@@ -124,6 +124,12 @@ a { color: inherit; }
 }
 
 .circle-button {
+  /* --scrub-x / --scrub-y are written by app.js as scroll progresses.
+     They translate the inner .circle and .text, leaving the anchor
+     itself free for Draggable to control. The two transforms compose
+     so scroll-drift and user-drag can run simultaneously. */
+  --scrub-x: 0px;
+  --scrub-y: 0px;
   position: relative;
   display: block;
   aspect-ratio: 1 / 1;
@@ -142,6 +148,7 @@ a { color: inherit; }
   width: 10rem;
   height: 10rem;
   margin: -5rem 0 0 -5rem;
+  transform: translate(var(--scrub-x), var(--scrub-y));
   border: 1px solid var(--text);
   border-radius: 50%;
   overflow: hidden;
@@ -172,6 +179,7 @@ a { color: inherit; }
 .circle-button .text {
   position: absolute;
   inset: 0;
+  transform: translate(var(--scrub-x), var(--scrub-y));
   display: flex;
   flex-direction: column;
   justify-content: center;

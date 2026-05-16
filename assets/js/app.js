@@ -10,12 +10,27 @@
 
   /**
    * For each [data-circle-button], on desktop only:
-   *   - make it Draggable with inertia
-   *   - scrub its position over scroll via ScrollTrigger
-   *   - dragging cancels the scroll-driven tween so user input wins
    *
-   * On mobile (≤1000px) the elements stay where the grid puts them
-   * (CSS already pins transform: translate(0,0) !important at that size).
+   *   Scroll-scrub drift  →  drives --scrub-x / --scrub-y CSS vars on the
+   *                          anchor; CSS uses them to translate the inner
+   *                          .circle + .text. This leaves the anchor's
+   *                          own transform free for Draggable.
+   *
+   *   Draggable           →  moves the anchor (translate via GSAP).
+   *
+   *   Composition         →  the visible circle ends up at:
+   *                          anchor_layout_position
+   *                            + draggable.translate
+   *                            + scroll_scrub.translate
+   *
+   *   First-drag handoff  →  the moment the user drags a circle, we tween
+   *                          a "mult" factor from 1 → 0.5 over 0.4s so the
+   *                          scroll drift continues at half amplitude.
+   *                          Signals "you're now in charge" without
+   *                          freezing the auto-motion entirely.
+   *
+   * On mobile (≤1000px) matchMedia skips both behaviors; the CSS pins
+   * the anchor's transform to translate(0,0) and the --scrub vars stay 0.
    *
    * Pattern adapted from reference f.js L378–423.
    */
@@ -31,7 +46,40 @@
 
       ScrollTrigger.matchMedia({
         '(min-width: 1001px)': function () {
-          let scrubTween;
+
+          // Per-button start/end offsets — randomized once per session.
+          // Biased so motion is guaranteed visible (upper-left → lower-right).
+          const startX = gsap.utils.random(-sx, 0);
+          const startY = gsap.utils.random(-sy, -sy * 0.3);
+          const endX   = gsap.utils.random(0, sx);
+          const endY   = gsap.utils.random(sy * 0.3, sy);
+
+          // progress: smoothed scroll position (0–1) from ScrollTrigger.
+          // mult:     drift amplitude factor; halves on first drag.
+          const state = { progress: 0, mult: 1 };
+
+          const apply = function () {
+            const p = state.progress;
+            const m = state.mult;
+            btn.style.setProperty('--scrub-x',
+              (((endX - startX) * p + startX) * m).toFixed(2) + 'px');
+            btn.style.setProperty('--scrub-y',
+              (((endY - startY) * p + startY) * m).toFixed(2) + 'px');
+          };
+
+          const st = ScrollTrigger.create({
+            trigger: container,
+            start: 'top bottom',
+            end: 'bottom top',
+            scrub: 1,
+            onUpdate: function (self) {
+              state.progress = self.progress;
+              apply();
+            }
+          });
+
+          // Set initial scattered position before first scroll event.
+          apply();
 
           if (window.Draggable) {
             Draggable.create(btn, {
@@ -42,33 +90,20 @@
               allowContextMenu: true,
               cursor: 'grab',
               activeCursor: 'grabbing',
-              onDragStart: function () { if (scrubTween) scrubTween.kill(false); }
+              onDragStart: function () {
+                if (state.mult > 0.5 + 0.001) {
+                  gsap.to(state, {
+                    mult: 0.5,
+                    duration: 0.4,
+                    ease: 'power2.out',
+                    onUpdate: apply
+                  });
+                }
+              }
             });
           }
 
-          // Bias start/end so motion is always clearly visible (signals to
-          // the user that the circles are interactive / draggable). Start
-          // is always in the upper-left quadrant of the scatter range,
-          // end is always in the lower-right — guarantees a minimum of
-          // ~60% sy vertical travel and a leftward-to-rightward arc.
-          scrubTween = gsap.fromTo(btn,
-            {
-              y: 'random(' + (-sy) + ', ' + (-sy * 0.3).toFixed(0) + ')',
-              x: 'random(' + (-sx) + ', 0)'
-            },
-            {
-              y: 'random(' + (sy * 0.3).toFixed(0) + ', ' + sy + ')',
-              x: 'random(0, ' + sx + ')',
-              scrollTrigger: {
-                trigger: container,
-                start: 'top bottom',
-                end: 'bottom top',
-                scrub: 1
-              }
-            }
-          );
-
-          return function cleanup() { if (scrubTween) scrubTween.kill(); };
+          return function cleanup() { if (st) st.kill(); };
         }
       });
     });
