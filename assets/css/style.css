@@ -33,9 +33,33 @@ body {
 }
 
 .layout {
+  position: relative;
+  z-index: 1;
   max-width: var(--max-width);
   margin-inline: auto;
   padding: var(--space-3) var(--space-2);
+}
+
+/* ─── Lines layer ────────────────────────────────────────────────── */
+/* Fixed full-viewport SVG sitting behind page content. The viewBox is
+   1200x800; lines are authored in that coordinate space and stretch
+   non-uniformly to fill any viewport size. */
+
+#lines-layer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 0;
+}
+#lines-layer path {
+  fill: none;
+  stroke: var(--line-stroke);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 h1, h2, h3 {

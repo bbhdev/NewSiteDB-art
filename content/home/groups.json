@@ -1,0 +1,24 @@
+[
+  {
+    "id": "ambient",
+    "name": "Ambient background drift",
+    "trigger": null,
+    "defaults": {
+      "translateX": 0,
+      "translateY": -120,
+      "rotate": 0,
+      "drawIn": false
+    }
+  },
+  {
+    "id": "projects-aura",
+    "name": "Lines around the projects section",
+    "trigger": "#projects",
+    "defaults": {
+      "translateX": 60,
+      "translateY": 20,
+      "rotate": 6,
+      "drawIn": false
+    }
+  }
+]

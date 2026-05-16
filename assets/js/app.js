@@ -7,6 +7,7 @@
   if (window.InertiaPlugin)  gsap.registerPlugin(InertiaPlugin);
 
   initCircleButtons();
+  initLineSystem();
 
   /**
    * For each [data-circle-button], on desktop only:
@@ -109,5 +110,127 @@
     });
   }
 
-  // Line system runtime will be added in Pass 3.
+  /**
+   * Line system runtime — reads the inlined JSON from the
+   * <script id="lines-data"> emitted by site/snippets/lines-layer.php,
+   * builds an <svg> path per line, and scroll-animates each line per
+   * its group's behaviors (translateX, translateY, rotate, drawIn),
+   * with per-line overrides.
+   *
+   * The SVG has viewBox 0 0 1200 800, so all "d" attributes are
+   * authored in that coordinate space. The element fills the viewport
+   * non-uniformly (preserveAspectRatio="none") so lines stretch with
+   * the screen.
+   */
+  function initLineSystem() {
+    const layer  = document.getElementById('lines-layer');
+    const dataEl = document.getElementById('lines-data');
+    if (!layer || !dataEl) return;
+
+    let data;
+    try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+
+    const groups     = Array.isArray(data.groups)     ? data.groups     : [];
+    const lines      = Array.isArray(data.lines)      ? data.lines      : [];
+    const svgImports = Array.isArray(data.svgImports) ? data.svgImports : [];
+
+    if (!lines.length && !svgImports.length) return;
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const groupById = {};
+    groups.forEach(function (g) { groupById[g.id] = g; });
+
+    // Render JSON-defined lines.
+    lines.forEach(function (line) {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', line.d);
+      if (line.stroke) p.setAttribute('stroke', line.stroke);
+      if (line.width)  p.setAttribute('stroke-width', line.width);
+      p.dataset.lineId  = line.id;
+      p.dataset.groupId = line.groupId || '';
+      layer.appendChild(p);
+    });
+
+    // Render imported SVG files. Extract every <path>; each becomes a
+    // line in a synthetic "__imported" group (registered if absent).
+    if (svgImports.length) {
+      const parser = new DOMParser();
+      svgImports.forEach(function (imp) {
+        const doc = parser.parseFromString(imp.content, 'image/svg+xml');
+        const paths = doc.querySelectorAll('path');
+        paths.forEach(function (sourcePath, i) {
+          const p = document.createElementNS(SVG_NS, 'path');
+          p.setAttribute('d', sourcePath.getAttribute('d') || '');
+          const s = sourcePath.getAttribute('stroke');
+          if (s) p.setAttribute('stroke', s);
+          p.dataset.lineId  = imp.id + '-' + i;
+          p.dataset.groupId = '__imported';
+          layer.appendChild(p);
+        });
+      });
+      if (!groupById['__imported']) {
+        groupById['__imported'] = {
+          id: '__imported',
+          trigger: null,
+          defaults: { translateX: 0, translateY: -40, rotate: 0, drawIn: false }
+        };
+      }
+    }
+
+    // Animate each rendered line per its group's behaviors + overrides.
+    layer.querySelectorAll('path[data-line-id]').forEach(function (pathEl) {
+      const group = groupById[pathEl.dataset.groupId];
+      if (!group) return;
+
+      const lineDef = lines.find(function (l) { return l.id === pathEl.dataset.lineId; }) || {};
+      const behaviors = Object.assign({}, group.defaults || {}, lineDef.overrides || {});
+
+      const triggerSel = group.trigger || 'body';
+      const triggerEl = document.querySelector(triggerSel);
+      if (!triggerEl) return;
+
+      const target = { transformOrigin: '50% 50%' };
+      let hasMotion = false;
+      if (typeof behaviors.translateX === 'number') { target.x        = behaviors.translateX; hasMotion = true; }
+      if (typeof behaviors.translateY === 'number') { target.y        = behaviors.translateY; hasMotion = true; }
+      if (typeof behaviors.rotate     === 'number') { target.rotation = behaviors.rotate;     hasMotion = true; }
+
+      if (hasMotion) {
+        gsap.fromTo(pathEl,
+          { x: 0, y: 0, rotation: 0, transformOrigin: '50% 50%' },
+          Object.assign({}, target, {
+            scrollTrigger: {
+              trigger: triggerEl,
+              start: 'top bottom',
+              end: 'bottom top',
+              scrub: 1
+            }
+          })
+        );
+      }
+
+      // Draw-in: stroke-dash reveal across the same scroll range.
+      if (behaviors.drawIn) {
+        let len = 0;
+        try { len = pathEl.getTotalLength(); } catch (e) { /* path may be malformed */ }
+        if (len > 0) {
+          pathEl.style.strokeDasharray  = len + ' ' + len;
+          pathEl.style.strokeDashoffset = len;
+          gsap.fromTo(pathEl,
+            { strokeDashoffset: len },
+            {
+              strokeDashoffset: 0,
+              ease: 'none',
+              scrollTrigger: {
+                trigger: triggerEl,
+                start: 'top bottom',
+                end: 'bottom top',
+                scrub: 1
+              }
+            }
+          );
+        }
+      }
+    });
+  }
 })();
