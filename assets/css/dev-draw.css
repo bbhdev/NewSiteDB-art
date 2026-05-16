@@ -39,6 +39,12 @@ body.editor {
   color: #999;
   font-weight: 400;
 }
+.ed-version {
+  color: #666;
+  font-weight: 400;
+  font-size: 0.85em;
+  font-family: ui-monospace, monospace;
+}
 .ed-tools {
   display: flex;
   gap: 0.25rem;

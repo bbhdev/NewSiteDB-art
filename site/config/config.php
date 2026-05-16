@@ -2,11 +2,22 @@
 
 return [
   /*
+   * App version (semver). Read from the /VERSION file at the repo
+   * root. Used as a cache-busting query string on every CSS/JS asset
+   * include so a bump invalidates the browser cache automatically.
+   * The patch number bumps on every commit; major / minor are author-
+   * controlled.
+   */
+  'version' => trim(@file_get_contents(__DIR__ . '/../../VERSION')) ?: 'dev',
+
+  /*
    * Routes for the /dev/draw editor.
    *
    *   POST /dev/draw/save  — persists groups + lines for a given page
-   *                          to content/<page>/groups.json + lines.json.
-   *                          Body: { page: "home", groups: [...], lines: [...] }
+   *                          to content/<page>/groups.json + lines.json,
+   *                          and the site-wide palette to
+   *                          content/colors.json.
+   *                          Body: { page, groups, lines, palette? }
    */
   'routes' => [
     [

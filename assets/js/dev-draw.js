@@ -44,6 +44,19 @@
   const saveBtn        = document.getElementById('save-btn');
   const saveStatus     = document.getElementById('save-status');
 
+  // Defensive: if any required element is missing, the user is probably
+  // serving stale cached HTML against fresh JS (or vice-versa). Log
+  // loudly so the cause is obvious in DevTools.
+  const required = { svg, canvasWrap, gridG, linesG, previewG, toolSettingsEl,
+                     groupsListEl, paletteListEl, selectionPanel,
+                     newGroupBtn, newColorBtn, saveBtn, saveStatus };
+  const missing = Object.keys(required).filter(function (k) { return !required[k]; });
+  if (missing.length) {
+    console.error('[dev-draw] Missing required DOM elements:', missing,
+                  '— browser may be serving stale HTML. Hard-reload (Cmd+Shift+R).');
+    return;
+  }
+
   // ── State ─────────────────────────────────────────────────────────
   const initial = JSON.parse(document.getElementById('editor-data').textContent);
   const state = {

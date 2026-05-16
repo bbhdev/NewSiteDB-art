@@ -40,12 +40,15 @@ if (file_exists($templatePath)) {
   $triggerSuggestions = array_values(array_unique($triggerSuggestions));
 }
 
+$v = option('version', 'dev');
+
 $payload = json_encode([
   'pageId'             => $targetSlug,
   'groups'             => $groups,
   'lines'              => $lines,
   'palette'            => $palette,
-  'triggerSuggestions' => $triggerSuggestions
+  'triggerSuggestions' => $triggerSuggestions,
+  'version'            => $v
 ], JSON_UNESCAPED_SLASHES);
 ?>
 <!doctype html>
@@ -54,13 +57,16 @@ $payload = json_encode([
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Draw — <?= $site->title() ?></title>
-  <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>">
-  <link rel="stylesheet" href="<?= url('assets/css/dev-draw.css') ?>">
+  <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
+  <link rel="stylesheet" href="<?= url('assets/css/dev-draw.css') ?>?v=<?= $v ?>">
 </head>
 <body class="editor">
 
 <header class="ed-toolbar">
-  <div class="ed-brand">Lines · <span class="ed-target"><?= esc($targetSlug) ?></span></div>
+  <div class="ed-brand">
+    Lines · <span class="ed-target"><?= esc($targetSlug) ?></span>
+    · <span class="ed-version">v<?= esc($v) ?></span>
+  </div>
 
   <div class="ed-tools" role="toolbar" aria-label="Drawing tools">
     <button type="button" class="ed-tool" data-tool="freehand" title="Freehand (F)">Freehand</button>
@@ -127,6 +133,7 @@ $payload = json_encode([
 </div>
 
 <script id="editor-data" type="application/json"><?= $payload ?></script>
-<script src="<?= url('assets/js/dev-draw.js') ?>"></script>
+<script src="<?= url('assets/js/dev-draw.js') ?>?v=<?= $v ?>"></script>
+<!-- v<?= $v ?> -->
 </body>
 </html>
