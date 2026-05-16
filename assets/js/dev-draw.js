@@ -140,7 +140,13 @@
       },
       onPointerUp: function () {
         if (!this._points) return;
-        const pts = simplify(this._points, 3);
+        // Without smoothing: preserve nearly every captured point so the
+        // stroke is faithful to the user's hand (including wobble).
+        // With smoothing: drop most of the closely-spaced points first so
+        // the quadratic-through-midpoints pass has room to actually round
+        // out the curve — otherwise it ends up hugging every micro-jitter.
+        const minDist = state.smoothing ? 22 : 2;
+        const pts = simplify(this._points, minDist);
         const d = pathFromPoints(pts, state.smoothing);
         this._preview.remove();
         this._points = null;
@@ -291,8 +297,10 @@
     if (!g) return;
     Object.assign(g, patch);
     state.dirty = true;
+    // Only refresh the sidebar (group name, line count). Do NOT re-render
+    // the selection panel — that would destroy the input the user is
+    // typing into and steal focus.
     renderGroupsList();
-    renderSelectionPanel();
   }
 
   function updateGroupDefaults(id, patch) {
@@ -300,7 +308,17 @@
     if (!g) return;
     g.defaults = Object.assign({}, g.defaults, patch);
     state.dirty = true;
-    renderSelectionPanel();
+    // Stroke/width default changes affect canvas rendering of every line
+    // that doesn't override them.
+    if ('stroke' in patch || 'width' in patch) renderLines();
+  }
+
+  function updateLine(id, patch) {
+    const l = state.lines.find(function (l) { return l.id === id; });
+    if (!l) return;
+    Object.assign(l, patch);
+    state.dirty = true;
+    renderLines();
   }
 
   function updateLineOverride(id, key, value) {
@@ -313,7 +331,9 @@
       l.overrides[key] = value;
     }
     state.dirty = true;
-    renderSelectionPanel();
+    // Keep the override-marker (*) in the sidebar in sync, but don't
+    // rebuild the selection panel — the user is editing fields in it.
+    renderGroupsList();
   }
 
   // ── Rendering ─────────────────────────────────────────────────────
@@ -344,8 +364,14 @@
     linesG.innerHTML = '';
     state.lines.forEach(function (line) {
       const p = createPath('', line.d);
-      if (line.stroke) p.style.stroke = line.stroke;
-      if (line.width)  p.style.strokeWidth = line.width;
+      const group = state.groups.find(function (g) { return g.id === line.groupId; });
+      // Effective stroke / width: line value wins, then group default,
+      // else fall back to the editor's CSS rule.
+      const stroke = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const width  = (line.width != null) ? line.width
+                   : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
+      if (stroke) p.style.stroke = stroke;
+      if (width)  p.style.strokeWidth = width;
       if (line.id === state.selectedLineId) p.classList.add('is-selected');
       p.dataset.lineId = line.id;
       p.addEventListener('click', function (e) {
@@ -436,11 +462,19 @@
     wrap.className = 'ed-settings';
 
     wrap.appendChild(textField('Name', g.name, function (v) { updateGroup(g.id, { name: v }); }));
-    wrap.appendChild(textField('Trigger', g.trigger || '', function (v) {
+    wrap.appendChild(triggerField('Trigger', g.trigger || '', function (v) {
       updateGroup(g.id, { trigger: v.trim() === '' ? null : v.trim() });
-    }, 'CSS selector or empty = page-wide'));
+    }));
 
-    wrap.appendChild(divider('Defaults'));
+    wrap.appendChild(divider('Appearance'));
+    wrap.appendChild(strokeField('Color', g.defaults.stroke, function (v) {
+      updateGroupDefaults(g.id, { stroke: v });
+    }));
+    wrap.appendChild(numberField('Width', g.defaults.width != null ? g.defaults.width : 1, function (v) {
+      updateGroupDefaults(g.id, { width: v });
+    }));
+
+    wrap.appendChild(divider('Behavior defaults'));
     wrap.appendChild(numberField('TranslateX', g.defaults.translateX, function (v) { updateGroupDefaults(g.id, { translateX: v }); }));
     wrap.appendChild(numberField('TranslateY', g.defaults.translateY, function (v) { updateGroupDefaults(g.id, { translateY: v }); }));
     wrap.appendChild(numberField('Rotate',     g.defaults.rotate,     function (v) { updateGroupDefaults(g.id, { rotate: v }); }));
@@ -481,6 +515,15 @@
     const wrap = document.createElement('div');
     wrap.className = 'ed-settings';
 
+    wrap.appendChild(divider('Appearance'));
+    wrap.appendChild(strokeField('Color', line.stroke, function (v) {
+      updateLine(line.id, { stroke: v });
+    }, group && group.defaults.stroke));
+    wrap.appendChild(overrideNumberField('Width', line.width, group && group.defaults.width, function (v) {
+      updateLine(line.id, { width: v });
+    }));
+
+    wrap.appendChild(divider('Behavior'));
     const ov = line.overrides || {};
     wrap.appendChild(overrideNumberField('TranslateX', ov.translateX, group && group.defaults.translateX, function (v) { updateLineOverride(line.id, 'translateX', v); }));
     wrap.appendChild(overrideNumberField('TranslateY', ov.translateY, group && group.defaults.translateY, function (v) { updateLineOverride(line.id, 'translateY', v); }));
@@ -573,6 +616,92 @@
     wrap.appendChild(lbl); wrap.appendChild(grp);
     return wrap;
   }
+  function strokeField(label, value, onChange, fallback) {
+    // Color editor with two preset buttons for the theme variables, plus
+    // a free-text input that accepts any CSS color value
+    // (#hex, rgb(), var(--…), etc.). Empty input clears the field so the
+    // line inherits the group default (or the runtime CSS default).
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '0.25rem';
+    row.style.alignItems = 'center';
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = value || '';
+    inp.placeholder = fallback ? String(fallback) : 'inherit / default';
+    inp.style.flex = '1';
+    inp.style.minWidth = 0;
+    inp.addEventListener('input', function () {
+      onChange(inp.value.trim() === '' ? null : inp.value.trim());
+    });
+
+    const presets = [
+      { label: 'text',   value: 'var(--text)' },
+      { label: 'accent', value: 'var(--accent)' }
+    ];
+    row.appendChild(inp);
+    presets.forEach(function (preset) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = preset.label;
+      btn.title = 'Use ' + preset.value;
+      btn.style.background = '#3a3a3a';
+      btn.style.color = '#ddd';
+      btn.style.border = '1px solid #555';
+      btn.style.borderRadius = '3px';
+      btn.style.padding = '0.15rem 0.4rem';
+      btn.style.fontSize = '0.8em';
+      btn.style.cursor = 'pointer';
+      btn.style.flexShrink = 0;
+      btn.addEventListener('click', function () {
+        inp.value = preset.value;
+        onChange(preset.value);
+      });
+      row.appendChild(btn);
+    });
+
+    wrap.appendChild(lbl); wrap.appendChild(row);
+    return wrap;
+  }
+
+  function triggerField(label, value, onChange) {
+    // Trigger input — a free-text field paired with a <datalist> so the
+    // user gets autocomplete suggestions for selectors that actually
+    // exist in the target page's template (extracted at render time and
+    // passed in via the editor-data JSON), but can still type anything.
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+
+    const datalistId = 'ed-trigger-suggestions';
+    if (!document.getElementById(datalistId)) {
+      const dl = document.createElement('datalist');
+      dl.id = datalistId;
+      const suggestions = Array.isArray(initial.triggerSuggestions) ? initial.triggerSuggestions : [];
+      suggestions.forEach(function (s) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        dl.appendChild(opt);
+      });
+      document.body.appendChild(dl);
+    }
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.setAttribute('list', datalistId);
+    inp.value = value || '';
+    inp.placeholder = 'CSS selector, empty = page-wide';
+    inp.addEventListener('input', function () { onChange(inp.value); });
+
+    wrap.appendChild(lbl); wrap.appendChild(inp);
+    return wrap;
+  }
+
   function divider(label) {
     const el = document.createElement('div');
     el.style.color = '#888';

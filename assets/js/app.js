@@ -144,10 +144,16 @@
     lines.forEach(function (line) {
       const p = document.createElementNS(SVG_NS, 'path');
       p.setAttribute('d', line.d);
-      // Set stroke via style (not attribute) so CSS variables resolve;
-      // SVG presentation attributes don't evaluate var(--…) in most browsers.
-      if (line.stroke) p.style.stroke = line.stroke;
-      if (line.width)  p.style.strokeWidth = line.width;
+      // Effective stroke / width: line value wins, then group default,
+      // else fall back to the CSS rule on #lines-layer path.
+      // Set via style (not the SVG attribute) so var(--…) resolves —
+      // SVG presentation attributes don't evaluate CSS vars in most browsers.
+      const group = groupById[line.groupId];
+      const stroke = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const width  = (line.width != null) ? line.width
+                   : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
+      if (stroke) p.style.stroke = stroke;
+      if (width)  p.style.strokeWidth = width;
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
       layer.appendChild(p);

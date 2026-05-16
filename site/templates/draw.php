@@ -19,10 +19,22 @@ $readJson = function ($path) {
 $groups = $targetPage ? $readJson($targetPage->root() . '/groups.json') : [];
 $lines  = $targetPage ? $readJson($targetPage->root() . '/lines.json')  : [];
 
+// Scan the target page's template for `id="…"` attributes so the
+// trigger-field combobox can suggest selectors that actually exist
+// (e.g. "#projects" if the home template has <h2 id="projects">).
+$triggerSuggestions = [];
+$templatePath = kirby()->root('templates') . '/' . $targetSlug . '.php';
+if (file_exists($templatePath)) {
+  preg_match_all('/\bid\s*=\s*["\']([^"\']+)["\']/i', file_get_contents($templatePath), $m);
+  foreach ($m[1] as $id) $triggerSuggestions[] = '#' . $id;
+  $triggerSuggestions = array_values(array_unique($triggerSuggestions));
+}
+
 $payload = json_encode([
-  'pageId' => $targetSlug,
-  'groups' => $groups,
-  'lines'  => $lines
+  'pageId'             => $targetSlug,
+  'groups'             => $groups,
+  'lines'              => $lines,
+  'triggerSuggestions' => $triggerSuggestions
 ], JSON_UNESCAPED_SLASHES);
 ?>
 <!doctype html>
