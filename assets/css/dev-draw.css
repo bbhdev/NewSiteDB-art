@@ -386,20 +386,32 @@ body.editor {
 #draw-surface .ed-handle:hover { fill: #00d9ff; }
 #draw-surface .ed-handle.is-dragging { fill: #00d9ff; cursor: grabbing; }
 
-/* Optional name labels — black text on a rect filled with the line's
-   own color and bordered black, so the user can see which authored
-   line is which without scrubbing the sidebar. Toggled by the Labels
+/* Optional name labels — always legible against any line color.
+   Text uses paint-order: stroke fill with a wide white stroke under
+   a black fill, so it reads as black text with a white halo on either
+   a dark or light background. The rect gets a double border (black
+   outer + white inner) for the same reason. Toggled by the Labels
    button in the toolbar. */
 #draw-surface .ed-label-text {
   fill: #000;
+  stroke: #fff;
+  stroke-width: 3;
+  paint-order: stroke fill;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   font-weight: 600;
   dominant-baseline: hanging;
   pointer-events: none;
 }
-#draw-surface .ed-label-bg {
+#draw-surface .ed-label-bg-outer {
   stroke: #000;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+#draw-surface .ed-label-bg-inner {
+  fill: none;
+  stroke: #fff;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
   pointer-events: none;

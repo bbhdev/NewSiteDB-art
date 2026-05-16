@@ -261,86 +261,164 @@
   // still appear and can drag the path's endpoints around.
 
   /**
-   * Extract the endpoint of every M/L/H/V/Q/T/S/C command in an SVG
-   * path `d` string. Sufficient for the kinds of paths this editor
-   * generates plus the hand-authored sample data. Doesn't validate
-   * syntax — assumes the string came from a working SVG.
+   * Parse an SVG `d` string into an array of segments. Each segment
+   * captures its command (M/L/C/Q/S/T/H/V/Z), any control points, and
+   * the endpoint — so we can regenerate the path later WITHOUT losing
+   * curve types. This is what keeps the seed wavy lines wavy after a
+   * handle is dragged: before this parser existed, we extracted only
+   * endpoints and the regenerator turned every C/S/Q into a straight L.
    */
-  function extractDisplayPoints(d) {
+  function parseSegments(d) {
     if (!d) return [];
-    const out = [];
+    const segments = [];
     let cur = { x: 0, y: 0 };
-    // Split into runs of "<command-letter><number-list>".
     const re = /([MLHVCSQTAZmlhvcsqtaz])([^MLHVCSQTAZmlhvcsqtaz]*)/g;
     let m;
+    const abs = function (rel, x, y) {
+      return rel ? { x: cur.x + x, y: cur.y + y } : { x: x, y: y };
+    };
     while ((m = re.exec(d)) !== null) {
       const cmd = m[1];
       const C   = cmd.toUpperCase();
       const rel = cmd !== C;
       const nums = (m[2].match(/-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/g) || []).map(parseFloat);
-      const step = function (ex, ey) {
-        cur = rel ? { x: cur.x + ex, y: cur.y + ey } : { x: ex, y: ey };
-        out.push({ x: cur.x, y: cur.y });
-      };
-      switch (C) {
-        case 'M': case 'L': case 'T':
-          for (let i = 0; i + 1 < nums.length; i += 2) step(nums[i], nums[i + 1]);
-          break;
-        case 'H':
-          for (let i = 0; i < nums.length; i++) {
-            cur = rel ? { x: cur.x + nums[i], y: cur.y } : { x: nums[i], y: cur.y };
-            out.push({ x: cur.x, y: cur.y });
-          }
-          break;
-        case 'V':
-          for (let i = 0; i < nums.length; i++) {
-            cur = rel ? { x: cur.x, y: cur.y + nums[i] } : { x: cur.x, y: nums[i] };
-            out.push({ x: cur.x, y: cur.y });
-          }
-          break;
-        case 'Q': case 'S':
-          for (let i = 0; i + 3 < nums.length; i += 4) step(nums[i + 2], nums[i + 3]);
-          break;
-        case 'C':
-          for (let i = 0; i + 5 < nums.length; i += 6) step(nums[i + 4], nums[i + 5]);
-          break;
-        // Z: no coords, cursor handling not needed for endpoint extraction.
+
+      if (C === 'M' || C === 'L' || C === 'T') {
+        for (let i = 0; i + 1 < nums.length; i += 2) {
+          const ep = abs(rel, nums[i], nums[i + 1]);
+          // Repeated coords after an M act like implicit L's per spec.
+          const segCmd = (C === 'M' && segments.length > 0 && i > 0) ? 'L' : C;
+          segments.push({ cmd: segCmd, controlPoints: [], endpoint: ep });
+          cur = ep;
+        }
+      } else if (C === 'H') {
+        for (let i = 0; i < nums.length; i++) {
+          const ep = rel ? { x: cur.x + nums[i], y: cur.y } : { x: nums[i], y: cur.y };
+          segments.push({ cmd: 'L', controlPoints: [], endpoint: ep });
+          cur = ep;
+        }
+      } else if (C === 'V') {
+        for (let i = 0; i < nums.length; i++) {
+          const ep = rel ? { x: cur.x, y: cur.y + nums[i] } : { x: cur.x, y: nums[i] };
+          segments.push({ cmd: 'L', controlPoints: [], endpoint: ep });
+          cur = ep;
+        }
+      } else if (C === 'C') {
+        for (let i = 0; i + 5 < nums.length; i += 6) {
+          const cp1 = abs(rel, nums[i],     nums[i + 1]);
+          const cp2 = abs(rel, nums[i + 2], nums[i + 3]);
+          const ep  = abs(rel, nums[i + 4], nums[i + 5]);
+          segments.push({ cmd: 'C', controlPoints: [cp1, cp2], endpoint: ep });
+          cur = ep;
+        }
+      } else if (C === 'S') {
+        for (let i = 0; i + 3 < nums.length; i += 4) {
+          const cp2 = abs(rel, nums[i],     nums[i + 1]);
+          const ep  = abs(rel, nums[i + 2], nums[i + 3]);
+          segments.push({ cmd: 'S', controlPoints: [cp2], endpoint: ep });
+          cur = ep;
+        }
+      } else if (C === 'Q') {
+        for (let i = 0; i + 3 < nums.length; i += 4) {
+          const cp = abs(rel, nums[i],     nums[i + 1]);
+          const ep = abs(rel, nums[i + 2], nums[i + 3]);
+          segments.push({ cmd: 'Q', controlPoints: [cp], endpoint: ep });
+          cur = ep;
+        }
+      } else if (C === 'Z') {
+        segments.push({ cmd: 'Z', controlPoints: [], endpoint: null });
       }
+    }
+    return segments;
+  }
+
+  function segmentsToD(segments) {
+    return segments.map(function (s) {
+      if (s.cmd === 'Z' || !s.endpoint) return 'Z';
+      const cps = s.controlPoints
+        .map(function (cp) { return fmt(cp.x) + ' ' + fmt(cp.y); })
+        .join(' ');
+      const ep = fmt(s.endpoint.x) + ' ' + fmt(s.endpoint.y);
+      return s.cmd + ' ' + (cps ? cps + ' ' : '') + ep;
+    }).join(' ');
+  }
+
+  // Indices into segments[] for segments that have an endpoint — i.e.
+  // every segment except Z. Used to map handle index ↔ segment index.
+  function pointSegmentIndices(segments) {
+    const out = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i].endpoint) out.push(i);
     }
     return out;
   }
 
   /**
    * Auto-upgrade any line that lacks `points` (sample seed data, SVG
-   * imports) into the new format. After this pass, every line has
-   * draggable handles available.
+   * imports). Parses the existing `d` into rich segments so curve
+   * types survive subsequent handle edits; populates `points` as the
+   * flat endpoint list the handle UI expects.
    */
   function migrateLines() {
     state.lines.forEach(function (line) {
       if (!Array.isArray(line.points)) {
-        line.points   = extractDisplayPoints(line.d);
-        line.kind     = line.kind     || 'manual';
+        line.kind     = line.kind || 'manual';
+        line.segments = parseSegments(line.d);
+        line.points   = line.segments
+          .filter(function (s) { return s.endpoint; })
+          .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; });
         line.smoothed = (line.smoothed !== undefined) ? line.smoothed : false;
-        line.closed   = !!line.closed;
+        line.closed   = (line.closed   !== undefined) ? line.closed
+                       : line.segments.some(function (s) { return s.cmd === 'Z'; });
       }
     });
   }
   migrateLines();
 
   /**
-   * Regenerate `d` from `points` + `kind` + `smoothed` + `closed`.
-   * Called after every handle drag and after every line creation.
+   * Regenerate `d` from the line's authored form.
+   *
+   * For "manual" lines (legacy / imported), we have a rich `segments`
+   * array that preserves each command's type and control points, so
+   * the regenerator emits the same curve types as the original — only
+   * the endpoints reflect any edits the user has made.
+   *
+   * For tool-authored lines (freehand, line, chain, freehandClosed),
+   * `points` is the source of truth and we generate from scratch with
+   * kind-appropriate smoothing + optional Z closure.
    */
   function regenerateLineD(line) {
-    if (!Array.isArray(line.points) || !line.points.length) {
-      // Keep whatever was there (legacy lines we can't regenerate).
+    if (line.kind === 'manual' && Array.isArray(line.segments) && line.segments.length) {
+      line.d = segmentsToD(line.segments);
       return;
     }
+    if (!Array.isArray(line.points) || !line.points.length) return;
     const smoothable = (line.kind === 'freehand' || line.kind === 'freehandClosed');
     const smooth = smoothable && !!line.smoothed;
     let d = pathFromPoints(line.points, smooth);
     if (line.closed) d += ' Z';
     line.d = d;
+  }
+
+  /**
+   * Apply a translation (dx, dy) to every authored point of a line —
+   * for manual lines, that includes control points so curves move
+   * rigidly with the path instead of warping.
+   */
+  function translateLine(line, origPoints, origSegments, dx, dy) {
+    line.points = origPoints.map(function (p) { return { x: p.x + dx, y: p.y + dy }; });
+    if (line.kind === 'manual' && Array.isArray(origSegments)) {
+      line.segments = origSegments.map(function (s) {
+        return {
+          cmd: s.cmd,
+          controlPoints: s.controlPoints.map(function (cp) {
+            return { x: cp.x + dx, y: cp.y + dy };
+          }),
+          endpoint: s.endpoint ? { x: s.endpoint.x + dx, y: s.endpoint.y + dy } : null
+        };
+      });
+    }
+    regenerateLineD(line);
   }
 
   function pathFromPoints(points, smooth) {
@@ -697,6 +775,9 @@
     const l = state.lines.find(function (l) { return l.id === id; });
     if (!l) return;
     Object.assign(l, patch);
+    // Geometry-affecting fields require regenerating `d` so the canvas
+    // (and the live site after save) reflects the new path shape.
+    if ('smoothed' in patch || 'closed' in patch) regenerateLineD(l);
     state.dirty = true;
     renderLines();
     if ('name' in patch) renderGroupsList();
@@ -820,19 +901,31 @@
       g.appendChild(text);
       labelsG.appendChild(g);
 
-      // Now that text is in the DOM, measure it and create the rect
-      // sized to surround it (inserted BEFORE text so it renders behind).
+      // Now that text is in the DOM, measure it and build the double-
+      // border rect behind it: outer rect with black 2px stroke +
+      // line-color fill, then inner rect 1px inside with a white 1px
+      // stroke. The two strokes interleave so the border reads against
+      // any background.
       const bb = text.getBBox();
       const pad = 4;
-      const rect = document.createElementNS(SVG_NS, 'rect');
-      rect.setAttribute('class', 'ed-label-bg');
-      rect.setAttribute('x',      (bb.x - pad).toFixed(1));
-      rect.setAttribute('y',      (bb.y - pad).toFixed(1));
-      rect.setAttribute('width',  (bb.width  + pad * 2).toFixed(1));
-      rect.setAttribute('height', (bb.height + pad * 2).toFixed(1));
-      rect.setAttribute('rx', 3);
-      rect.style.fill = fill;
-      g.insertBefore(rect, text);
+      const outer = document.createElementNS(SVG_NS, 'rect');
+      outer.setAttribute('class', 'ed-label-bg-outer');
+      outer.setAttribute('x',      (bb.x - pad).toFixed(1));
+      outer.setAttribute('y',      (bb.y - pad).toFixed(1));
+      outer.setAttribute('width',  (bb.width  + pad * 2).toFixed(1));
+      outer.setAttribute('height', (bb.height + pad * 2).toFixed(1));
+      outer.setAttribute('rx', 3);
+      outer.style.fill = fill;
+      g.insertBefore(outer, text);
+
+      const inner = document.createElementNS(SVG_NS, 'rect');
+      inner.setAttribute('class', 'ed-label-bg-inner');
+      inner.setAttribute('x',      (bb.x - pad + 1).toFixed(1));
+      inner.setAttribute('y',      (bb.y - pad + 1).toFixed(1));
+      inner.setAttribute('width',  (bb.width  + pad * 2 - 2).toFixed(1));
+      inner.setAttribute('height', (bb.height + pad * 2 - 2).toFixed(1));
+      inner.setAttribute('rx', 2);
+      g.insertBefore(inner, text);
     });
   }
 
@@ -897,6 +990,16 @@
         if (!dragging) return;
         const pos = clientToSvg(e.clientX, e.clientY);
         line.points[idx] = { x: pos.x, y: pos.y };
+        // Manual lines also have a segments array that mirrors points.
+        // Keep them in sync so the segment-aware regenerator preserves
+        // C/S/Q curve types when emitting `d`.
+        if (line.kind === 'manual' && Array.isArray(line.segments)) {
+          const segIdxList = pointSegmentIndices(line.segments);
+          const segIdx = segIdxList[idx];
+          if (segIdx != null) {
+            line.segments[segIdx].endpoint = { x: pos.x, y: pos.y };
+          }
+        }
         regenerateLineD(line);
         state.dirty = true;
         // Update the moving handle + the line's paths inline (no full
@@ -975,11 +1078,12 @@
         state.openGroupIds[g.id] = !wasOpen;
         // Clicking a group row always means "this group is the focus
         // now" — drop any leftover line selection so the next edit
-        // goes to the group's settings, not to a stale line. (Without
-        // this, the selection panel would silently keep showing line
-        // controls when closing the group that contained the line.)
+        // goes to the group's settings, not to a stale line. Also
+        // re-render the lines layer so the handle dots from the
+        // previously selected line disappear with it.
         state.selectedLineId = null;
         renderGroupsList();
+        renderLines();
         renderSelectionPanel();
       });
       li.appendChild(row);
@@ -1187,6 +1291,14 @@
     wrap.appendChild(textField('Name', line.name || '', function (v) {
       updateLine(line.id, { name: v });
     }, 'optional'));
+
+    // Smoothing toggle is only meaningful for the freehand kinds — for
+    // straight-line and chain kinds the regenerator ignores it.
+    if (line.kind === 'freehand' || line.kind === 'freehandClosed') {
+      wrap.appendChild(checkboxField('Smooth', !!line.smoothed, function (v) {
+        updateLine(line.id, { smoothed: v });
+      }));
+    }
 
     wrap.appendChild(divider('Appearance'));
     wrap.appendChild(strokeField('Color', line.stroke, function (v) {
@@ -1474,6 +1586,11 @@
   // under one click, the first click picks the topmost, subsequent
   // clicks at the same spot rotate through the rest.
   let clickCycle = null; // { x, y, ids: [...], idx: <int> }
+  // Move-line mode: pressing inside the SELECTED line's hit area (but
+  // not on one of its handles) starts translating the entire line.
+  // Indispensable for big shapes where moving each handle would be
+  // impractical. Reset on pointerup.
+  let moveLine = null; // { lineId, startPt, origPoints, origSegments }
 
   svg.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
@@ -1482,10 +1599,54 @@
     pointerActive = true;
     downClient = { x: e.clientX, y: e.clientY };
     downTarget = e.target;
+
+    // If the user pressed inside the currently selected line's hit
+    // area, this drag is going to translate the whole line, not start
+    // a new stroke. The drawing tool's pointerDown is skipped entirely.
+    const lineHit = e.target && e.target.closest
+      ? e.target.closest('[data-line-id]') : null;
+    if (lineHit && lineHit.dataset.lineId === state.selectedLineId) {
+      const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
+      if (line) {
+        moveLine = {
+          lineId: line.id,
+          startPt: eventPt(e),
+          origPoints:   line.points.map(function (p) { return { x: p.x, y: p.y }; }),
+          origSegments: Array.isArray(line.segments)
+            ? line.segments.map(function (s) {
+                return {
+                  cmd: s.cmd,
+                  controlPoints: s.controlPoints.map(function (cp) { return { x: cp.x, y: cp.y }; }),
+                  endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null
+                };
+              })
+            : null
+        };
+      }
+      return; // skip tool dispatch
+    }
+
     const tool = TOOLS[state.activeToolId];
     if (tool && tool.onPointerDown) tool.onPointerDown(eventPt(e));
   });
   svg.addEventListener('pointermove', function (e) {
+    if (moveLine) {
+      const cur = eventPt(e);
+      const dx = cur.x - moveLine.startPt.x;
+      const dy = cur.y - moveLine.startPt.y;
+      const line = state.lines.find(function (l) { return l.id === moveLine.lineId; });
+      if (line) {
+        translateLine(line, moveLine.origPoints, moveLine.origSegments, dx, dy);
+        state.dirty = true;
+        // Sync every visual piece tied to this line: hit + visible
+        // path, handles, label.
+        linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
+          .forEach(function (el) { el.setAttribute('d', line.d); });
+        renderHandles();
+        renderLabels();
+      }
+      return;
+    }
     const tool = TOOLS[state.activeToolId];
     if (!tool) return;
     // For chain mode, preview tracks cursor even without an active press.
@@ -1498,6 +1659,13 @@
   });
   svg.addEventListener('pointerup', function (e) {
     pointerActive = false;
+    if (moveLine) {
+      moveLine = null;
+      snapshot();          // undo restores the entire pre-move position
+      downClient = null;
+      downTarget = null;
+      return;
+    }
     const tool = TOOLS[state.activeToolId];
     if (tool && tool.onPointerUp) tool.onPointerUp(eventPt(e));
 

@@ -150,9 +150,9 @@ $payload = json_encode([
       </g>
       <g id="grid"></g>
       <g id="committed-lines"></g>
-      <g id="labels-layer"></g>
       <g id="handles-layer"></g>
       <g id="preview-layer"></g>
+      <g id="labels-layer"></g>
     </svg>
   </main>
 </div>

@@ -204,6 +204,15 @@
       }
     }
 
+    // Optional name labels. The editor's "Labels" toggle is stored in
+    // localStorage (shared origin), so when the author enables it they
+    // see labels on the live site too. Labels never appear for other
+    // visitors (their localStorage doesn't have the flag set).
+    if (typeof localStorage !== 'undefined' &&
+        localStorage.getItem('ed-show-labels') === '1') {
+      renderRuntimeLabels(layer, lines, groupById, paletteById);
+    }
+
     // Animate each rendered line per its group's behaviors + overrides.
     layer.querySelectorAll('path[data-line-id]').forEach(function (pathEl) {
       const group = groupById[pathEl.dataset.groupId];
@@ -239,7 +248,7 @@
       // Draw-in: stroke-dash reveal across the same scroll range.
       if (behaviors.drawIn) {
         let len = 0;
-        try { len = pathEl.getTotalLength(); } catch (e) { /* path may be malformed */ }
+        try { len = pathEl.getTotalLength ? pathEl.getTotalLength() : 0; } catch (e) { /* path may be malformed */ }
         if (len > 0) {
           pathEl.style.strokeDasharray  = len + ' ' + len;
           pathEl.style.strokeDashoffset = len;
@@ -258,6 +267,84 @@
           );
         }
       }
+    });
+  }
+
+  /**
+   * Render developer-facing name labels next to each named line, with
+   * the same double-stroke text + double-bordered rect treatment used
+   * in the editor. Only invoked when the editor's Labels toggle is on
+   * (read from localStorage).
+   */
+  function renderRuntimeLabels(layer, lines, groupById, paletteById) {
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    function resolveStroke(ref) {
+      if (!ref) return null;
+      return paletteById[ref] ? paletteById[ref].value : ref;
+    }
+    lines.forEach(function (line) {
+      if (!line.name) return;
+      const pathEl = layer.querySelector('path[data-line-id="' + line.id + '"]');
+      if (!pathEl) return;
+
+      // Position at the middle authored point if available, else the
+      // path's bbox center (seed lines without `points` use bbox).
+      let pos;
+      if (Array.isArray(line.points) && line.points.length) {
+        const mid = line.points[Math.floor(line.points.length / 2)];
+        pos = { x: mid.x + 6, y: mid.y + 6 };
+      } else {
+        try {
+          const b = pathEl.getBBox();
+          pos = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+        } catch (e) { return; }
+      }
+
+      const group = groupById[line.groupId];
+      const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const fill = resolveStroke(strokeRef) || '#aaa';
+
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('x', 6); text.setAttribute('y', 4);
+      text.setAttribute('fill', '#000');
+      text.setAttribute('stroke', '#fff');
+      text.setAttribute('stroke-width', 3);
+      text.setAttribute('paint-order', 'stroke fill');
+      text.setAttribute('font-family', 'system-ui, -apple-system, sans-serif');
+      text.setAttribute('font-size', 14);
+      text.setAttribute('font-weight', 600);
+      text.setAttribute('dominant-baseline', 'hanging');
+      text.textContent = line.name;
+      g.appendChild(text);
+      layer.appendChild(g);
+
+      const bb = text.getBBox();
+      const pad = 4;
+      const outer = document.createElementNS(SVG_NS, 'rect');
+      outer.setAttribute('x',      (bb.x - pad).toFixed(1));
+      outer.setAttribute('y',      (bb.y - pad).toFixed(1));
+      outer.setAttribute('width',  (bb.width + pad * 2).toFixed(1));
+      outer.setAttribute('height', (bb.height + pad * 2).toFixed(1));
+      outer.setAttribute('rx', 3);
+      outer.setAttribute('fill', fill);
+      outer.setAttribute('stroke', '#000');
+      outer.setAttribute('stroke-width', 2);
+      outer.style.vectorEffect = 'non-scaling-stroke';
+      g.insertBefore(outer, text);
+
+      const inner = document.createElementNS(SVG_NS, 'rect');
+      inner.setAttribute('x',      (bb.x - pad + 1).toFixed(1));
+      inner.setAttribute('y',      (bb.y - pad + 1).toFixed(1));
+      inner.setAttribute('width',  (bb.width + pad * 2 - 2).toFixed(1));
+      inner.setAttribute('height', (bb.height + pad * 2 - 2).toFixed(1));
+      inner.setAttribute('rx', 2);
+      inner.setAttribute('fill', 'none');
+      inner.setAttribute('stroke', '#fff');
+      inner.setAttribute('stroke-width', 1);
+      inner.style.vectorEffect = 'non-scaling-stroke';
+      g.insertBefore(inner, text);
     });
   }
 })();
