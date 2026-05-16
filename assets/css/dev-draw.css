@@ -1,0 +1,270 @@
+/* Editor-specific styles. Loaded after style.css so it can override
+   the global .layout/typography rules with editor chrome. */
+
+body.editor {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #2a2a2a;
+  color: #eee;
+  font-family: var(--font-body);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ── toolbar ─────────────────────────────────────────────────────── */
+.ed-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #1a1a1a;
+  border-bottom: 1px solid #444;
+  flex-shrink: 0;
+  min-height: 48px;
+}
+.ed-brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.5rem;
+}
+.ed-target {
+  color: #999;
+  font-weight: 400;
+}
+.ed-tools {
+  display: flex;
+  gap: 0.25rem;
+}
+.ed-tool {
+  background: #3a3a3a;
+  color: #ddd;
+  border: 1px solid #555;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.ed-tool:hover { background: #4a4a4a; }
+.ed-tool.is-active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.ed-tool-settings {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid #444;
+  min-height: 32px;
+  color: #ccc;
+}
+.ed-tool-settings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+.ed-spacer { flex: 1; }
+
+.ed-save {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ed-save:hover { filter: brightness(1.1); }
+.ed-save:disabled { opacity: 0.5; cursor: progress; }
+.ed-status { min-width: 8em; color: #9c9; font-size: 0.85em; }
+.ed-status.is-error { color: #f88; }
+
+/* ── body layout ─────────────────────────────────────────────────── */
+.ed-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.ed-sidebar {
+  width: 280px;
+  background: #1f1f1f;
+  border-right: 1px solid #444;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.ed-canvas-wrap {
+  flex: 1;
+  background:
+    repeating-linear-gradient(0deg,  #232323 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, #232323 0 1px, transparent 1px 40px),
+    #1c1c1c;
+  position: relative;
+}
+
+/* ── panels ──────────────────────────────────────────────────────── */
+.ed-panel {
+  border-bottom: 1px solid #333;
+  padding: 0.75rem;
+}
+.ed-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.ed-panel-head h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  font-family: var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #aaa;
+  font-weight: 600;
+}
+.ed-mini {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid #555;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.ed-mini:hover { background: #333; }
+
+/* ── groups list ─────────────────────────────────────────────────── */
+.ed-groups { list-style: none; padding: 0; margin: 0; }
+.ed-group {
+  border-radius: 3px;
+  margin-bottom: 0.25rem;
+}
+.ed-group-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ed-group-row:hover { background: #2c2c2c; }
+.ed-group.is-active > .ed-group-row {
+  background: #333;
+  outline: 1px solid var(--accent);
+}
+.ed-group-name { flex: 1; }
+.ed-group-count {
+  color: #888;
+  font-size: 0.8em;
+}
+.ed-line-list {
+  list-style: none;
+  padding: 0 0 0 1rem;
+  margin: 0;
+}
+.ed-line-row {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85em;
+  color: #bbb;
+  cursor: pointer;
+  border-radius: 2px;
+  display: flex;
+  justify-content: space-between;
+}
+.ed-line-row:hover { background: #2c2c2c; }
+.ed-line-row.is-selected { background: #444; color: #fff; }
+.ed-line-id { font-family: ui-monospace, monospace; font-size: 0.85em; color: #888; }
+
+/* ── settings panel ──────────────────────────────────────────────── */
+.ed-settings { display: grid; gap: 0.5rem; }
+.ed-field {
+  display: grid;
+  grid-template-columns: 5em 1fr;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ed-field > label {
+  color: #aaa;
+  font-size: 0.85em;
+}
+.ed-field input[type="text"],
+.ed-field input[type="number"] {
+  background: #111;
+  color: #eee;
+  border: 1px solid #444;
+  padding: 0.25rem 0.4rem;
+  border-radius: 3px;
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+.ed-field input[type="checkbox"] { justify-self: start; }
+.ed-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.ed-actions button {
+  background: #3a3a3a;
+  color: #ddd;
+  border: 1px solid #555;
+  padding: 0.3rem 0.6rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+.ed-actions button.ed-danger {
+  background: transparent;
+  border-color: #855;
+  color: #f88;
+}
+.ed-actions button:hover { filter: brightness(1.2); }
+
+.ed-help {
+  margin: auto 0.75rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #181818;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 0.8em;
+  color: #888;
+  line-height: 1.4;
+}
+.ed-help strong { color: #ccc; }
+
+/* ── canvas SVG ──────────────────────────────────────────────────── */
+#draw-surface {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+#draw-surface path {
+  fill: none;
+  stroke: #ddd;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+}
+#draw-surface path.is-accent { stroke: var(--accent); }
+#draw-surface path.is-selected {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+#draw-surface path.is-preview {
+  stroke: #888;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+#grid line {
+  stroke: #2a2a2a;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (max-width: 800px) {
+  .ed-sidebar { width: 100%; height: 40vh; border-right: none; border-bottom: 1px solid #444; }
+  .ed-body { flex-direction: column; }
+}
