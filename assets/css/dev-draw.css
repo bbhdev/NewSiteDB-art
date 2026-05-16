@@ -248,9 +248,16 @@ body.editor {
 #draw-surface {
   display: block;
   /* Fixed pixel size (1px = 1 viewBox unit). The wrap is overflow:auto
-     so this is what makes the canvas scrollable in both directions. */
+     so this is what makes the canvas scrollable in both directions.
+     Opt out of the global `svg { max-width: 100% }` rule — without
+     this override, the surface gets clamped to the wrap's width and
+     its rendered aspect ratio diverges from the viewBox, which throws
+     off pointer-to-viewBox coordinate mapping the further you draw
+     from center. */
   width: 2400px;
   height: 1600px;
+  max-width: none;
+  max-height: none;
   cursor: crosshair;
   /* Stop touch gestures (pan / pinch-zoom) from hijacking the pointer
      stream while the user is drawing on a touchscreen. */
@@ -274,9 +281,11 @@ body.editor {
 }
 #draw-surface path.is-selected {
   /* Distinct from the design palette so selection is always recognisable
-     against any user-chosen color. */
-  stroke: #00d9ff;
-  stroke-width: 3;
+     against any user-chosen color. !important is needed because each
+     path also gets an inline style.stroke from the line's palette
+     resolution, which would otherwise win. */
+  stroke: #00d9ff !important;
+  stroke-width: 3 !important;
 }
 #draw-surface path.is-preview {
   stroke: #888;
@@ -342,17 +351,21 @@ body.editor {
 .ed-color-picker .swatch.is-clear:hover { background: #2c2c2c; }
 
 /* ── group collapse / expand ─────────────────────────────────────── */
+/* The whole .ed-group-row is clickable: clicking toggles the group's
+   open state AND activates it. The triangle is visual-only — a clear
+   affordance, not its own click target. */
 .ed-group-toggle {
-  background: transparent;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  padding: 0 0.2rem;
-  font: inherit;
-  width: 1rem;
+  display: inline-block;
+  width: 1.1em;
+  color: #bbb;
+  font-size: 0.9em;
   text-align: center;
+  pointer-events: none;
+  transition: transform 0.15s ease;
 }
-.ed-group-toggle:hover { color: #ddd; }
+.ed-group.is-open .ed-group-toggle {
+  transform: rotate(90deg);
+}
 .ed-group:not(.is-open) .ed-line-list { display: none; }
 
 @media (max-width: 800px) {

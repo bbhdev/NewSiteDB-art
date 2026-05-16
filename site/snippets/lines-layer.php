@@ -25,8 +25,17 @@
 
 $root = $page->root();
 
+// Read the live .json file if it exists, otherwise fall back to the
+// committed .example.json seed. The live files are gitignored (they're
+// user-authored content written by /dev/draw/save) so a fresh clone
+// gets the example data automatically and per-machine drawings never
+// conflict with `git pull`.
 $readJson = function ($path) {
-  if (!file_exists($path)) return [];
+  if (!file_exists($path)) {
+    $seed = preg_replace('/\.json$/', '.example.json', $path);
+    if (file_exists($seed)) $path = $seed;
+    else return [];
+  }
   $decoded = json_decode(file_get_contents($path), true);
   return is_array($decoded) ? $decoded : [];
 };

@@ -54,6 +54,12 @@ body {
   position: fixed;
   left: -50vw; top: -50vh;
   width: 200vw; height: 200vh;
+  /* Opt out of the global `svg { max-width: 100% }` rule — otherwise
+     this SVG gets clamped to viewport width and the off-page area on
+     the right gets hidden, which shifts every drawn line leftward and
+     distorts the aspect ratio. */
+  max-width: none;
+  max-height: none;
   pointer-events: none;
   z-index: 0;
 }

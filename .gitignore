@@ -8,3 +8,11 @@
 !/media/index.html
 .DS_Store
 Thumbs.db
+
+# Editor-authored data lives alongside .example.json seeds.
+# The real .json files are user content (written by /dev/draw/save);
+# they're ignored so pulls never collide with locally-saved drawings.
+# On fresh clones the snippet/template falls back to the .example file.
+/content/colors.json
+/content/*/lines.json
+/content/*/groups.json

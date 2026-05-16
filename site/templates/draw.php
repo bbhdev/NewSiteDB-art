@@ -10,8 +10,15 @@
 $targetSlug = $page->targetPage()->or('home')->value();
 $targetPage = kirby()->page($targetSlug);
 
+// Read the live .json file if it exists, otherwise fall back to the
+// committed .example.json seed. Live files are gitignored — see
+// site/snippets/lines-layer.php for the full rationale.
 $readJson = function ($path) {
-  if (!file_exists($path)) return [];
+  if (!file_exists($path)) {
+    $seed = preg_replace('/\.json$/', '.example.json', $path);
+    if (file_exists($seed)) $path = $seed;
+    else return [];
+  }
   $decoded = json_decode(file_get_contents($path), true);
   return is_array($decoded) ? $decoded : [];
 };

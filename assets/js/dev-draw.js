@@ -230,40 +230,74 @@
       settings: function () {
         const span = document.createElement('span');
         span.style.color = '#888';
-        span.textContent = state.chainPoints ? 'chain: ' + state.chainPoints.length + ' pts — Esc to finish' : 'click to start a chain';
+        span.textContent = state.chainPoints
+          ? 'chain: ' + state.chainPoints.length + ' pt' + (state.chainPoints.length === 1 ? '' : 's') + ' — Esc or double-click to finish'
+          : 'click to start a chain';
         return [span];
       },
+      // A chain is built up over multiple clicks but committed as ONE
+      // line at the end, so the whole zig-zag carries a single set of
+      // behaviors. Two previews run during construction:
+      //   _committedPreview  — solid line through points clicked so far
+      //   _cursorPreview     — dashed line from last anchor to cursor
       onPointerDown: function (pt) {
         if (!state.chainPoints) {
           state.chainPoints = [pt];
-          renderToolSettings();
-          return;
+        } else {
+          const prev = state.chainPoints[state.chainPoints.length - 1];
+          const dx = pt.x - prev.x, dy = pt.y - prev.y;
+          if (dx * dx + dy * dy < 1) return; // ignore double-click duplicates
+          state.chainPoints.push(pt);
         }
-        const prev = state.chainPoints[state.chainPoints.length - 1];
-        const dx = pt.x - prev.x, dy = pt.y - prev.y;
-        if (dx * dx + dy * dy < 1) return; // ignore double-click duplicates
-        commitLine(pathFromPoints([prev, pt], false));
-        state.chainPoints.push(pt);
+        this._updateCommittedPreview();
         renderToolSettings();
       },
       onPointerMove: function (pt) {
-        if (!state.chainPoints) return;
+        if (!state.chainPoints || !state.chainPoints.length) return;
         const prev = state.chainPoints[state.chainPoints.length - 1];
-        if (!this._preview) {
-          this._preview = createPath('is-preview', pathFromPoints([prev, pt], false));
-          previewG.appendChild(this._preview);
+        if (!this._cursorPreview) {
+          this._cursorPreview = createPath('is-preview', pathFromPoints([prev, pt], false));
+          previewG.appendChild(this._cursorPreview);
         } else {
-          this._preview.setAttribute('d', pathFromPoints([prev, pt], false));
+          this._cursorPreview.setAttribute('d', pathFromPoints([prev, pt], false));
         }
       },
-      onPointerUp: function () { /* commits happen on down for chain */ },
+      onPointerUp: function () { /* chain advances on pointer DOWN */ },
       finish: function () {
-        if (this._preview) this._preview.remove();
-        this._preview = null;
+        // Commit the whole chain as a single multi-segment line.
+        if (state.chainPoints && state.chainPoints.length >= 2) {
+          commitLine(pathFromPoints(state.chainPoints, false));
+        }
+        if (this._committedPreview) { this._committedPreview.remove(); this._committedPreview = null; }
+        if (this._cursorPreview)    { this._cursorPreview.remove();    this._cursorPreview    = null; }
         state.chainPoints = null;
         renderToolSettings();
       },
-      cancel: function () { this.finish(); }
+      cancel: function () {
+        if (this._committedPreview) { this._committedPreview.remove(); this._committedPreview = null; }
+        if (this._cursorPreview)    { this._cursorPreview.remove();    this._cursorPreview    = null; }
+        state.chainPoints = null;
+        renderToolSettings();
+      },
+      _updateCommittedPreview: function () {
+        if (!state.chainPoints || state.chainPoints.length < 2) {
+          if (this._committedPreview) {
+            this._committedPreview.remove();
+            this._committedPreview = null;
+          }
+          return;
+        }
+        const d = pathFromPoints(state.chainPoints, false);
+        if (!this._committedPreview) {
+          this._committedPreview = createPath('', d);
+          this._committedPreview.style.stroke = '#ccc';
+          this._committedPreview.style.strokeWidth = '2';
+          this._committedPreview.style.pointerEvents = 'none';
+          previewG.appendChild(this._committedPreview);
+        } else {
+          this._committedPreview.setAttribute('d', d);
+        }
+      }
     }
   };
 
@@ -443,18 +477,11 @@
       const row = document.createElement('div');
       row.className = 'ed-group-row';
 
-      // Disclosure triangle — toggles the inline line list without
-      // changing which group is active for drawing.
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
+      // Pure-visual disclosure indicator. Rotation is CSS-driven via
+      // .ed-group.is-open. The whole row is the click target.
+      const toggle = document.createElement('span');
       toggle.className = 'ed-group-toggle';
-      toggle.title = isOpen ? 'Collapse' : 'Expand';
-      toggle.textContent = isOpen ? '▾' : '▸';
-      toggle.addEventListener('click', function (e) {
-        e.stopPropagation();
-        state.openGroupIds[g.id] = !isOpen;
-        renderGroupsList();
-      });
+      toggle.textContent = '▸';
       row.appendChild(toggle);
 
       const name = document.createElement('span');
@@ -467,10 +494,15 @@
       row.appendChild(name);
       row.appendChild(count);
       row.addEventListener('click', function () {
+        const wasOpen = !!state.openGroupIds[g.id];
         state.activeGroupId = g.id;
-        state.selectedLineId = null;
-        // Auto-expand the active group so user sees its lines.
-        state.openGroupIds[g.id] = true;
+        state.openGroupIds[g.id] = !wasOpen;
+        // Closing a group deselects any line that belongs to it —
+        // a hidden line shouldn't stay "selected".
+        if (wasOpen && state.selectedLineId) {
+          const sel = state.lines.find(function (l) { return l.id === state.selectedLineId; });
+          if (sel && sel.groupId === g.id) state.selectedLineId = null;
+        }
         renderGroupsList();
         renderSelectionPanel();
       });
