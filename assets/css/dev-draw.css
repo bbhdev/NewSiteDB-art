@@ -79,6 +79,37 @@ body.editor {
   gap: 0.3rem;
   cursor: pointer;
 }
+.ed-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid #444;
+}
+.ed-zoom button {
+  background: #3a3a3a;
+  color: #ddd;
+  border: 1px solid #555;
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  min-width: 1.8em;
+}
+.ed-zoom button:hover { background: #4a4a4a; }
+.ed-zoom #zoom-level {
+  display: inline-block;
+  min-width: 4em;
+  text-align: center;
+  color: #aaa;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  cursor: pointer;
+  user-select: none;
+}
+.ed-zoom #zoom-level:hover { color: #ddd; }
+
 .ed-spacer { flex: 1; }
 
 .ed-save {
@@ -190,6 +221,7 @@ body.editor {
 .ed-line-row:hover { background: #2c2c2c; }
 .ed-line-row.is-selected { background: #444; color: #fff; }
 .ed-line-id { font-family: ui-monospace, monospace; font-size: 0.85em; color: #888; }
+.ed-line-name { color: #ddd; }
 
 /* ── settings panel ──────────────────────────────────────────────── */
 .ed-settings { display: grid; gap: 0.5rem; }
@@ -277,7 +309,19 @@ body.editor {
   stroke: #ddd;
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
-  pointer-events: stroke;
+  pointer-events: none;
+}
+/* Invisible wider hit target paired with every committed line so the
+   line is easy to click on selection — picking a 1.5px-wide stroke
+   pixel-perfectly is awful. Stroke + fill both hit-tested so closed
+   loops are clickable on the inside too. */
+#draw-surface path.ed-line-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 14;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: pointer;
 }
 #draw-surface path.is-selected {
   /* No color override — the line keeps its authored color so the user

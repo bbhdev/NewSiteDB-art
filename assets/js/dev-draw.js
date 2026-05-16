@@ -48,10 +48,14 @@
   // Defensive: if any required element is missing, the user is probably
   // serving stale cached HTML against fresh JS (or vice-versa). Log
   // loudly so the cause is obvious in DevTools.
+  const zoomInBtn    = document.getElementById('zoom-in');
+  const zoomOutBtn   = document.getElementById('zoom-out');
+  const zoomLevelEl  = document.getElementById('zoom-level');
+
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
-                     saveBtn, saveStatus };
+                     saveBtn, saveStatus, zoomInBtn, zoomOutBtn, zoomLevelEl };
   const missing = Object.keys(required).filter(function (k) { return !required[k]; });
   if (missing.length) {
     console.error('[dev-draw] Missing required DOM elements:', missing,
@@ -72,6 +76,7 @@
     activeToolId:   'freehand',
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
+    zoom: 1,                   // canvas zoom factor (1 = 100%, 2 = 200%, …)
     dirty: false
   };
   state.activeGroupId = state.groups[0].id;
@@ -112,6 +117,49 @@
     };
   }
   function eventPt(e) { return clientToSvg(e.clientX, e.clientY); }
+
+  // ── Zoom ──────────────────────────────────────────────────────────
+  // Zoom is implemented by scaling the SVG element's CSS width/height
+  // away from its base 2400×1600 pixel size. The viewBox stays fixed
+  // at -600 -400 2400 1600, so authored coordinates don't change with
+  // zoom; only the rendered scale does. clientToSvg already reads
+  // rect.width / rect.height, so pointer-to-viewBox math keeps working
+  // at any zoom level without changes.
+  const ZOOM_MIN = 0.25, ZOOM_MAX = 4, ZOOM_STEP = 1.25;
+
+  function setZoom(z, anchorClientX, anchorClientY) {
+    const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    if (newZoom === state.zoom) return;
+
+    // Keep the point under the anchor visually fixed across the zoom
+    // change. If no anchor is supplied, anchor to the center of the
+    // visible viewport of the wrap.
+    const wrapRect = canvasWrap.getBoundingClientRect();
+    const ax = (anchorClientX != null) ? anchorClientX : wrapRect.left + wrapRect.width  / 2;
+    const ay = (anchorClientY != null) ? anchorClientY : wrapRect.top  + wrapRect.height / 2;
+    const wrapX = ax - wrapRect.left;
+    const wrapY = ay - wrapRect.top;
+    // What logical content position is under the anchor right now?
+    const contentX = (canvasWrap.scrollLeft + wrapX) / state.zoom;
+    const contentY = (canvasWrap.scrollTop  + wrapY) / state.zoom;
+
+    state.zoom = newZoom;
+    svg.style.width  = (2400 * newZoom) + 'px';
+    svg.style.height = (1600 * newZoom) + 'px';
+
+    // Put the same logical content position back under the anchor by
+    // adjusting scroll.
+    canvasWrap.scrollLeft = contentX * newZoom - wrapX;
+    canvasWrap.scrollTop  = contentY * newZoom - wrapY;
+
+    zoomLevelEl.textContent = Math.round(newZoom * 100) + '%';
+    // Handles need to re-render at the new inverse scale so they stay
+    // a constant visual size regardless of zoom level.
+    renderHandles();
+  }
+  function zoomIn(anchorX, anchorY)  { setZoom(state.zoom * ZOOM_STEP, anchorX, anchorY); }
+  function zoomOut(anchorX, anchorY) { setZoom(state.zoom / ZOOM_STEP, anchorX, anchorY); }
+  function zoomReset() { setZoom(1); }
 
   // ── Line data model ───────────────────────────────────────────────
   // Every line carries:
@@ -267,31 +315,40 @@
         return [lbl];
       },
       onPointerDown: function (pt) {
+        // Stash the first point but DON'T create a preview yet. The
+        // preview only appears on the first actual move — that way a
+        // pure click (no drag) leaves no trace and doesn't compete
+        // with click-to-select logic.
         this._points = [pt];
-        this._preview = createPath('is-preview', pathFromPoints(this._points, false));
-        previewG.appendChild(this._preview);
+        this._preview = null;
       },
       onPointerMove: function (pt) {
         if (!this._points) return;
         this._points.push(pt);
-        this._preview.setAttribute('d', pathFromPoints(this._points, false));
+        if (!this._preview) {
+          this._preview = createPath('is-preview', pathFromPoints(this._points, false));
+          previewG.appendChild(this._preview);
+        } else {
+          this._preview.setAttribute('d', pathFromPoints(this._points, false));
+        }
       },
       onPointerUp: function () {
         if (!this._points) return;
+        const pts = this._points;
+        this._points = null;
+        if (this._preview) { this._preview.remove(); this._preview = null; }
+        if (pts.length < 2) return; // pure click — nothing to commit
         // Without smoothing: preserve nearly every captured point so the
         // stroke is faithful to the user's hand (including wobble).
         // With smoothing: drop most of the closely-spaced points first so
         // the quadratic-through-midpoints pass has room to actually round
         // out the curve — otherwise it ends up hugging every micro-jitter.
         const minDist = state.smoothing ? 22 : 2;
-        const pts = simplify(this._points, minDist);
-        this._preview.remove();
-        this._points = null;
-        this._preview = null;
-        if (pts.length < 2) return;
+        const simp = simplify(pts, minDist);
+        if (simp.length < 2) return;
         commitLine({
           kind:     closed ? 'freehandClosed' : 'freehand',
-          points:   pts,
+          points:   simp,
           smoothed: state.smoothing,
           closed:   closed
         });
@@ -312,20 +369,24 @@
       settings: function () { return []; },
       onPointerDown: function (pt) {
         this._start = pt;
-        this._preview = createPath('is-preview', pathFromPoints([pt, pt], false));
-        previewG.appendChild(this._preview);
+        this._preview = null; // deferred until first move
       },
       onPointerMove: function (pt) {
         if (!this._start) return;
-        this._preview.setAttribute('d', pathFromPoints([this._start, pt], false));
+        if (!this._preview) {
+          this._preview = createPath('is-preview', pathFromPoints([this._start, pt], false));
+          previewG.appendChild(this._preview);
+        } else {
+          this._preview.setAttribute('d', pathFromPoints([this._start, pt], false));
+        }
       },
       onPointerUp: function (pt) {
         if (!this._start) return;
         const start = this._start;
-        this._preview.remove();
         this._start = null;
-        this._preview = null;
-        // Ignore zero-length clicks.
+        if (this._preview) { this._preview.remove(); this._preview = null; }
+        // Ignore zero-length clicks — handled as click-to-select/deselect
+        // by the pointerup dispatcher on the SVG.
         const dx = pt.x - start.x, dy = pt.y - start.y;
         if (dx * dx + dy * dy < 1) return;
         commitLine({ kind: 'line', points: [start, pt], smoothed: false, closed: false });
@@ -517,6 +578,9 @@
     Object.assign(l, patch);
     state.dirty = true;
     renderLines();
+    // Sidebar shows the line's display name (name || id) — keep it in
+    // sync when name is edited.
+    if ('name' in patch) renderGroupsList();
   }
 
   function updateLineOverride(id, key, value) {
@@ -570,10 +634,18 @@
   function renderLines() {
     linesG.innerHTML = '';
     state.lines.forEach(function (line) {
-      const p = createPath('', line.d);
       const group = state.groups.find(function (g) { return g.id === line.groupId; });
-      // Effective stroke / width: line value wins, then group default,
-      // else fall back to the editor's CSS rule.
+
+      // Invisible wide hit-target so the line is easy to click for
+      // selection — picking a 1.5px stroke pixel-perfectly is awful.
+      // The hit target carries the data-line-id; click resolution
+      // happens in the SVG pointerup dispatcher.
+      const hit = createPath('ed-line-hit', line.d);
+      hit.dataset.lineId = line.id;
+      linesG.appendChild(hit);
+
+      // Visible path.
+      const p = createPath('', line.d);
       const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
       const stroke    = resolveStroke(strokeRef);
       const width  = (line.width != null) ? line.width
@@ -581,16 +653,10 @@
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
       // Closed loops fill with the stroke color so the inside reads as
-      // a solid blob. Separate fill-color control could be added later.
+      // a solid blob.
       if (line.closed && stroke) p.style.fill = stroke;
       if (line.id === state.selectedLineId) p.classList.add('is-selected');
       p.dataset.lineId = line.id;
-      p.addEventListener('click', function (e) {
-        e.stopPropagation();
-        state.selectedLineId = line.id;
-        renderLines();
-        renderSelectionPanel();
-      });
       linesG.appendChild(p);
     });
     renderHandles();
@@ -613,13 +679,16 @@
     const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
     if (!line || !Array.isArray(line.points) || !line.points.length) return;
 
+    // Handle radius is in viewBox units, but we want a constant visual
+    // size regardless of zoom — so divide by zoom.
+    const handleR = 6 / state.zoom;
     const indices = sparseHandleIndices(line.points, 50);
     indices.forEach(function (idx) {
       const pt = line.points[idx];
       const c  = document.createElementNS(SVG_NS, 'circle');
       c.setAttribute('cx', pt.x);
       c.setAttribute('cy', pt.y);
-      c.setAttribute('r',  6);
+      c.setAttribute('r',  handleR);
       c.setAttribute('class', 'ed-handle');
       c.dataset.idx    = idx;
       c.dataset.lineId = line.id;
@@ -724,8 +793,14 @@
           const lr = document.createElement('li');
           lr.className = 'ed-line-row' + (line.id === state.selectedLineId ? ' is-selected' : '');
           const idSpan = document.createElement('span');
-          idSpan.className = 'ed-line-id';
-          idSpan.textContent = line.id;
+          if (line.name) {
+            idSpan.className = 'ed-line-name';
+            idSpan.textContent = line.name;
+            idSpan.title = line.id;
+          } else {
+            idSpan.className = 'ed-line-id';
+            idSpan.textContent = line.id;
+          }
           const overrideTag = document.createElement('span');
           overrideTag.style.color = '#888';
           overrideTag.textContent = (line.overrides && Object.keys(line.overrides).length) ? '*' : '';
@@ -882,18 +957,32 @@
     const group = state.groups.find(function (g) { return g.id === line.groupId; });
     const head = document.createElement('header');
     head.className = 'ed-panel-head';
-    head.innerHTML = '<h3>Line override</h3>';
+    const h3 = document.createElement('h3');
+    h3.textContent = line.name ? line.name : 'Line';
+    head.appendChild(h3);
     selectionPanel.appendChild(head);
 
     const meta = document.createElement('p');
     meta.style.color = '#888';
     meta.style.fontSize = '0.85em';
     meta.style.margin = '0 0 0.5rem';
-    meta.innerHTML = 'id <code>' + line.id + '</code> · group <strong>' + (group ? group.name : '?') + '</strong> · empty = use group default';
+    const idCode = document.createElement('code');
+    idCode.textContent = line.id;
+    meta.appendChild(document.createTextNode('id '));
+    meta.appendChild(idCode);
+    meta.appendChild(document.createTextNode(' · group '));
+    const grpStrong = document.createElement('strong');
+    grpStrong.textContent = group ? group.name : '?';
+    meta.appendChild(grpStrong);
+    meta.appendChild(document.createTextNode(' · ' + line.kind));
     selectionPanel.appendChild(meta);
 
     const wrap = document.createElement('div');
     wrap.className = 'ed-settings';
+
+    wrap.appendChild(textField('Name', line.name || '', function (v) {
+      updateLine(line.id, { name: v });
+    }, 'optional'));
 
     wrap.appendChild(divider('Appearance'));
     wrap.appendChild(strokeField('Color', line.stroke, function (v) {
@@ -1135,6 +1224,19 @@
   newGroupBtn.addEventListener('click', addGroup);
   newColorBtn.addEventListener('click', addColor);
   saveBtn.addEventListener('click', save);
+  zoomInBtn.addEventListener('click',  function () { zoomIn();  });
+  zoomOutBtn.addEventListener('click', function () { zoomOut(); });
+  zoomLevelEl.addEventListener('click', zoomReset);
+
+  // Wheel zoom — requires Ctrl/Cmd modifier so plain wheel keeps
+  // scrolling the canvas wrap normally. Anchored to the cursor so
+  // the point under the pointer stays put across the zoom step.
+  canvasWrap.addEventListener('wheel', function (e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : (1 / 1.1);
+    setZoom(state.zoom * factor, e.clientX, e.clientY);
+  }, { passive: false });
 
   // Center the page area in the scrollable canvas on first load so the
   // user starts looking at the live viewport rather than empty off-page
@@ -1146,28 +1248,26 @@
     wrap.scrollTop  = 400 + PAGE_H / 2 - wrap.clientHeight / 2;
   }
 
-  // Canvas click on empty area deselects the current line. Clicks on
-  // a path or a handle stay selected — the path handler runs first and
-  // calls stopPropagation; this fallback only fires for the bg layers.
-  svg.addEventListener('click', function (e) {
-    if (e.target === svg
-        || (e.target.classList && (
-            e.target.classList.contains('bg-outer') ||
-            e.target.classList.contains('bg-page')))) {
-      state.selectedLineId = null;
-      renderLines();
-      renderSelectionPanel();
-    }
-  });
-
   // Pointer events → active tool. Pointer capture keeps the stroke
   // alive even if the cursor leaves the SVG mid-drag.
+  //
+  // A click (pointerdown + pointerup with no significant movement) is
+  // treated as a selection gesture: clicking on a line's hit target
+  // selects it, clicking empty canvas deselects. This runs after the
+  // active tool's onPointerUp, so a pure-click never commits a stroke
+  // (each tool's onPointerUp short-circuits on insufficient movement)
+  // and the tool's cleanup leaves no residue to compete with.
   let pointerActive = false;
+  let downClient = null;
+  let downTarget = null;
+
   svg.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
     e.preventDefault();
     svg.setPointerCapture(e.pointerId);
     pointerActive = true;
+    downClient = { x: e.clientX, y: e.clientY };
+    downTarget = e.target;
     const tool = TOOLS[state.activeToolId];
     if (tool && tool.onPointerDown) tool.onPointerDown(eventPt(e));
   });
@@ -1186,6 +1286,28 @@
     pointerActive = false;
     const tool = TOOLS[state.activeToolId];
     if (tool && tool.onPointerUp) tool.onPointerUp(eventPt(e));
+
+    // Click vs drag detection. Threshold is in client (viewport) pixels.
+    if (downClient) {
+      const dx = e.clientX - downClient.x;
+      const dy = e.clientY - downClient.y;
+      const dragged = (dx * dx + dy * dy) > 9;  // ~3px slop
+      const inChain = state.activeToolId === 'lineChain' && state.chainPoints;
+      // Skip selection clicks while a chain is being built — each click
+      // is the user adding a point, not picking a different line.
+      if (!dragged && !inChain) {
+        const hitEl = downTarget && downTarget.closest
+                      ? downTarget.closest('[data-line-id]') : null;
+        const newSelection = hitEl ? hitEl.dataset.lineId : null;
+        if (newSelection !== state.selectedLineId) {
+          state.selectedLineId = newSelection;
+          renderLines();
+          renderSelectionPanel();
+        }
+      }
+    }
+    downClient = null;
+    downTarget = null;
   });
   svg.addEventListener('dblclick', function (e) {
     const tool = TOOLS[state.activeToolId];
@@ -1210,6 +1332,10 @@
     if (e.key === 'o' || e.key === 'O') setActiveTool('freehandClosed');
     if (e.key === 'l' || e.key === 'L') setActiveTool('line');
     if (e.key === 'c' || e.key === 'C') setActiveTool('lineChain');
+    // Zoom shortcuts
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn();  }
+    if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
+    if (e.key === '0')                  { e.preventDefault(); zoomReset(); }
   });
 
   // Warn before navigating away with unsaved changes.
