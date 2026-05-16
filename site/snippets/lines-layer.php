@@ -31,8 +31,9 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-$groups = $readJson($root . '/groups.json');
-$lines  = $readJson($root . '/lines.json');
+$groups  = $readJson($root . '/groups.json');
+$lines   = $readJson($root . '/lines.json');
+$palette = $readJson(kirby()->root('content') . '/colors.json');
 
 $svgImports = [];
 $svgDir = $root . '/lines';
@@ -46,9 +47,9 @@ if (is_dir($svgDir)) {
 }
 
 $payload = json_encode(
-  ['groups' => $groups, 'lines' => $lines, 'svgImports' => $svgImports],
+  ['groups' => $groups, 'lines' => $lines, 'palette' => $palette, 'svgImports' => $svgImports],
   JSON_UNESCAPED_SLASHES
 );
 ?>
-<svg id="lines-layer" viewBox="0 0 1200 800" preserveAspectRatio="none" aria-hidden="true"></svg>
+<svg id="lines-layer" viewBox="-600 -400 2400 1600" preserveAspectRatio="none" aria-hidden="true"></svg>
 <script id="lines-data" type="application/json"><?= $payload ?></script>

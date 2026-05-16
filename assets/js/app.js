@@ -132,6 +132,7 @@
 
     const groups     = Array.isArray(data.groups)     ? data.groups     : [];
     const lines      = Array.isArray(data.lines)      ? data.lines      : [];
+    const palette    = Array.isArray(data.palette)    ? data.palette    : [];
     const svgImports = Array.isArray(data.svgImports) ? data.svgImports : [];
 
     if (!lines.length && !svgImports.length) return;
@@ -139,6 +140,19 @@
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const groupById = {};
     groups.forEach(function (g) { groupById[g.id] = g; });
+    const paletteById = {};
+    palette.forEach(function (c) { paletteById[c.id] = c; });
+
+    /**
+     * Resolve a stroke value. Lines and group defaults store a palette
+     * color ID (e.g. "text"); the runtime looks up the actual CSS color.
+     * If the value isn't a palette ID it's treated as a literal CSS
+     * color, keeping backward compatibility with pre-palette data.
+     */
+    function resolveStroke(ref) {
+      if (!ref) return null;
+      return paletteById[ref] ? paletteById[ref].value : ref;
+    }
 
     // Render JSON-defined lines.
     lines.forEach(function (line) {
@@ -149,7 +163,8 @@
       // Set via style (not the SVG attribute) so var(--…) resolves —
       // SVG presentation attributes don't evaluate CSS vars in most browsers.
       const group = groupById[line.groupId];
-      const stroke = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const stroke    = resolveStroke(strokeRef);
       const width  = (line.width != null) ? line.width
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;

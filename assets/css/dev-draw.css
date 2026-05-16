@@ -106,11 +106,9 @@ body.editor {
 }
 .ed-canvas-wrap {
   flex: 1;
-  background:
-    repeating-linear-gradient(0deg,  #232323 0 1px, transparent 1px 40px),
-    repeating-linear-gradient(90deg, #232323 0 1px, transparent 1px 40px),
-    #1c1c1c;
+  background: #111;
   position: relative;
+  overflow: auto;
 }
 
 /* ── panels ──────────────────────────────────────────────────────── */
@@ -242,10 +240,24 @@ body.editor {
 
 /* ── canvas SVG ──────────────────────────────────────────────────── */
 #draw-surface {
-  width: 100%;
-  height: 100%;
   display: block;
+  /* Fixed pixel size (1px = 1 viewBox unit). The wrap is overflow:auto
+     so this is what makes the canvas scrollable in both directions. */
+  width: 2400px;
+  height: 1600px;
   cursor: crosshair;
+  /* Stop touch gestures (pan / pinch-zoom) from hijacking the pointer
+     stream while the user is drawing on a touchscreen. */
+  touch-action: none;
+}
+#draw-surface .bg-outer { fill: #181818; pointer-events: none; }
+#draw-surface .bg-page  {
+  fill: #232323;
+  stroke: #4a4a4a;
+  stroke-width: 1;
+  stroke-dasharray: 8 4;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 #draw-surface path {
   fill: none;
@@ -254,9 +266,10 @@ body.editor {
   vector-effect: non-scaling-stroke;
   pointer-events: stroke;
 }
-#draw-surface path.is-accent { stroke: var(--accent); }
 #draw-surface path.is-selected {
-  stroke: var(--accent);
+  /* Distinct from the design palette so selection is always recognisable
+     against any user-chosen color. */
+  stroke: #00d9ff;
   stroke-width: 3;
 }
 #draw-surface path.is-preview {
@@ -265,10 +278,76 @@ body.editor {
   pointer-events: none;
 }
 #grid line {
-  stroke: #2a2a2a;
+  stroke: #262626;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
+
+/* ── palette panel ───────────────────────────────────────────────── */
+.ed-palette-list { list-style: none; padding: 0; margin: 0; }
+.ed-palette-row {
+  display: grid;
+  grid-template-columns: 1.2rem 1fr 1fr auto;
+  gap: 0.3rem;
+  align-items: center;
+  padding: 0.2rem 0;
+}
+.ed-palette-swatch {
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 3px;
+  border: 1px solid #555;
+}
+.ed-palette-row input[type="text"] {
+  background: #111; color: #eee; border: 1px solid #444;
+  padding: 0.15rem 0.3rem; border-radius: 3px; font: inherit;
+  font-size: 0.85em; min-width: 0;
+  width: 100%; box-sizing: border-box;
+}
+.ed-palette-row .ed-mini { padding: 0.05rem 0.35rem; font-size: 0.75em; }
+
+/* ── color picker (swatches) in group/line panels ────────────────── */
+.ed-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+.ed-color-picker .swatch {
+  width: 1.5rem; height: 1.5rem;
+  border-radius: 50%;
+  border: 2px solid #555;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+}
+.ed-color-picker .swatch.is-active {
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.3);
+}
+.ed-color-picker .swatch.is-clear {
+  background: transparent;
+  color: #888;
+  width: auto; height: 1.5rem;
+  border-radius: 3px;
+  padding: 0 0.4rem;
+  font-size: 0.75em;
+}
+.ed-color-picker .swatch.is-clear:hover { background: #2c2c2c; }
+
+/* ── group collapse / expand ─────────────────────────────────────── */
+.ed-group-toggle {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  font: inherit;
+  width: 1rem;
+  text-align: center;
+}
+.ed-group-toggle:hover { color: #ddd; }
+.ed-group:not(.is-open) .ed-line-list { display: none; }
 
 @media (max-width: 800px) {
   .ed-sidebar { width: 100%; height: 40vh; border-right: none; border-bottom: 1px solid #444; }

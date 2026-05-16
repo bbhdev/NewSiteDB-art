@@ -41,15 +41,19 @@ body {
 }
 
 /* ─── Lines layer ────────────────────────────────────────────────── */
-/* Fixed full-viewport SVG sitting behind page content. The viewBox is
-   1200x800; lines are authored in that coordinate space and stretch
-   non-uniformly to fill any viewport size. */
+/* Fixed overlay sitting behind page content. The SVG element extends
+   beyond the viewport on every side so lines authored outside the
+   visible 1200×800 "page area" have a render target — those lines
+   live in the off-canvas margin until scroll-triggered translates
+   slide them in.
+   viewBox: -600 -400 2400 1600
+     central 1200×800 = the visible page area
+     extra 600px each side horizontally, 400px each side vertically */
 
 #lines-layer {
   position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
+  left: -50vw; top: -50vh;
+  width: 200vw; height: 200vh;
   pointer-events: none;
   z-index: 0;
 }
@@ -60,6 +64,11 @@ body {
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
+  /* Rotation/transform-origin must be relative to the path's own
+     bounding box, not the SVG viewport — otherwise rotate=N just
+     pivots everything around (0,0). */
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
 }
 
 h1, h2, h3 {

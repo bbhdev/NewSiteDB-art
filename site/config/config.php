@@ -16,9 +16,10 @@ return [
         $kirby = kirby();
         $body  = $kirby->request()->body()->toArray();
 
-        $pageId = $body['page']   ?? null;
-        $groups = $body['groups'] ?? null;
-        $lines  = $body['lines']  ?? null;
+        $pageId  = $body['page']    ?? null;
+        $groups  = $body['groups']  ?? null;
+        $lines   = $body['lines']   ?? null;
+        $palette = $body['palette'] ?? null;  // optional — site-wide
 
         if (!is_string($pageId) || !is_array($groups) || !is_array($lines)) {
           return new Kirby\Http\Response(
@@ -39,10 +40,21 @@ return [
 
         $root = $page->root();
         $opts = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES;
+
+        // Per-page files: lines + groups go alongside the page content.
         $writeOk = (
           file_put_contents($root . '/groups.json', json_encode($groups, $opts) . "\n") !== false &&
           file_put_contents($root . '/lines.json',  json_encode($lines,  $opts) . "\n") !== false
         );
+
+        // Site-wide file: the design palette is shared across pages, so
+        // it lives at the content root rather than under any one page.
+        if (is_array($palette)) {
+          $writeOk = $writeOk && (
+            file_put_contents($kirby->root('content') . '/colors.json',
+              json_encode($palette, $opts) . "\n") !== false
+          );
+        }
 
         if (!$writeOk) {
           return new Kirby\Http\Response(

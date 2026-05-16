@@ -16,8 +16,18 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-$groups = $targetPage ? $readJson($targetPage->root() . '/groups.json') : [];
-$lines  = $targetPage ? $readJson($targetPage->root() . '/lines.json')  : [];
+$groups  = $targetPage ? $readJson($targetPage->root() . '/groups.json') : [];
+$lines   = $targetPage ? $readJson($targetPage->root() . '/lines.json')  : [];
+$palette = $readJson(kirby()->root('content') . '/colors.json');
+
+// Default palette if the file doesn't exist yet — gives the editor
+// something to pick from on first run.
+if (empty($palette)) {
+  $palette = [
+    ['id' => 'text',   'name' => 'Text',   'value' => 'var(--text)'],
+    ['id' => 'accent', 'name' => 'Accent', 'value' => 'var(--accent)']
+  ];
+}
 
 // Scan the target page's template for `id="…"` attributes so the
 // trigger-field combobox can suggest selectors that actually exist
@@ -34,6 +44,7 @@ $payload = json_encode([
   'pageId'             => $targetSlug,
   'groups'             => $groups,
   'lines'              => $lines,
+  'palette'            => $palette,
   'triggerSuggestions' => $triggerSuggestions
 ], JSON_UNESCAPED_SLASHES);
 ?>
@@ -69,6 +80,14 @@ $payload = json_encode([
   <aside class="ed-sidebar">
     <section class="ed-panel">
       <header class="ed-panel-head">
+        <h3>Design colors</h3>
+        <button type="button" id="new-color-btn" class="ed-mini">+ Color</button>
+      </header>
+      <ul id="palette-list" class="ed-palette-list"></ul>
+    </section>
+
+    <section class="ed-panel">
+      <header class="ed-panel-head">
         <h3>Groups</h3>
         <button type="button" id="new-group-btn" class="ed-mini">+ New group</button>
       </header>
@@ -85,10 +104,21 @@ $payload = json_encode([
   </aside>
 
   <main class="ed-canvas-wrap">
+    <!-- viewBox spans -600..1800 horizontally and -400..1200 vertically.
+         The central 1200×800 area (0,0 → 1200,800) is the live page
+         viewport; everything outside is off-page space, useful for
+         lines that slide in via scroll-triggered translates.
+         Surface is rendered at 1px=1 viewBox unit (2400×1600px) and
+         lives inside an overflow:auto wrap so the user can scroll. -->
     <svg id="draw-surface"
-         viewBox="0 0 1200 800"
-         preserveAspectRatio="none"
+         viewBox="-600 -400 2400 1600"
+         width="2400" height="1600"
+         preserveAspectRatio="xMidYMid meet"
          xmlns="http://www.w3.org/2000/svg">
+      <g id="bg-layer">
+        <rect class="bg-outer" x="-600" y="-400" width="2400" height="1600" />
+        <rect class="bg-page"  x="0"    y="0"    width="1200" height="800" />
+      </g>
       <g id="grid"></g>
       <g id="committed-lines"></g>
       <g id="preview-layer"></g>

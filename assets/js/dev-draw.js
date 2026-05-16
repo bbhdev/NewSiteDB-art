@@ -18,21 +18,29 @@
   'use strict';
 
   // ── Coordinate space ──────────────────────────────────────────────
-  // Editor SVG uses the same viewBox as the runtime: 0 0 1200 800.
-  const VB_W = 1200;
-  const VB_H = 800;
+  // Editor SVG matches the runtime viewBox: -600 -400 2400 1600.
+  // The central 1200×800 (0,0 → 1200,800) is the visible page area;
+  // outside is off-page space for slide-in effects. Pointer events are
+  // converted to logical viewBox coords by clientToSvg(), which reads
+  // the viewBox attribute live so this works even after the surface
+  // is scrolled or zoomed.
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  const PAGE_W = 1200;
+  const PAGE_H = 800;
 
   // ── DOM refs ──────────────────────────────────────────────────────
   const svg        = document.getElementById('draw-surface');
+  const canvasWrap = document.querySelector('.ed-canvas-wrap');
   const gridG      = document.getElementById('grid');
   const linesG     = document.getElementById('committed-lines');
   const previewG   = document.getElementById('preview-layer');
   const toolButtons = document.querySelectorAll('.ed-tool');
   const toolSettingsEl = document.getElementById('tool-settings');
   const groupsListEl   = document.getElementById('groups-list');
+  const paletteListEl  = document.getElementById('palette-list');
   const selectionPanel = document.getElementById('selection-panel');
   const newGroupBtn    = document.getElementById('new-group-btn');
+  const newColorBtn    = document.getElementById('new-color-btn');
   const saveBtn        = document.getElementById('save-btn');
   const saveStatus     = document.getElementById('save-status');
 
@@ -42,14 +50,24 @@
     pageId: initial.pageId,
     groups: initial.groups.length ? initial.groups : [defaultGroup()],
     lines:  initial.lines,
+    palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
+    openGroupIds:   {},        // groupId → true when expanded in sidebar
     activeGroupId:  null,
     selectedLineId: null,
     activeToolId:   'freehand',
     smoothing: true,
-    chainPoints: null,  // active polyline points when lineChain is mid-chain
+    chainPoints: null,         // active polyline points when lineChain is mid-chain
     dirty: false
   };
   state.activeGroupId = state.groups[0].id;
+  state.openGroupIds[state.activeGroupId] = true;
+
+  function defaultPalette() {
+    return [
+      { id: 'text',   name: 'Text',   value: 'var(--text)'   },
+      { id: 'accent', name: 'Accent', value: 'var(--accent)' }
+    ];
+  }
 
   function defaultGroup() {
     return {
@@ -65,11 +83,17 @@
   }
 
   // ── Coord helpers ─────────────────────────────────────────────────
+  // Converts client (viewport) pixel coords to viewBox logical coords.
+  // Uses getBoundingClientRect so scroll offsets and any future zoom
+  // are handled automatically — the rect already reflects the surface's
+  // current visual position. The viewBox.baseVal gives the origin
+  // offset (-600, -400) plus the logical size (2400, 1600).
   function clientToSvg(clientX, clientY) {
     const rect = svg.getBoundingClientRect();
+    const vb   = svg.viewBox.baseVal;
     return {
-      x: ((clientX - rect.left) / rect.width)  * VB_W,
-      y: ((clientY - rect.top)  / rect.height) * VB_H
+      x: vb.x + ((clientX - rect.left) / rect.width)  * vb.width,
+      y: vb.y + ((clientY - rect.top)  / rect.height) * vb.height
     };
   }
   function eventPt(e) { return clientToSvg(e.clientX, e.clientY); }
@@ -346,18 +370,27 @@
 
   function renderGrid() {
     gridG.innerHTML = '';
-    for (let x = 100; x < VB_W; x += 100) {
+    // Grid covers only the page area (0–1200, 0–800). Off-page space
+    // stays solid #181818 so the user can see which side of the live
+    // viewport they're authoring in.
+    for (let x = 100; x < PAGE_W; x += 100) {
       const l = document.createElementNS(SVG_NS, 'line');
       l.setAttribute('x1', x); l.setAttribute('x2', x);
-      l.setAttribute('y1', 0); l.setAttribute('y2', VB_H);
+      l.setAttribute('y1', 0); l.setAttribute('y2', PAGE_H);
       gridG.appendChild(l);
     }
-    for (let y = 100; y < VB_H; y += 100) {
+    for (let y = 100; y < PAGE_H; y += 100) {
       const l = document.createElementNS(SVG_NS, 'line');
-      l.setAttribute('x1', 0); l.setAttribute('x2', VB_W);
+      l.setAttribute('x1', 0); l.setAttribute('x2', PAGE_W);
       l.setAttribute('y1', y); l.setAttribute('y2', y);
       gridG.appendChild(l);
     }
+  }
+
+  function resolveStroke(ref) {
+    if (!ref) return null;
+    const entry = state.palette.find(function (p) { return p.id === ref; });
+    return entry ? entry.value : ref; // legacy literal fallback
   }
 
   function renderLines() {
@@ -367,7 +400,8 @@
       const group = state.groups.find(function (g) { return g.id === line.groupId; });
       // Effective stroke / width: line value wins, then group default,
       // else fall back to the editor's CSS rule.
-      const stroke = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const stroke    = resolveStroke(strokeRef);
       const width  = (line.width != null) ? line.width
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
@@ -387,11 +421,29 @@
   function renderGroupsList() {
     groupsListEl.innerHTML = '';
     state.groups.forEach(function (g) {
+      const isOpen = !!state.openGroupIds[g.id];
       const li = document.createElement('li');
-      li.className = 'ed-group' + (g.id === state.activeGroupId ? ' is-active' : '');
+      li.className = 'ed-group'
+        + (g.id === state.activeGroupId ? ' is-active' : '')
+        + (isOpen ? ' is-open' : '');
 
       const row = document.createElement('div');
       row.className = 'ed-group-row';
+
+      // Disclosure triangle — toggles the inline line list without
+      // changing which group is active for drawing.
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'ed-group-toggle';
+      toggle.title = isOpen ? 'Collapse' : 'Expand';
+      toggle.textContent = isOpen ? '▾' : '▸';
+      toggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        state.openGroupIds[g.id] = !isOpen;
+        renderGroupsList();
+      });
+      row.appendChild(toggle);
+
       const name = document.createElement('span');
       name.className = 'ed-group-name';
       name.textContent = g.name;
@@ -404,12 +456,15 @@
       row.addEventListener('click', function () {
         state.activeGroupId = g.id;
         state.selectedLineId = null;
+        // Auto-expand the active group so user sees its lines.
+        state.openGroupIds[g.id] = true;
         renderGroupsList();
         renderSelectionPanel();
       });
       li.appendChild(row);
 
-      // Inline list of lines belonging to this group.
+      // Inline list of lines belonging to this group. Hidden by CSS
+      // when the group isn't open.
       const ll = document.createElement('ul');
       ll.className = 'ed-line-list';
       state.lines.filter(function (l) { return l.groupId === g.id; })
@@ -428,6 +483,7 @@
             e.stopPropagation();
             state.selectedLineId = line.id;
             state.activeGroupId  = g.id;
+            state.openGroupIds[g.id] = true;
             renderGroupsList();
             renderLines();
             renderSelectionPanel();
@@ -438,6 +494,78 @@
 
       groupsListEl.appendChild(li);
     });
+  }
+
+  // ── Palette panel ─────────────────────────────────────────────────
+  function renderPaletteList() {
+    paletteListEl.innerHTML = '';
+    state.palette.forEach(function (c) {
+      const li = document.createElement('li');
+      li.className = 'ed-palette-row';
+
+      const sw = document.createElement('span');
+      sw.className = 'ed-palette-swatch';
+      sw.style.background = c.value;
+
+      const nameInp = document.createElement('input');
+      nameInp.type = 'text';
+      nameInp.value = c.name;
+      nameInp.placeholder = 'name';
+      nameInp.addEventListener('input', function () {
+        c.name = nameInp.value;
+        state.dirty = true;
+      });
+
+      const valInp = document.createElement('input');
+      valInp.type = 'text';
+      valInp.value = c.value;
+      valInp.placeholder = 'css color';
+      valInp.addEventListener('input', function () {
+        c.value = valInp.value;
+        sw.style.background = c.value;
+        state.dirty = true;
+        renderLines();             // canvas reflects new color
+        renderSelectionPanel();    // active swatch glow follows it
+      });
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'ed-mini';
+      del.style.borderColor = '#855';
+      del.style.color = '#f88';
+      del.textContent = '×';
+      del.title = 'Delete color';
+      del.addEventListener('click', function () {
+        if (!confirm('Delete color "' + c.name + '"? Lines using it will revert to inherit.')) return;
+        // Clear references in groups + lines.
+        state.groups.forEach(function (g) {
+          if (g.defaults && g.defaults.stroke === c.id) delete g.defaults.stroke;
+        });
+        state.lines.forEach(function (l) {
+          if (l.stroke === c.id) l.stroke = null;
+        });
+        state.palette = state.palette.filter(function (p) { return p.id !== c.id; });
+        state.dirty = true;
+        renderAll();
+      });
+
+      li.appendChild(sw);
+      li.appendChild(nameInp);
+      li.appendChild(valInp);
+      li.appendChild(del);
+      paletteListEl.appendChild(li);
+    });
+  }
+
+  function addColor() {
+    state.palette.push({
+      id: uid('c'),
+      name: 'Color ' + (state.palette.length + 1),
+      value: '#888888'
+    });
+    state.dirty = true;
+    renderPaletteList();
+    renderSelectionPanel();
   }
 
   function renderSelectionPanel() {
@@ -518,7 +646,7 @@
     wrap.appendChild(divider('Appearance'));
     wrap.appendChild(strokeField('Color', line.stroke, function (v) {
       updateLine(line.id, { stroke: v });
-    }, group && group.defaults.stroke));
+    }));
     wrap.appendChild(overrideNumberField('Width', line.width, group && group.defaults.width, function (v) {
       updateLine(line.id, { width: v });
     }));
@@ -616,56 +744,51 @@
     wrap.appendChild(lbl); wrap.appendChild(grp);
     return wrap;
   }
-  function strokeField(label, value, onChange, fallback) {
-    // Color editor with two preset buttons for the theme variables, plus
-    // a free-text input that accepts any CSS color value
-    // (#hex, rgb(), var(--…), etc.). Empty input clears the field so the
-    // line inherits the group default (or the runtime CSS default).
+  function strokeField(label, value, onChange) {
+    // Color picker constrained to the palette — no free entry.
+    // Enforces the "design system" discipline: every line color must
+    // come from the project palette. Add/edit colors via the Design
+    // colors panel; this field only references them by id.
+    // Empty / "inherit" clears the field so the line falls back to its
+    // group default (or, for groups, the runtime CSS default).
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';
     const lbl = document.createElement('label'); lbl.textContent = label;
 
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.gap = '0.25rem';
-    row.style.alignItems = 'center';
+    const picker = document.createElement('div');
+    picker.className = 'ed-color-picker';
 
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.value = value || '';
-    inp.placeholder = fallback ? String(fallback) : 'inherit / default';
-    inp.style.flex = '1';
-    inp.style.minWidth = 0;
-    inp.addEventListener('input', function () {
-      onChange(inp.value.trim() === '' ? null : inp.value.trim());
-    });
+    function activate(target) {
+      picker.querySelectorAll('.swatch').forEach(function (s) { s.classList.remove('is-active'); });
+      target.classList.add('is-active');
+    }
 
-    const presets = [
-      { label: 'text',   value: 'var(--text)' },
-      { label: 'accent', value: 'var(--accent)' }
-    ];
-    row.appendChild(inp);
-    presets.forEach(function (preset) {
+    state.palette.forEach(function (c) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = preset.label;
-      btn.title = 'Use ' + preset.value;
-      btn.style.background = '#3a3a3a';
-      btn.style.color = '#ddd';
-      btn.style.border = '1px solid #555';
-      btn.style.borderRadius = '3px';
-      btn.style.padding = '0.15rem 0.4rem';
-      btn.style.fontSize = '0.8em';
-      btn.style.cursor = 'pointer';
-      btn.style.flexShrink = 0;
+      btn.className = 'swatch' + (value === c.id ? ' is-active' : '');
+      btn.style.background = c.value;
+      btn.title = c.name;
       btn.addEventListener('click', function () {
-        inp.value = preset.value;
-        onChange(preset.value);
+        activate(btn);
+        onChange(c.id);
       });
-      row.appendChild(btn);
+      picker.appendChild(btn);
     });
 
-    wrap.appendChild(lbl); wrap.appendChild(row);
+    // Inherit / clear button.
+    const clr = document.createElement('button');
+    clr.type = 'button';
+    clr.className = 'swatch is-clear' + (!value ? ' is-active' : '');
+    clr.textContent = 'inherit';
+    clr.title = 'Clear (use group default)';
+    clr.addEventListener('click', function () {
+      activate(clr);
+      onChange(null);
+    });
+    picker.appendChild(clr);
+
+    wrap.appendChild(lbl); wrap.appendChild(picker);
     return wrap;
   }
 
@@ -716,6 +839,7 @@
   }
 
   function renderAll() {
+    renderPaletteList();
     renderGroupsList();
     renderLines();
     renderSelectionPanel();
@@ -731,9 +855,10 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          page: state.pageId,
-          groups: state.groups,
-          lines:  state.lines
+          page:    state.pageId,
+          groups:  state.groups,
+          lines:   state.lines,
+          palette: state.palette
         })
       });
       const body = await res.json().catch(function () { return {}; });
@@ -756,7 +881,18 @@
     b.addEventListener('click', function () { setActiveTool(b.dataset.tool); });
   });
   newGroupBtn.addEventListener('click', addGroup);
+  newColorBtn.addEventListener('click', addColor);
   saveBtn.addEventListener('click', save);
+
+  // Center the page area in the scrollable canvas on first load so the
+  // user starts looking at the live viewport rather than empty off-page
+  // space. The surface is 2400×1600; the page area starts at SVG pixel
+  // (600, 400) — center the wrap on that point.
+  function centerOnPage() {
+    const wrap = canvasWrap;
+    wrap.scrollLeft = 600 + PAGE_W / 2 - wrap.clientWidth  / 2;
+    wrap.scrollTop  = 400 + PAGE_H / 2 - wrap.clientHeight / 2;
+  }
 
   // Canvas click on empty area deselects the current line.
   svg.addEventListener('click', function () {
@@ -825,4 +961,5 @@
   renderGrid();
   setActiveTool('freehand');
   renderAll();
+  centerOnPage();
 })();
