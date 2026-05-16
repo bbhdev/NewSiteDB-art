@@ -51,11 +51,14 @@
   const zoomInBtn    = document.getElementById('zoom-in');
   const zoomOutBtn   = document.getElementById('zoom-out');
   const zoomLevelEl  = document.getElementById('zoom-level');
+  const undoBtn      = document.getElementById('undo-btn');
+  const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
-                     saveBtn, saveStatus, zoomInBtn, zoomOutBtn, zoomLevelEl };
+                     saveBtn, saveStatus, zoomInBtn, zoomOutBtn, zoomLevelEl,
+                     undoBtn, redoBtn };
   const missing = Object.keys(required).filter(function (k) { return !required[k]; });
   if (missing.length) {
     console.error('[dev-draw] Missing required DOM elements:', missing,
@@ -102,6 +105,12 @@
     return prefix + '-' + Math.random().toString(36).slice(2, 8);
   }
 
+  function arraysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
   // ── Coord helpers ─────────────────────────────────────────────────
   // Converts client (viewport) pixel coords to viewBox logical coords.
   // Uses getBoundingClientRect so scroll offsets and any future zoom
@@ -117,6 +126,78 @@
     };
   }
   function eventPt(e) { return clientToSvg(e.clientX, e.clientY); }
+
+  // ── Undo / redo ───────────────────────────────────────────────────
+  // Snapshot-based undo. Each snapshot deep-copies the editable parts
+  // of state (groups, lines, palette, current selection). Discrete
+  // actions (commit / delete / add color / etc.) snapshot immediately;
+  // text and number field edits coalesce via a debounce so undoing
+  // doesn't step through every keystroke.
+  const HISTORY_MAX = 50;
+  state.history    = [];
+  state.historyIdx = -1;
+  let snapshotTimer = null;
+
+  function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function snapshot() {
+    if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
+    const snap = {
+      groups:  deepCopy(state.groups),
+      lines:   deepCopy(state.lines),
+      palette: deepCopy(state.palette),
+      selectedLineId: state.selectedLineId,
+      activeGroupId:  state.activeGroupId
+    };
+    // Truncate any redo branch beyond the current position.
+    state.history = state.history.slice(0, state.historyIdx + 1);
+    state.history.push(snap);
+    if (state.history.length > HISTORY_MAX) state.history.shift();
+    state.historyIdx = state.history.length - 1;
+    updateUndoButtons();
+  }
+
+  // Debounced snapshot for field-by-field text/number edits. Rapid
+  // typing collapses into one history step; finishing edits (pause >
+  // 600ms) commits a snapshot.
+  function scheduleSnapshot() {
+    if (snapshotTimer) clearTimeout(snapshotTimer);
+    snapshotTimer = setTimeout(function () {
+      snapshotTimer = null;
+      snapshot();
+    }, 600);
+  }
+
+  function restoreFromSnapshot(snap) {
+    state.groups  = deepCopy(snap.groups);
+    state.lines   = deepCopy(snap.lines);
+    state.palette = deepCopy(snap.palette);
+    state.selectedLineId = snap.selectedLineId;
+    state.activeGroupId  = snap.activeGroupId;
+    state.dirty = true;
+    renderAll();
+    updateUndoButtons();
+  }
+
+  function undo() {
+    // Flush any pending debounced snapshot first so the in-progress
+    // edit becomes its own history entry the user can step back from.
+    if (snapshotTimer) snapshot();
+    if (state.historyIdx <= 0) return;
+    state.historyIdx--;
+    restoreFromSnapshot(state.history[state.historyIdx]);
+  }
+
+  function redo() {
+    if (state.historyIdx >= state.history.length - 1) return;
+    state.historyIdx++;
+    restoreFromSnapshot(state.history[state.historyIdx]);
+  }
+
+  function updateUndoButtons() {
+    undoBtn.disabled = state.historyIdx <= 0;
+    redoBtn.disabled = state.historyIdx >= state.history.length - 1;
+  }
 
   // ── Zoom ──────────────────────────────────────────────────────────
   // Zoom is implemented by scaling the SVG element's CSS width/height
@@ -280,6 +361,27 @@
   }
   function fmt(n) { return Math.round(n * 100) / 100; }
 
+  /**
+   * Total arc-length of a polyline (sum of consecutive segment lengths).
+   * Used as the "is this even a line?" gate for freehand strokes — a
+   * pure click can still wobble a few px and produce a tiny path that
+   * would otherwise commit as a near-invisible blob.
+   */
+  function pathLength(points) {
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      const dx = points[i].x - points[i - 1].x;
+      const dy = points[i].y - points[i - 1].y;
+      total += Math.sqrt(dx * dx + dy * dy);
+    }
+    return total;
+  }
+
+  // Minimum total displacement before a stroke is allowed to commit.
+  // ~10 viewBox units = ~10px at 100% zoom, easily clears the noise of
+  // a misclick but doesn't get in the way of intentional short strokes.
+  const MIN_STROKE_LENGTH = 10;
+
   function simplify(points, minDist) {
     if (points.length < 2) return points;
     const out = [points[0]];
@@ -346,6 +448,9 @@
         const minDist = state.smoothing ? 22 : 2;
         const simp = simplify(pts, minDist);
         if (simp.length < 2) return;
+        // Reject strokes shorter than the noise threshold so a slightly
+        // jittery click doesn't end up as a tiny invisible squiggle.
+        if (pathLength(simp) < MIN_STROKE_LENGTH) return;
         commitLine({
           kind:     closed ? 'freehandClosed' : 'freehand',
           points:   simp,
@@ -385,10 +490,10 @@
         const start = this._start;
         this._start = null;
         if (this._preview) { this._preview.remove(); this._preview = null; }
-        // Ignore zero-length clicks — handled as click-to-select/deselect
-        // by the pointerup dispatcher on the SVG.
+        // Ignore tiny strokes (misclicks); the SVG pointerup dispatcher
+        // treats anything below this threshold as a select/deselect.
         const dx = pt.x - start.x, dy = pt.y - start.y;
-        if (dx * dx + dy * dy < 1) return;
+        if (dx * dx + dy * dy < MIN_STROKE_LENGTH * MIN_STROKE_LENGTH) return;
         commitLine({ kind: 'line', points: [start, pt], smoothed: false, closed: false });
       },
       cancel: function () {
@@ -520,6 +625,7 @@
     state.lines.push(line);
     state.selectedLineId = line.id;
     state.dirty = true;
+    snapshot();
     renderAll();
   }
 
@@ -527,6 +633,7 @@
     state.lines = state.lines.filter(function (l) { return l.id !== id; });
     if (state.selectedLineId === id) state.selectedLineId = null;
     state.dirty = true;
+    snapshot();
     renderAll();
   }
 
@@ -537,6 +644,7 @@
     state.activeGroupId = g.id;
     state.selectedLineId = null;
     state.dirty = true;
+    snapshot();
     renderAll();
   }
 
@@ -548,6 +656,7 @@
     state.lines.forEach(function (l) { if (l.groupId === id) l.groupId = fallback; });
     if (state.activeGroupId === id) state.activeGroupId = fallback;
     state.dirty = true;
+    snapshot();
     renderAll();
   }
 
@@ -560,6 +669,7 @@
     // the selection panel — that would destroy the input the user is
     // typing into and steal focus.
     renderGroupsList();
+    scheduleSnapshot();
   }
 
   function updateGroupDefaults(id, patch) {
@@ -570,6 +680,10 @@
     // Stroke/width default changes affect canvas rendering of every line
     // that doesn't override them.
     if ('stroke' in patch || 'width' in patch) renderLines();
+    // Booleans / discrete picks snapshot immediately; numeric / text
+    // fields coalesce so undo doesn't step through every keystroke.
+    if (typeof patch[Object.keys(patch)[0]] === 'boolean') snapshot();
+    else scheduleSnapshot();
   }
 
   function updateLine(id, patch) {
@@ -578,9 +692,9 @@
     Object.assign(l, patch);
     state.dirty = true;
     renderLines();
-    // Sidebar shows the line's display name (name || id) — keep it in
-    // sync when name is edited.
     if ('name' in patch) renderGroupsList();
+    if (typeof patch[Object.keys(patch)[0]] === 'boolean') snapshot();
+    else scheduleSnapshot();
   }
 
   function updateLineOverride(id, key, value) {
@@ -593,9 +707,9 @@
       l.overrides[key] = value;
     }
     state.dirty = true;
-    // Keep the override-marker (*) in the sidebar in sync, but don't
-    // rebuild the selection panel — the user is editing fields in it.
     renderGroupsList();
+    if (typeof value === 'boolean' || value === null) snapshot();
+    else scheduleSnapshot();
   }
 
   // ── Rendering ─────────────────────────────────────────────────────
@@ -716,8 +830,12 @@
       });
       c.addEventListener('pointerup', function (e) {
         if (!dragging) return;
+        e.stopPropagation();
         dragging = false;
         c.classList.remove('is-dragging');
+        // One snapshot per drag — undo restores the entire pre-drag
+        // path in a single step, not pixel-by-pixel.
+        snapshot();
         // A full re-render after the drag ends syncs every handle
         // position (some may need updates if the path is closed/smoothed).
         renderHandles();
@@ -841,6 +959,7 @@
       nameInp.addEventListener('input', function () {
         c.name = nameInp.value;
         state.dirty = true;
+        scheduleSnapshot();
       });
 
       const valInp = document.createElement('input');
@@ -853,6 +972,7 @@
         state.dirty = true;
         renderLines();             // canvas reflects new color
         renderSelectionPanel();    // active swatch glow follows it
+        scheduleSnapshot();
       });
 
       const del = document.createElement('button');
@@ -873,6 +993,7 @@
         });
         state.palette = state.palette.filter(function (p) { return p.id !== c.id; });
         state.dirty = true;
+        snapshot();
         renderAll();
       });
 
@@ -891,6 +1012,7 @@
       value: '#888888'
     });
     state.dirty = true;
+    snapshot();
     renderPaletteList();
     renderSelectionPanel();
   }
@@ -1227,6 +1349,8 @@
   zoomInBtn.addEventListener('click',  function () { zoomIn();  });
   zoomOutBtn.addEventListener('click', function () { zoomOut(); });
   zoomLevelEl.addEventListener('click', zoomReset);
+  undoBtn.addEventListener('click', undo);
+  redoBtn.addEventListener('click', redo);
 
   // Wheel zoom — requires Ctrl/Cmd modifier so plain wheel keeps
   // scrolling the canvas wrap normally. Anchored to the cursor so
@@ -1234,7 +1358,9 @@
   canvasWrap.addEventListener('wheel', function (e) {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : (1 / 1.1);
+    // Gentle 5% per tick — finer than the toolbar buttons (which use
+    // 1.25×) so you can dial in a precise size with the wheel.
+    const factor = e.deltaY < 0 ? 1.05 : (1 / 1.05);
     setZoom(state.zoom * factor, e.clientX, e.clientY);
   }, { passive: false });
 
@@ -1260,6 +1386,10 @@
   let pointerActive = false;
   let downClient = null;
   let downTarget = null;
+  // Cycle-through selection: when several lines' hit-targets overlap
+  // under one click, the first click picks the topmost, subsequent
+  // clicks at the same spot rotate through the rest.
+  let clickCycle = null; // { x, y, ids: [...], idx: <int> }
 
   svg.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
@@ -1296,9 +1426,29 @@
       // Skip selection clicks while a chain is being built — each click
       // is the user adding a point, not picking a different line.
       if (!dragged && !inChain) {
-        const hitEl = downTarget && downTarget.closest
-                      ? downTarget.closest('[data-line-id]') : null;
-        const newSelection = hitEl ? hitEl.dataset.lineId : null;
+        // Find every line whose hit-target sits under the click point
+        // (top-to-bottom z-order). Lets us cycle through overlapping
+        // lines on repeat clicks.
+        const ids = document.elementsFromPoint(downClient.x, downClient.y)
+          .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
+          .map(function (el) { return el.dataset.lineId; });
+
+        let newSelection = null;
+        if (ids.length) {
+          const sameZone = clickCycle &&
+            Math.abs(downClient.x - clickCycle.x) < 5 &&
+            Math.abs(downClient.y - clickCycle.y) < 5 &&
+            arraysEqual(clickCycle.ids, ids);
+          if (sameZone) {
+            clickCycle.idx = (clickCycle.idx + 1) % ids.length;
+          } else {
+            clickCycle = { x: downClient.x, y: downClient.y, ids: ids, idx: 0 };
+          }
+          newSelection = ids[clickCycle.idx];
+        } else {
+          clickCycle = null;
+        }
+
         if (newSelection !== state.selectedLineId) {
           state.selectedLineId = newSelection;
           renderLines();
@@ -1315,6 +1465,17 @@
   });
 
   window.addEventListener('keydown', function (e) {
+    // Undo / Redo — works even inside inputs, just like every text app.
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || e.key === 'Y')) {
+      e.preventDefault();
+      redo();
+      return;
+    }
     if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
     if (e.key === 'Escape') {
       const tool = TOOLS[state.activeToolId];
@@ -1343,9 +1504,11 @@
     if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
   });
 
-  // Initial render.
+  // Initial render. Snapshot the loaded state so the user always has
+  // at least one history entry (and can't undo into emptiness).
   renderGrid();
   setActiveTool('freehand');
+  snapshot();
   renderAll();
   centerOnPage();
 })();

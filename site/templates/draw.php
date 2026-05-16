@@ -90,6 +90,11 @@ $payload = json_encode([
     <button type="button" id="zoom-in"    title="Zoom in (+)">+</button>
   </div>
 
+  <div class="ed-undo" role="toolbar" aria-label="Undo / redo">
+    <button type="button" id="undo-btn" title="Undo (Cmd+Z)">↶</button>
+    <button type="button" id="redo-btn" title="Redo (Cmd+Shift+Z)">↷</button>
+  </div>
+
   <div class="ed-spacer"></div>
 
   <button type="button" id="save-btn" class="ed-save">Save</button>
