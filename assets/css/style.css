@@ -1,0 +1,52 @@
+:root {
+  --bg: #f5efe6;
+  --text: #1a1a1a;
+  --accent: #ff5500;
+  --line-stroke: currentColor;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 2rem;
+  --space-4: 4rem;
+  --space-5: 8rem;
+  --max-width: 72rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; }
+html, body { height: 100%; }
+img, svg, picture { display: block; max-width: 100%; }
+
+html {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.layout {
+  max-width: var(--max-width);
+  margin-inline: auto;
+  padding: var(--space-3) var(--space-2);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+h1 { font-size: clamp(2rem, 5vw, 3.5rem); margin-bottom: var(--space-3); }
+h2 { font-size: clamp(1.5rem, 3.5vw, 2.25rem); margin-bottom: var(--space-2); }
+p  { margin-bottom: var(--space-2); max-width: 38em; }
+
+a { color: inherit; }

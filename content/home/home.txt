@@ -1,0 +1,9 @@
+Title: NewSiteDB Art
+
+----
+
+Intro:
+
+A workbench for a small site kit: a reusable button, a draggable scatter-circle button, and a scroll-driven moving-line system.
+
+This is the foundation pass — the primitives land in the next round.
