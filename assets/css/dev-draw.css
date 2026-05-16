@@ -280,13 +280,21 @@ body.editor {
   pointer-events: stroke;
 }
 #draw-surface path.is-selected {
-  /* Distinct from the design palette so selection is always recognisable
-     against any user-chosen color. !important is needed because each
-     path also gets an inline style.stroke from the line's palette
-     resolution, which would otherwise win. */
-  stroke: #00d9ff !important;
-  stroke-width: 3 !important;
+  /* No color override — the line keeps its authored color so the user
+     can verify what they picked. Selection is shown by the handle dots
+     drawn in #handles-layer over the path. */
 }
+
+#draw-surface .ed-handle {
+  fill: #fff;
+  stroke: #00d9ff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+  /* `r` is animatable via attr but not via CSS — set on the element. */
+}
+#draw-surface .ed-handle:hover { fill: #00d9ff; }
+#draw-surface .ed-handle.is-dragging { fill: #00d9ff; cursor: grabbing; }
 #draw-surface path.is-preview {
   stroke: #888;
   stroke-dasharray: 4 3;

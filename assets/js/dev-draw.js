@@ -39,6 +39,7 @@
   const groupsListEl   = document.getElementById('groups-list');
   const paletteListEl  = document.getElementById('palette-list');
   const selectionPanel = document.getElementById('selection-panel');
+  const handlesG       = document.getElementById('handles-layer');
   const newGroupBtn    = document.getElementById('new-group-btn');
   const newColorBtn    = document.getElementById('new-color-btn');
   const saveBtn        = document.getElementById('save-btn');
@@ -47,9 +48,10 @@
   // Defensive: if any required element is missing, the user is probably
   // serving stale cached HTML against fresh JS (or vice-versa). Log
   // loudly so the cause is obvious in DevTools.
-  const required = { svg, canvasWrap, gridG, linesG, previewG, toolSettingsEl,
-                     groupsListEl, paletteListEl, selectionPanel,
-                     newGroupBtn, newColorBtn, saveBtn, saveStatus };
+  const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
+                     toolSettingsEl, groupsListEl, paletteListEl,
+                     selectionPanel, newGroupBtn, newColorBtn,
+                     saveBtn, saveStatus };
   const missing = Object.keys(required).filter(function (k) { return !required[k]; });
   if (missing.length) {
     console.error('[dev-draw] Missing required DOM elements:', missing,
@@ -111,6 +113,100 @@
   }
   function eventPt(e) { return clientToSvg(e.clientX, e.clientY); }
 
+  // ── Line data model ───────────────────────────────────────────────
+  // Every line carries:
+  //   kind     "freehand" | "freehandClosed" | "line" | "chain" | "manual"
+  //   points   [{x, y}, …]  — the vertices the user authored
+  //   smoothed boolean (relevant for freehand kinds)
+  //   closed   boolean (true for freehandClosed; closes path with Z + fill)
+  //   d        SVG `d` string — regenerated from points on every edit
+  // Legacy lines (sample data, SVG imports) have only `d`; we parse it on
+  // load to populate `points` and tag them as `kind: "manual"` so handles
+  // still appear and can drag the path's endpoints around.
+
+  /**
+   * Extract the endpoint of every M/L/H/V/Q/T/S/C command in an SVG
+   * path `d` string. Sufficient for the kinds of paths this editor
+   * generates plus the hand-authored sample data. Doesn't validate
+   * syntax — assumes the string came from a working SVG.
+   */
+  function extractDisplayPoints(d) {
+    if (!d) return [];
+    const out = [];
+    let cur = { x: 0, y: 0 };
+    // Split into runs of "<command-letter><number-list>".
+    const re = /([MLHVCSQTAZmlhvcsqtaz])([^MLHVCSQTAZmlhvcsqtaz]*)/g;
+    let m;
+    while ((m = re.exec(d)) !== null) {
+      const cmd = m[1];
+      const C   = cmd.toUpperCase();
+      const rel = cmd !== C;
+      const nums = (m[2].match(/-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/g) || []).map(parseFloat);
+      const step = function (ex, ey) {
+        cur = rel ? { x: cur.x + ex, y: cur.y + ey } : { x: ex, y: ey };
+        out.push({ x: cur.x, y: cur.y });
+      };
+      switch (C) {
+        case 'M': case 'L': case 'T':
+          for (let i = 0; i + 1 < nums.length; i += 2) step(nums[i], nums[i + 1]);
+          break;
+        case 'H':
+          for (let i = 0; i < nums.length; i++) {
+            cur = rel ? { x: cur.x + nums[i], y: cur.y } : { x: nums[i], y: cur.y };
+            out.push({ x: cur.x, y: cur.y });
+          }
+          break;
+        case 'V':
+          for (let i = 0; i < nums.length; i++) {
+            cur = rel ? { x: cur.x, y: cur.y + nums[i] } : { x: cur.x, y: nums[i] };
+            out.push({ x: cur.x, y: cur.y });
+          }
+          break;
+        case 'Q': case 'S':
+          for (let i = 0; i + 3 < nums.length; i += 4) step(nums[i + 2], nums[i + 3]);
+          break;
+        case 'C':
+          for (let i = 0; i + 5 < nums.length; i += 6) step(nums[i + 4], nums[i + 5]);
+          break;
+        // Z: no coords, cursor handling not needed for endpoint extraction.
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Auto-upgrade any line that lacks `points` (sample seed data, SVG
+   * imports) into the new format. After this pass, every line has
+   * draggable handles available.
+   */
+  function migrateLines() {
+    state.lines.forEach(function (line) {
+      if (!Array.isArray(line.points)) {
+        line.points   = extractDisplayPoints(line.d);
+        line.kind     = line.kind     || 'manual';
+        line.smoothed = (line.smoothed !== undefined) ? line.smoothed : false;
+        line.closed   = !!line.closed;
+      }
+    });
+  }
+  migrateLines();
+
+  /**
+   * Regenerate `d` from `points` + `kind` + `smoothed` + `closed`.
+   * Called after every handle drag and after every line creation.
+   */
+  function regenerateLineD(line) {
+    if (!Array.isArray(line.points) || !line.points.length) {
+      // Keep whatever was there (legacy lines we can't regenerate).
+      return;
+    }
+    const smoothable = (line.kind === 'freehand' || line.kind === 'freehandClosed');
+    const smooth = smoothable && !!line.smoothed;
+    let d = pathFromPoints(line.points, smooth);
+    if (line.closed) d += ' Z';
+    line.d = d;
+  }
+
   function pathFromPoints(points, smooth) {
     if (!points.length) return '';
     if (points.length === 1) return 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y);
@@ -152,9 +248,14 @@
   }
 
   // ── Tools registry ────────────────────────────────────────────────
-  const TOOLS = {
-    freehand: {
-      label: 'Freehand',
+  /**
+   * Freehand strokes — shared logic between open and closed variants.
+   * The `closed` flag at commit time decides whether the path gets a
+   * Z appended (auto-close back to start) and a fill applied.
+   */
+  function makeFreehandTool(closed, labelText) {
+    return {
+      label: labelText,
       settings: function () {
         const lbl = document.createElement('label');
         const cb  = document.createElement('input');
@@ -184,17 +285,27 @@
         // out the curve — otherwise it ends up hugging every micro-jitter.
         const minDist = state.smoothing ? 22 : 2;
         const pts = simplify(this._points, minDist);
-        const d = pathFromPoints(pts, state.smoothing);
         this._preview.remove();
         this._points = null;
         this._preview = null;
-        if (d) commitLine(d);
+        if (pts.length < 2) return;
+        commitLine({
+          kind:     closed ? 'freehandClosed' : 'freehand',
+          points:   pts,
+          smoothed: state.smoothing,
+          closed:   closed
+        });
       },
       cancel: function () {
         if (this._preview) this._preview.remove();
         this._points = null; this._preview = null;
       }
-    },
+    };
+  }
+
+  const TOOLS = {
+    freehand:       makeFreehandTool(false, 'Freehand'),
+    freehandClosed: makeFreehandTool(true,  'Closed loop'),
 
     line: {
       label: 'Line',
@@ -217,7 +328,7 @@
         // Ignore zero-length clicks.
         const dx = pt.x - start.x, dy = pt.y - start.y;
         if (dx * dx + dy * dy < 1) return;
-        commitLine(pathFromPoints([start, pt], false));
+        commitLine({ kind: 'line', points: [start, pt], smoothed: false, closed: false });
       },
       cancel: function () {
         if (this._preview) this._preview.remove();
@@ -266,7 +377,12 @@
       finish: function () {
         // Commit the whole chain as a single multi-segment line.
         if (state.chainPoints && state.chainPoints.length >= 2) {
-          commitLine(pathFromPoints(state.chainPoints, false));
+          commitLine({
+            kind:     'chain',
+            points:   state.chainPoints,
+            smoothed: false,
+            closed:   false
+          });
         }
         if (this._committedPreview) { this._committedPreview.remove(); this._committedPreview = null; }
         if (this._cursorPreview)    { this._cursorPreview.remove();    this._cursorPreview    = null; }
@@ -319,16 +435,27 @@
   }
 
   // ── Line + group mutations ────────────────────────────────────────
-  function commitLine(d) {
-    if (!d) return;
+  /**
+   * Create a new line and select it. Tools pass meta describing the
+   * line's geometry origin so handles + future re-render know how to
+   * regenerate `d` from `points`.
+   */
+  function commitLine(meta) {
+    if (!meta || !Array.isArray(meta.points) || meta.points.length < 1) return;
     const line = {
       id: uid('l'),
-      d: d,
+      kind:     meta.kind || 'manual',
+      points:   meta.points.map(function (p) { return { x: p.x, y: p.y }; }),
+      smoothed: !!meta.smoothed,
+      closed:   !!meta.closed,
+      d: '',
       stroke: null,
       width: null,
       groupId: state.activeGroupId,
       overrides: {}
     };
+    regenerateLineD(line);
+    if (!line.d) return;
     state.lines.push(line);
     state.selectedLineId = line.id;
     state.dirty = true;
@@ -453,6 +580,9 @@
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
+      // Closed loops fill with the stroke color so the inside reads as
+      // a solid blob. Separate fill-color control could be added later.
+      if (line.closed && stroke) p.style.fill = stroke;
       if (line.id === state.selectedLineId) p.classList.add('is-selected');
       p.dataset.lineId = line.id;
       p.addEventListener('click', function (e) {
@@ -463,6 +593,83 @@
       });
       linesG.appendChild(p);
     });
+    renderHandles();
+  }
+
+  /**
+   * Draw the selection handles for the currently selected line.
+   * Handles serve as both:
+   *   - the visual selection indicator (so the line's authored color
+   *     stays visible, unlike a stroke override)
+   *   - drag targets that edit the underlying `points` array
+   *
+   * Freehand strokes can hold many points; we down-sample so handles
+   * stay roughly 50 viewBox units apart (the user gets visible dots
+   * without clutter) while always preserving the first and last point.
+   */
+  function renderHandles() {
+    handlesG.innerHTML = '';
+    if (!state.selectedLineId) return;
+    const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
+    if (!line || !Array.isArray(line.points) || !line.points.length) return;
+
+    const indices = sparseHandleIndices(line.points, 50);
+    indices.forEach(function (idx) {
+      const pt = line.points[idx];
+      const c  = document.createElementNS(SVG_NS, 'circle');
+      c.setAttribute('cx', pt.x);
+      c.setAttribute('cy', pt.y);
+      c.setAttribute('r',  6);
+      c.setAttribute('class', 'ed-handle');
+      c.dataset.idx    = idx;
+      c.dataset.lineId = line.id;
+
+      let dragging = false;
+      c.addEventListener('pointerdown', function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        dragging = true;
+        c.classList.add('is-dragging');
+        c.setPointerCapture(e.pointerId);
+      });
+      c.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        const pos = clientToSvg(e.clientX, e.clientY);
+        line.points[idx] = { x: pos.x, y: pos.y };
+        regenerateLineD(line);
+        state.dirty = true;
+        // Update the moving handle + the line path inline (no full
+        // re-render — keeps drag smooth and preserves other handles).
+        c.setAttribute('cx', pos.x);
+        c.setAttribute('cy', pos.y);
+        const pathEl = linesG.querySelector('[data-line-id="' + line.id + '"]');
+        if (pathEl) pathEl.setAttribute('d', line.d);
+      });
+      c.addEventListener('pointerup', function (e) {
+        if (!dragging) return;
+        dragging = false;
+        c.classList.remove('is-dragging');
+        // A full re-render after the drag ends syncs every handle
+        // position (some may need updates if the path is closed/smoothed).
+        renderHandles();
+      });
+
+      handlesG.appendChild(c);
+    });
+  }
+
+  function sparseHandleIndices(points, minDist) {
+    if (points.length <= 1) return points.map(function (_, i) { return i; });
+    const md2 = minDist * minDist;
+    const out = [0];
+    let last = points[0];
+    for (let i = 1; i < points.length - 1; i++) {
+      const dx = points[i].x - last.x;
+      const dy = points[i].y - last.y;
+      if (dx * dx + dy * dy >= md2) { out.push(i); last = points[i]; }
+    }
+    if (out[out.length - 1] !== points.length - 1) out.push(points.length - 1);
+    return out;
   }
 
   function renderGroupsList() {
@@ -939,11 +1146,18 @@
     wrap.scrollTop  = 400 + PAGE_H / 2 - wrap.clientHeight / 2;
   }
 
-  // Canvas click on empty area deselects the current line.
-  svg.addEventListener('click', function () {
-    state.selectedLineId = null;
-    renderLines();
-    renderSelectionPanel();
+  // Canvas click on empty area deselects the current line. Clicks on
+  // a path or a handle stay selected — the path handler runs first and
+  // calls stopPropagation; this fallback only fires for the bg layers.
+  svg.addEventListener('click', function (e) {
+    if (e.target === svg
+        || (e.target.classList && (
+            e.target.classList.contains('bg-outer') ||
+            e.target.classList.contains('bg-page')))) {
+      state.selectedLineId = null;
+      renderLines();
+      renderSelectionPanel();
+    }
   });
 
   // Pointer events → active tool. Pointer capture keeps the stroke
@@ -993,6 +1207,7 @@
     }
     // Tool shortcuts
     if (e.key === 'f' || e.key === 'F') setActiveTool('freehand');
+    if (e.key === 'o' || e.key === 'O') setActiveTool('freehandClosed');
     if (e.key === 'l' || e.key === 'L') setActiveTool('line');
     if (e.key === 'c' || e.key === 'C') setActiveTool('lineChain');
   });

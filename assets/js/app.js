@@ -169,6 +169,10 @@
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
+      // Closed loops (freehandClosed kind, or any line with closed=true)
+      // fill with the stroke color so they read as solid shapes on the
+      // live site. Open paths keep fill: none from CSS.
+      if (line.closed && stroke) p.style.fill = stroke;
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
       layer.appendChild(p);
