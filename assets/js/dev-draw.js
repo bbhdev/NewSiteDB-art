@@ -40,6 +40,8 @@
   const paletteListEl  = document.getElementById('palette-list');
   const selectionPanel = document.getElementById('selection-panel');
   const handlesG       = document.getElementById('handles-layer');
+  const labelsG        = document.getElementById('labels-layer');
+  const labelsBtn      = document.getElementById('labels-btn');
   const newGroupBtn    = document.getElementById('new-group-btn');
   const newColorBtn    = document.getElementById('new-color-btn');
   const saveBtn        = document.getElementById('save-btn');
@@ -55,6 +57,7 @@
   const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
+                     labelsG, labelsBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
                      saveBtn, saveStatus, zoomInBtn, zoomOutBtn, zoomLevelEl,
@@ -80,6 +83,10 @@
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
     zoom: 1,                   // canvas zoom factor (1 = 100%, 2 = 200%, …)
+    // Editor-local view toggle, persisted to localStorage so it survives
+    // reloads. When on, every named line gets a colored label rendered
+    // next to it so the user can spot which is which in a busy canvas.
+    showLabels: localStorage.getItem('ed-show-labels') === '1',
     dirty: false
   };
   state.activeGroupId = state.groups[0].id;
@@ -773,7 +780,78 @@
       p.dataset.lineId = line.id;
       linesG.appendChild(p);
     });
+    renderLabels();
     renderHandles();
+  }
+
+  /**
+   * Optional per-line name overlay. For every line that has a `name`
+   * set, draw a small label near its midpoint: black text inside a
+   * rounded rect filled with the line's own color and bordered black.
+   * Toggled by the Labels button in the toolbar (state.showLabels);
+   * off by default, persists across reloads via localStorage.
+   *
+   * The rect is sized to the text's bbox after insertion — SVG text
+   * has no intrinsic width, so we render text first, measure, then
+   * back-fill the rect.
+   */
+  function renderLabels() {
+    labelsG.innerHTML = '';
+    if (!state.showLabels) return;
+
+    state.lines.forEach(function (line) {
+      if (!line.name) return;
+      if (!Array.isArray(line.points) || !line.points.length) return;
+      const pos = labelPositionFor(line);
+
+      const group = state.groups.find(function (g) { return g.id === line.groupId; });
+      const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
+      const fill = resolveStroke(strokeRef) || '#aaa';
+
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'ed-label');
+      g.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('class', 'ed-label-text');
+      text.setAttribute('x', 6);
+      text.setAttribute('y', 4);
+      text.textContent = line.name;
+      g.appendChild(text);
+      labelsG.appendChild(g);
+
+      // Now that text is in the DOM, measure it and create the rect
+      // sized to surround it (inserted BEFORE text so it renders behind).
+      const bb = text.getBBox();
+      const pad = 4;
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('class', 'ed-label-bg');
+      rect.setAttribute('x',      (bb.x - pad).toFixed(1));
+      rect.setAttribute('y',      (bb.y - pad).toFixed(1));
+      rect.setAttribute('width',  (bb.width  + pad * 2).toFixed(1));
+      rect.setAttribute('height', (bb.height + pad * 2).toFixed(1));
+      rect.setAttribute('rx', 3);
+      rect.style.fill = fill;
+      g.insertBefore(rect, text);
+    });
+  }
+
+  // Label placement: middle vertex of the points array. Picks a point
+  // actually on the line so the label is anchored visually — bbox
+  // center could fall in empty space for a curved/open path.
+  function labelPositionFor(line) {
+    const pts = line.points;
+    const mid = pts[Math.floor(pts.length / 2)];
+    // Slight offset so the label sits above-right of the anchor point
+    // instead of directly on top of the line.
+    return { x: mid.x + 6, y: mid.y + 6 };
+  }
+
+  function toggleLabels() {
+    state.showLabels = !state.showLabels;
+    localStorage.setItem('ed-show-labels', state.showLabels ? '1' : '0');
+    labelsBtn.classList.toggle('is-active', state.showLabels);
+    renderLabels();
   }
 
   /**
@@ -821,12 +899,16 @@
         line.points[idx] = { x: pos.x, y: pos.y };
         regenerateLineD(line);
         state.dirty = true;
-        // Update the moving handle + the line path inline (no full
+        // Update the moving handle + the line's paths inline (no full
         // re-render — keeps drag smooth and preserves other handles).
+        // Each line owns TWO path elements (a wide invisible hit target
+        // + the visible stroke), both tagged with data-line-id, so we
+        // update all matches — otherwise the visible path stays stale
+        // while only the hit area moves.
         c.setAttribute('cx', pos.x);
         c.setAttribute('cy', pos.y);
-        const pathEl = linesG.querySelector('[data-line-id="' + line.id + '"]');
-        if (pathEl) pathEl.setAttribute('d', line.d);
+        linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
+          .forEach(function (el) { el.setAttribute('d', line.d); });
       });
       c.addEventListener('pointerup', function (e) {
         if (!dragging) return;
@@ -891,12 +973,12 @@
         const wasOpen = !!state.openGroupIds[g.id];
         state.activeGroupId = g.id;
         state.openGroupIds[g.id] = !wasOpen;
-        // Closing a group deselects any line that belongs to it —
-        // a hidden line shouldn't stay "selected".
-        if (wasOpen && state.selectedLineId) {
-          const sel = state.lines.find(function (l) { return l.id === state.selectedLineId; });
-          if (sel && sel.groupId === g.id) state.selectedLineId = null;
-        }
+        // Clicking a group row always means "this group is the focus
+        // now" — drop any leftover line selection so the next edit
+        // goes to the group's settings, not to a stale line. (Without
+        // this, the selection panel would silently keep showing line
+        // controls when closing the group that contained the line.)
+        state.selectedLineId = null;
         renderGroupsList();
         renderSelectionPanel();
       });
@@ -1351,6 +1433,8 @@
   zoomLevelEl.addEventListener('click', zoomReset);
   undoBtn.addEventListener('click', undo);
   redoBtn.addEventListener('click', redo);
+  labelsBtn.addEventListener('click', toggleLabels);
+  labelsBtn.classList.toggle('is-active', state.showLabels);
 
   // Wheel zoom — requires Ctrl/Cmd modifier so plain wheel keeps
   // scrolling the canvas wrap normally. Anchored to the cursor so
@@ -1358,9 +1442,9 @@
   canvasWrap.addEventListener('wheel', function (e) {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    // Gentle 5% per tick — finer than the toolbar buttons (which use
-    // 1.25×) so you can dial in a precise size with the wheel.
-    const factor = e.deltaY < 0 ? 1.05 : (1 / 1.05);
+    // Very fine 2.5% per tick — toolbar buttons use 1.25× for bigger
+    // jumps; the wheel is for dialing in precise zoom levels.
+    const factor = e.deltaY < 0 ? 1.025 : (1 / 1.025);
     setZoom(state.zoom * factor, e.clientX, e.clientY);
   }, { passive: false });
 

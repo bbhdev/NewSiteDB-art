@@ -95,6 +95,10 @@ $payload = json_encode([
     <button type="button" id="redo-btn" title="Redo (Cmd+Shift+Z)">↷</button>
   </div>
 
+  <div class="ed-view" role="toolbar" aria-label="View options">
+    <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
+  </div>
+
   <div class="ed-spacer"></div>
 
   <button type="button" id="save-btn" class="ed-save">Save</button>
@@ -146,6 +150,7 @@ $payload = json_encode([
       </g>
       <g id="grid"></g>
       <g id="committed-lines"></g>
+      <g id="labels-layer"></g>
       <g id="handles-layer"></g>
       <g id="preview-layer"></g>
     </svg>

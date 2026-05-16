@@ -133,6 +133,29 @@ body.editor {
 .ed-undo button:hover:not(:disabled) { background: #4a4a4a; }
 .ed-undo button:disabled { opacity: 0.3; cursor: not-allowed; }
 
+.ed-view {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid #444;
+}
+.ed-view button {
+  background: #3a3a3a;
+  color: #ddd;
+  border: 1px solid #555;
+  padding: 0.3rem 0.65rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+.ed-view button:hover { background: #4a4a4a; }
+.ed-view button.is-active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 .ed-spacer { flex: 1; }
 
 .ed-save {
@@ -362,6 +385,25 @@ body.editor {
 }
 #draw-surface .ed-handle:hover { fill: #00d9ff; }
 #draw-surface .ed-handle.is-dragging { fill: #00d9ff; cursor: grabbing; }
+
+/* Optional name labels — black text on a rect filled with the line's
+   own color and bordered black, so the user can see which authored
+   line is which without scrubbing the sidebar. Toggled by the Labels
+   button in the toolbar. */
+#draw-surface .ed-label-text {
+  fill: #000;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  dominant-baseline: hanging;
+  pointer-events: none;
+}
+#draw-surface .ed-label-bg {
+  stroke: #000;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
 #draw-surface path.is-preview {
   stroke: #888;
   stroke-dasharray: 4 3;
