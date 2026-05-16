@@ -144,8 +144,10 @@
     lines.forEach(function (line) {
       const p = document.createElementNS(SVG_NS, 'path');
       p.setAttribute('d', line.d);
-      if (line.stroke) p.setAttribute('stroke', line.stroke);
-      if (line.width)  p.setAttribute('stroke-width', line.width);
+      // Set stroke via style (not attribute) so CSS variables resolve;
+      // SVG presentation attributes don't evaluate var(--…) in most browsers.
+      if (line.stroke) p.style.stroke = line.stroke;
+      if (line.width)  p.style.strokeWidth = line.width;
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
       layer.appendChild(p);
@@ -162,7 +164,7 @@
           const p = document.createElementNS(SVG_NS, 'path');
           p.setAttribute('d', sourcePath.getAttribute('d') || '');
           const s = sourcePath.getAttribute('stroke');
-          if (s) p.setAttribute('stroke', s);
+          if (s) p.style.stroke = s;
           p.dataset.lineId  = imp.id + '-' + i;
           p.dataset.groupId = '__imported';
           layer.appendChild(p);
