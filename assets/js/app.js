@@ -46,15 +46,23 @@
             });
           }
 
+          // Bias start/end so motion is always clearly visible (signals to
+          // the user that the circles are interactive / draggable). Start
+          // is always in the upper-left quadrant of the scatter range,
+          // end is always in the lower-right — guarantees a minimum of
+          // ~60% sy vertical travel and a leftward-to-rightward arc.
           scrubTween = gsap.fromTo(btn,
-            { y: 'random(' + (-sy) + ', 0)', x: 'random(' + (-sx) + ', ' + sx + ')' },
             {
-              x: 'random(' + (-sx) + ', ' + sx + ')',
-              y: 'random(0, ' + sy + ')',
+              y: 'random(' + (-sy) + ', ' + (-sy * 0.3).toFixed(0) + ')',
+              x: 'random(' + (-sx) + ', 0)'
+            },
+            {
+              y: 'random(' + (sy * 0.3).toFixed(0) + ', ' + sy + ')',
+              x: 'random(0, ' + sx + ')',
               scrollTrigger: {
                 trigger: container,
-                start: 'top bottom+=25%',
-                end: 'bottom top-=25%',
+                start: 'top bottom',
+                end: 'bottom top',
                 scrub: 1
               }
             }
