@@ -111,6 +111,7 @@ $payload = json_encode([
 
   <div class="ed-view" role="toolbar" aria-label="View options">
     <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
+    <button type="button" id="grid-btn"   title="Show / hide diagnostic coordinate grid (cyan, 50px step, coords every 100px). Renders on the live site too — useful for comparing where authored coords land in each surface.">Grid</button>
   </div>
 
   <div class="ed-spacer"></div>

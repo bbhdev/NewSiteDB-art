@@ -42,6 +42,7 @@
   const handlesG       = document.getElementById('handles-layer');
   const labelsG        = document.getElementById('labels-layer');
   const labelsBtn      = document.getElementById('labels-btn');
+  const gridBtn        = document.getElementById('grid-btn');
   const selectAllBtn   = document.getElementById('select-all-btn');
   const newGroupBtn    = document.getElementById('new-group-btn');
   const newColorBtn    = document.getElementById('new-color-btn');
@@ -61,7 +62,7 @@
   const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
-                     labelsG, labelsBtn, selectAllBtn,
+                     labelsG, labelsBtn, gridBtn, selectAllBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
                      saveBtn, saveStatus, clearLinesBtn, helpBtn,
@@ -97,6 +98,12 @@
     // reloads. When on, every named line gets a colored label rendered
     // next to it so the user can spot which is which in a busy canvas.
     showLabels: localStorage.getItem('ed-show-labels') === '1',
+    // Diagnostic coord grid — cyan, 50px step, coords every 100px.
+    // Persisted in localStorage so refresh keeps the same view, and
+    // the runtime in app.js reads the same flag so the grid renders
+    // on the live site too. Handy for comparing where authored coords
+    // actually land in each surface.
+    showDiagGrid: localStorage.getItem('ed-show-diag-grid') === '1',
     dirty: false
   };
   state.activeGroupId = state.groups[0].id;
@@ -1502,6 +1509,75 @@
     }
   }
 
+  // Diagnostic grid — cyan ruling spanning the full viewBox, lines
+  // every 50px, coords every 100px (checkerboarded so labels don't
+  // collide at dense intersections). Toggled by the Grid button;
+  // persisted in localStorage so refresh keeps the same view, and
+  // the runtime in app.js reads the same flag so the live site shows
+  // an identical grid. Useful for visually verifying that authored
+  // coordinates land at the same viewport positions in editor and
+  // live, and for spotting scroll-driven shifts at a glance.
+  let diagGridG = null;
+  function ensureDiagGridLayer() {
+    if (diagGridG) return;
+    diagGridG = document.createElementNS(SVG_NS, 'g');
+    diagGridG.setAttribute('id', 'diag-grid');
+    diagGridG.style.pointerEvents = 'none';
+    // Insert right after the page/bg layer (gridG's location) so the
+    // grid sits below committed lines but above the page-area fill.
+    gridG.parentNode.insertBefore(diagGridG, gridG.nextSibling);
+  }
+  function renderDiagGrid() {
+    ensureDiagGridLayer();
+    diagGridG.innerHTML = '';
+    if (!state.showDiagGrid) return;
+    const X0 = -600, X1 = 1800, Y0 = -400, Y1 = 1200;
+    const STEP = 50, LABEL_STEP = 100;
+    for (let x = X0; x <= X1; x += STEP) {
+      const l = document.createElementNS(SVG_NS, 'line');
+      l.setAttribute('x1', x); l.setAttribute('y1', Y0);
+      l.setAttribute('x2', x); l.setAttribute('y2', Y1);
+      l.setAttribute('stroke', '#00FFFF');
+      l.setAttribute('stroke-opacity', x % LABEL_STEP === 0 ? '0.5' : '0.2');
+      l.setAttribute('stroke-width', '1');
+      l.style.vectorEffect = 'non-scaling-stroke';
+      diagGridG.appendChild(l);
+    }
+    for (let y = Y0; y <= Y1; y += STEP) {
+      const l = document.createElementNS(SVG_NS, 'line');
+      l.setAttribute('x1', X0); l.setAttribute('y1', y);
+      l.setAttribute('x2', X1); l.setAttribute('y2', y);
+      l.setAttribute('stroke', '#00FFFF');
+      l.setAttribute('stroke-opacity', y % LABEL_STEP === 0 ? '0.5' : '0.2');
+      l.setAttribute('stroke-width', '1');
+      l.style.vectorEffect = 'non-scaling-stroke';
+      diagGridG.appendChild(l);
+    }
+    // Coord labels — at the 100px intersections, checkerboarded so
+    // every other intersection gets labelled (cuts the count roughly
+    // in half and keeps the grid readable). Format: "x,y".
+    for (let x = X0; x <= X1; x += LABEL_STEP) {
+      for (let y = Y0; y <= Y1; y += LABEL_STEP) {
+        if (((x / LABEL_STEP) + (y / LABEL_STEP)) & 1) continue;
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', x + 3);
+        t.setAttribute('y', y + 12);
+        t.setAttribute('fill', '#00FFFF');
+        t.setAttribute('font-size', '10');
+        t.setAttribute('font-family', 'ui-monospace, monospace');
+        t.style.opacity = '0.75';
+        t.textContent = x + ',' + y;
+        diagGridG.appendChild(t);
+      }
+    }
+  }
+  function toggleDiagGrid() {
+    state.showDiagGrid = !state.showDiagGrid;
+    localStorage.setItem('ed-show-diag-grid', state.showDiagGrid ? '1' : '0');
+    gridBtn.classList.toggle('is-active', state.showDiagGrid);
+    renderDiagGrid();
+  }
+
   function resolveStroke(ref) {
     if (!ref) return null;
     const entry = state.palette.find(function (p) { return p.id === ref; });
@@ -2667,6 +2743,9 @@
   redoBtn.addEventListener('click', redo);
   labelsBtn.addEventListener('click', toggleLabels);
   labelsBtn.classList.toggle('is-active', state.showLabels);
+  gridBtn.addEventListener('click', toggleDiagGrid);
+  gridBtn.classList.toggle('is-active', state.showDiagGrid);
+  renderDiagGrid(); // initial paint if the flag was already on
   selectAllBtn.addEventListener('click', toggleSelectAll);
   updateSelectAllButton();
 

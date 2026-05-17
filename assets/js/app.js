@@ -214,20 +214,18 @@
       }
     }
 
-    // Optional name labels. The editor's "Labels" toggle is stored in
-    // localStorage (shared origin), so when the author enables it they
-    // see labels on the live site too. Labels never appear for other
-    // visitors (their localStorage doesn't have the flag set).
-    if (typeof localStorage !== 'undefined' &&
-        localStorage.getItem('ed-show-labels') === '1') {
+    // Optional dev aids. The editor's toggle buttons (Labels, Grid)
+    // are stored in localStorage (shared origin), so when the author
+    // enables them they see the same aids on the live site too.
+    // Other visitors don't have the flags set → no overlay.
+    const hasLS = (typeof localStorage !== 'undefined');
+    if (hasLS && localStorage.getItem('ed-show-labels') === '1') {
       renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
-      // Page-area outline + grid overlay. Same 1200×800 rectangle the
-      // editor draws as bg-page; lets the author verify on the live
-      // site that shapes sit where the editor showed them and see
-      // exactly where the design canvas maps to within the viewport
-      // (letterbox margins included). Tied to the Labels toggle so
-      // it ships and hides as a single dev-aid block.
+      // Page-area outline + reference markers (see v0.1.21).
       renderRuntimePageGuide(layer);
+    }
+    if (hasLS && localStorage.getItem('ed-show-diag-grid') === '1') {
+      renderRuntimeDiagGrid(layer);
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
@@ -401,6 +399,53 @@
    * confirm at a glance where the design canvas's coordinates land
    * inside the actual viewport.
    */
+  /**
+   * Diagnostic coord grid, mirroring the one the editor draws when
+   * its Grid button is on. Cyan, 50px step, coords every 100px
+   * (checkerboarded). Renders below labels but above lines so it
+   * doesn't obscure shape colors. Inserted as the FIRST child of the
+   * SVG so it always sits behind everything else.
+   */
+  function renderRuntimeDiagGrid(layer) {
+    const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
+    const g = document.createElementNS(SVG_NS_LOCAL, 'g');
+    g.setAttribute('id', 'runtime-diag-grid');
+    g.style.pointerEvents = 'none';
+    const X0 = -600, X1 = 1800, Y0 = -400, Y1 = 1200;
+    const STEP = 50, LABEL_STEP = 100;
+    function ln(x1, y1, x2, y2, opacity) {
+      const l = document.createElementNS(SVG_NS_LOCAL, 'line');
+      l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+      l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+      l.setAttribute('stroke', '#00FFFF');
+      l.setAttribute('stroke-opacity', opacity);
+      l.setAttribute('stroke-width', '1');
+      l.style.vectorEffect = 'non-scaling-stroke';
+      return l;
+    }
+    for (let x = X0; x <= X1; x += STEP) {
+      g.appendChild(ln(x, Y0, x, Y1, x % LABEL_STEP === 0 ? '0.5' : '0.2'));
+    }
+    for (let y = Y0; y <= Y1; y += STEP) {
+      g.appendChild(ln(X0, y, X1, y, y % LABEL_STEP === 0 ? '0.5' : '0.2'));
+    }
+    for (let x = X0; x <= X1; x += LABEL_STEP) {
+      for (let y = Y0; y <= Y1; y += LABEL_STEP) {
+        if (((x / LABEL_STEP) + (y / LABEL_STEP)) & 1) continue;
+        const t = document.createElementNS(SVG_NS_LOCAL, 'text');
+        t.setAttribute('x', x + 3); t.setAttribute('y', y + 12);
+        t.setAttribute('fill', '#00FFFF');
+        t.setAttribute('font-size', '10');
+        t.setAttribute('font-family', 'ui-monospace, monospace');
+        t.style.opacity = '0.75';
+        t.textContent = x + ',' + y;
+        g.appendChild(t);
+      }
+    }
+    // Behind everything else.
+    layer.insertBefore(g, layer.firstChild);
+  }
+
   function renderRuntimePageGuide(layer) {
     const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
 
