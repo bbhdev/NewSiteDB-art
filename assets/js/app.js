@@ -232,31 +232,44 @@
       const behaviors = Object.assign({}, group.defaults || {}, lineDef.overrides || {});
 
       const triggerSel = group.trigger || 'body';
-      const triggerEl = document.querySelector(triggerSel);
-      if (!triggerEl) {
-        // If a group's trigger doesn't resolve to an element, NONE of
-        // its lines will animate — usually because the group's trigger
-        // selector was edited to point at an id/section that no longer
-        // exists in the target page's template. Surface it loudly so
-        // the user can find the offending group from the console.
-        console.warn('[lines] group "' + (group.name || group.id) + '" trigger "' +
-                     triggerSel + '" did not match any element — ' +
-                     'its lines will render but not animate.');
-        return;
-      }
-
-      // Trigger range depends on whether this is a page-wide group or
-      // section-bound:
-      //   page-wide  → animate over the full document scroll
-      //                (top-of-body at top-of-viewport → bottom-of-body
-      //                 at bottom-of-viewport). Scroll = 0 is progress 0,
-      //                so initial position = drawn position.
-      //   section    → animate while the section sweeps through the
-      //                viewport (top-of-section at bottom-of-viewport →
-      //                bottom-of-section at top-of-viewport).
       const isPageWide = !group.trigger || group.trigger === 'body' || group.trigger === 'html';
-      const stStart = isPageWide ? 'top top'       : 'top bottom';
-      const stEnd   = isPageWide ? 'bottom bottom' : 'bottom top';
+
+      // Build the ScrollTrigger config once and reuse it for the
+      // motion tween and the drawIn tween — same scroll progress
+      // drives both.
+      //
+      //   page-wide  → no trigger element. Raw scroll positions
+      //                start: 0 (top of document) and end: 'max'
+      //                (max scrollable position). This is the
+      //                canonical way to drive a tween over the
+      //                whole document, and it sidesteps the silent
+      //                no-fire behavior we hit when using `body` as
+      //                a trigger element with 'top top' / 'bottom
+      //                bottom' (ScrollTrigger doesn't compute the
+      //                range correctly for `body` itself).
+      //
+      //   section    → trigger on the named element. Animation runs
+      //                while the section sweeps through the viewport
+      //                (top reaches bottom-of-viewport → bottom
+      //                reaches top-of-viewport).
+      let stConfig;
+      if (isPageWide) {
+        stConfig = { start: 0, end: 'max', scrub: 1 };
+      } else {
+        const triggerEl = document.querySelector(triggerSel);
+        if (!triggerEl) {
+          console.warn('[lines] group "' + (group.name || group.id) + '" trigger "' +
+                       triggerSel + '" did not match any element — ' +
+                       'its lines will render but not animate.');
+          return;
+        }
+        stConfig = {
+          trigger: triggerEl,
+          start: 'top bottom',
+          end:   'bottom top',
+          scrub: 1
+        };
+      }
 
       // Rotation/scale origin: for geometric primitives, rotate around
       // the shape's geometric center (cx, cy) rather than its bounding
@@ -285,14 +298,7 @@
       if (hasMotion) {
         gsap.fromTo(pathEl,
           { x: 0, y: 0, rotation: 0, transformOrigin: originAttr },
-          Object.assign({}, target, {
-            scrollTrigger: {
-              trigger: triggerEl,
-              start: stStart,
-              end:   stEnd,
-              scrub: 1
-            }
-          })
+          Object.assign({}, target, { scrollTrigger: stConfig })
         );
       }
 
@@ -328,12 +334,7 @@
           {
             attr: { 'stroke-dashoffset': 0 },
             ease: 'none',
-            scrollTrigger: {
-              trigger: triggerEl,
-              start: stStart,
-              end:   stEnd,
-              scrub: 1
-            }
+            scrollTrigger: stConfig
           }
         );
       }
