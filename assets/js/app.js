@@ -221,6 +221,13 @@
     if (typeof localStorage !== 'undefined' &&
         localStorage.getItem('ed-show-labels') === '1') {
       renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
+      // Page-area outline + grid overlay. Same 1200×800 rectangle the
+      // editor draws as bg-page; lets the author verify on the live
+      // site that shapes sit where the editor showed them and see
+      // exactly where the design canvas maps to within the viewport
+      // (letterbox margins included). Tied to the Labels toggle so
+      // it ships and hides as a single dev-aid block.
+      renderRuntimePageGuide(layer);
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
@@ -383,6 +390,74 @@
    * in the editor. Only invoked when the editor's Labels toggle is on
    * (read from localStorage).
    */
+  /**
+   * Draw the page-area outline + a few internal reference points on
+   * the live SVG layer. Author-facing dev aid — only shown when the
+   * editor's Labels toggle is on, so other visitors never see it.
+   *
+   * The outline matches the editor's bg-page rect exactly (0 0
+   * 1200 800 in viewBox coords). Center + four corners get small
+   * crosshairs with their viewBox coords printed, so the author can
+   * confirm at a glance where the design canvas's coordinates land
+   * inside the actual viewport.
+   */
+  function renderRuntimePageGuide(layer) {
+    const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
+
+    const rect = document.createElementNS(SVG_NS_LOCAL, 'rect');
+    rect.setAttribute('x', 0);
+    rect.setAttribute('y', 0);
+    rect.setAttribute('width',  1200);
+    rect.setAttribute('height', 800);
+    rect.setAttribute('fill', 'none');
+    rect.setAttribute('stroke', '#9a4');
+    rect.setAttribute('stroke-width', 1);
+    rect.setAttribute('stroke-dasharray', '8 4');
+    rect.style.vectorEffect = 'non-scaling-stroke';
+    rect.style.pointerEvents = 'none';
+    layer.appendChild(rect);
+
+    // Reference markers — viewBox corners + center. Each is a small
+    // crosshair + coord label so the author can spot-check the
+    // viewBox-to-viewport mapping.
+    const marks = [
+      { x: 0,    y: 0,    label: '(0, 0)'     },
+      { x: 1200, y: 0,    label: '(1200, 0)'  },
+      { x: 0,    y: 800,  label: '(0, 800)'   },
+      { x: 1200, y: 800,  label: '(1200, 800)'},
+      { x: 600,  y: 400,  label: '(600, 400)' }
+    ];
+    marks.forEach(function (m) {
+      const g = document.createElementNS(SVG_NS_LOCAL, 'g');
+      g.setAttribute('transform', 'translate(' + m.x + ',' + m.y + ')');
+      // Crosshair
+      const sz = 6;
+      const h = document.createElementNS(SVG_NS_LOCAL, 'line');
+      h.setAttribute('x1', -sz); h.setAttribute('y1', 0);
+      h.setAttribute('x2',  sz); h.setAttribute('y2', 0);
+      h.setAttribute('stroke', '#9a4'); h.setAttribute('stroke-width', 1.5);
+      h.style.vectorEffect = 'non-scaling-stroke';
+      g.appendChild(h);
+      const v = document.createElementNS(SVG_NS_LOCAL, 'line');
+      v.setAttribute('x1', 0); v.setAttribute('y1', -sz);
+      v.setAttribute('x2', 0); v.setAttribute('y2',  sz);
+      v.setAttribute('stroke', '#9a4'); v.setAttribute('stroke-width', 1.5);
+      v.style.vectorEffect = 'non-scaling-stroke';
+      g.appendChild(v);
+      // Label
+      const t = document.createElementNS(SVG_NS_LOCAL, 'text');
+      t.setAttribute('x', 8); t.setAttribute('y', -8);
+      t.setAttribute('fill', '#9a4');
+      t.setAttribute('font-family', 'ui-monospace, monospace');
+      t.setAttribute('font-size', 11);
+      t.style.pointerEvents = 'none';
+      t.textContent = m.label;
+      g.appendChild(t);
+      g.style.pointerEvents = 'none';
+      layer.appendChild(g);
+    });
+  }
+
   function renderRuntimeLabels(layer, lines, groups, groupById, paletteById) {
     const SVG_NS = 'http://www.w3.org/2000/svg';
     function resolveStroke(ref) {
