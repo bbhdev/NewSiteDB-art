@@ -83,12 +83,15 @@
     palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
     openGroupIds:   {},        // groupId → true when expanded in sidebar
     activeGroupId:  null,
-    selectedLineId: null,
+    // Multi-select: ordered array of object ids (formerly `selectedLineId`).
+    // Order = click order; the last entry is the "primary" selection used
+    // by the params panel. Empty = no selection. The "Select all" button
+    // just fills this with every object id (no separate allSelected flag).
+    selectedIds:    [],
     activeToolId:   'select',  // neutral on first load — no accidental strokes
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
     bezierPoints: null,        // active bezier anchors when bezier is mid-draw
-    allSelected: false,        // "Select all" mode — drag anywhere moves every line
     zoom: 1,                   // canvas zoom factor (1 = 100%, 2 = 200%, …)
     // Editor-local view toggle, persisted to localStorage so it survives
     // reloads. When on, every named line gets a colored label rendered
@@ -117,6 +120,26 @@
 
   function uid(prefix) {
     return prefix + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ── Multi-select helpers ──────────────────────────────────────────
+  function isSelected(id) { return state.selectedIds.indexOf(id) >= 0; }
+  function selectOnly(id) { state.selectedIds = id ? [id] : []; }
+  function toggleInSelection(id) {
+    const i = state.selectedIds.indexOf(id);
+    if (i >= 0) state.selectedIds.splice(i, 1);
+    else state.selectedIds.push(id);
+  }
+  function clearSelection() { state.selectedIds = []; }
+  // The "primary" selection is the most recently added id; the params
+  // panel renders this one's fields when exactly one object is selected.
+  function primarySelectedId() {
+    return state.selectedIds.length
+      ? state.selectedIds[state.selectedIds.length - 1] : null;
+  }
+  function allObjectsSelected() {
+    return state.lines.length > 0 &&
+           state.selectedIds.length === state.lines.length;
   }
 
   function arraysEqual(a, b) {
@@ -217,14 +240,15 @@
       html: '\
         <p>Neutral mode — no drawing happens. Click a tool to switch back to drawing.</p>\
         <ul>\
-          <li><strong>Click</strong> on a line to select it.</li>\
-          <li><strong>Click again</strong> at the same spot to cycle to the next line beneath.</li>\
-          <li><strong>Drag</strong> a selected line\'s body to move the whole shape.</li>\
-          <li><strong>Drag handles</strong> (cyan dots) to reshape — point handles on free-form lines, parameter handles on primitives.</li>\
-          <li><strong>Esc</strong> or empty-canvas click to deselect.</li>\
-          <li><strong>Backspace</strong> / Delete to remove the selected line.</li>\
+          <li><strong>Click</strong> on an object to select it.</li>\
+          <li><strong>Click again</strong> at the same spot to cycle to the next object beneath.</li>\
+          <li><strong>Cmd/Shift-click</strong> on the canvas or on a row in the sidebar to add an object to the selection — or remove it if already selected.</li>\
+          <li><strong>Drag</strong> any selected object\'s body to move every selected object in lockstep, preserving their spatial relationship.</li>\
+          <li><strong>Drag handles</strong> (cyan dots) to reshape — point handles on free-form lines, parameter handles on primitives. Handles only show when exactly one object is selected.</li>\
+          <li><strong>Esc</strong> or empty-canvas click to clear the selection.</li>\
+          <li><strong>Backspace</strong> / Delete to remove every selected object.</li>\
         </ul>\
-        <p>Use the <kbd>Select all</kbd> button alongside this one to grab every line at once and drag them in lockstep.</p>'
+        <p>The <kbd>Select all</kbd> button toggles between "every object selected" and nothing — the same selection list the canvas and sidebar drive.</p>'
     }
   };
 
@@ -274,7 +298,7 @@
       groups:  deepCopy(state.groups),
       lines:   deepCopy(state.lines),
       palette: deepCopy(state.palette),
-      selectedLineId: state.selectedLineId,
+      selectedIds:    state.selectedIds.slice(),
       activeGroupId:  state.activeGroupId
     };
     // Truncate any redo branch beyond the current position.
@@ -300,8 +324,8 @@
     state.groups  = deepCopy(snap.groups);
     state.lines   = deepCopy(snap.lines);
     state.palette = deepCopy(snap.palette);
-    state.selectedLineId = snap.selectedLineId;
-    state.activeGroupId  = snap.activeGroupId;
+    state.selectedIds   = (snap.selectedIds || []).slice();
+    state.activeGroupId = snap.activeGroupId;
     state.dirty = true;
     renderAll();
     updateUndoButtons();
@@ -1311,7 +1335,7 @@
     regenerateLineD(line);
     if (!line.d) return;
     state.lines.push(line);
-    state.selectedLineId = line.id;
+    selectOnly(line.id);
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1319,7 +1343,19 @@
 
   function deleteLine(id) {
     state.lines = state.lines.filter(function (l) { return l.id !== id; });
-    if (state.selectedLineId === id) state.selectedLineId = null;
+    state.selectedIds = state.selectedIds.filter(function (x) { return x !== id; });
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  // Delete every currently selected object in one go (Backspace / Delete
+  // when 1+ objects are selected, including the multi-select case).
+  function deleteSelected() {
+    if (!state.selectedIds.length) return;
+    const ids = state.selectedIds.slice();
+    state.lines = state.lines.filter(function (l) { return ids.indexOf(l.id) < 0; });
+    clearSelection();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1342,7 +1378,7 @@
     g.name = 'Group ' + (state.groups.length + 1);
     state.groups.push(g);
     state.activeGroupId = g.id;
-    state.selectedLineId = null;
+    clearSelection();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1378,7 +1414,7 @@
     }
     state.openGroupIds = {};
     state.openGroupIds[state.activeGroupId] = true;
-    state.selectedLineId = null;
+    clearSelection();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1514,7 +1550,7 @@
           p.style.transformOrigin = (pa.x + pa.w / 2) + 'px ' + (pa.y + pa.h / 2) + 'px';
         }
       }
-      if (line.id === state.selectedLineId) p.classList.add('is-selected');
+      if (isSelected(line.id)) p.classList.add('is-selected');
       // Hidden lines stay visible in the editor (so the user can find
       // them and re-enable) but render at low opacity so they read as
       // "off". The runtime drops them entirely.
@@ -1622,20 +1658,23 @@
     renderLabels();
   }
 
+  // "Select all" toggles between every object selected and nothing
+  // selected. It just drives the same selectedIds the modifier-click
+  // path uses, so the rest of the UI (handles, panel, drag-to-move)
+  // doesn't need a separate code path for the all-selected case.
   function toggleSelectAll() {
-    state.allSelected = !state.allSelected;
-    // Stepping into select-all clears any single-line selection so the
-    // user doesn't see two competing UI states (selected line handles
-    // + select-all banner). Stepping out leaves no selection either.
-    state.selectedLineId = null;
+    if (allObjectsSelected()) clearSelection();
+    else state.selectedIds = state.lines.map(function (l) { return l.id; });
     updateSelectAllButton();
+    renderGroupsList();
     renderLines();
     renderSelectionPanel();
   }
 
   function updateSelectAllButton() {
-    selectAllBtn.classList.toggle('is-active', state.allSelected);
-    selectAllBtn.textContent = state.allSelected ? 'Deselect all' : 'Select all';
+    const all = allObjectsSelected();
+    selectAllBtn.classList.toggle('is-active', all);
+    selectAllBtn.textContent = all ? 'Deselect all' : 'Select all';
   }
 
   /**
@@ -1651,15 +1690,18 @@
    */
   function renderHandles() {
     handlesG.innerHTML = '';
-    // Select-all mode: one accent-colored marker per line at its
-    // visual center instead of per-vertex handles. Communicates "all
-    // selected" without flooding the canvas with handles.
-    if (state.allSelected) {
-      renderAllSelectedMarkers();
+    // No selection → nothing.
+    if (!state.selectedIds.length) return;
+    // Multi-select (2+): one accent-colored marker per selected object
+    // at its visual center, instead of per-vertex handles. Communicates
+    // "these are selected" without flooding the canvas with handles —
+    // and matches what the old "Select all" mode used to draw.
+    if (state.selectedIds.length > 1) {
+      renderMultiSelectedMarkers();
       return;
     }
-    if (!state.selectedLineId) return;
-    const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
+    const primaryId = primarySelectedId();
+    const line = state.lines.find(function (l) { return l.id === primaryId; });
     if (!line) return;
 
     // If the selected line has an explicit rotation pivot (via its own
@@ -1850,10 +1892,11 @@
     handlesG.appendChild(g);
   }
 
-  function renderAllSelectedMarkers() {
+  function renderMultiSelectedMarkers() {
     const r = 7 / state.zoom;
-    state.lines.forEach(function (line) {
-      if (line.hidden) return;
+    state.selectedIds.forEach(function (id) {
+      const line = state.lines.find(function (l) { return l.id === id; });
+      if (!line || line.hidden) return;
       const c = centerOf(line);
       if (!c) return;
       const dot = document.createElementNS(SVG_NS, 'circle');
@@ -1920,7 +1963,7 @@
         // goes to the group's settings, not to a stale line. Also
         // re-render the lines layer so the handle dots from the
         // previously selected line disappear with it.
-        state.selectedLineId = null;
+        clearSelection();
         renderGroupsList();
         renderLines();
         renderSelectionPanel();
@@ -1959,7 +2002,7 @@
       state.lines.filter(function (l) { return l.groupId === g.id; })
         .forEach(function (line) {
           const lr = document.createElement('li');
-          lr.className = 'ed-line-row' + (line.id === state.selectedLineId ? ' is-selected' : '');
+          lr.className = 'ed-line-row' + (isSelected(line.id) ? ' is-selected' : '');
           // Drag-and-drop source: a line row can be dragged onto any
           // group row in the sidebar to move the line into that group.
           lr.draggable = true;
@@ -1983,9 +2026,18 @@
           lr.appendChild(overrideTag);
           lr.addEventListener('click', function (e) {
             e.stopPropagation();
-            state.selectedLineId = line.id;
+            // Cmd/Shift toggles the row in/out of the selection; plain
+            // click replaces with just this line. Matches the canvas
+            // modifier-click behavior so both selection surfaces stay
+            // in sync.
+            if (e.metaKey || e.ctrlKey || e.shiftKey) {
+              toggleInSelection(line.id);
+            } else {
+              selectOnly(line.id);
+            }
             state.activeGroupId  = g.id;
             state.openGroupIds[g.id] = true;
+            updateSelectAllButton();
             renderGroupsList();
             renderLines();
             renderSelectionPanel();
@@ -2068,7 +2120,7 @@
     if (!confirm('Delete all ' + n + ' line' + (n === 1 ? '' : 's') +
                  ' from this page?\n\nThis can be undone (Cmd+Z).')) return;
     state.lines = [];
-    state.selectedLineId = null;
+    clearSelection();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -2088,14 +2140,46 @@
 
   function renderSelectionPanel() {
     selectionPanel.innerHTML = '';
-    // Line selection takes precedence over group selection.
-    if (state.selectedLineId) {
-      const line  = state.lines.find(function (l) { return l.id === state.selectedLineId; });
+    // Multi-select takes precedence: show a compact bulk-actions panel.
+    // Single selection shows the full line params panel (unchanged).
+    // Otherwise fall through to the active group's settings.
+    if (state.selectedIds.length > 1) {
+      renderMultiSelectionPanel();
+    } else if (state.selectedIds.length === 1) {
+      const line = state.lines.find(function (l) { return l.id === primarySelectedId(); });
       if (line) renderLinePanel(line);
     } else if (state.activeGroupId) {
       const g = state.groups.find(function (g) { return g.id === state.activeGroupId; });
       if (g) renderGroupPanel(g);
     }
+  }
+
+  function renderMultiSelectionPanel() {
+    const n = state.selectedIds.length;
+    const head = document.createElement('header');
+    head.className = 'ed-panel-head';
+    head.innerHTML = '<h3>' + n + ' objects selected</h3>';
+    selectionPanel.appendChild(head);
+
+    const hint = document.createElement('p');
+    hint.className = 'ed-panel-hint';
+    hint.style.color = '#888';
+    hint.style.margin = '6px 0 12px';
+    hint.textContent = 'Drag any one to move them all together. ' +
+                       'Cmd/Shift-click to add or remove from the selection.';
+    selectionPanel.appendChild(hint);
+
+    const actions = document.createElement('div');
+    actions.className = 'ed-actions';
+    const del = document.createElement('button');
+    del.className = 'ed-danger';
+    del.textContent = 'Delete selected';
+    del.addEventListener('click', function () {
+      if (!confirm('Delete ' + n + ' objects? This can be undone (Cmd+Z).')) return;
+      deleteSelected();
+    });
+    actions.appendChild(del);
+    selectionPanel.appendChild(actions);
   }
 
   function renderGroupPanel(g) {
@@ -2609,15 +2693,11 @@
   // under one click, the first click picks the topmost, subsequent
   // clicks at the same spot rotate through the rest.
   let clickCycle = null; // { x, y, ids: [...], idx: <int> }
-  // Move-line mode: pressing inside the SELECTED line's hit area (but
-  // not on one of its handles) starts translating the entire line.
-  // Indispensable for big shapes where moving each handle would be
-  // impractical. Reset on pointerup.
-  let moveLine = null; // { lineId, startPt, origPoints, origSegments }
-  // Move-all mode: when state.allSelected is on, a drag anywhere moves
-  // every line on the page together. The original geometry of every
-  // line is captured at drag start so the translation stays rigid.
-  let moveAll = null;  // { startPt, origLines: [{ id, origPoints, origSegments, origParams }, …] }
+  // Move-selection mode: pressing inside any selected object's hit
+  // area (but not on a handle) starts translating every selected
+  // object in lockstep. Single- and multi-select share this code path
+  // — selectedIds.length is the only difference. Reset on pointerup.
+  let moveSel = null;  // { startPt, origLines: [{ id, origPoints, origSegments, origParams, origOverrides }, …] }
   // Set-rotate-origin mode: the user clicked "Set on canvas →" in a
   // panel; the next canvas click writes that point into the active
   // target's rotateOriginX / Y, then mode exits.
@@ -2662,13 +2742,21 @@
     downClient = { x: e.clientX, y: e.clientY };
     downTarget = e.target;
 
-    // Select-all mode: any drag (anywhere) translates every line in
-    // lockstep. A pure click (no drag) exits select-all and proceeds
-    // to regular single-line selection.
-    if (state.allSelected) {
-      moveAll = {
+    // If the user pressed inside any selected object's hit area, and
+    // no modifier is held, this drag is going to translate every
+    // selected object in lockstep. The drawing tool's pointerDown is
+    // skipped entirely. Modifier-press defers to pointerup so it can
+    // be interpreted as a toggle-click instead of a move.
+    const lineHit = e.target && e.target.closest
+      ? e.target.closest('[data-line-id]') : null;
+    const pressedSelected = lineHit && isSelected(lineHit.dataset.lineId);
+    const modifier = e.metaKey || e.ctrlKey || e.shiftKey;
+    if (pressedSelected && !modifier) {
+      moveSel = {
         startPt: eventPt(e),
-        origLines: state.lines.map(function (l) {
+        origLines: state.selectedIds.map(function (id) {
+          const l = state.lines.find(function (x) { return x.id === id; });
+          if (!l) return null;
           return {
             id: l.id,
             origPoints:   Array.isArray(l.points)
@@ -2683,41 +2771,11 @@
                   };
                 })
               : null,
-            origParams: l.params ? Object.assign({}, l.params) : null,
+            origParams:    l.params    ? Object.assign({}, l.params)    : null,
             origOverrides: l.overrides ? Object.assign({}, l.overrides) : null
           };
-        })
+        }).filter(function (s) { return s; })
       };
-      return;
-    }
-
-    // If the user pressed inside the currently selected line's hit
-    // area, this drag is going to translate the whole line, not start
-    // a new stroke. The drawing tool's pointerDown is skipped entirely.
-    const lineHit = e.target && e.target.closest
-      ? e.target.closest('[data-line-id]') : null;
-    if (lineHit && lineHit.dataset.lineId === state.selectedLineId) {
-      const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
-      if (line) {
-        moveLine = {
-          lineId: line.id,
-          startPt: eventPt(e),
-          origPoints:   Array.isArray(line.points)
-            ? line.points.map(function (p) { return { x: p.x, y: p.y }; })
-            : null,
-          origSegments: Array.isArray(line.segments)
-            ? line.segments.map(function (s) {
-                return {
-                  cmd: s.cmd,
-                  controlPoints: s.controlPoints.map(function (cp) { return { x: cp.x, y: cp.y }; }),
-                  endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null
-                };
-              })
-            : null,
-          origParams:    line.params    ? Object.assign({}, line.params)    : null,
-          origOverrides: line.overrides ? Object.assign({}, line.overrides) : null
-        };
-      }
       return; // skip tool dispatch
     }
 
@@ -2725,11 +2783,11 @@
     if (tool && tool.onPointerDown) tool.onPointerDown(eventPt(e));
   });
   svg.addEventListener('pointermove', function (e) {
-    if (moveAll) {
+    if (moveSel) {
       const cur = eventPt(e);
-      const dx = cur.x - moveAll.startPt.x;
-      const dy = cur.y - moveAll.startPt.y;
-      moveAll.origLines.forEach(function (snap) {
+      const dx = cur.x - moveSel.startPt.x;
+      const dy = cur.y - moveSel.startPt.y;
+      moveSel.origLines.forEach(function (snap) {
         const line = state.lines.find(function (l) { return l.id === snap.id; });
         if (!line) return;
         translateLine(line, snap.origPoints, snap.origSegments, snap.origParams, snap.origOverrides, dx, dy);
@@ -2737,25 +2795,8 @@
           .forEach(function (el) { el.setAttribute('d', line.d); });
       });
       state.dirty = true;
-      renderHandles(); // accent select-all dots follow their lines
+      renderHandles(); // accent dots / single-line handles follow their lines
       renderLabels();  // labels follow their lines too
-      return;
-    }
-    if (moveLine) {
-      const cur = eventPt(e);
-      const dx = cur.x - moveLine.startPt.x;
-      const dy = cur.y - moveLine.startPt.y;
-      const line = state.lines.find(function (l) { return l.id === moveLine.lineId; });
-      if (line) {
-        translateLine(line, moveLine.origPoints, moveLine.origSegments, moveLine.origParams, moveLine.origOverrides, dx, dy);
-        state.dirty = true;
-        // Sync every visual piece tied to this line: hit + visible
-        // path, handles, label.
-        linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
-          .forEach(function (el) { el.setAttribute('d', line.d); });
-        renderHandles();
-        renderLabels();
-      }
       return;
     }
     const tool = TOOLS[state.activeToolId];
@@ -2772,33 +2813,18 @@
   });
   svg.addEventListener('pointerup', function (e) {
     pointerActive = false;
-    // Select-all + drag → commit translation of every line. Pure click
-    // in select-all → exit select-all and proceed to normal selection.
-    if (moveAll) {
-      const dxAll = downClient ? (e.clientX - downClient.x) : 0;
-      const dyAll = downClient ? (e.clientY - downClient.y) : 0;
-      const dragged = (dxAll * dxAll + dyAll * dyAll) > 9;
-      moveAll = null;
-      if (dragged) {
-        snapshot();
-        downClient = null; downTarget = null;
-        return;
-      }
-      // Pure click — turn off select-all; fall through to single-line selection.
-      state.allSelected = false;
-      updateSelectAllButton();
-    }
-    // If the user pressed on the selected line's hit area and then
-    // actually dragged, commit the move. A pure click (no drag) falls
-    // through to the selection-cycle path below so the user can step
-    // down to a shape covered by the current one.
-    let wasMoveLine = false;
-    if (moveLine) {
-      wasMoveLine = true;
+    // If the user pressed inside a selected object's hit area and then
+    // actually dragged, commit the (single- or multi-line) move. A
+    // pure click (no drag) falls through to the selection-cycle path
+    // below so the user can step down to a shape covered by the
+    // current one — or cycle through siblings within a multi-select.
+    let wasMoveSel = false;
+    if (moveSel) {
+      wasMoveSel = true;
       const dxMove = downClient ? (e.clientX - downClient.x) : 0;
       const dyMove = downClient ? (e.clientY - downClient.y) : 0;
       const dragged = (dxMove * dxMove + dyMove * dyMove) > 9; // ~3px slop
-      moveLine = null;
+      moveSel = null;
       if (dragged) {
         snapshot();
         downClient = null;
@@ -2808,7 +2834,7 @@
       // else: fall through to selection logic (don't dispatch to a
       // drawing tool's onPointerUp since pointerDown was bypassed).
     }
-    if (!wasMoveLine) {
+    if (!wasMoveSel) {
       const tool = TOOLS[state.activeToolId];
       if (tool && tool.onPointerUp) tool.onPointerUp(eventPt(e));
     }
@@ -2829,30 +2855,46 @@
         const ids = document.elementsFromPoint(downClient.x, downClient.y)
           .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
           .map(function (el) { return el.dataset.lineId; });
+        const modifier = e.shiftKey || e.metaKey || e.ctrlKey;
 
-        let newSelection = null;
-        if (ids.length) {
-          const sameZone = clickCycle &&
-            Math.abs(downClient.x - clickCycle.x) < 5 &&
-            Math.abs(downClient.y - clickCycle.y) < 5 &&
-            arraysEqual(clickCycle.ids, ids);
-          if (sameZone) {
-            clickCycle.idx = (clickCycle.idx + 1) % ids.length;
-          } else {
-            clickCycle = { x: downClient.x, y: downClient.y, ids: ids, idx: 0 };
-          }
-          newSelection = ids[clickCycle.idx];
-        } else {
+        let changed = false;
+        if (modifier) {
+          // Cmd/Shift-click toggles the topmost hit object in/out of
+          // the selection. Empty-area modifier-click is a no-op (don't
+          // accidentally deselect everything when the user just missed
+          // a target). Cycle state is reset so a subsequent plain
+          // click starts a fresh cycle.
           clickCycle = null;
-        }
-
-        if (newSelection !== state.selectedLineId) {
-          state.selectedLineId = newSelection;
-          // Make the sidebar reflect the new selection: open the line's
-          // group (so the highlighted row is actually visible) and make
-          // it the active group too. Both renderGroupsList AND
-          // renderLines run so the sidebar's row highlight and the
-          // canvas's handle dots track the new selection.
+          if (ids.length) {
+            const hit = ids[0];
+            toggleInSelection(hit);
+            const sel = state.lines.find(function (l) { return l.id === hit; });
+            if (sel && sel.groupId) {
+              state.openGroupIds[sel.groupId] = true;
+              state.activeGroupId = sel.groupId;
+            }
+            changed = true;
+          }
+        } else {
+          // Plain click: replace selection with one cycled-to id, or
+          // clear it if the click hit empty canvas.
+          let newSelection = null;
+          if (ids.length) {
+            const sameZone = clickCycle &&
+              Math.abs(downClient.x - clickCycle.x) < 5 &&
+              Math.abs(downClient.y - clickCycle.y) < 5 &&
+              arraysEqual(clickCycle.ids, ids);
+            if (sameZone) {
+              clickCycle.idx = (clickCycle.idx + 1) % ids.length;
+            } else {
+              clickCycle = { x: downClient.x, y: downClient.y, ids: ids, idx: 0 };
+            }
+            newSelection = ids[clickCycle.idx];
+          } else {
+            clickCycle = null;
+          }
+          const before = state.selectedIds.slice();
+          selectOnly(newSelection);
           if (newSelection) {
             const sel = state.lines.find(function (l) { return l.id === newSelection; });
             if (sel && sel.groupId) {
@@ -2860,6 +2902,11 @@
               state.activeGroupId = sel.groupId;
             }
           }
+          changed = !arraysEqual(before, state.selectedIds);
+        }
+
+        if (changed) {
+          updateSelectAllButton();
           renderGroupsList();
           renderLines();
           renderSelectionPanel();
@@ -2896,12 +2943,13 @@
       if (settingOrigin) { exitSetRotateOrigin(); return; }
       const tool = TOOLS[state.activeToolId];
       if (tool && tool.cancel) tool.cancel();
-      state.selectedLineId = null;
+      clearSelection();
+      updateSelectAllButton();
       renderAll();
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (state.selectedLineId) { e.preventDefault(); deleteLine(state.selectedLineId); }
+      if (state.selectedIds.length) { e.preventDefault(); deleteSelected(); }
       return;
     }
     // Tool shortcuts

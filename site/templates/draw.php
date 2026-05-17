@@ -77,7 +77,7 @@ $payload = json_encode([
 
   <div class="ed-tools" role="toolbar" aria-label="Selection">
     <button type="button" class="ed-tool" data-tool="select" title="Select (S) — no drawing; click to select, drag to move">↖ Select</button>
-    <button type="button" class="ed-tool" id="select-all-btn" title="Select all lines on this page — drag any one to move every line together">Select all</button>
+    <button type="button" class="ed-tool" id="select-all-btn" title="Select every object on this page — drag any one to move them all together. Cmd/Shift-click objects to build a custom multi-selection.">Select all</button>
   </div>
 
   <div class="ed-tools" role="toolbar" aria-label="Drawing tools">
