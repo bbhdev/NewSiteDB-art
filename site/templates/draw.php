@@ -84,6 +84,14 @@ $payload = json_encode([
     <button type="button" class="ed-tool" data-tool="bezier"         title="Bezier (B) — click anchors, smooth curve through them; Esc/double-click to finish">Bezier</button>
   </div>
 
+  <div class="ed-tools ed-tools-geo" role="toolbar" aria-label="Geometric primitives">
+    <button type="button" class="ed-tool" data-tool="circle"  title="Circle — click center, drag for radius">Circle</button>
+    <button type="button" class="ed-tool" data-tool="ellipse" title="Ellipse — click center, drag for rx/ry">Ellipse</button>
+    <button type="button" class="ed-tool" data-tool="rect"    title="Rectangle — click corner, drag for size">Rect</button>
+    <button type="button" class="ed-tool" data-tool="polygon" title="Polygon (triangle / diamond / pentagon / N-gon by setting Sides)">Polygon</button>
+    <button type="button" class="ed-tool" data-tool="star"    title="N-pointed star">Star</button>
+  </div>
+
   <div class="ed-tool-settings" id="tool-settings"></div>
 
   <div class="ed-zoom" role="toolbar" aria-label="Zoom">

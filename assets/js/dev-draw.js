@@ -391,6 +391,11 @@
    * kind-appropriate smoothing + optional Z closure.
    */
   function regenerateLineD(line) {
+    // Geometric primitives generate `d` from their `params` table.
+    if (PRIMITIVES[line.kind] && line.params) {
+      line.d = PRIMITIVES[line.kind].generateD(line.params);
+      return;
+    }
     if (line.kind === 'manual' && Array.isArray(line.segments) && line.segments.length) {
       line.d = segmentsToD(line.segments);
       return;
@@ -410,11 +415,26 @@
   }
 
   /**
-   * Apply a translation (dx, dy) to every authored point of a line —
-   * for manual lines, that includes control points so curves move
-   * rigidly with the path instead of warping.
+   * Apply a translation (dx, dy) to a line's authored form.
+   *   - Geometric primitives shift only their position keys (cx/cy or
+   *     x/y) so the whole shape moves rigidly without distortion.
+   *   - Manual lines shift every point AND every segment control point
+   *     so authored curves keep their shape.
+   *   - Everything else just shifts points.
    */
-  function translateLine(line, origPoints, origSegments, dx, dy) {
+  function translateLine(line, origPoints, origSegments, origParams, dx, dy) {
+    if (PRIMITIVES[line.kind] && origParams) {
+      const keys = PRIMITIVES[line.kind].positionKeys;
+      line.params = Object.assign({}, origParams);
+      keys.forEach(function (k, i) {
+        if (k in origParams) {
+          line.params[k] = origParams[k] + (i === 0 ? dx : dy);
+        }
+      });
+      regenerateLineD(line);
+      return;
+    }
+    if (!origPoints) return;
     line.points = origPoints.map(function (p) { return { x: p.x + dx, y: p.y + dy }; });
     if (line.kind === 'manual' && Array.isArray(origSegments)) {
       line.segments = origSegments.map(function (s) {
@@ -462,6 +482,288 @@
            ' '  + fmt(p2.x)  + ' ' + fmt(p2.y);
     }
     return d;
+  }
+
+  // ── Geometric primitives ──────────────────────────────────────────
+  // Each primitive is a self-contained entry in PRIMITIVES that knows:
+  //   paramsFromDrag (start, end)  — initial params from a click+drag
+  //   generateD      (params)      — SVG path "d" string for these params
+  //   handles        (params)      — list of { id, x, y } handle positions
+  //   updateFromHandle(params,id,p)— new params when a handle is moved
+  //   paramFields                  — [[key, label], …] for the line panel
+  //   positionKeys                 — which keys move when translating
+  //                                  (so drag-to-move shifts the whole shape)
+  //   labelPosition  (params)      — where to place the name label
+
+  function circlePathD(cx, cy, r) {
+    // Two half-arcs to make a full circle as a path (SVG paths don't
+    // have a native circle command, so we approximate with arc-tos).
+    return 'M ' + fmt(cx - r) + ' ' + fmt(cy) +
+           ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 1 0 ' + fmt(cx + r) + ' ' + fmt(cy) +
+           ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 1 0 ' + fmt(cx - r) + ' ' + fmt(cy) + ' Z';
+  }
+  function ellipsePathD(cx, cy, rx, ry) {
+    return 'M ' + fmt(cx - rx) + ' ' + fmt(cy) +
+           ' A ' + fmt(rx) + ' ' + fmt(ry) + ' 0 1 0 ' + fmt(cx + rx) + ' ' + fmt(cy) +
+           ' A ' + fmt(rx) + ' ' + fmt(ry) + ' 0 1 0 ' + fmt(cx - rx) + ' ' + fmt(cy) + ' Z';
+  }
+  function rectPathD(x, y, w, h, r) {
+    if (!r || r <= 0) {
+      return 'M ' + fmt(x) + ' ' + fmt(y) +
+             ' L ' + fmt(x + w) + ' ' + fmt(y) +
+             ' L ' + fmt(x + w) + ' ' + fmt(y + h) +
+             ' L ' + fmt(x)     + ' ' + fmt(y + h) + ' Z';
+    }
+    // Rounded rectangle. Clamp the radius to half of the smaller side
+    // so it can't exceed the rect's geometry.
+    r = Math.min(r, w / 2, h / 2);
+    return 'M ' + fmt(x + r)     + ' ' + fmt(y)         +
+           ' L ' + fmt(x + w - r) + ' ' + fmt(y)         +
+           ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(x + w)     + ' ' + fmt(y + r) +
+           ' L ' + fmt(x + w)     + ' ' + fmt(y + h - r) +
+           ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(x + w - r) + ' ' + fmt(y + h) +
+           ' L ' + fmt(x + r)     + ' ' + fmt(y + h)     +
+           ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(x)         + ' ' + fmt(y + h - r) +
+           ' L ' + fmt(x)         + ' ' + fmt(y + r)     +
+           ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(x + r)     + ' ' + fmt(y)         +
+           ' Z';
+  }
+  function polygonPathD(cx, cy, r, sides, angleDeg) {
+    sides = Math.max(3, Math.round(sides));
+    let d = '';
+    for (let i = 0; i < sides; i++) {
+      // Start at top (angle 0 = pointing up).
+      const theta = ((i * 360 / sides) + angleDeg - 90) * Math.PI / 180;
+      const x = cx + r * Math.cos(theta);
+      const y = cy + r * Math.sin(theta);
+      d += (i === 0 ? 'M ' : ' L ') + fmt(x) + ' ' + fmt(y);
+    }
+    return d + ' Z';
+  }
+  function starPathD(cx, cy, rOuter, rInner, points, angleDeg) {
+    points = Math.max(2, Math.round(points));
+    let d = '';
+    for (let i = 0; i < points * 2; i++) {
+      const r = (i % 2 === 0) ? rOuter : rInner;
+      const theta = ((i * 180 / points) + angleDeg - 90) * Math.PI / 180;
+      const x = cx + r * Math.cos(theta);
+      const y = cy + r * Math.sin(theta);
+      d += (i === 0 ? 'M ' : ' L ') + fmt(x) + ' ' + fmt(y);
+    }
+    return d + ' Z';
+  }
+
+  const PRIMITIVES = {
+    circle: {
+      label: 'Circle',
+      paramsFromDrag: function (s, e) {
+        return { cx: s.x, cy: s.y, r: Math.max(1, Math.hypot(e.x - s.x, e.y - s.y)) };
+      },
+      generateD: function (p) { return circlePathD(p.cx, p.cy, p.r); },
+      handles: function (p) {
+        return [
+          { id: 'c', x: p.cx,         y: p.cy },
+          { id: 'r', x: p.cx + p.r,   y: p.cy }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        return Object.assign({}, p, { r: Math.max(1, Math.hypot(pos.x - p.cx, pos.y - p.cy)) });
+      },
+      paramFields: [['cx', 'Center X'], ['cy', 'Center Y'], ['r', 'Radius']],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    ellipse: {
+      label: 'Ellipse',
+      paramsFromDrag: function (s, e) {
+        return {
+          cx: s.x, cy: s.y,
+          rx: Math.max(1, Math.abs(e.x - s.x)),
+          ry: Math.max(1, Math.abs(e.y - s.y))
+        };
+      },
+      generateD: function (p) { return ellipsePathD(p.cx, p.cy, p.rx, p.ry); },
+      handles: function (p) {
+        return [
+          { id: 'c',  x: p.cx,         y: p.cy },
+          { id: 'rx', x: p.cx + p.rx,  y: p.cy },
+          { id: 'ry', x: p.cx,         y: p.cy + p.ry }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c')  return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        if (id === 'rx') return Object.assign({}, p, { rx: Math.max(1, Math.abs(pos.x - p.cx)) });
+        return Object.assign({}, p, { ry: Math.max(1, Math.abs(pos.y - p.cy)) });
+      },
+      paramFields: [['cx', 'Center X'], ['cy', 'Center Y'], ['rx', 'Radius X'], ['ry', 'Radius Y']],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    rect: {
+      label: 'Rectangle',
+      paramsFromDrag: function (s, e) {
+        return {
+          x: Math.min(s.x, e.x),
+          y: Math.min(s.y, e.y),
+          w: Math.max(1, Math.abs(e.x - s.x)),
+          h: Math.max(1, Math.abs(e.y - s.y)),
+          r: 0
+        };
+      },
+      generateD: function (p) { return rectPathD(p.x, p.y, p.w, p.h, p.r); },
+      handles: function (p) {
+        return [
+          { id: 'tl', x: p.x,       y: p.y },
+          { id: 'tr', x: p.x + p.w, y: p.y },
+          { id: 'br', x: p.x + p.w, y: p.y + p.h },
+          { id: 'bl', x: p.x,       y: p.y + p.h }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        // Compute new bounding box from the moved corner. The opposite
+        // corner stays fixed so the rect resizes naturally.
+        let x1 = p.x, y1 = p.y, x2 = p.x + p.w, y2 = p.y + p.h;
+        if      (id === 'tl') { x1 = pos.x; y1 = pos.y; }
+        else if (id === 'tr') { x2 = pos.x; y1 = pos.y; }
+        else if (id === 'br') { x2 = pos.x; y2 = pos.y; }
+        else if (id === 'bl') { x1 = pos.x; y2 = pos.y; }
+        const nx = Math.min(x1, x2), ny = Math.min(y1, y2);
+        return Object.assign({}, p, {
+          x: nx, y: ny,
+          w: Math.max(1, Math.abs(x2 - x1)),
+          h: Math.max(1, Math.abs(y2 - y1))
+        });
+      },
+      paramFields: [
+        ['x', 'X'], ['y', 'Y'],
+        ['w', 'Width'], ['h', 'Height'],
+        ['r', 'Corner radius']
+      ],
+      positionKeys: ['x', 'y'],
+      labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
+    },
+
+    polygon: {
+      label: 'Polygon',
+      paramsFromDrag: function (s, e) {
+        return {
+          cx: s.x, cy: s.y,
+          r: Math.max(1, Math.hypot(e.x - s.x, e.y - s.y)),
+          sides: 5,
+          angle: 0
+        };
+      },
+      generateD: function (p) { return polygonPathD(p.cx, p.cy, p.r, p.sides, p.angle); },
+      handles: function (p) {
+        // One handle for center, one at the first vertex (drives radius
+        // and rotation simultaneously).
+        const t = (p.angle - 90) * Math.PI / 180;
+        return [
+          { id: 'c', x: p.cx, y: p.cy },
+          { id: 'v', x: p.cx + p.r * Math.cos(t), y: p.cy + p.r * Math.sin(t) }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        const dx = pos.x - p.cx, dy = pos.y - p.cy;
+        const r = Math.max(1, Math.hypot(dx, dy));
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+        return Object.assign({}, p, { r: r, angle: angle });
+      },
+      paramFields: [
+        ['cx', 'Center X'], ['cy', 'Center Y'],
+        ['r', 'Radius'], ['sides', 'Sides'], ['angle', 'Angle']
+      ],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    star: {
+      label: 'Star',
+      paramsFromDrag: function (s, e) {
+        const r = Math.max(1, Math.hypot(e.x - s.x, e.y - s.y));
+        return { cx: s.x, cy: s.y, rOuter: r, rInner: r * 0.4, points: 5, angle: 0 };
+      },
+      generateD: function (p) {
+        return starPathD(p.cx, p.cy, p.rOuter, p.rInner, p.points, p.angle);
+      },
+      handles: function (p) {
+        const tO = (p.angle - 90) * Math.PI / 180;
+        const tI = (p.angle - 90 + 180 / p.points) * Math.PI / 180;
+        return [
+          { id: 'c', x: p.cx, y: p.cy },
+          { id: 'o', x: p.cx + p.rOuter * Math.cos(tO), y: p.cy + p.rOuter * Math.sin(tO) },
+          { id: 'i', x: p.cx + p.rInner * Math.cos(tI), y: p.cy + p.rInner * Math.sin(tI) }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        const dx = pos.x - p.cx, dy = pos.y - p.cy;
+        const r = Math.max(1, Math.hypot(dx, dy));
+        if (id === 'o') {
+          // Outer vertex drives outer radius + overall rotation.
+          const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+          return Object.assign({}, p, { rOuter: r, angle: angle });
+        }
+        // Inner vertex: only its radius changes.
+        return Object.assign({}, p, { rInner: r });
+      },
+      paramFields: [
+        ['cx', 'Center X'], ['cy', 'Center Y'],
+        ['rOuter', 'Outer radius'], ['rInner', 'Inner radius'],
+        ['points', 'Points'], ['angle', 'Angle']
+      ],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    }
+  };
+
+  /**
+   * One factory builds the click-drag tool for every primitive. The
+   * specifics (params from a drag, path d, etc.) live in PRIMITIVES;
+   * the tool here just wires up the gesture and a preview path.
+   */
+  function makePrimitiveTool(kindId) {
+    const PRIM = PRIMITIVES[kindId];
+    return {
+      label: PRIM.label,
+      settings: function () { return []; },
+      onPointerDown: function (pt) {
+        this._start = pt;
+        this._preview = null;
+      },
+      onPointerMove: function (pt) {
+        if (!this._start) return;
+        const params = PRIM.paramsFromDrag(this._start, pt);
+        const d = PRIM.generateD(params);
+        if (!this._preview) {
+          this._preview = createPath('is-preview', d);
+          previewG.appendChild(this._preview);
+        } else {
+          this._preview.setAttribute('d', d);
+        }
+      },
+      onPointerUp: function (pt) {
+        if (!this._start) return;
+        const start = this._start;
+        this._start = null;
+        if (this._preview) { this._preview.remove(); this._preview = null; }
+        const dx = pt.x - start.x, dy = pt.y - start.y;
+        if (dx * dx + dy * dy < MIN_STROKE_LENGTH * MIN_STROKE_LENGTH) return;
+        commitLine({
+          kind:   kindId,
+          params: PRIM.paramsFromDrag(start, pt),
+          filled: true
+        });
+      },
+      cancel: function () {
+        if (this._preview) this._preview.remove();
+        this._preview = null; this._start = null;
+      }
+    };
   }
 
   function pathFromPoints(points, smooth) {
@@ -617,6 +919,14 @@
 
     freehand:       makeFreehandTool(false, 'Freehand'),
     freehandClosed: makeFreehandTool(true,  'Closed loop'),
+
+    // Geometric primitives — each generated from PRIMITIVES so adding
+    // another shape later is just a registry entry.
+    circle:  makePrimitiveTool('circle'),
+    ellipse: makePrimitiveTool('ellipse'),
+    rect:    makePrimitiveTool('rect'),
+    polygon: makePrimitiveTool('polygon'),
+    star:    makePrimitiveTool('star'),
 
     line: {
       label: 'Line',
@@ -840,13 +1150,21 @@
    * regenerate `d` from `points`.
    */
   function commitLine(meta) {
-    if (!meta || !Array.isArray(meta.points) || meta.points.length < 1) return;
+    if (!meta) return;
+    const isPrim = !!PRIMITIVES[meta.kind];
+    // Primitives store `params` (shape-specific) and don't need
+    // `points`; everything else needs at least one point.
+    if (!isPrim && (!Array.isArray(meta.points) || meta.points.length < 1)) return;
     const line = {
       id: uid('l'),
       kind:     meta.kind || 'manual',
-      points:   meta.points.map(function (p) { return { x: p.x, y: p.y }; }),
+      points:   meta.points ? meta.points.map(function (p) { return { x: p.x, y: p.y }; }) : null,
+      params:   meta.params ? Object.assign({}, meta.params) : null,
       smoothed: !!meta.smoothed,
       closed:   !!meta.closed,
+      // Primitives default to filled; other kinds inherit from `closed`
+      // unless explicitly overridden.
+      filled:   meta.filled !== undefined ? !!meta.filled : (isPrim || !!meta.closed),
       d: '',
       stroke: null,
       width: null,
@@ -1015,9 +1333,12 @@
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
-      // Closed loops fill with the stroke color so the inside reads as
-      // a solid blob.
-      if (line.closed && stroke) p.style.fill = stroke;
+      // Fill rules:
+      //   - `filled` is the source of truth when set explicitly
+      //     (true for primitives, true for closed-loop freehand, etc.)
+      //   - falls back to `closed` for legacy data without `filled`
+      const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
+      if (wantsFill && stroke) p.style.fill = stroke;
       if (line.id === state.selectedLineId) p.classList.add('is-selected');
       p.dataset.lineId = line.id;
       linesG.appendChild(p);
@@ -1043,7 +1364,10 @@
 
     state.lines.forEach(function (line) {
       if (!line.name) return;
-      if (!Array.isArray(line.points) || !line.points.length) return;
+      // Need either points OR primitive params to anchor the label.
+      const hasGeo = (Array.isArray(line.points) && line.points.length) ||
+                     (PRIMITIVES[line.kind] && line.params);
+      if (!hasGeo) return;
       const pos = labelPositionFor(line);
 
       const group = state.groups.find(function (g) { return g.id === line.groupId; });
@@ -1090,14 +1414,16 @@
     });
   }
 
-  // Label placement: middle vertex of the points array. Picks a point
-  // actually on the line so the label is anchored visually — bbox
-  // center could fall in empty space for a curved/open path.
+  // Label placement: primitives use their own labelPosition() (anchored
+  // to center/bbox); everything else uses the middle vertex of the
+  // points array, which lies actually on the line.
   function labelPositionFor(line) {
+    if (PRIMITIVES[line.kind] && line.params) {
+      return PRIMITIVES[line.kind].labelPosition(line.params);
+    }
     const pts = line.points;
+    if (!pts || !pts.length) return { x: 0, y: 0 };
     const mid = pts[Math.floor(pts.length / 2)];
-    // Slight offset so the label sits above-right of the anchor point
-    // instead of directly on top of the line.
     return { x: mid.x + 6, y: mid.y + 6 };
   }
 
@@ -1123,11 +1449,21 @@
     handlesG.innerHTML = '';
     if (!state.selectedLineId) return;
     const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
-    if (!line || !Array.isArray(line.points) || !line.points.length) return;
+    if (!line) return;
 
     // Handle radius is in viewBox units, but we want a constant visual
     // size regardless of zoom — so divide by zoom.
     const handleR = 6 / state.zoom;
+
+    // Geometric primitives have parameter-driven handles (radius vertex,
+    // rect corners, star points, etc.) — dragging one updates `params`
+    // and other handles re-position together via PRIMITIVES.handles().
+    if (PRIMITIVES[line.kind] && line.params) {
+      renderPrimitiveHandles(line, handleR);
+      return;
+    }
+    if (!Array.isArray(line.points) || !line.points.length) return;
+
     const indices = sparseHandleIndices(line.points, 50);
     indices.forEach(function (idx) {
       const pt = line.points[idx];
@@ -1187,6 +1523,69 @@
         renderHandles();
       });
 
+      handlesG.appendChild(c);
+    });
+  }
+
+  /**
+   * Render the parameter-driven handles for a geometric primitive.
+   * Each handle's position is computed from PRIMITIVES[kind].handles()
+   * for the current `params`. Dragging a handle calls updateFromHandle
+   * with the cursor position; we update `params`, regenerate `d`, and
+   * reposition every handle live so handles that depend on each other
+   * (rect corners, star outer/inner) track together.
+   */
+  function renderPrimitiveHandles(line, handleR) {
+    const PRIM = PRIMITIVES[line.kind];
+    const handleEls = {};
+
+    function applyHandles(params) {
+      const hs = PRIM.handles(params);
+      hs.forEach(function (h) {
+        const el = handleEls[h.id];
+        if (el) { el.setAttribute('cx', h.x); el.setAttribute('cy', h.y); }
+      });
+    }
+
+    PRIM.handles(line.params).forEach(function (h) {
+      const c = document.createElementNS(SVG_NS, 'circle');
+      c.setAttribute('cx', h.x);
+      c.setAttribute('cy', h.y);
+      c.setAttribute('r',  handleR);
+      c.setAttribute('class', 'ed-handle');
+      c.dataset.handleId = h.id;
+
+      let dragging = false;
+      c.addEventListener('pointerdown', function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        dragging = true;
+        c.classList.add('is-dragging');
+        c.setPointerCapture(e.pointerId);
+      });
+      c.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        const pos = clientToSvg(e.clientX, e.clientY);
+        line.params = PRIM.updateFromHandle(line.params, h.id, pos);
+        regenerateLineD(line);
+        state.dirty = true;
+        // Update the path's two DOM elements (hit target + visible).
+        linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
+          .forEach(function (el) { el.setAttribute('d', line.d); });
+        // Reposition every handle so dependents track the dragged one
+        // (e.g. rect corners share x/y with neighbors).
+        applyHandles(line.params);
+      });
+      c.addEventListener('pointerup', function (e) {
+        if (!dragging) return;
+        e.stopPropagation();
+        dragging = false;
+        c.classList.remove('is-dragging');
+        snapshot();
+        renderHandles();
+      });
+
+      handleEls[h.id] = c;
       handlesG.appendChild(c);
     });
   }
@@ -1479,6 +1878,28 @@
     if (line.kind === 'freehand' || line.kind === 'freehandClosed') {
       wrap.appendChild(checkboxField('Smooth', !!line.smoothed, function (v) {
         updateLine(line.id, { smoothed: v });
+      }));
+    }
+
+    // Primitive parameters (cx/cy/r for circle, w/h/r for rect, etc.).
+    // Editing any value regenerates the path live.
+    if (PRIMITIVES[line.kind] && line.params) {
+      wrap.appendChild(divider('Parameters'));
+      const PRIM = PRIMITIVES[line.kind];
+      PRIM.paramFields.forEach(function (entry) {
+        const key = entry[0], label = entry[1];
+        wrap.appendChild(numberField(label, line.params[key], function (v) {
+          line.params = Object.assign({}, line.params, function () {
+            const patch = {}; patch[key] = v; return patch;
+          }());
+          regenerateLineD(line);
+          state.dirty = true;
+          renderLines();
+          scheduleSnapshot();
+        }));
+      });
+      wrap.appendChild(checkboxField('Filled', !!line.filled, function (v) {
+        updateLine(line.id, { filled: v });
       }));
     }
 
@@ -1827,7 +2248,9 @@
         moveLine = {
           lineId: line.id,
           startPt: eventPt(e),
-          origPoints:   line.points.map(function (p) { return { x: p.x, y: p.y }; }),
+          origPoints:   Array.isArray(line.points)
+            ? line.points.map(function (p) { return { x: p.x, y: p.y }; })
+            : null,
           origSegments: Array.isArray(line.segments)
             ? line.segments.map(function (s) {
                 return {
@@ -1836,7 +2259,8 @@
                   endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null
                 };
               })
-            : null
+            : null,
+          origParams: line.params ? Object.assign({}, line.params) : null
         };
       }
       return; // skip tool dispatch
@@ -1852,7 +2276,7 @@
       const dy = cur.y - moveLine.startPt.y;
       const line = state.lines.find(function (l) { return l.id === moveLine.lineId; });
       if (line) {
-        translateLine(line, moveLine.origPoints, moveLine.origSegments, dx, dy);
+        translateLine(line, moveLine.origPoints, moveLine.origSegments, moveLine.origParams, dx, dy);
         state.dirty = true;
         // Sync every visual piece tied to this line: hit + visible
         // path, handles, label.

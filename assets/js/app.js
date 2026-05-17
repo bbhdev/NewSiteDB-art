@@ -86,7 +86,14 @@
             Draggable.create(btn, {
               type: 'x,y',
               inertia: !!window.InertiaPlugin,
-              edgeResistance: 0.25,
+              // Constrain to the viewport so an enthusiastic throw can't
+              // send a button off-screen where it becomes unreachable.
+              // High edgeResistance gives a rubbery feel approaching the
+              // edges instead of a hard stop. Bouncing-off-walls is the
+              // ideal endgame but needs a custom physics loop on top of
+              // GSAP's inertia; deferred for now.
+              bounds: window,
+              edgeResistance: 0.85,
               throwResistance: 1000,
               allowContextMenu: true,
               cursor: 'grab',
@@ -169,10 +176,11 @@
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
-      // Closed loops (freehandClosed kind, or any line with closed=true)
-      // fill with the stroke color so they read as solid shapes on the
-      // live site. Open paths keep fill: none from CSS.
-      if (line.closed && stroke) p.style.fill = stroke;
+      // Fill: `filled` is authoritative when set (true for primitives,
+      // closed-loop freehand, and any explicit author choice); falls
+      // back to `closed` for legacy data without `filled`.
+      const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
+      if (wantsFill && stroke) p.style.fill = stroke;
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
       layer.appendChild(p);
@@ -247,14 +255,17 @@
 
       // Draw-in: stroke-dash reveal across the same scroll range.
       //
-      // Bypass CSS for the dash attributes — set them directly via SVG
-      // presentation attributes and animate via GSAP's `attr:` plugin.
-      // The .style.strokeDashoffset path-of-glory in v0.1.8 worked for
-      // negative offsets but left a phantom dash past the line's end
-      // for positive offsets, presumably because the CSS pipeline
-      // interprets the unitless value differently when sign + vector-
-      // effect: non-scaling-stroke meet. Going attribute-only keeps
-      // the value in pure user-space throughout.
+      // KNOWN QUIRK: the forward (begin → end) direction occasionally
+      // shows a faint "phantom" sliver beyond the path's end at low
+      // scroll progress. The reverse (end → begin) direction does not.
+      // Multiple attempts to fix it (pathLength normalization in v0.1.8,
+      // attribute-based animation in v0.1.9) cleared reverse but left
+      // forward affected — almost certainly a browser-level rendering
+      // quirk in how stroke-dasharray + non-scaling-stroke interact
+      // with positive dashoffsets on stretched viewBoxes. The visual
+      // effect is mild and reads as intentional, so it's left as-is
+      // per the project owner's call. The code below is the cleanest
+      // implementation we landed on.
       //
       // pathLength="1" normalizes all stroke-length calculations to a
       // path of length 1, so dasharray "1 1" and dashoffset ±1 → 0
@@ -303,13 +314,24 @@
       const pathEl = layer.querySelector('path[data-line-id="' + line.id + '"]');
       if (!pathEl) return;
 
-      // Position at the middle authored point if available, else the
-      // path's bbox center (seed lines without `points` use bbox).
+      // Position by line type:
+      //   - primitives: use their geometric center from `params`.
+      //   - free-form lines: middle of `points`.
+      //   - legacy seed data with neither: path bbox center.
       let pos;
-      if (Array.isArray(line.points) && line.points.length) {
+      if (line.params) {
+        const p = line.params;
+        if ('cx' in p && 'cy' in p) {
+          pos = { x: p.cx + 6, y: p.cy + 6 };
+        } else if ('x' in p && 'y' in p && 'w' in p && 'h' in p) {
+          pos = { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 };
+        }
+      }
+      if (!pos && Array.isArray(line.points) && line.points.length) {
         const mid = line.points[Math.floor(line.points.length / 2)];
         pos = { x: mid.x + 6, y: mid.y + 6 };
-      } else {
+      }
+      if (!pos) {
         try {
           const b = pathEl.getBBox();
           pos = { x: b.x + b.width / 2, y: b.y + b.height / 2 };

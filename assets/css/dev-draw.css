@@ -49,6 +49,10 @@ body.editor {
   display: flex;
   gap: 0.25rem;
 }
+.ed-tools-geo {
+  padding-left: 0.5rem;
+  border-left: 1px solid #444;
+}
 .ed-tool {
   background: #3a3a3a;
   color: #ddd;
