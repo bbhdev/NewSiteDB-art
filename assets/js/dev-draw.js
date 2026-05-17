@@ -123,6 +123,105 @@
     return true;
   }
 
+  // ── Modals (help panel, choice dialog) ────────────────────────────
+  // A central place for any prompt that needs more than the browser's
+  // 2-button confirm() — and a substrate for future help content.
+
+  /**
+   * Show a modal with custom buttons. Returns a Promise that resolves
+   * with the chosen button's value (or null on Escape / overlay click).
+   *
+   * opts.title    — header text (optional)
+   * opts.message  — body text or HTML
+   * opts.html     — if true, message is HTML; otherwise plain text
+   * opts.buttons  — [{ label, value, className? }, …]
+   */
+  function showChoiceDialog(opts) {
+    return new Promise(function (resolve) {
+      const overlay = document.createElement('div');
+      overlay.className = 'ed-modal-overlay';
+      const modal = document.createElement('div');
+      modal.className = 'ed-modal';
+
+      if (opts.title) {
+        const h = document.createElement('div');
+        h.className = 'ed-modal-header';
+        const t = document.createElement('h3'); t.textContent = opts.title;
+        h.appendChild(t);
+        const x = document.createElement('button');
+        x.className = 'ed-modal-close'; x.textContent = '×';
+        x.addEventListener('click', function () { cleanup(); resolve(null); });
+        h.appendChild(x);
+        modal.appendChild(h);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'ed-modal-body';
+      if (opts.html) body.innerHTML = opts.message;
+      else {
+        const p = document.createElement('p'); p.textContent = opts.message;
+        body.appendChild(p);
+      }
+      modal.appendChild(body);
+
+      const btnRow = document.createElement('div');
+      btnRow.className = 'ed-modal-buttons';
+      opts.buttons.forEach(function (b) {
+        const btn = document.createElement('button');
+        btn.textContent = b.label;
+        if (b.className) btn.className = b.className;
+        btn.addEventListener('click', function () { cleanup(); resolve(b.value); });
+        btnRow.appendChild(btn);
+      });
+      modal.appendChild(btnRow);
+
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      function cleanup() {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { cleanup(); resolve(null); }
+      }
+      document.addEventListener('keydown', onKey);
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) { cleanup(); resolve(null); }
+      });
+    });
+  }
+
+  // Help-topic registry. More topics can be added later (per tool,
+  // per panel, etc.) and surfaced via showHelp(topicId).
+  const HELP_TOPICS = {
+    select: {
+      title: 'Select mode',
+      html: '\
+        <p>Neutral mode — no drawing happens. Click a tool to switch back to drawing.</p>\
+        <ul>\
+          <li><strong>Click</strong> on a line to select it.</li>\
+          <li><strong>Click again</strong> at the same spot to cycle to the next line beneath.</li>\
+          <li><strong>Drag</strong> a selected line\'s body to move the whole shape.</li>\
+          <li><strong>Drag handles</strong> (cyan dots) to reshape — point handles on free-form lines, parameter handles on primitives.</li>\
+          <li><strong>Esc</strong> or empty-canvas click to deselect.</li>\
+          <li><strong>Backspace</strong> / Delete to remove the selected line.</li>\
+        </ul>\
+        <p>Use the <kbd>Select all</kbd> button alongside this one to grab every line at once and drag them in lockstep.</p>'
+    }
+  };
+
+  function showHelp(topicId) {
+    const topic = HELP_TOPICS[topicId];
+    if (!topic) return;
+    showChoiceDialog({
+      title:   topic.title,
+      message: topic.html,
+      html:    true,
+      buttons: [{ label: 'Close', value: null }]
+    });
+  }
+
   // ── Coord helpers ─────────────────────────────────────────────────
   // Converts client (viewport) pixel coords to viewBox logical coords.
   // Uses getBoundingClientRect so scroll offsets and any future zoom
@@ -909,16 +1008,17 @@
     select: {
       label: 'Select',
       settings: function () {
-        // Compact info icon — the full hint shows in the native tooltip
-        // on hover. Keeps the toolbar from wrapping when the canvas is
-        // narrow, which it does when the sidebar gets wider.
-        const info = document.createElement('span');
+        // Accent-bordered ⓘ button — opens a help panel describing
+        // what selection mode can do. Discoverable and clearly
+        // clickable (the previous dim-gray glyph was easy to miss).
+        // Built on the generic showHelp() so adding more topics is
+        // just another entry in HELP_TOPICS.
+        const info = document.createElement('button');
+        info.type = 'button';
+        info.className = 'ed-info-btn';
         info.textContent = 'ⓘ';
-        info.title = 'click to select · drag to move · drag handles to reshape';
-        info.style.color = '#888';
-        info.style.fontSize = '1.05em';
-        info.style.cursor = 'help';
-        info.style.padding = '0 0.25rem';
+        info.title = 'Help — Select mode';
+        info.addEventListener('click', function () { showHelp('select'); });
         return [info];
       }
       // No onPointerDown / onPointerMove / onPointerUp — dispatcher
@@ -1192,6 +1292,18 @@
   function deleteLine(id) {
     state.lines = state.lines.filter(function (l) { return l.id !== id; });
     if (state.selectedLineId === id) state.selectedLineId = null;
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  function moveLineToGroup(lineId, newGroupId) {
+    const line = state.lines.find(function (l) { return l.id === lineId; });
+    if (!line || line.groupId === newGroupId) return;
+    line.groupId = newGroupId;
+    // Auto-open the destination group so the user sees the move land.
+    state.openGroupIds[newGroupId] = true;
+    state.activeGroupId = newGroupId;
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1502,6 +1614,13 @@
    */
   function renderHandles() {
     handlesG.innerHTML = '';
+    // Select-all mode: one accent-colored marker per line at its
+    // visual center instead of per-vertex handles. Communicates "all
+    // selected" without flooding the canvas with handles.
+    if (state.allSelected) {
+      renderAllSelectedMarkers();
+      return;
+    }
     if (!state.selectedLineId) return;
     const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
     if (!line) return;
@@ -1645,6 +1764,38 @@
     });
   }
 
+  // Geometric / visual center of a line, used by select-all markers
+  // and by labelPositionFor. For primitives this is the shape's actual
+  // center; for free-form lines it's the middle vertex of the points
+  // array (a point that's ON the line, not floating in empty space).
+  function centerOf(line) {
+    if (PRIMITIVES[line.kind] && line.params) {
+      const p = line.params;
+      if ('cx' in p && 'cy' in p) return { x: p.cx, y: p.cy };
+      if ('x' in p && 'w' in p)  return { x: p.x + p.w / 2, y: p.y + p.h / 2 };
+    }
+    if (Array.isArray(line.points) && line.points.length) {
+      const mid = line.points[Math.floor(line.points.length / 2)];
+      return { x: mid.x, y: mid.y };
+    }
+    return null;
+  }
+
+  function renderAllSelectedMarkers() {
+    const r = 7 / state.zoom;
+    state.lines.forEach(function (line) {
+      if (line.hidden) return;
+      const c = centerOf(line);
+      if (!c) return;
+      const dot = document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('cx', c.x);
+      dot.setAttribute('cy', c.y);
+      dot.setAttribute('r',  r);
+      dot.setAttribute('class', 'ed-handle-all');
+      handlesG.appendChild(dot);
+    });
+  }
+
   function sparseHandleIndices(points, minDist) {
     if (points.length <= 1) return points.map(function (_, i) { return i; });
     const md2 = minDist * minDist;
@@ -1701,6 +1852,31 @@
         renderLines();
         renderSelectionPanel();
       });
+      // Make group rows valid drop targets for lines dragged from the
+      // sidebar — dropping a line here re-homes it into this group.
+      row.addEventListener('dragenter', function (e) {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types).indexOf('text/x-line-id') !== -1) {
+          e.preventDefault();
+          row.classList.add('ed-drop-target');
+        }
+      });
+      row.addEventListener('dragover', function (e) {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types).indexOf('text/x-line-id') !== -1) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }
+      });
+      row.addEventListener('dragleave', function () {
+        row.classList.remove('ed-drop-target');
+      });
+      row.addEventListener('drop', function (e) {
+        row.classList.remove('ed-drop-target');
+        const lineId = e.dataTransfer && e.dataTransfer.getData('text/x-line-id');
+        if (lineId) {
+          e.preventDefault();
+          moveLineToGroup(lineId, g.id);
+        }
+      });
       li.appendChild(row);
 
       // Inline list of lines belonging to this group. Hidden by CSS
@@ -1711,6 +1887,13 @@
         .forEach(function (line) {
           const lr = document.createElement('li');
           lr.className = 'ed-line-row' + (line.id === state.selectedLineId ? ' is-selected' : '');
+          // Drag-and-drop source: a line row can be dragged onto any
+          // group row in the sidebar to move the line into that group.
+          lr.draggable = true;
+          lr.addEventListener('dragstart', function (e) {
+            e.dataTransfer.setData('text/x-line-id', line.id);
+            e.dataTransfer.effectAllowed = 'move';
+          });
           const idSpan = document.createElement('span');
           if (line.name) {
             idSpan.className = 'ed-line-name';
@@ -1876,36 +2059,41 @@
 
     selectionPanel.appendChild(wrap);
 
-    // Delete is always available. When the group has lines, the user
-    // gets a choice between deleting JUST the group (lines survive,
-    // re-homed) or deleting the group AND its lines together. Empty
-    // groups skip the dialog and just delete.
+    // Delete is always available. Empty groups: a single confirm.
+    // Non-empty groups: a custom 3-button dialog so the choice
+    // (Cancel / Group only / Group + lines) is one prompt instead of
+    // two chained confirms.
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
     const del = document.createElement('button');
     del.className = 'ed-danger';
     del.textContent = 'Delete group';
-    del.addEventListener('click', function () {
+    del.addEventListener('click', async function () {
       const lineCount = state.lines.filter(function (l) { return l.groupId === g.id; }).length;
       if (lineCount === 0) {
-        if (confirm('Delete empty group "' + g.name + '"?')) deleteGroup(g.id, false);
+        const choice = await showChoiceDialog({
+          title: 'Delete group',
+          message: 'Delete empty group "' + g.name + '"?',
+          buttons: [
+            { label: 'Cancel', value: null },
+            { label: 'Delete', value: 'group', className: 'ed-danger' }
+          ]
+        });
+        if (choice === 'group') deleteGroup(g.id, false);
         return;
       }
-      // 3-way prompt: Cancel / Keep lines (move them) / Delete both.
-      // Browser confirm() is 2-button, so we chain two prompts: first
-      // ask whether to proceed, then ask whether to delete the lines.
-      // Cancel at either step aborts.
-      const proceed = confirm(
-        'Delete group "' + g.name + '"?\n\n' +
-        'It contains ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + '.'
-      );
-      if (!proceed) return;
-      const keepLines = confirm(
-        'Keep the ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + '?\n\n' +
-        'OK   — keep them (they will move to the first remaining group)\n' +
-        'Cancel — delete them along with the group'
-      );
-      deleteGroup(g.id, !keepLines);
+      const choice = await showChoiceDialog({
+        title:   'Delete group',
+        message: 'Delete group "' + g.name + '"? It contains ' +
+                 lineCount + ' line' + (lineCount === 1 ? '' : 's') + '.',
+        buttons: [
+          { label: 'Cancel',         value: null },
+          { label: 'Group only',     value: 'group' },
+          { label: 'Group and lines', value: 'both', className: 'ed-danger' }
+        ]
+      });
+      if (choice === 'group') deleteGroup(g.id, false);
+      else if (choice === 'both')  deleteGroup(g.id, true);
     });
     actions.appendChild(del);
     selectionPanel.appendChild(actions);

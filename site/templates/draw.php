@@ -75,8 +75,12 @@ $payload = json_encode([
     · <span class="ed-version">v<?= esc($v) ?></span>
   </div>
 
+  <div class="ed-tools" role="toolbar" aria-label="Selection">
+    <button type="button" class="ed-tool" data-tool="select" title="Select (S) — no drawing; click to select, drag to move">↖ Select</button>
+    <button type="button" class="ed-tool" id="select-all-btn" title="Select all lines on this page — drag any one to move every line together">Select all</button>
+  </div>
+
   <div class="ed-tools" role="toolbar" aria-label="Drawing tools">
-    <button type="button" class="ed-tool" data-tool="select"         title="Select (S) — no drawing; click to select, drag to move">↖ Select</button>
     <button type="button" class="ed-tool" data-tool="freehand"       title="Freehand (F)">Freehand</button>
     <button type="button" class="ed-tool" data-tool="freehandClosed" title="Closed loop (O) — freehand stroke auto-closes and fills">Loop</button>
     <button type="button" class="ed-tool" data-tool="line"           title="Line (L)">Line</button>
@@ -84,7 +88,7 @@ $payload = json_encode([
     <button type="button" class="ed-tool" data-tool="bezier"         title="Bezier (B) — click anchors, smooth curve through them; Esc/double-click to finish">Bezier</button>
   </div>
 
-  <div class="ed-tools ed-tools-geo" role="toolbar" aria-label="Geometric primitives">
+  <div class="ed-tools" role="toolbar" aria-label="Geometric primitives">
     <button type="button" class="ed-tool" data-tool="circle"  title="Circle — click center, drag for radius">Circle</button>
     <button type="button" class="ed-tool" data-tool="ellipse" title="Ellipse — click center, drag for rx/ry">Ellipse</button>
     <button type="button" class="ed-tool" data-tool="rect"    title="Rectangle — click corner, drag for size">Rect</button>
@@ -106,8 +110,7 @@ $payload = json_encode([
   </div>
 
   <div class="ed-view" role="toolbar" aria-label="View options">
-    <button type="button" id="labels-btn"     title="Show / hide name labels on every named line">Labels</button>
-    <button type="button" id="select-all-btn" title="Select all lines on this page — drag any one to move every line together">Select all</button>
+    <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
   </div>
 
   <div class="ed-spacer"></div>

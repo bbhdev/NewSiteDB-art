@@ -48,22 +48,33 @@ body.editor {
 .ed-tools {
   display: flex;
   gap: 0.25rem;
-}
-.ed-tools-geo {
   padding-left: 0.5rem;
   border-left: 1px solid #444;
 }
-.ed-tool {
+.ed-tools:first-of-type { padding-left: 0; border-left: none; }
+
+/* All top-toolbar buttons share one look so the bar reads as a
+   consistent control strip — same height, same padding, same radius.
+   Active / save / danger keep their accent variants. */
+.ed-toolbar button {
   background: #3a3a3a;
   color: #ddd;
   border: 1px solid #555;
-  padding: 0.4rem 0.75rem;
+  height: 2rem;
+  padding: 0 0.75rem;
   border-radius: 4px;
   cursor: pointer;
   font: inherit;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  min-width: 2rem;
 }
-.ed-tool:hover { background: #4a4a4a; }
-.ed-tool.is-active {
+.ed-toolbar button:hover:not(:disabled) { background: #4a4a4a; }
+.ed-toolbar button:disabled { opacity: 0.3; cursor: not-allowed; }
+.ed-toolbar button.is-active {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
@@ -90,18 +101,7 @@ body.editor {
   padding-left: 0.5rem;
   border-left: 1px solid #444;
 }
-.ed-zoom button {
-  background: #3a3a3a;
-  color: #ddd;
-  border: 1px solid #555;
-  padding: 0.25rem 0.6rem;
-  border-radius: 3px;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-  min-width: 1.8em;
-}
-.ed-zoom button:hover { background: #4a4a4a; }
+.ed-zoom button { font-weight: 600; }
 .ed-zoom #zoom-level {
   display: inline-block;
   min-width: 4em;
@@ -121,21 +121,7 @@ body.editor {
   padding-left: 0.5rem;
   border-left: 1px solid #444;
 }
-.ed-undo button {
-  background: #3a3a3a;
-  color: #ddd;
-  border: 1px solid #555;
-  padding: 0.25rem 0.6rem;
-  border-radius: 3px;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-  min-width: 1.8em;
-  font-size: 1.1em;
-  line-height: 1;
-}
-.ed-undo button:hover:not(:disabled) { background: #4a4a4a; }
-.ed-undo button:disabled { opacity: 0.3; cursor: not-allowed; }
+.ed-undo button { font-weight: 600; font-size: 1.1em; }
 
 .ed-view {
   display: flex;
@@ -144,36 +130,17 @@ body.editor {
   padding-left: 0.5rem;
   border-left: 1px solid #444;
 }
-.ed-view button {
-  background: #3a3a3a;
-  color: #ddd;
-  border: 1px solid #555;
-  padding: 0.3rem 0.65rem;
-  border-radius: 3px;
-  cursor: pointer;
-  font: inherit;
-}
-.ed-view button:hover { background: #4a4a4a; }
-.ed-view button.is-active {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
 
 .ed-spacer { flex: 1; }
 
-.ed-save {
+.ed-toolbar .ed-save {
   background: var(--accent);
   color: white;
-  border: none;
-  padding: 0.4rem 1rem;
-  border-radius: 4px;
-  font: inherit;
+  border-color: var(--accent);
   font-weight: 600;
-  cursor: pointer;
 }
-.ed-save:hover { filter: brightness(1.1); }
-.ed-save:disabled { opacity: 0.5; cursor: progress; }
+.ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+.ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
 .ed-status { min-width: 8em; color: #9c9; font-size: 0.85em; }
 .ed-status.is-error { color: #f88; }
 
@@ -413,6 +380,18 @@ body.editor {
 #draw-surface .ed-handle:hover { fill: #00d9ff; }
 #draw-surface .ed-handle.is-dragging { fill: #00d9ff; cursor: grabbing; }
 
+/* Per-object selection indicator shown in "Select all" mode. One dot
+   per line, sitting at the line's center, in accent color so the
+   user sees clearly which lines are in the group selection without
+   the canvas filling up with per-vertex handles. */
+#draw-surface .ed-handle-all {
+  fill: var(--accent);
+  stroke: white;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
 /* Optional name labels — always legible against any line color.
    Text uses paint-order: stroke fill with a wide white stroke under
    a black fill, so it reads as black text with a white halo on either
@@ -523,6 +502,111 @@ body.editor {
   transform: rotate(90deg);
 }
 .ed-group:not(.is-open) .ed-line-list { display: none; }
+
+/* ── modal overlays (help panel, choice dialogs) ─────────────────── */
+.ed-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ed-modal {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 6px;
+  max-width: 30rem;
+  width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.ed-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid #444;
+}
+.ed-modal-header h3 { margin: 0; font-size: 1rem; font-family: var(--font-body); }
+.ed-modal-close {
+  background: transparent;
+  border: none;
+  color: #ddd;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 1.8rem;
+  height: 1.8rem;
+}
+.ed-modal-close:hover { color: #fff; }
+.ed-modal-body {
+  padding: 0.9rem 1.1rem;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+.ed-modal-body p { margin: 0 0 0.5rem; }
+.ed-modal-body ul { padding-left: 1.2rem; margin: 0 0 0.5rem; }
+.ed-modal-body li { margin-bottom: 0.15rem; }
+.ed-modal-body strong, .ed-modal-body kbd { color: #fff; }
+.ed-modal-buttons {
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  border-top: 1px solid #444;
+}
+.ed-modal-buttons button {
+  background: #3a3a3a;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+}
+.ed-modal-buttons button:hover { background: #4a4a4a; }
+.ed-modal-buttons button.ed-danger {
+  border-color: #855;
+  color: #f88;
+  background: transparent;
+}
+.ed-modal-buttons button.ed-danger:hover { background: #2c1818; color: #fff; }
+.ed-modal-buttons button.ed-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.ed-modal-buttons button.ed-primary:hover { filter: brightness(1.1); }
+
+/* Info-trigger button used as the per-tool help icon. Accent-bordered
+   so it pops out of the dark toolbar — was nearly invisible before. */
+.ed-info-btn {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 0.5rem;
+  cursor: pointer;
+  font: inherit;
+  height: 1.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ed-info-btn:hover { background: var(--accent); color: white; }
+
+/* Sidebar group row that's being hovered while dragging a line over it. */
+.ed-group-row.ed-drop-target {
+  background: rgba(255, 85, 0, 0.18);
+  outline: 2px dashed var(--accent);
+}
+.ed-line-row { cursor: grab; }
+.ed-line-row:active { cursor: grabbing; }
 
 @media (max-width: 800px) {
   .ed-sidebar { width: 100%; height: 40vh; border-right: none; border-bottom: 1px solid #444; }

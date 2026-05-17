@@ -254,8 +254,8 @@
       // which would otherwise drift visually when rotated.
       let originAttr = '50% 50%';
       let useViewBoxOrigin = false;
-      if (line.params) {
-        const pa = line.params;
+      if (lineDef.params) {
+        const pa = lineDef.params;
         if ('cx' in pa && 'cy' in pa) {
           originAttr = pa.cx + 'px ' + pa.cy + 'px';
           useViewBoxOrigin = true;
