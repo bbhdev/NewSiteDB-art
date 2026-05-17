@@ -49,6 +49,7 @@
   const saveStatus     = document.getElementById('save-status');
   const clearLinesBtn  = document.getElementById('clear-lines-btn');
   const helpBtn        = document.getElementById('help-btn');
+  const setOriginBanner = document.getElementById('set-origin-banner');
 
   // Defensive: if any required element is missing, the user is probably
   // serving stale cached HTML against fresh JS (or vice-versa). Log
@@ -538,8 +539,12 @@
    *   - Manual lines shift every point AND every segment control point
    *     so authored curves keep their shape.
    *   - Everything else just shifts points.
+   *   - Any per-line rotateOriginX/Y override is shifted too so the
+   *     pivot follows the line. (Group defaults are NOT touched — they
+   *     are shared by every line in the group and shouldn't move when
+   *     one line moves.)
    */
-  function translateLine(line, origPoints, origSegments, origParams, dx, dy) {
+  function translateLine(line, origPoints, origSegments, origParams, origOverrides, dx, dy) {
     if (PRIMITIVES[line.kind] && origParams) {
       const keys = PRIMITIVES[line.kind].positionKeys;
       line.params = Object.assign({}, origParams);
@@ -548,21 +553,28 @@
           line.params[k] = origParams[k] + (i === 0 ? dx : dy);
         }
       });
-      regenerateLineD(line);
-      return;
+    } else if (origPoints) {
+      line.points = origPoints.map(function (p) { return { x: p.x + dx, y: p.y + dy }; });
+      if (line.kind === 'manual' && Array.isArray(origSegments)) {
+        line.segments = origSegments.map(function (s) {
+          return {
+            cmd: s.cmd,
+            controlPoints: s.controlPoints.map(function (cp) {
+              return { x: cp.x + dx, y: cp.y + dy };
+            }),
+            endpoint: s.endpoint ? { x: s.endpoint.x + dx, y: s.endpoint.y + dy } : null
+          };
+        });
+      }
     }
-    if (!origPoints) return;
-    line.points = origPoints.map(function (p) { return { x: p.x + dx, y: p.y + dy }; });
-    if (line.kind === 'manual' && Array.isArray(origSegments)) {
-      line.segments = origSegments.map(function (s) {
-        return {
-          cmd: s.cmd,
-          controlPoints: s.controlPoints.map(function (cp) {
-            return { x: cp.x + dx, y: cp.y + dy };
-          }),
-          endpoint: s.endpoint ? { x: s.endpoint.x + dx, y: s.endpoint.y + dy } : null
-        };
-      });
+    if (origOverrides) {
+      if (!line.overrides) line.overrides = {};
+      if (Number.isFinite(origOverrides.rotateOriginX)) {
+        line.overrides.rotateOriginX = origOverrides.rotateOriginX + dx;
+      }
+      if (Number.isFinite(origOverrides.rotateOriginY)) {
+        line.overrides.rotateOriginY = origOverrides.rotateOriginY + dy;
+      }
     }
     regenerateLineD(line);
   }
@@ -2612,10 +2624,12 @@
   function startSetRotateOrigin(target) {
     settingOrigin = target;
     canvasWrap.classList.add('ed-set-origin-mode');
+    if (setOriginBanner) setOriginBanner.hidden = false;
   }
   function exitSetRotateOrigin() {
     settingOrigin = null;
     canvasWrap.classList.remove('ed-set-origin-mode');
+    if (setOriginBanner) setOriginBanner.hidden = true;
   }
 
   svg.addEventListener('pointerdown', function (e) {
@@ -2667,7 +2681,8 @@
                   };
                 })
               : null,
-            origParams: l.params ? Object.assign({}, l.params) : null
+            origParams: l.params ? Object.assign({}, l.params) : null,
+            origOverrides: l.overrides ? Object.assign({}, l.overrides) : null
           };
         })
       };
@@ -2697,7 +2712,8 @@
                 };
               })
             : null,
-          origParams: line.params ? Object.assign({}, line.params) : null
+          origParams:    line.params    ? Object.assign({}, line.params)    : null,
+          origOverrides: line.overrides ? Object.assign({}, line.overrides) : null
         };
       }
       return; // skip tool dispatch
@@ -2714,7 +2730,7 @@
       moveAll.origLines.forEach(function (snap) {
         const line = state.lines.find(function (l) { return l.id === snap.id; });
         if (!line) return;
-        translateLine(line, snap.origPoints, snap.origSegments, snap.origParams, dx, dy);
+        translateLine(line, snap.origPoints, snap.origSegments, snap.origParams, snap.origOverrides, dx, dy);
         linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
           .forEach(function (el) { el.setAttribute('d', line.d); });
       });
@@ -2729,7 +2745,7 @@
       const dy = cur.y - moveLine.startPt.y;
       const line = state.lines.find(function (l) { return l.id === moveLine.lineId; });
       if (line) {
-        translateLine(line, moveLine.origPoints, moveLine.origSegments, moveLine.origParams, dx, dy);
+        translateLine(line, moveLine.origPoints, moveLine.origSegments, moveLine.origParams, moveLine.origOverrides, dx, dy);
         state.dirty = true;
         // Sync every visual piece tied to this line: hit + visible
         // path, handles, label.

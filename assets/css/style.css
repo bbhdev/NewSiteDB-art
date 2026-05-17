@@ -70,11 +70,10 @@ body {
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-  /* Rotation/transform-origin must be relative to the path's own
-     bounding box, not the SVG viewport — otherwise rotate=N just
-     pivots everything around (0,0). */
-  transform-box: fill-box;
-  transform-origin: 50% 50%;
+  /* Transforms (translate + rotate) are written directly to each
+     path's SVG `transform` attribute by the runtime, with `rotate`
+     using its built-in `rotate(angle, cx, cy)` origin parameter.
+     No CSS transform-origin needed here. */
 }
 
 h1, h2, h3 {

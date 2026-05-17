@@ -147,6 +147,10 @@ $payload = json_encode([
     </div>
   </aside>
 
+  <div class="ed-mode-banner" id="set-origin-banner" hidden>
+    Click anywhere on the canvas to set the rotation pivot · <kbd>Esc</kbd> to cancel
+  </div>
+
   <main class="ed-canvas-wrap">
     <!-- viewBox spans -600..1800 horizontally and -400..1200 vertically.
          The central 1200×800 area (0,0 → 1200,800) is the live page

@@ -403,11 +403,38 @@ body.editor {
 }
 
 /* While the user is targeting the next click as a rotate-origin
-   point, swap the canvas cursor to a crosshair so the gesture is
-   obvious. Pointer events still flow normally — the JS captures the
-   first click and exits the mode. */
+   point, the canvas cursor changes to a target reticle (custom SVG,
+   accent color) so the mode is unmistakable. The default canvas
+   cursor is already `crosshair`, which made the previous mode swap
+   invisible. */
 .ed-canvas-wrap.ed-set-origin-mode,
-.ed-canvas-wrap.ed-set-origin-mode #draw-surface { cursor: crosshair; }
+.ed-canvas-wrap.ed-set-origin-mode #draw-surface {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='none' stroke='%23ff5500' stroke-width='2'/><circle cx='16' cy='16' r='2' fill='%23ff5500'/><line x1='2' y1='16' x2='12' y2='16' stroke='%23ff5500' stroke-width='2'/><line x1='20' y1='16' x2='30' y2='16' stroke='%23ff5500' stroke-width='2'/><line x1='16' y1='2' x2='16' y2='12' stroke='%23ff5500' stroke-width='2'/><line x1='16' y1='20' x2='16' y2='30' stroke='%23ff5500' stroke-width='2'/></svg>") 16 16, crosshair;
+}
+
+/* Floating banner shown across the canvas while set-origin mode is
+   active. Pointer-events: none so it doesn't intercept the click. */
+.ed-mode-banner {
+  position: fixed;
+  top: calc(48px + 1rem);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: white;
+  padding: 0.55rem 1rem;
+  border-radius: 4px;
+  font-size: 0.9em;
+  z-index: 50;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.ed-mode-banner kbd {
+  background: rgba(255,255,255,0.2);
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
 
 /* Optional name labels — always legible against any line color.
    Text uses paint-order: stroke fill with a wide white stroke under

@@ -271,51 +271,71 @@
         };
       }
 
-      // Rotation pivot. GSAP's `svgOrigin` sets the rotation origin in
-      // absolute SVG user-coords — bypassing the bbox-centered default
-      // that `transformOrigin: 50% 50%` falls back to for SVG paths.
-      // That's what fixes the off-center rotation on primitives whose
-      // bbox center differs from their geometric center (polygons,
-      // stars, asymmetric curves).
+      // ── Rotation pivot ──────────────────────────────────────────
+      // SVG's native `rotate(angle, cx, cy)` syntax has a built-in
+      // origin parameter, so we use the SVG `transform` attribute
+      // directly. Sidesteps the GSAP svgOrigin / CSS transform-box
+      // route that didn't take effect for custom origins.
       //
       // Priority:
-      //   1. Explicit rotateOriginX/Y from the line/group behavior —
-      //      lets the user place the pivot anywhere.
+      //   1. Explicit rotateOriginX/Y from the behavior — lets the
+      //      user place the pivot anywhere on the page.
       //   2. Primitive's geometric center (cx/cy or rect-center).
-      //   3. Nothing set → GSAP falls back to bbox center via
-      //      transformOrigin: '50% 50%'.
-      let svgOriginAttr = null;
+      //   3. Fallback to path's bbox center via getBBox().
+      let originX = 0, originY = 0;
       if (Number.isFinite(behaviors.rotateOriginX) &&
           Number.isFinite(behaviors.rotateOriginY)) {
-        svgOriginAttr = behaviors.rotateOriginX + ' ' + behaviors.rotateOriginY;
+        originX = behaviors.rotateOriginX;
+        originY = behaviors.rotateOriginY;
       } else if (lineDef.params) {
         const pa = lineDef.params;
         if ('cx' in pa && 'cy' in pa) {
-          svgOriginAttr = pa.cx + ' ' + pa.cy;
+          originX = pa.cx; originY = pa.cy;
         } else if ('x' in pa && 'y' in pa && 'w' in pa && 'h' in pa) {
-          svgOriginAttr = (pa.x + pa.w / 2) + ' ' + (pa.y + pa.h / 2);
+          originX = pa.x + pa.w / 2;
+          originY = pa.y + pa.h / 2;
         }
-      }
-
-      const fromState = { x: 0, y: 0, rotation: 0 };
-      const target = {};
-      if (svgOriginAttr) {
-        fromState.svgOrigin = svgOriginAttr;
-        target.svgOrigin    = svgOriginAttr;
       } else {
-        fromState.transformOrigin = '50% 50%';
-        target.transformOrigin    = '50% 50%';
+        try {
+          const b = pathEl.getBBox();
+          originX = b.x + b.width  / 2;
+          originY = b.y + b.height / 2;
+        } catch (e) { /* bbox unavailable for malformed paths */ }
       }
 
-      let hasMotion = false;
-      if (typeof behaviors.translateX === 'number') { target.x        = behaviors.translateX; hasMotion = true; }
-      if (typeof behaviors.translateY === 'number') { target.y        = behaviors.translateY; hasMotion = true; }
-      if (typeof behaviors.rotate     === 'number') { target.rotation = behaviors.rotate;     hasMotion = true; }
+      const tx  = (typeof behaviors.translateX === 'number') ? behaviors.translateX : 0;
+      const ty  = (typeof behaviors.translateY === 'number') ? behaviors.translateY : 0;
+      const rot = (typeof behaviors.rotate     === 'number') ? behaviors.rotate     : 0;
+      const hasMotion = (tx !== 0 || ty !== 0 || rot !== 0);
+
+      // Initial state: identity-equivalent transform. The path renders
+      // exactly at its authored `d` coordinates at scroll 0 — same as
+      // the editor. (Previously GSAP's CSS-based transform plus
+      // transform-box: fill-box was causing subpixel rendering
+      // differences between draw-time and runtime.)
+      pathEl.setAttribute(
+        'transform',
+        'translate(0 0) rotate(0 ' + originX + ' ' + originY + ')'
+      );
 
       if (hasMotion) {
-        gsap.fromTo(pathEl, fromState,
-          Object.assign({}, target, { scrollTrigger: stConfig })
-        );
+        ScrollTrigger.create({
+          trigger: stConfig.trigger,
+          start:   stConfig.start,
+          end:     stConfig.end,
+          scrub:   stConfig.scrub,
+          onUpdate: function (self) {
+            const p   = self.progress;
+            const px  = p * tx;
+            const py  = p * ty;
+            const pr  = p * rot;
+            pathEl.setAttribute(
+              'transform',
+              'translate(' + px + ' ' + py + ') ' +
+              'rotate(' + pr + ' ' + originX + ' ' + originY + ')'
+            );
+          }
+        });
       }
 
       // Draw-in: stroke-dash reveal across the same scroll range.
