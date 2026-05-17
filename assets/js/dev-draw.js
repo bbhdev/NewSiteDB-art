@@ -81,7 +81,7 @@
     openGroupIds:   {},        // groupId → true when expanded in sidebar
     activeGroupId:  null,
     selectedLineId: null,
-    activeToolId:   'freehand',
+    activeToolId:   'select',  // neutral on first load — no accidental strokes
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
     bezierPoints: null,        // active bezier anchors when bezier is mid-draw
@@ -594,6 +594,27 @@
   }
 
   const TOOLS = {
+    /**
+     * Select — neutral mode. No drawing happens; pointerdown skips
+     * the tool dispatcher entirely (no preview, no commit). All the
+     * non-drawing gestures (click-to-select, drag a selected line,
+     * drag a handle) still work, because they're wired separately from
+     * the tool registry. The shortcut S and the leading toolbar button
+     * make it easy to reach when the user just wants to navigate.
+     */
+    select: {
+      label: 'Select',
+      settings: function () {
+        const span = document.createElement('span');
+        span.style.color = '#888';
+        span.textContent = 'click to select · drag to move · drag handles to reshape';
+        return [span];
+      }
+      // No onPointerDown / onPointerMove / onPointerUp — dispatcher
+      // calls them through `tool && tool.onPointerDown ? ...` etc., so
+      // their absence is a clean no-op.
+    },
+
     freehand:       makeFreehandTool(false, 'Freehand'),
     freehandClosed: makeFreehandTool(true,  'Closed loop'),
 
@@ -1940,6 +1961,9 @@
       return;
     }
     if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
+    // Skip tool / view shortcuts when a modifier is held (Cmd+S, Cmd+F,
+    // etc. should stay native — not silently swap the active tool).
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {
       const tool = TOOLS[state.activeToolId];
       if (tool && tool.cancel) tool.cancel();
@@ -1952,6 +1976,7 @@
       return;
     }
     // Tool shortcuts
+    if (e.key === 's' || e.key === 'S') setActiveTool('select');
     if (e.key === 'f' || e.key === 'F') setActiveTool('freehand');
     if (e.key === 'o' || e.key === 'O') setActiveTool('freehandClosed');
     if (e.key === 'l' || e.key === 'L') setActiveTool('line');
@@ -1971,7 +1996,7 @@
   // Initial render. Snapshot the loaded state so the user always has
   // at least one history entry (and can't undo into emptiness).
   renderGrid();
-  setActiveTool('freehand');
+  setActiveTool('select');
   snapshot();
   renderAll();
   centerOnPage();

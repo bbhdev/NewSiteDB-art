@@ -246,34 +246,41 @@
       }
 
       // Draw-in: stroke-dash reveal across the same scroll range.
-      // Direction controls which end the line draws FROM:
-      //   forward  — dashoffset animates from +len down to 0, so the
-      //              dash slides forward along the path, revealing it
-      //              from start to end.
-      //   reverse  — dashoffset animates from −len up to 0; the dash
-      //              slides backward, revealing the line from end to
-      //              start. Same math, different sign on the start.
+      //
+      // Normalize via the SVG `pathLength` attribute: setting it to 1
+      // tells the browser "treat this path as having length 1" for
+      // every stroke-length calculation. Then dasharray "1 1" and
+      // dashoffset ±1 → 0 work no matter how the path is geometrically
+      // stretched (preserveAspectRatio="none") or whether
+      // vector-effect: non-scaling-stroke is on. Without this, the
+      // dash period (in device pixels under non-scaling-stroke) and
+      // getTotalLength (in user units) diverged and the pattern
+      // repeated past the path's visible end — showing a phantom
+      // "second copy" bit beyond the line.
+      //
+      // Direction:
+      //   forward  — dashoffset animates from +1 to 0; dash slides
+      //              forward along the path, revealing it begin → end.
+      //   reverse  — dashoffset animates from −1 to 0; dash slides
+      //              backward, revealing it end → begin.
       if (behaviors.drawIn) {
-        let len = 0;
-        try { len = pathEl.getTotalLength ? pathEl.getTotalLength() : 0; } catch (e) { /* path may be malformed */ }
-        if (len > 0) {
-          const dir = behaviors.drawInDirection === 'reverse' ? -len : len;
-          pathEl.style.strokeDasharray  = len + ' ' + len;
-          pathEl.style.strokeDashoffset = dir;
-          gsap.fromTo(pathEl,
-            { strokeDashoffset: dir },
-            {
-              strokeDashoffset: 0,
-              ease: 'none',
-              scrollTrigger: {
-                trigger: triggerEl,
-                start: 'top bottom',
-                end: 'bottom top',
-                scrub: 1
-              }
+        pathEl.setAttribute('pathLength', '1');
+        const dir = behaviors.drawInDirection === 'reverse' ? -1 : 1;
+        pathEl.style.strokeDasharray  = '1 1';
+        pathEl.style.strokeDashoffset = dir;
+        gsap.fromTo(pathEl,
+          { strokeDashoffset: dir },
+          {
+            strokeDashoffset: 0,
+            ease: 'none',
+            scrollTrigger: {
+              trigger: triggerEl,
+              start: 'top bottom',
+              end: 'bottom top',
+              scrub: 1
             }
-          );
-        }
+          }
+        );
       }
     });
   }

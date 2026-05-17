@@ -76,6 +76,7 @@ $payload = json_encode([
   </div>
 
   <div class="ed-tools" role="toolbar" aria-label="Drawing tools">
+    <button type="button" class="ed-tool" data-tool="select"         title="Select (S) — no drawing; click to select, drag to move">↖ Select</button>
     <button type="button" class="ed-tool" data-tool="freehand"       title="Freehand (F)">Freehand</button>
     <button type="button" class="ed-tool" data-tool="freehandClosed" title="Closed loop (O) — freehand stroke auto-closes and fills">Loop</button>
     <button type="button" class="ed-tool" data-tool="line"           title="Line (L)">Line</button>
