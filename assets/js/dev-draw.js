@@ -237,14 +237,7 @@
           <li><strong>Bezier</strong> — clicks become a smooth curve through every anchor. Esc / double-click finishes.</li>\
           <li><strong>Circle, Ellipse, Rect, Polygon, Star</strong> — click-drag to size.</li>\
         </ul>\
-        <p>Click an existing line on the canvas to select it. Drag its body to move; drag handles to reshape. Click the same spot again to cycle to a line beneath.</p>\
-        <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
-        <p>Drag a line row onto another group in the sidebar to move it between groups.</p>\
-        <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>'
-    },
-    select: {
-      title: 'Select mode',
-      html: '\
+        <h4>Select mode</h4>\
         <p>Neutral mode — no drawing happens. Click a tool to switch back to drawing.</p>\
         <ul>\
           <li><strong>Click</strong> on an object to select it.</li>\
@@ -255,7 +248,12 @@
           <li><strong>Esc</strong> or empty-canvas click to clear the selection.</li>\
           <li><strong>Backspace</strong> / Delete to remove every selected object.</li>\
         </ul>\
-        <p>The <kbd>Select all</kbd> button toggles between "every object selected" and nothing — the same selection list the canvas and sidebar drive.</p>'
+        <p>The <kbd>Select all</kbd> button toggles between "every object selected" and nothing — the same selection list the canvas and sidebar drive.</p>\
+        <h4>Workflow</h4>\
+        <p>Click an existing line on the canvas to select it. Drag its body to move; drag handles to reshape. Click the same spot again to cycle to a line beneath.</p>\
+        <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
+        <p>Drag a line row onto another group in the sidebar to move it between groups.</p>\
+        <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>'
     }
   };
 
@@ -1065,24 +1063,11 @@
      * make it easy to reach when the user just wants to navigate.
      */
     select: {
-      label: 'Select',
-      settings: function () {
-        // Accent-bordered ⓘ button — opens a help panel describing
-        // what selection mode can do. Discoverable and clearly
-        // clickable (the previous dim-gray glyph was easy to miss).
-        // Built on the generic showHelp() so adding more topics is
-        // just another entry in HELP_TOPICS.
-        const info = document.createElement('button');
-        info.type = 'button';
-        info.className = 'ed-info-btn';
-        info.textContent = 'ⓘ';
-        info.title = 'Help — Select mode';
-        info.addEventListener('click', function () { showHelp('select'); });
-        return [info];
-      }
-      // No onPointerDown / onPointerMove / onPointerUp — dispatcher
-      // calls them through `tool && tool.onPointerDown ? ...` etc., so
-      // their absence is a clean no-op.
+      label: 'Select'
+      // No settings / pointer handlers — Select is neutral mode.
+      // The Help button at the bottom-left of the sidebar opens the
+      // general topic, which now also contains the Select-mode
+      // section (was a separate ⓘ icon here, awkward placement).
     },
 
     freehand:       makeFreehandTool(false, 'Freehand'),

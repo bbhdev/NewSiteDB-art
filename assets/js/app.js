@@ -417,7 +417,9 @@
       const l = document.createElementNS(SVG_NS_LOCAL, 'line');
       l.setAttribute('x1', x1); l.setAttribute('y1', y1);
       l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-      l.setAttribute('stroke', '#00FFFF');
+      // Magenta on the live site (the editor uses cyan against its
+      // dark canvas; magenta reads better against the beige page bg).
+      l.setAttribute('stroke', '#FF00FF');
       l.setAttribute('stroke-opacity', opacity);
       l.setAttribute('stroke-width', '1');
       l.style.vectorEffect = 'non-scaling-stroke';
@@ -434,7 +436,7 @@
         if (((x / LABEL_STEP) + (y / LABEL_STEP)) & 1) continue;
         const t = document.createElementNS(SVG_NS_LOCAL, 'text');
         t.setAttribute('x', x + 3); t.setAttribute('y', y + 12);
-        t.setAttribute('fill', '#00FFFF');
+        t.setAttribute('fill', '#FF00FF');
         t.setAttribute('font-size', '10');
         t.setAttribute('font-family', 'ui-monospace, monospace');
         t.style.opacity = '0.75';
