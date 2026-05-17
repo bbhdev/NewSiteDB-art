@@ -1585,11 +1585,8 @@
       g.appendChild(text);
       labelsG.appendChild(g);
 
-      // Now that text is in the DOM, measure it and build the double-
-      // border rect behind it: outer rect with black 2px stroke +
-      // line-color fill, then inner rect 1px inside with a white 1px
-      // stroke. The two strokes interleave so the border reads against
-      // any background.
+      // Now that text is in the DOM, measure it and build the background
+      // rect: white fill with a 3px border in the object's own color.
       const bb = text.getBBox();
       const pad = 4;
       const outer = document.createElementNS(SVG_NS, 'rect');
@@ -1599,17 +1596,9 @@
       outer.setAttribute('width',  (bb.width  + pad * 2).toFixed(1));
       outer.setAttribute('height', (bb.height + pad * 2).toFixed(1));
       outer.setAttribute('rx', 3);
-      outer.style.fill = fill;
+      outer.style.fill   = 'white';
+      outer.style.stroke = fill;
       g.insertBefore(outer, text);
-
-      const inner = document.createElementNS(SVG_NS, 'rect');
-      inner.setAttribute('class', 'ed-label-bg-inner');
-      inner.setAttribute('x',      (bb.x - pad + 1).toFixed(1));
-      inner.setAttribute('y',      (bb.y - pad + 1).toFixed(1));
-      inner.setAttribute('width',  (bb.width  + pad * 2 - 2).toFixed(1));
-      inner.setAttribute('height', (bb.height + pad * 2 - 2).toFixed(1));
-      inner.setAttribute('rx', 2);
-      g.insertBefore(inner, text);
     });
   }
 

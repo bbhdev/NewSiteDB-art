@@ -450,9 +450,6 @@ body.editor {
    button in the toolbar. */
 #draw-surface .ed-label-text {
   fill: #000;
-  stroke: #fff;
-  stroke-width: 3;
-  paint-order: stroke fill;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   font-weight: 600;
@@ -460,15 +457,7 @@ body.editor {
   pointer-events: none;
 }
 #draw-surface .ed-label-bg-outer {
-  stroke: #000;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-  pointer-events: none;
-}
-#draw-surface .ed-label-bg-inner {
-  fill: none;
-  stroke: #fff;
-  stroke-width: 1;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
