@@ -427,9 +427,6 @@
       const text = document.createElementNS(SVG_NS, 'text');
       text.setAttribute('x', 6); text.setAttribute('y', 4);
       text.setAttribute('fill', '#000');
-      text.setAttribute('stroke', '#fff');
-      text.setAttribute('stroke-width', 3);
-      text.setAttribute('paint-order', 'stroke fill');
       text.setAttribute('font-family', 'system-ui, -apple-system, sans-serif');
       text.setAttribute('font-size', 14);
       text.setAttribute('font-weight', 600);
@@ -466,23 +463,11 @@
       outer.setAttribute('width',  (bb.width + pad * 2).toFixed(1));
       outer.setAttribute('height', (bb.height + pad * 2).toFixed(1));
       outer.setAttribute('rx', 3);
-      outer.setAttribute('fill', fill);
-      outer.setAttribute('stroke', '#000');
-      outer.setAttribute('stroke-width', 2);
+      outer.setAttribute('fill', 'white');
+      outer.setAttribute('stroke', fill);
+      outer.setAttribute('stroke-width', 3);
       outer.style.vectorEffect = 'non-scaling-stroke';
       g.insertBefore(outer, text);
-
-      const inner = document.createElementNS(SVG_NS, 'rect');
-      inner.setAttribute('x',      (bb.x - pad + 1).toFixed(1));
-      inner.setAttribute('y',      (bb.y - pad + 1).toFixed(1));
-      inner.setAttribute('width',  (bb.width + pad * 2 - 2).toFixed(1));
-      inner.setAttribute('height', (bb.height + pad * 2 - 2).toFixed(1));
-      inner.setAttribute('rx', 2);
-      inner.setAttribute('fill', 'none');
-      inner.setAttribute('stroke', '#fff');
-      inner.setAttribute('stroke-width', 1);
-      inner.style.vectorEffect = 'non-scaling-stroke';
-      g.insertBefore(inner, text);
     });
   }
 })();
