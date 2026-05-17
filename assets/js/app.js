@@ -271,33 +271,49 @@
         };
       }
 
-      // Rotation/scale origin: for geometric primitives, rotate around
-      // the shape's geometric center (cx, cy) rather than its bounding
-      // box center — the two differ for odd-vertex polygons and stars,
-      // which would otherwise drift visually when rotated.
-      let originAttr = '50% 50%';
-      let useViewBoxOrigin = false;
-      if (lineDef.params) {
+      // Rotation pivot. GSAP's `svgOrigin` sets the rotation origin in
+      // absolute SVG user-coords — bypassing the bbox-centered default
+      // that `transformOrigin: 50% 50%` falls back to for SVG paths.
+      // That's what fixes the off-center rotation on primitives whose
+      // bbox center differs from their geometric center (polygons,
+      // stars, asymmetric curves).
+      //
+      // Priority:
+      //   1. Explicit rotateOriginX/Y from the line/group behavior —
+      //      lets the user place the pivot anywhere.
+      //   2. Primitive's geometric center (cx/cy or rect-center).
+      //   3. Nothing set → GSAP falls back to bbox center via
+      //      transformOrigin: '50% 50%'.
+      let svgOriginAttr = null;
+      if (Number.isFinite(behaviors.rotateOriginX) &&
+          Number.isFinite(behaviors.rotateOriginY)) {
+        svgOriginAttr = behaviors.rotateOriginX + ' ' + behaviors.rotateOriginY;
+      } else if (lineDef.params) {
         const pa = lineDef.params;
         if ('cx' in pa && 'cy' in pa) {
-          originAttr = pa.cx + 'px ' + pa.cy + 'px';
-          useViewBoxOrigin = true;
+          svgOriginAttr = pa.cx + ' ' + pa.cy;
         } else if ('x' in pa && 'y' in pa && 'w' in pa && 'h' in pa) {
-          originAttr = (pa.x + pa.w / 2) + 'px ' + (pa.y + pa.h / 2) + 'px';
-          useViewBoxOrigin = true;
+          svgOriginAttr = (pa.x + pa.w / 2) + ' ' + (pa.y + pa.h / 2);
         }
       }
-      if (useViewBoxOrigin) pathEl.style.transformBox = 'view-box';
 
-      const target = { transformOrigin: originAttr };
+      const fromState = { x: 0, y: 0, rotation: 0 };
+      const target = {};
+      if (svgOriginAttr) {
+        fromState.svgOrigin = svgOriginAttr;
+        target.svgOrigin    = svgOriginAttr;
+      } else {
+        fromState.transformOrigin = '50% 50%';
+        target.transformOrigin    = '50% 50%';
+      }
+
       let hasMotion = false;
       if (typeof behaviors.translateX === 'number') { target.x        = behaviors.translateX; hasMotion = true; }
       if (typeof behaviors.translateY === 'number') { target.y        = behaviors.translateY; hasMotion = true; }
       if (typeof behaviors.rotate     === 'number') { target.rotation = behaviors.rotate;     hasMotion = true; }
 
       if (hasMotion) {
-        gsap.fromTo(pathEl,
-          { x: 0, y: 0, rotation: 0, transformOrigin: originAttr },
+        gsap.fromTo(pathEl, fromState,
           Object.assign({}, target, { scrollTrigger: stConfig })
         );
       }
@@ -398,11 +414,27 @@
       text.setAttribute('font-size', 14);
       text.setAttribute('font-weight', 600);
       text.setAttribute('dominant-baseline', 'hanging');
-      // Match the editor's "Gx <name>" prefix so the runtime preview
-      // (with editor's Labels toggle on) reads identically.
+      // Two-line label: "Gx <name>" on the first line, "(x, y)" coords
+      // on the second. Matches the editor exactly so the user can
+      // compare draw-position vs runtime-position when chasing
+      // initial-position bugs.
       const gIdx = groups.findIndex(function (gg) { return gg.id === line.groupId; });
       const groupTag = gIdx >= 0 ? 'G' + (gIdx + 1) + ' ' : '';
-      text.textContent = groupTag + line.name;
+      const nameSpan = document.createElementNS(SVG_NS, 'tspan');
+      nameSpan.setAttribute('x', 6);
+      nameSpan.textContent = groupTag + line.name;
+      text.appendChild(nameSpan);
+      // Use the same `pos` we computed above (offset by 6,6 from the
+      // line's center) minus the offset to recover the actual center.
+      const cx = pos.x - 6;
+      const cy = pos.y - 6;
+      const coords = document.createElementNS(SVG_NS, 'tspan');
+      coords.setAttribute('x', 6);
+      coords.setAttribute('dy', '1.15em');
+      coords.setAttribute('font-size', 11);
+      coords.setAttribute('font-weight', 400);
+      coords.textContent = '(' + Math.round(cx) + ', ' + Math.round(cy) + ')';
+      text.appendChild(coords);
       g.appendChild(text);
       layer.appendChild(g);
 

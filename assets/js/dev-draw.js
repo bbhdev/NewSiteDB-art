@@ -1549,12 +1549,27 @@
       text.setAttribute('class', 'ed-label-text');
       text.setAttribute('x', 6);
       text.setAttribute('y', 4);
-      // Prefix the label with the group's index "Gn" so the user can
-      // see at a glance which group an on-canvas label belongs to,
-      // matching the index pill in the sidebar.
+      // First line: group prefix (Gx) + line name. Group prefix
+      // matches the pill in the sidebar.
       const gIdx = state.groups.findIndex(function (gg) { return gg.id === line.groupId; });
       const groupTag = gIdx >= 0 ? 'G' + (gIdx + 1) + ' ' : '';
-      text.textContent = groupTag + line.name;
+      const nameSpan = document.createElementNS(SVG_NS, 'tspan');
+      nameSpan.setAttribute('x', 6);
+      nameSpan.textContent = groupTag + line.name;
+      text.appendChild(nameSpan);
+      // Second line: the line's center coords, useful for debugging
+      // initial-position issues (same coords are visible on the live
+      // site when Labels is on, so the user can compare drawing vs
+      // runtime placement).
+      const center = centerOf(line);
+      if (center) {
+        const coords = document.createElementNS(SVG_NS, 'tspan');
+        coords.setAttribute('x', 6);
+        coords.setAttribute('dy', '1.15em');
+        coords.setAttribute('class', 'ed-label-coords');
+        coords.textContent = '(' + Math.round(center.x) + ', ' + Math.round(center.y) + ')';
+        text.appendChild(coords);
+      }
       g.appendChild(text);
       labelsG.appendChild(g);
 
@@ -1645,6 +1660,11 @@
     if (!state.selectedLineId) return;
     const line = state.lines.find(function (l) { return l.id === state.selectedLineId; });
     if (!line) return;
+
+    // If the selected line has an explicit rotation pivot (via its own
+    // override or its group's default), draw a crosshair at that point
+    // so the user can see where rotations will pivot before saving.
+    renderRotateOriginMarker(line);
 
     // Handle radius is in viewBox units, but we want a constant visual
     // size regardless of zoom — so divide by zoom.
@@ -1800,6 +1820,33 @@
       return { x: mid.x, y: mid.y };
     }
     return null;
+  }
+
+  function renderRotateOriginMarker(line) {
+    const group = state.groups.find(function (g) { return g.id === line.groupId; });
+    const ov  = line.overrides || {};
+    const gd  = (group && group.defaults) || {};
+    // Effective pivot = line override or group default. Either coord
+    // missing → no custom pivot, no marker.
+    const ox = Number.isFinite(ov.rotateOriginX) ? ov.rotateOriginX : gd.rotateOriginX;
+    const oy = Number.isFinite(ov.rotateOriginY) ? ov.rotateOriginY : gd.rotateOriginY;
+    if (!Number.isFinite(ox) || !Number.isFinite(oy)) return;
+    const size = 12 / state.zoom;
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'ed-rotate-origin');
+    const h = document.createElementNS(SVG_NS, 'line');
+    h.setAttribute('x1', ox - size); h.setAttribute('y1', oy);
+    h.setAttribute('x2', ox + size); h.setAttribute('y2', oy);
+    g.appendChild(h);
+    const v = document.createElementNS(SVG_NS, 'line');
+    v.setAttribute('x1', ox); v.setAttribute('y1', oy - size);
+    v.setAttribute('x2', ox); v.setAttribute('y2', oy + size);
+    g.appendChild(v);
+    const c = document.createElementNS(SVG_NS, 'circle');
+    c.setAttribute('cx', ox); c.setAttribute('cy', oy);
+    c.setAttribute('r', 2 / state.zoom);
+    g.appendChild(c);
+    handlesG.appendChild(g);
   }
 
   function renderAllSelectedMarkers() {
@@ -2078,6 +2125,15 @@
     wrap.appendChild(numberField('TranslateX', g.defaults.translateX, function (v) { updateGroupDefaults(g.id, { translateX: v }); }));
     wrap.appendChild(numberField('TranslateY', g.defaults.translateY, function (v) { updateGroupDefaults(g.id, { translateY: v }); }));
     wrap.appendChild(numberField('Rotate',     g.defaults.rotate,     function (v) { updateGroupDefaults(g.id, { rotate: v }); }));
+    // Rotation pivot — leave blank for "use the shape's natural center"
+    // (geometric center for primitives, bbox center for free-form).
+    // Fill with explicit X/Y for off-center rotations; or click
+    // "Set on canvas" then click anywhere on the surface to drop the
+    // pivot visually.
+    wrap.appendChild(numberField('Rotate origin X', g.defaults.rotateOriginX, function (v) { updateGroupDefaults(g.id, { rotateOriginX: v }); }));
+    wrap.appendChild(numberField('Rotate origin Y', g.defaults.rotateOriginY, function (v) { updateGroupDefaults(g.id, { rotateOriginY: v }); }));
+    wrap.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'group', id: g.id }); }));
+
     wrap.appendChild(checkboxField('Draw-in', !!g.defaults.drawIn, function (v) { updateGroupDefaults(g.id, { drawIn: v }); }));
     wrap.appendChild(selectField('Direction', g.defaults.drawInDirection || 'forward', [
       { value: 'forward', label: 'Begin → end' },
@@ -2207,6 +2263,12 @@
     wrap.appendChild(overrideNumberField('TranslateX', ov.translateX, group && group.defaults.translateX, function (v) { updateLineOverride(line.id, 'translateX', v); }));
     wrap.appendChild(overrideNumberField('TranslateY', ov.translateY, group && group.defaults.translateY, function (v) { updateLineOverride(line.id, 'translateY', v); }));
     wrap.appendChild(overrideNumberField('Rotate',     ov.rotate,     group && group.defaults.rotate,     function (v) { updateLineOverride(line.id, 'rotate', v); }));
+    // Per-line rotation pivot — overrides the group default (or the
+    // shape's natural center if the group also has none).
+    wrap.appendChild(overrideNumberField('Rotate origin X', ov.rotateOriginX, group && group.defaults.rotateOriginX, function (v) { updateLineOverride(line.id, 'rotateOriginX', v); }));
+    wrap.appendChild(overrideNumberField('Rotate origin Y', ov.rotateOriginY, group && group.defaults.rotateOriginY, function (v) { updateLineOverride(line.id, 'rotateOriginY', v); }));
+    wrap.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'line', id: line.id }); }));
+
     wrap.appendChild(overrideCheckboxField('Draw-in', ov.drawIn, group && group.defaults.drawIn, function (v) { updateLineOverride(line.id, 'drawIn', v); }));
     wrap.appendChild(overrideSelectField('Direction', ov.drawInDirection,
       group && group.defaults.drawInDirection || 'forward',
@@ -2409,6 +2471,22 @@
     });
   }
 
+  function setOriginButton(onClick) {
+    // A field row whose right column is a button. Empty label keeps
+    // the grid layout aligned with the number fields above.
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = '';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ed-mini';
+    btn.textContent = 'Set on canvas →';
+    btn.title = 'Click here, then click anywhere on the canvas to set the rotation origin to that point.';
+    btn.addEventListener('click', onClick);
+    wrap.appendChild(lbl); wrap.appendChild(btn);
+    return wrap;
+  }
+
   function divider(label) {
     const el = document.createElement('div');
     el.style.color = '#888';
@@ -2526,10 +2604,43 @@
   // every line on the page together. The original geometry of every
   // line is captured at drag start so the translation stays rigid.
   let moveAll = null;  // { startPt, origLines: [{ id, origPoints, origSegments, origParams }, …] }
+  // Set-rotate-origin mode: the user clicked "Set on canvas →" in a
+  // panel; the next canvas click writes that point into the active
+  // target's rotateOriginX / Y, then mode exits.
+  let settingOrigin = null; // { type: 'group'|'line', id: '…' }
+
+  function startSetRotateOrigin(target) {
+    settingOrigin = target;
+    canvasWrap.classList.add('ed-set-origin-mode');
+  }
+  function exitSetRotateOrigin() {
+    settingOrigin = null;
+    canvasWrap.classList.remove('ed-set-origin-mode');
+  }
 
   svg.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
     e.preventDefault();
+
+    // Set-rotate-origin mode: consume this click as the origin and
+    // exit the mode. Don't run any other behavior (no tool, no select,
+    // no move).
+    if (settingOrigin) {
+      const pt = eventPt(e);
+      const x = Math.round(pt.x * 10) / 10;
+      const y = Math.round(pt.y * 10) / 10;
+      if (settingOrigin.type === 'group') {
+        updateGroupDefaults(settingOrigin.id, { rotateOriginX: x, rotateOriginY: y });
+      } else if (settingOrigin.type === 'line') {
+        updateLineOverride(settingOrigin.id, 'rotateOriginX', x);
+        updateLineOverride(settingOrigin.id, 'rotateOriginY', y);
+      }
+      exitSetRotateOrigin();
+      renderSelectionPanel(); // refresh the input fields with new values
+      renderHandles();        // re-render so the pivot marker shows
+      return;
+    }
+
     svg.setPointerCapture(e.pointerId);
     pointerActive = true;
     downClient = { x: e.clientX, y: e.clientY };
@@ -2762,6 +2873,9 @@
     // etc. should stay native — not silently swap the active tool).
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {
+      // Escape cancels the set-rotate-origin gesture before anything
+      // else, since it's the most "active" mode the user can be in.
+      if (settingOrigin) { exitSetRotateOrigin(); return; }
       const tool = TOOLS[state.activeToolId];
       if (tool && tool.cancel) tool.cancel();
       state.selectedLineId = null;

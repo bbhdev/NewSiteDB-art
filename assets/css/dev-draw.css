@@ -387,6 +387,28 @@ body.editor {
   pointer-events: none;
 }
 
+/* Crosshair marking the selected line's effective rotation pivot.
+   Bright yellow so it pops against any line color; non-scaling so it
+   stays the same visual size at any zoom. */
+.ed-rotate-origin line {
+  stroke: #ffd400;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.ed-rotate-origin circle {
+  fill: #ffd400;
+  stroke: black;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* While the user is targeting the next click as a rotate-origin
+   point, swap the canvas cursor to a crosshair so the gesture is
+   obvious. Pointer events still flow normally — the JS captures the
+   first click and exits the mode. */
+.ed-canvas-wrap.ed-set-origin-mode,
+.ed-canvas-wrap.ed-set-origin-mode #draw-surface { cursor: crosshair; }
+
 /* Optional name labels — always legible against any line color.
    Text uses paint-order: stroke fill with a wide white stroke under
    a black fill, so it reads as black text with a white halo on either
@@ -416,6 +438,11 @@ body.editor {
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
+}
+#draw-surface .ed-label-coords {
+  font-size: 0.8em;
+  font-weight: 400;
+  opacity: 0.85;
 }
 #draw-surface path.is-preview {
   stroke: #888;
