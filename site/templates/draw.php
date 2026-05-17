@@ -100,7 +100,7 @@ $payload = json_encode([
 
   <div class="ed-zoom" role="toolbar" aria-label="Zoom">
     <button type="button" id="zoom-out"   title="Zoom out (−)">−</button>
-    <span    id="zoom-level" title="Click to reset to 100%">100%</span>
+    <span    id="zoom-level" title="Click to enter an exact zoom percentage">100%</span>
     <button type="button" id="zoom-in"    title="Zoom in (+)">+</button>
   </div>
 

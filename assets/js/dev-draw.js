@@ -2561,7 +2561,18 @@
   helpBtn.addEventListener('click', function () { showHelp('general'); });
   zoomInBtn.addEventListener('click',  function () { zoomIn();  });
   zoomOutBtn.addEventListener('click', function () { zoomOut(); });
-  zoomLevelEl.addEventListener('click', zoomReset);
+  // Click the percentage to type an exact zoom value. Most fine-
+  // grained way to dial in a target zoom for direct comparison with
+  // the live page. Out-of-range / unparseable inputs are ignored.
+  // (Reset to 100% is just typing 100.)
+  zoomLevelEl.addEventListener('click', function () {
+    const current = Math.round(state.zoom * 100);
+    const input = prompt('Zoom percent (25 – 400):', current);
+    if (input == null) return;
+    const v = parseFloat(input);
+    if (Number.isFinite(v) && v >= 25 && v <= 400) setZoom(v / 100);
+  });
+  zoomLevelEl.title = 'Click to type an exact zoom percentage';
   undoBtn.addEventListener('click', undo);
   redoBtn.addEventListener('click', redo);
   labelsBtn.addEventListener('click', toggleLabels);
@@ -2575,9 +2586,11 @@
   canvasWrap.addEventListener('wheel', function (e) {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    // Very fine 2.5% per tick — toolbar buttons use 1.25× for bigger
-    // jumps; the wheel is for dialing in precise zoom levels.
-    const factor = e.deltaY < 0 ? 1.025 : (1 / 1.025);
+    // Very fine 1.5% per tick — toolbar buttons use 1.25× for bigger
+    // jumps; the wheel is for dialing in precise zoom levels (e.g.,
+    // matching the live viewport's effective zoom for screenshot
+    // comparison).
+    const factor = e.deltaY < 0 ? 1.015 : (1 / 1.015);
     setZoom(state.zoom * factor, e.clientX, e.clientY);
   }, { passive: false });
 
