@@ -247,31 +247,32 @@
 
       // Draw-in: stroke-dash reveal across the same scroll range.
       //
-      // Normalize via the SVG `pathLength` attribute: setting it to 1
-      // tells the browser "treat this path as having length 1" for
-      // every stroke-length calculation. Then dasharray "1 1" and
-      // dashoffset ±1 → 0 work no matter how the path is geometrically
-      // stretched (preserveAspectRatio="none") or whether
-      // vector-effect: non-scaling-stroke is on. Without this, the
-      // dash period (in device pixels under non-scaling-stroke) and
-      // getTotalLength (in user units) diverged and the pattern
-      // repeated past the path's visible end — showing a phantom
-      // "second copy" bit beyond the line.
+      // Bypass CSS for the dash attributes — set them directly via SVG
+      // presentation attributes and animate via GSAP's `attr:` plugin.
+      // The .style.strokeDashoffset path-of-glory in v0.1.8 worked for
+      // negative offsets but left a phantom dash past the line's end
+      // for positive offsets, presumably because the CSS pipeline
+      // interprets the unitless value differently when sign + vector-
+      // effect: non-scaling-stroke meet. Going attribute-only keeps
+      // the value in pure user-space throughout.
+      //
+      // pathLength="1" normalizes all stroke-length calculations to a
+      // path of length 1, so dasharray "1 1" and dashoffset ±1 → 0
+      // work regardless of the path's actual geometric length or any
+      // non-uniform transform.
       //
       // Direction:
-      //   forward  — dashoffset animates from +1 to 0; dash slides
-      //              forward along the path, revealing it begin → end.
-      //   reverse  — dashoffset animates from −1 to 0; dash slides
-      //              backward, revealing it end → begin.
+      //   forward  — dashoffset animates from +1 to 0; reveals begin → end.
+      //   reverse  — dashoffset animates from −1 to 0; reveals end → begin.
       if (behaviors.drawIn) {
-        pathEl.setAttribute('pathLength', '1');
+        pathEl.setAttribute('pathLength',       '1');
+        pathEl.setAttribute('stroke-dasharray', '1 1');
         const dir = behaviors.drawInDirection === 'reverse' ? -1 : 1;
-        pathEl.style.strokeDasharray  = '1 1';
-        pathEl.style.strokeDashoffset = dir;
+        pathEl.setAttribute('stroke-dashoffset', String(dir));
         gsap.fromTo(pathEl,
-          { strokeDashoffset: dir },
+          { attr: { 'stroke-dashoffset': dir } },
           {
-            strokeDashoffset: 0,
+            attr: { 'stroke-dashoffset': 0 },
             ease: 'none',
             scrollTrigger: {
               trigger: triggerEl,
