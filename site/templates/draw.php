@@ -80,6 +80,7 @@ $payload = json_encode([
     <button type="button" class="ed-tool" data-tool="freehandClosed" title="Closed loop (O) — freehand stroke auto-closes and fills">Loop</button>
     <button type="button" class="ed-tool" data-tool="line"           title="Line (L)">Line</button>
     <button type="button" class="ed-tool" data-tool="lineChain"      title="Line chain (C) — click to extend, Esc/double-click to finish">Chain</button>
+    <button type="button" class="ed-tool" data-tool="bezier"         title="Bezier (B) — click anchors, smooth curve through them; Esc/double-click to finish">Bezier</button>
   </div>
 
   <div class="ed-tool-settings" id="tool-settings"></div>
@@ -130,6 +131,10 @@ $payload = json_encode([
     <p class="ed-help">
       <strong>Tips:</strong> Click an empty space in the canvas with a tool to draw. Click an existing line to select it and edit overrides. In chain mode, click to add segments; Esc or double-click to finish.
     </p>
+
+    <div class="ed-danger-zone">
+      <button type="button" id="clear-lines-btn" class="ed-mini ed-danger">Clear all lines</button>
+    </div>
   </aside>
 
   <main class="ed-canvas-wrap">

@@ -293,6 +293,15 @@ body.editor {
   box-sizing: border-box;
 }
 .ed-field input[type="checkbox"] { justify-self: start; }
+.ed-field select {
+  background: #111;
+  color: #eee;
+  border: 1px solid #444;
+  padding: 0.25rem 0.4rem;
+  border-radius: 3px;
+  font: inherit;
+  width: 100%;
+}
 .ed-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .ed-actions button {
   background: #3a3a3a;
@@ -321,6 +330,16 @@ body.editor {
   line-height: 1.4;
 }
 .ed-help strong { color: #ccc; }
+
+.ed-danger-zone {
+  margin: 0 0.75rem 0.75rem;
+}
+.ed-mini.ed-danger {
+  background: transparent;
+  border-color: #855;
+  color: #f88;
+}
+.ed-mini.ed-danger:hover { background: #2c1818; color: #fff; }
 
 /* ── canvas SVG ──────────────────────────────────────────────────── */
 #draw-surface {

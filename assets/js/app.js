@@ -246,14 +246,22 @@
       }
 
       // Draw-in: stroke-dash reveal across the same scroll range.
+      // Direction controls which end the line draws FROM:
+      //   forward  — dashoffset animates from +len down to 0, so the
+      //              dash slides forward along the path, revealing it
+      //              from start to end.
+      //   reverse  — dashoffset animates from −len up to 0; the dash
+      //              slides backward, revealing the line from end to
+      //              start. Same math, different sign on the start.
       if (behaviors.drawIn) {
         let len = 0;
         try { len = pathEl.getTotalLength ? pathEl.getTotalLength() : 0; } catch (e) { /* path may be malformed */ }
         if (len > 0) {
+          const dir = behaviors.drawInDirection === 'reverse' ? -len : len;
           pathEl.style.strokeDasharray  = len + ' ' + len;
-          pathEl.style.strokeDashoffset = len;
+          pathEl.style.strokeDashoffset = dir;
           gsap.fromTo(pathEl,
-            { strokeDashoffset: len },
+            { strokeDashoffset: dir },
             {
               strokeDashoffset: 0,
               ease: 'none',

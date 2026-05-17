@@ -46,6 +46,7 @@
   const newColorBtn    = document.getElementById('new-color-btn');
   const saveBtn        = document.getElementById('save-btn');
   const saveStatus     = document.getElementById('save-status');
+  const clearLinesBtn  = document.getElementById('clear-lines-btn');
 
   // Defensive: if any required element is missing, the user is probably
   // serving stale cached HTML against fresh JS (or vice-versa). Log
@@ -60,7 +61,8 @@
                      labelsG, labelsBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
-                     saveBtn, saveStatus, zoomInBtn, zoomOutBtn, zoomLevelEl,
+                     saveBtn, saveStatus, clearLinesBtn,
+                     zoomInBtn, zoomOutBtn, zoomLevelEl,
                      undoBtn, redoBtn };
   const missing = Object.keys(required).filter(function (k) { return !required[k]; });
   if (missing.length) {
@@ -82,6 +84,7 @@
     activeToolId:   'freehand',
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
+    bezierPoints: null,        // active bezier anchors when bezier is mid-draw
     zoom: 1,                   // canvas zoom factor (1 = 100%, 2 = 200%, …)
     // Editor-local view toggle, persisted to localStorage so it survives
     // reloads. When on, every named line gets a colored label rendered
@@ -393,6 +396,12 @@
       return;
     }
     if (!Array.isArray(line.points) || !line.points.length) return;
+    if (line.kind === 'bezier') {
+      // Auto-smooth curve through every anchor. Closed bezier loops
+      // get a Z to seal back to the first point.
+      line.d = bezierThroughPoints(line.points) + (line.closed ? ' Z' : '');
+      return;
+    }
     const smoothable = (line.kind === 'freehand' || line.kind === 'freehandClosed');
     const smooth = smoothable && !!line.smoothed;
     let d = pathFromPoints(line.points, smooth);
@@ -419,6 +428,40 @@
       });
     }
     regenerateLineD(line);
+  }
+
+  /**
+   * Build a cubic-Bezier path that passes smoothly through a list of
+   * anchor points (Catmull-Rom → Bezier conversion with tension 1).
+   *
+   * For each interior pair (P1, P2), the cubic's control points are:
+   *   cp1 = P1 + (P2 − P0) / 6
+   *   cp2 = P2 − (P3 − P1) / 6
+   * where P0 and P3 are the neighbors on either side. Endpoints reuse
+   * themselves so the curve doesn't "fly out" past the first or last
+   * anchor. The result feels like the hand-authored wavy seed lines —
+   * smooth curves through every click.
+   */
+  function bezierThroughPoints(points) {
+    if (!points.length) return '';
+    if (points.length === 1) return 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y);
+    if (points.length === 2) {
+      return 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y) +
+             ' L ' + fmt(points[1].x) + ' ' + fmt(points[1].y);
+    }
+    let d = 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i - 1] || points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2] || points[i + 1];
+      const cp1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+      const cp2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+      d += ' C ' + fmt(cp1.x) + ' ' + fmt(cp1.y) +
+           ' '  + fmt(cp2.x) + ' ' + fmt(cp2.y) +
+           ' '  + fmt(p2.x)  + ' ' + fmt(p2.y);
+    }
+    return d;
   }
 
   function pathFromPoints(points, smooth) {
@@ -665,6 +708,90 @@
           this._committedPreview.setAttribute('d', d);
         }
       }
+    },
+
+    /**
+     * Bezier — click anchors to drop them; the path is rendered as a
+     * smooth cubic curve passing through every anchor (Catmull-Rom →
+     * cubic Bezier). Esc or double-click finishes. Same multi-click
+     * UX as Chain mode; the curve type is what differs.
+     */
+    bezier: {
+      label: 'Bezier',
+      settings: function () {
+        const span = document.createElement('span');
+        span.style.color = '#888';
+        span.textContent = state.bezierPoints
+          ? 'bezier: ' + state.bezierPoints.length + ' anchor' +
+            (state.bezierPoints.length === 1 ? '' : 's') +
+            ' — Esc or double-click to finish'
+          : 'click to drop anchors';
+        return [span];
+      },
+      onPointerDown: function (pt) {
+        if (!state.bezierPoints) {
+          state.bezierPoints = [pt];
+        } else {
+          const prev = state.bezierPoints[state.bezierPoints.length - 1];
+          const dx = pt.x - prev.x, dy = pt.y - prev.y;
+          if (dx * dx + dy * dy < 1) return; // ignore double-click duplicates
+          state.bezierPoints.push(pt);
+        }
+        this._updateCommittedPreview();
+        renderToolSettings();
+      },
+      onPointerMove: function (pt) {
+        if (!state.bezierPoints || !state.bezierPoints.length) return;
+        // Live preview: smooth curve through (anchors so far + cursor)
+        // so the user sees what the next click will produce.
+        const previewPts = state.bezierPoints.concat([pt]);
+        if (!this._cursorPreview) {
+          this._cursorPreview = createPath('is-preview', bezierThroughPoints(previewPts));
+          previewG.appendChild(this._cursorPreview);
+        } else {
+          this._cursorPreview.setAttribute('d', bezierThroughPoints(previewPts));
+        }
+      },
+      onPointerUp: function () { /* chain advances on pointer DOWN */ },
+      finish: function () {
+        if (state.bezierPoints && state.bezierPoints.length >= 2) {
+          commitLine({
+            kind:     'bezier',
+            points:   state.bezierPoints,
+            smoothed: false,
+            closed:   false
+          });
+        }
+        if (this._committedPreview) { this._committedPreview.remove(); this._committedPreview = null; }
+        if (this._cursorPreview)    { this._cursorPreview.remove();    this._cursorPreview    = null; }
+        state.bezierPoints = null;
+        renderToolSettings();
+      },
+      cancel: function () {
+        if (this._committedPreview) { this._committedPreview.remove(); this._committedPreview = null; }
+        if (this._cursorPreview)    { this._cursorPreview.remove();    this._cursorPreview    = null; }
+        state.bezierPoints = null;
+        renderToolSettings();
+      },
+      _updateCommittedPreview: function () {
+        if (!state.bezierPoints || state.bezierPoints.length < 2) {
+          if (this._committedPreview) {
+            this._committedPreview.remove();
+            this._committedPreview = null;
+          }
+          return;
+        }
+        const d = bezierThroughPoints(state.bezierPoints);
+        if (!this._committedPreview) {
+          this._committedPreview = createPath('', d);
+          this._committedPreview.style.stroke = '#ccc';
+          this._committedPreview.style.strokeWidth = '2';
+          this._committedPreview.style.pointerEvents = 'none';
+          previewG.appendChild(this._committedPreview);
+        } else {
+          this._committedPreview.setAttribute('d', d);
+        }
+      }
     }
   };
 
@@ -734,12 +861,25 @@
   }
 
   function deleteGroup(id) {
-    if (state.groups.length <= 1) return;
-    state.groups = state.groups.filter(function (g) { return g.id !== id; });
-    // Re-home orphan lines into the first remaining group.
-    const fallback = state.groups[0].id;
-    state.lines.forEach(function (l) { if (l.groupId === id) l.groupId = fallback; });
-    if (state.activeGroupId === id) state.activeGroupId = fallback;
+    if (state.groups.length > 1) {
+      state.groups = state.groups.filter(function (g) { return g.id !== id; });
+      // Re-home orphan lines into the first remaining group.
+      const fallback = state.groups[0].id;
+      state.lines.forEach(function (l) { if (l.groupId === id) l.groupId = fallback; });
+      if (state.activeGroupId === id) state.activeGroupId = fallback;
+    } else {
+      // Deleting the LAST group — replace it with a fresh default so
+      // lines aren't orphaned. The user can rename it after; this
+      // keeps "Delete group" always functional, including for a fresh
+      // page with just one group.
+      const replacement = defaultGroup();
+      state.groups = [replacement];
+      state.lines.forEach(function (l) { l.groupId = replacement.id; });
+      state.activeGroupId = replacement.id;
+    }
+    state.openGroupIds = {};
+    state.openGroupIds[state.activeGroupId] = true;
+    state.selectedLineId = null;
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1191,6 +1331,18 @@
     });
   }
 
+  function clearAllLines() {
+    if (!state.lines.length) return;
+    const n = state.lines.length;
+    if (!confirm('Delete all ' + n + ' line' + (n === 1 ? '' : 's') +
+                 ' from this page?\n\nThis can be undone (Cmd+Z).')) return;
+    state.lines = [];
+    state.selectedLineId = null;
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
   function addColor() {
     state.palette.push({
       id: uid('c'),
@@ -1242,23 +1394,32 @@
     wrap.appendChild(numberField('TranslateY', g.defaults.translateY, function (v) { updateGroupDefaults(g.id, { translateY: v }); }));
     wrap.appendChild(numberField('Rotate',     g.defaults.rotate,     function (v) { updateGroupDefaults(g.id, { rotate: v }); }));
     wrap.appendChild(checkboxField('Draw-in', !!g.defaults.drawIn, function (v) { updateGroupDefaults(g.id, { drawIn: v }); }));
+    wrap.appendChild(selectField('Direction', g.defaults.drawInDirection || 'forward', [
+      { value: 'forward', label: 'Begin → end' },
+      { value: 'reverse', label: 'End → begin' }
+    ], function (v) { updateGroupDefaults(g.id, { drawInDirection: v }); }));
 
     selectionPanel.appendChild(wrap);
 
-    if (state.groups.length > 1) {
-      const actions = document.createElement('div');
-      actions.className = 'ed-actions';
-      const del = document.createElement('button');
-      del.className = 'ed-danger';
-      del.textContent = 'Delete group';
-      del.addEventListener('click', function () {
-        if (confirm('Delete group "' + g.name + '"? Its lines will move to the first remaining group.')) {
-          deleteGroup(g.id);
-        }
-      });
-      actions.appendChild(del);
-      selectionPanel.appendChild(actions);
-    }
+    // Delete is always available. When this is the last remaining
+    // group, deleteGroup replaces it with a fresh default so existing
+    // lines have somewhere to live.
+    const actions = document.createElement('div');
+    actions.className = 'ed-actions';
+    const del = document.createElement('button');
+    del.className = 'ed-danger';
+    del.textContent = 'Delete group';
+    del.addEventListener('click', function () {
+      const lineCount = state.lines.filter(function (l) { return l.groupId === g.id; }).length;
+      const msg = (state.groups.length > 1)
+        ? 'Delete group "' + g.name + '"?' +
+          (lineCount ? ' Its ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') +
+                       ' will move to the first remaining group.' : '')
+        : 'Delete the only group "' + g.name + '"? It will be replaced with a fresh default group; existing lines are kept.';
+      if (confirm(msg)) deleteGroup(g.id);
+    });
+    actions.appendChild(del);
+    selectionPanel.appendChild(actions);
   }
 
   function renderLinePanel(line) {
@@ -1314,6 +1475,13 @@
     wrap.appendChild(overrideNumberField('TranslateY', ov.translateY, group && group.defaults.translateY, function (v) { updateLineOverride(line.id, 'translateY', v); }));
     wrap.appendChild(overrideNumberField('Rotate',     ov.rotate,     group && group.defaults.rotate,     function (v) { updateLineOverride(line.id, 'rotate', v); }));
     wrap.appendChild(overrideCheckboxField('Draw-in', ov.drawIn, group && group.defaults.drawIn, function (v) { updateLineOverride(line.id, 'drawIn', v); }));
+    wrap.appendChild(overrideSelectField('Direction', ov.drawInDirection,
+      group && group.defaults.drawInDirection || 'forward',
+      [
+        { value: 'forward', label: 'Begin → end' },
+        { value: 'reverse', label: 'End → begin' }
+      ],
+      function (v) { updateLineOverride(line.id, 'drawInDirection', v); }));
 
     selectionPanel.appendChild(wrap);
 
@@ -1482,6 +1650,32 @@
     return wrap;
   }
 
+  function selectField(label, value, options, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+    const sel = document.createElement('select');
+    options.forEach(function (o) {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label;
+      if (o.value === value) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', function () { onChange(sel.value); });
+    wrap.appendChild(lbl); wrap.appendChild(sel);
+    return wrap;
+  }
+
+  // For tri-state per-line overrides on select fields: an extra
+  // "(inherit)" option at the top maps to null (clear override).
+  function overrideSelectField(label, ov, fallbackValue, options, onChange) {
+    const augmented = [{ value: '__inherit__', label: '(inherit)' }].concat(options);
+    return selectField(label, ov == null ? '__inherit__' : ov, augmented, function (v) {
+      onChange(v === '__inherit__' ? null : v);
+    });
+  }
+
   function divider(label) {
     const el = document.createElement('div');
     el.style.color = '#888';
@@ -1540,6 +1734,7 @@
   newGroupBtn.addEventListener('click', addGroup);
   newColorBtn.addEventListener('click', addColor);
   saveBtn.addEventListener('click', save);
+  clearLinesBtn.addEventListener('click', clearAllLines);
   zoomInBtn.addEventListener('click',  function () { zoomIn();  });
   zoomOutBtn.addEventListener('click', function () { zoomOut(); });
   zoomLevelEl.addEventListener('click', zoomReset);
@@ -1649,8 +1844,10 @@
     }
     const tool = TOOLS[state.activeToolId];
     if (!tool) return;
-    // For chain mode, preview tracks cursor even without an active press.
-    if (state.activeToolId === 'lineChain') {
+    // Chain and Bezier are multi-click tools — their preview needs to
+    // track the cursor between clicks (no button held). Other tools
+    // only care about pointermove while a drag is active.
+    if (state.activeToolId === 'lineChain' || state.activeToolId === 'bezier') {
       if (tool.onPointerMove) tool.onPointerMove(eventPt(e));
       return;
     }
@@ -1674,10 +1871,11 @@
       const dx = e.clientX - downClient.x;
       const dy = e.clientY - downClient.y;
       const dragged = (dx * dx + dy * dy) > 9;  // ~3px slop
-      const inChain = state.activeToolId === 'lineChain' && state.chainPoints;
-      // Skip selection clicks while a chain is being built — each click
-      // is the user adding a point, not picking a different line.
-      if (!dragged && !inChain) {
+      // Multi-click tools (chain, bezier) consume bare clicks as anchor
+      // additions, so we don't also treat them as selection clicks.
+      const mid = (state.activeToolId === 'lineChain' && state.chainPoints) ||
+                  (state.activeToolId === 'bezier'    && state.bezierPoints);
+      if (!dragged && !mid) {
         // Find every line whose hit-target sits under the click point
         // (top-to-bottom z-order). Lets us cycle through overlapping
         // lines on repeat clicks.
@@ -1703,6 +1901,19 @@
 
         if (newSelection !== state.selectedLineId) {
           state.selectedLineId = newSelection;
+          // Make the sidebar reflect the new selection: open the line's
+          // group (so the highlighted row is actually visible) and make
+          // it the active group too. Both renderGroupsList AND
+          // renderLines run so the sidebar's row highlight and the
+          // canvas's handle dots track the new selection.
+          if (newSelection) {
+            const sel = state.lines.find(function (l) { return l.id === newSelection; });
+            if (sel && sel.groupId) {
+              state.openGroupIds[sel.groupId] = true;
+              state.activeGroupId = sel.groupId;
+            }
+          }
+          renderGroupsList();
           renderLines();
           renderSelectionPanel();
         }
@@ -1745,6 +1956,7 @@
     if (e.key === 'o' || e.key === 'O') setActiveTool('freehandClosed');
     if (e.key === 'l' || e.key === 'L') setActiveTool('line');
     if (e.key === 'c' || e.key === 'C') setActiveTool('lineChain');
+    if (e.key === 'b' || e.key === 'B') setActiveTool('bezier');
     // Zoom shortcuts
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn();  }
     if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
