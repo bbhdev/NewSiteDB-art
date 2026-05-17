@@ -411,6 +411,12 @@ body.editor {
 .ed-canvas-wrap.ed-set-origin-mode #draw-surface {
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='none' stroke='%23ff5500' stroke-width='2'/><circle cx='16' cy='16' r='2' fill='%23ff5500'/><line x1='2' y1='16' x2='12' y2='16' stroke='%23ff5500' stroke-width='2'/><line x1='20' y1='16' x2='30' y2='16' stroke='%23ff5500' stroke-width='2'/><line x1='16' y1='2' x2='16' y2='12' stroke='%23ff5500' stroke-width='2'/><line x1='16' y1='20' x2='16' y2='30' stroke='%23ff5500' stroke-width='2'/></svg>") 16 16, crosshair;
 }
+/* Force every child of the canvas (line hit-targets, handles, etc.)
+   to inherit the canvas cursor instead of using their own
+   "pointer" / "grab" cursors. Otherwise the reticle reverts to a
+   hand whenever the user happens to hover over an existing line
+   during the set-pivot gesture. */
+.ed-canvas-wrap.ed-set-origin-mode * { cursor: inherit !important; }
 
 /* Floating banner shown across the canvas while set-origin mode is
    active. Pointer-events: none so it doesn't intercept the click. */

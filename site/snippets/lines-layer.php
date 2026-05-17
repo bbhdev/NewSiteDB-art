@@ -60,5 +60,5 @@ $payload = json_encode(
   JSON_UNESCAPED_SLASHES
 );
 ?>
-<svg id="lines-layer" viewBox="-600 -400 2400 1600" preserveAspectRatio="none" aria-hidden="true"></svg>
+<svg id="lines-layer" viewBox="-600 -400 2400 1600" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
 <script id="lines-data" type="application/json"><?= $payload ?></script>
