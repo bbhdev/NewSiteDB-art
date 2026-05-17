@@ -141,11 +141,8 @@ $payload = json_encode([
       <!-- Populated dynamically: group settings or line overrides -->
     </section>
 
-    <p class="ed-help">
-      <strong>Tips:</strong> Click an empty space in the canvas with a tool to draw. Click an existing line to select it and edit overrides. In chain mode, click to add segments; Esc or double-click to finish.
-    </p>
-
-    <div class="ed-danger-zone">
+    <div class="ed-sidebar-footer">
+      <button type="button" id="help-btn"        class="ed-mini">? Help</button>
       <button type="button" id="clear-lines-btn" class="ed-mini ed-danger">Clear all lines</button>
     </div>
   </aside>

@@ -48,6 +48,7 @@
   const saveBtn        = document.getElementById('save-btn');
   const saveStatus     = document.getElementById('save-status');
   const clearLinesBtn  = document.getElementById('clear-lines-btn');
+  const helpBtn        = document.getElementById('help-btn');
 
   // Defensive: if any required element is missing, the user is probably
   // serving stale cached HTML against fresh JS (or vice-versa). Log
@@ -62,7 +63,7 @@
                      labelsG, labelsBtn, selectAllBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
-                     saveBtn, saveStatus, clearLinesBtn,
+                     saveBtn, saveStatus, clearLinesBtn, helpBtn,
                      zoomInBtn, zoomOutBtn, zoomLevelEl,
                      undoBtn, redoBtn };
   const missing = Object.keys(required).filter(function (k) { return !required[k]; });
@@ -195,6 +196,21 @@
   // Help-topic registry. More topics can be added later (per tool,
   // per panel, etc.) and surfaced via showHelp(topicId).
   const HELP_TOPICS = {
+    general: {
+      title: 'Editor tips',
+      html: '\
+        <p>Pick a tool then draw on the canvas. Each tool commits on release.</p>\
+        <ul>\
+          <li><strong>Freehand / Loop</strong> — click-drag for an organic stroke. Loop auto-closes and fills.</li>\
+          <li><strong>Line / Chain</strong> — straight segments. Chain adds anchors on each click; Esc or double-click finishes.</li>\
+          <li><strong>Bezier</strong> — clicks become a smooth curve through every anchor. Esc / double-click finishes.</li>\
+          <li><strong>Circle, Ellipse, Rect, Polygon, Star</strong> — click-drag to size.</li>\
+        </ul>\
+        <p>Click an existing line on the canvas to select it. Drag its body to move; drag handles to reshape. Click the same spot again to cycle to a line beneath.</p>\
+        <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
+        <p>Drag a line row onto another group in the sidebar to move it between groups.</p>\
+        <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>'
+    },
     select: {
       title: 'Select mode',
       html: '\
@@ -1533,7 +1549,12 @@
       text.setAttribute('class', 'ed-label-text');
       text.setAttribute('x', 6);
       text.setAttribute('y', 4);
-      text.textContent = line.name;
+      // Prefix the label with the group's index "Gn" so the user can
+      // see at a glance which group an on-canvas label belongs to,
+      // matching the index pill in the sidebar.
+      const gIdx = state.groups.findIndex(function (gg) { return gg.id === line.groupId; });
+      const groupTag = gIdx >= 0 ? 'G' + (gIdx + 1) + ' ' : '';
+      text.textContent = groupTag + line.name;
       g.appendChild(text);
       labelsG.appendChild(g);
 
@@ -1822,11 +1843,15 @@
       const row = document.createElement('div');
       row.className = 'ed-group-row';
 
-      // Pure-visual disclosure indicator. Rotation is CSS-driven via
-      // .ed-group.is-open. The whole row is the click target.
+      // Group index pill (G1, G2, …) sitting where the disclosure
+      // triangle used to be. Matched by the "Gx" prefix on canvas
+      // labels so the user can tell at a glance which group an
+      // on-canvas label belongs to. The whole row is the click target
+      // and the line-list visibility itself indicates open state.
+      const idx = state.groups.indexOf(g);
       const toggle = document.createElement('span');
       toggle.className = 'ed-group-toggle';
-      toggle.textContent = '▸';
+      toggle.textContent = 'G' + (idx + 1);
       row.appendChild(toggle);
 
       const name = document.createElement('span');
@@ -2043,7 +2068,9 @@
     wrap.appendChild(strokeField('Color', g.defaults.stroke, function (v) {
       updateGroupDefaults(g.id, { stroke: v });
     }));
-    wrap.appendChild(numberField('Width', g.defaults.width != null ? g.defaults.width : 1, function (v) {
+    // "Line width" — distinguishes the stroke width from primitives'
+    // shape width (rect's `w` param uses "Width" as its label).
+    wrap.appendChild(numberField('Line width', g.defaults.width != null ? g.defaults.width : 1, function (v) {
       updateGroupDefaults(g.id, { width: v });
     }));
 
@@ -2171,7 +2198,7 @@
     wrap.appendChild(strokeField('Color', line.stroke, function (v) {
       updateLine(line.id, { stroke: v });
     }));
-    wrap.appendChild(overrideNumberField('Width', line.width, group && group.defaults.width, function (v) {
+    wrap.appendChild(overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
       updateLine(line.id, { width: v });
     }));
 
@@ -2441,6 +2468,7 @@
   newColorBtn.addEventListener('click', addColor);
   saveBtn.addEventListener('click', save);
   clearLinesBtn.addEventListener('click', clearAllLines);
+  helpBtn.addEventListener('click', function () { showHelp('general'); });
   zoomInBtn.addEventListener('click',  function () { zoomIn();  });
   zoomOutBtn.addEventListener('click', function () { zoomOut(); });
   zoomLevelEl.addEventListener('click', zoomReset);
@@ -2580,7 +2608,8 @@
           .forEach(function (el) { el.setAttribute('d', line.d); });
       });
       state.dirty = true;
-      renderLabels(); // labels follow their lines
+      renderHandles(); // accent select-all dots follow their lines
+      renderLabels();  // labels follow their lines too
       return;
     }
     if (moveLine) {

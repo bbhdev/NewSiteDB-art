@@ -138,6 +138,10 @@ body.editor {
   color: white;
   border-color: var(--accent);
   font-weight: 600;
+  /* Wider than other toolbar buttons so the primary action reads as
+     primary, instead of looking squeezed at "Save" length. */
+  min-width: 4.5rem;
+  padding: 0 1rem;
 }
 .ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 .ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
@@ -210,14 +214,14 @@ body.editor {
   padding: 0.4rem 0.5rem;
   border-radius: 3px;
   cursor: pointer;
-  /* Slightly redder + lighter than the line rows below so a group
+  /* Brighter + a hint redder than the line rows below so a group
      header reads as distinct from its children at a glance. */
-  background: #312828;
-  color: #f0f0f0;
+  background: #443232;
+  color: #fafafa;
 }
-.ed-group-row:hover { background: #3a2f2f; }
+.ed-group-row:hover { background: #4d3838; }
 .ed-group.is-active > .ed-group-row {
-  background: #3f3232;
+  background: #523c3c;
   outline: 1px solid var(--accent);
 }
 .ed-group-name { flex: 1; }
@@ -294,20 +298,11 @@ body.editor {
 }
 .ed-actions button:hover { filter: brightness(1.2); }
 
-.ed-help {
+.ed-sidebar-footer {
   margin: auto 0.75rem 0.75rem;
-  padding: 0.5rem 0.75rem;
-  background: #181818;
-  border: 1px solid #333;
-  border-radius: 4px;
-  font-size: 0.8em;
-  color: #888;
-  line-height: 1.4;
-}
-.ed-help strong { color: #ccc; }
-
-.ed-danger-zone {
-  margin: 0 0.75rem 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
 }
 .ed-mini.ed-danger {
   background: transparent;
@@ -486,20 +481,20 @@ body.editor {
 .ed-color-picker .swatch.is-clear:hover { background: #2c2c2c; }
 
 /* ── group collapse / expand ─────────────────────────────────────── */
-/* The whole .ed-group-row is clickable: clicking toggles the group's
-   open state AND activates it. The triangle is visual-only — a clear
-   affordance, not its own click target. */
+/* The whole .ed-group-row is clickable. The group's index (G1, G2, …)
+   appears in the slot where the disclosure triangle used to live; it
+   serves a double purpose — quick visual identifier (matched by the
+   "Gx" prefix that name labels carry on the canvas) AND lets the open
+   list of lines below speak for itself as the "open" indicator. */
 .ed-group-toggle {
   display: inline-block;
-  width: 1.1em;
-  color: #bbb;
-  font-size: 0.9em;
+  min-width: 2.2em;
   text-align: center;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--accent);
   pointer-events: none;
-  transition: transform 0.15s ease;
-}
-.ed-group.is-open .ed-group-toggle {
-  transform: rotate(90deg);
 }
 .ed-group:not(.is-open) .ed-line-list { display: none; }
 

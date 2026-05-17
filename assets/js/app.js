@@ -220,7 +220,7 @@
     // visitors (their localStorage doesn't have the flag set).
     if (typeof localStorage !== 'undefined' &&
         localStorage.getItem('ed-show-labels') === '1') {
-      renderRuntimeLabels(layer, lines, groupById, paletteById);
+      renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
@@ -233,7 +233,17 @@
 
       const triggerSel = group.trigger || 'body';
       const triggerEl = document.querySelector(triggerSel);
-      if (!triggerEl) return;
+      if (!triggerEl) {
+        // If a group's trigger doesn't resolve to an element, NONE of
+        // its lines will animate — usually because the group's trigger
+        // selector was edited to point at an id/section that no longer
+        // exists in the target page's template. Surface it loudly so
+        // the user can find the offending group from the console.
+        console.warn('[lines] group "' + (group.name || group.id) + '" trigger "' +
+                     triggerSel + '" did not match any element — ' +
+                     'its lines will render but not animate.');
+        return;
+      }
 
       // Trigger range depends on whether this is a page-wide group or
       // section-bound:
@@ -336,7 +346,7 @@
    * in the editor. Only invoked when the editor's Labels toggle is on
    * (read from localStorage).
    */
-  function renderRuntimeLabels(layer, lines, groupById, paletteById) {
+  function renderRuntimeLabels(layer, lines, groups, groupById, paletteById) {
     const SVG_NS = 'http://www.w3.org/2000/svg';
     function resolveStroke(ref) {
       if (!ref) return null;
@@ -387,7 +397,11 @@
       text.setAttribute('font-size', 14);
       text.setAttribute('font-weight', 600);
       text.setAttribute('dominant-baseline', 'hanging');
-      text.textContent = line.name;
+      // Match the editor's "Gx <name>" prefix so the runtime preview
+      // (with editor's Labels toggle on) reads identically.
+      const gIdx = groups.findIndex(function (gg) { return gg.id === line.groupId; });
+      const groupTag = gIdx >= 0 ? 'G' + (gIdx + 1) + ' ' : '';
+      text.textContent = groupTag + line.name;
       g.appendChild(text);
       layer.appendChild(g);
 
