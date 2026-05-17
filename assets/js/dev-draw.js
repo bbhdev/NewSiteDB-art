@@ -1767,6 +1767,11 @@
         c.setAttribute('cy', pos.y);
         linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
           .forEach(function (el) { el.setAttribute('d', line.d); });
+        // Labels read their coords from line.points / line.params, so
+        // they need to refresh as the drag moves a point — otherwise
+        // the label is stuck at the pre-drag position and shows stale
+        // (x, y) text underneath.
+        renderLabels();
       });
       c.addEventListener('pointerup', function (e) {
         if (!dragging) return;
@@ -1779,6 +1784,11 @@
         // A full re-render after the drag ends syncs every handle
         // position (some may need updates if the path is closed/smoothed).
         renderHandles();
+        renderLabels();
+        // Panel number-inputs were rendered with pre-drag values and
+        // aren't bound to state changes — refresh so they show the new
+        // coords too.
+        renderSelectionPanel();
       });
 
       handlesG.appendChild(c);
@@ -1833,6 +1843,8 @@
         // Reposition every handle so dependents track the dragged one
         // (e.g. rect corners share x/y with neighbors).
         applyHandles(line.params);
+        // Labels follow the shape — see point-handle drag for context.
+        renderLabels();
       });
       c.addEventListener('pointerup', function (e) {
         if (!dragging) return;
@@ -1841,6 +1853,11 @@
         c.classList.remove('is-dragging');
         snapshot();
         renderHandles();
+        renderLabels();
+        // Panel inputs (Center X, Center Y, Radius, …) were rendered
+        // with pre-drag values; refresh so the panel agrees with the
+        // dragged shape's actual params.
+        renderSelectionPanel();
       });
 
       handleEls[h.id] = c;
@@ -2827,6 +2844,10 @@
       moveSel = null;
       if (dragged) {
         snapshot();
+        // Panel inputs (Center X/Y, X/Y, etc.) were rendered with the
+        // pre-drag values — refresh so the panel agrees with where the
+        // dragged objects landed.
+        renderSelectionPanel();
         downClient = null;
         downTarget = null;
         return;
