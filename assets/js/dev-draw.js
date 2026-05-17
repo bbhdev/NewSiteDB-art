@@ -42,6 +42,7 @@
   const handlesG       = document.getElementById('handles-layer');
   const labelsG        = document.getElementById('labels-layer');
   const labelsBtn      = document.getElementById('labels-btn');
+  const selectAllBtn   = document.getElementById('select-all-btn');
   const newGroupBtn    = document.getElementById('new-group-btn');
   const newColorBtn    = document.getElementById('new-color-btn');
   const saveBtn        = document.getElementById('save-btn');
@@ -58,7 +59,7 @@
   const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
-                     labelsG, labelsBtn,
+                     labelsG, labelsBtn, selectAllBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
                      saveBtn, saveStatus, clearLinesBtn,
@@ -85,6 +86,7 @@
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
     bezierPoints: null,        // active bezier anchors when bezier is mid-draw
+    allSelected: false,        // "Select all" mode — drag anywhere moves every line
     zoom: 1,                   // canvas zoom factor (1 = 100%, 2 = 200%, …)
     // Editor-local view toggle, persisted to localStorage so it survives
     // reloads. When on, every named line gets a colored label rendered
@@ -907,10 +909,17 @@
     select: {
       label: 'Select',
       settings: function () {
-        const span = document.createElement('span');
-        span.style.color = '#888';
-        span.textContent = 'click to select · drag to move · drag handles to reshape';
-        return [span];
+        // Compact info icon — the full hint shows in the native tooltip
+        // on hover. Keeps the toolbar from wrapping when the canvas is
+        // narrow, which it does when the sidebar gets wider.
+        const info = document.createElement('span');
+        info.textContent = 'ⓘ';
+        info.title = 'click to select · drag to move · drag handles to reshape';
+        info.style.color = '#888';
+        info.style.fontSize = '1.05em';
+        info.style.cursor = 'help';
+        info.style.padding = '0 0.25rem';
+        return [info];
       }
       // No onPointerDown / onPointerMove / onPointerUp — dispatcher
       // calls them through `tool && tool.onPointerDown ? ...` etc., so
@@ -1199,18 +1208,29 @@
     renderAll();
   }
 
-  function deleteGroup(id) {
+  /**
+   * Delete a group.
+   *   alsoDeleteLines = false  → re-home the group's lines into the
+   *                              first remaining group (preserve them).
+   *   alsoDeleteLines = true   → delete the group AND every line it
+   *                              owns.
+   *
+   * If `id` is the last group, it's replaced with a fresh default so
+   * the editor always has at least one group to receive new lines.
+   */
+  function deleteGroup(id, alsoDeleteLines) {
+    if (alsoDeleteLines) {
+      state.lines = state.lines.filter(function (l) { return l.groupId !== id; });
+    }
     if (state.groups.length > 1) {
       state.groups = state.groups.filter(function (g) { return g.id !== id; });
-      // Re-home orphan lines into the first remaining group.
       const fallback = state.groups[0].id;
+      // Re-home any surviving lines that still point at the deleted group.
       state.lines.forEach(function (l) { if (l.groupId === id) l.groupId = fallback; });
       if (state.activeGroupId === id) state.activeGroupId = fallback;
     } else {
-      // Deleting the LAST group — replace it with a fresh default so
-      // lines aren't orphaned. The user can rename it after; this
-      // keeps "Delete group" always functional, including for a fresh
-      // page with just one group.
+      // Deleting the only group — replace it with a fresh default so
+      // surviving (or future) lines have somewhere to live.
       const replacement = defaultGroup();
       state.groups = [replacement];
       state.lines.forEach(function (l) { l.groupId = replacement.id; });
@@ -1339,7 +1359,26 @@
       //   - falls back to `closed` for legacy data without `filled`
       const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
       if (wantsFill && stroke) p.style.fill = stroke;
+      // Primitives rotate around their geometric center, not their
+      // bounding box center — matters for odd-vertex polygons and
+      // stars where the two differ. (Runtime applies the same logic;
+      // the editor doesn't run scroll triggers but we keep transform-
+      // box consistent so any preview rotation in the panel agrees.)
+      if (line.params) {
+        const pa = line.params;
+        if ('cx' in pa && 'cy' in pa) {
+          p.style.transformBox = 'view-box';
+          p.style.transformOrigin = pa.cx + 'px ' + pa.cy + 'px';
+        } else if ('x' in pa && 'y' in pa && 'w' in pa && 'h' in pa) {
+          p.style.transformBox = 'view-box';
+          p.style.transformOrigin = (pa.x + pa.w / 2) + 'px ' + (pa.y + pa.h / 2) + 'px';
+        }
+      }
       if (line.id === state.selectedLineId) p.classList.add('is-selected');
+      // Hidden lines stay visible in the editor (so the user can find
+      // them and re-enable) but render at low opacity so they read as
+      // "off". The runtime drops them entirely.
+      if (line.hidden) p.style.opacity = '0.18';
       p.dataset.lineId = line.id;
       linesG.appendChild(p);
     });
@@ -1432,6 +1471,22 @@
     localStorage.setItem('ed-show-labels', state.showLabels ? '1' : '0');
     labelsBtn.classList.toggle('is-active', state.showLabels);
     renderLabels();
+  }
+
+  function toggleSelectAll() {
+    state.allSelected = !state.allSelected;
+    // Stepping into select-all clears any single-line selection so the
+    // user doesn't see two competing UI states (selected line handles
+    // + select-all banner). Stepping out leaves no selection either.
+    state.selectedLineId = null;
+    updateSelectAllButton();
+    renderLines();
+    renderSelectionPanel();
+  }
+
+  function updateSelectAllButton() {
+    selectAllBtn.classList.toggle('is-active', state.allSelected);
+    selectAllBtn.textContent = state.allSelected ? 'Deselect all' : 'Select all';
   }
 
   /**
@@ -1821,9 +1876,10 @@
 
     selectionPanel.appendChild(wrap);
 
-    // Delete is always available. When this is the last remaining
-    // group, deleteGroup replaces it with a fresh default so existing
-    // lines have somewhere to live.
+    // Delete is always available. When the group has lines, the user
+    // gets a choice between deleting JUST the group (lines survive,
+    // re-homed) or deleting the group AND its lines together. Empty
+    // groups skip the dialog and just delete.
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
     const del = document.createElement('button');
@@ -1831,12 +1887,25 @@
     del.textContent = 'Delete group';
     del.addEventListener('click', function () {
       const lineCount = state.lines.filter(function (l) { return l.groupId === g.id; }).length;
-      const msg = (state.groups.length > 1)
-        ? 'Delete group "' + g.name + '"?' +
-          (lineCount ? ' Its ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') +
-                       ' will move to the first remaining group.' : '')
-        : 'Delete the only group "' + g.name + '"? It will be replaced with a fresh default group; existing lines are kept.';
-      if (confirm(msg)) deleteGroup(g.id);
+      if (lineCount === 0) {
+        if (confirm('Delete empty group "' + g.name + '"?')) deleteGroup(g.id, false);
+        return;
+      }
+      // 3-way prompt: Cancel / Keep lines (move them) / Delete both.
+      // Browser confirm() is 2-button, so we chain two prompts: first
+      // ask whether to proceed, then ask whether to delete the lines.
+      // Cancel at either step aborts.
+      const proceed = confirm(
+        'Delete group "' + g.name + '"?\n\n' +
+        'It contains ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + '.'
+      );
+      if (!proceed) return;
+      const keepLines = confirm(
+        'Keep the ' + lineCount + ' line' + (lineCount === 1 ? '' : 's') + '?\n\n' +
+        'OK   — keep them (they will move to the first remaining group)\n' +
+        'Cancel — delete them along with the group'
+      );
+      deleteGroup(g.id, !keepLines);
     });
     actions.appendChild(del);
     selectionPanel.appendChild(actions);
@@ -1872,6 +1941,13 @@
     wrap.appendChild(textField('Name', line.name || '', function (v) {
       updateLine(line.id, { name: v });
     }, 'optional'));
+
+    // Visibility — toggle off to hide on the live site without
+    // deleting. Useful for trying variants. Renders faded in the
+    // editor; runtime skips entirely.
+    wrap.appendChild(checkboxField('Visible', !line.hidden, function (v) {
+      updateLine(line.id, { hidden: !v });
+    }));
 
     // Smoothing toggle is only meaningful for the freehand kinds — for
     // straight-line and chain kinds the regenerator ignores it.
@@ -2184,6 +2260,8 @@
   redoBtn.addEventListener('click', redo);
   labelsBtn.addEventListener('click', toggleLabels);
   labelsBtn.classList.toggle('is-active', state.showLabels);
+  selectAllBtn.addEventListener('click', toggleSelectAll);
+  updateSelectAllButton();
 
   // Wheel zoom — requires Ctrl/Cmd modifier so plain wheel keeps
   // scrolling the canvas wrap normally. Anchored to the cursor so
@@ -2228,6 +2306,10 @@
   // Indispensable for big shapes where moving each handle would be
   // impractical. Reset on pointerup.
   let moveLine = null; // { lineId, startPt, origPoints, origSegments }
+  // Move-all mode: when state.allSelected is on, a drag anywhere moves
+  // every line on the page together. The original geometry of every
+  // line is captured at drag start so the translation stays rigid.
+  let moveAll = null;  // { startPt, origLines: [{ id, origPoints, origSegments, origParams }, …] }
 
   svg.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
@@ -2236,6 +2318,34 @@
     pointerActive = true;
     downClient = { x: e.clientX, y: e.clientY };
     downTarget = e.target;
+
+    // Select-all mode: any drag (anywhere) translates every line in
+    // lockstep. A pure click (no drag) exits select-all and proceeds
+    // to regular single-line selection.
+    if (state.allSelected) {
+      moveAll = {
+        startPt: eventPt(e),
+        origLines: state.lines.map(function (l) {
+          return {
+            id: l.id,
+            origPoints:   Array.isArray(l.points)
+              ? l.points.map(function (p) { return { x: p.x, y: p.y }; })
+              : null,
+            origSegments: Array.isArray(l.segments)
+              ? l.segments.map(function (s) {
+                  return {
+                    cmd: s.cmd,
+                    controlPoints: s.controlPoints.map(function (cp) { return { x: cp.x, y: cp.y }; }),
+                    endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null
+                  };
+                })
+              : null,
+            origParams: l.params ? Object.assign({}, l.params) : null
+          };
+        })
+      };
+      return;
+    }
 
     // If the user pressed inside the currently selected line's hit
     // area, this drag is going to translate the whole line, not start
@@ -2270,6 +2380,21 @@
     if (tool && tool.onPointerDown) tool.onPointerDown(eventPt(e));
   });
   svg.addEventListener('pointermove', function (e) {
+    if (moveAll) {
+      const cur = eventPt(e);
+      const dx = cur.x - moveAll.startPt.x;
+      const dy = cur.y - moveAll.startPt.y;
+      moveAll.origLines.forEach(function (snap) {
+        const line = state.lines.find(function (l) { return l.id === snap.id; });
+        if (!line) return;
+        translateLine(line, snap.origPoints, snap.origSegments, snap.origParams, dx, dy);
+        linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
+          .forEach(function (el) { el.setAttribute('d', line.d); });
+      });
+      state.dirty = true;
+      renderLabels(); // labels follow their lines
+      return;
+    }
     if (moveLine) {
       const cur = eventPt(e);
       const dx = cur.x - moveLine.startPt.x;
@@ -2301,15 +2426,46 @@
   });
   svg.addEventListener('pointerup', function (e) {
     pointerActive = false;
-    if (moveLine) {
-      moveLine = null;
-      snapshot();          // undo restores the entire pre-move position
-      downClient = null;
-      downTarget = null;
-      return;
+    // Select-all + drag → commit translation of every line. Pure click
+    // in select-all → exit select-all and proceed to normal selection.
+    if (moveAll) {
+      const dxAll = downClient ? (e.clientX - downClient.x) : 0;
+      const dyAll = downClient ? (e.clientY - downClient.y) : 0;
+      const dragged = (dxAll * dxAll + dyAll * dyAll) > 9;
+      moveAll = null;
+      if (dragged) {
+        snapshot();
+        downClient = null; downTarget = null;
+        return;
+      }
+      // Pure click — turn off select-all; fall through to single-line selection.
+      state.allSelected = false;
+      updateSelectAllButton();
     }
-    const tool = TOOLS[state.activeToolId];
-    if (tool && tool.onPointerUp) tool.onPointerUp(eventPt(e));
+    // If the user pressed on the selected line's hit area and then
+    // actually dragged, commit the move. A pure click (no drag) falls
+    // through to the selection-cycle path below so the user can step
+    // down to a shape covered by the current one.
+    let wasMoveLine = false;
+    if (moveLine) {
+      wasMoveLine = true;
+      const dxMove = downClient ? (e.clientX - downClient.x) : 0;
+      const dyMove = downClient ? (e.clientY - downClient.y) : 0;
+      const dragged = (dxMove * dxMove + dyMove * dyMove) > 9; // ~3px slop
+      moveLine = null;
+      if (dragged) {
+        snapshot();
+        downClient = null;
+        downTarget = null;
+        return;
+      }
+      // else: fall through to selection logic (don't dispatch to a
+      // drawing tool's onPointerUp since pointerDown was bypassed).
+    }
+    if (!wasMoveLine) {
+      const tool = TOOLS[state.activeToolId];
+      if (tool && tool.onPointerUp) tool.onPointerUp(eventPt(e));
+    }
 
     // Click vs drag detection. Threshold is in client (viewport) pixels.
     if (downClient) {

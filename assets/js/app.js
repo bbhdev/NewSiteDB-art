@@ -161,8 +161,10 @@
       return paletteById[ref] ? paletteById[ref].value : ref;
     }
 
-    // Render JSON-defined lines.
+    // Render JSON-defined lines. Hidden lines are skipped entirely on
+    // the live site — the editor's Visible toggle is the gate.
     lines.forEach(function (line) {
+      if (line.hidden) return;
       const p = document.createElementNS(SVG_NS, 'path');
       p.setAttribute('d', line.d);
       // Effective stroke / width: line value wins, then group default,
@@ -233,7 +235,38 @@
       const triggerEl = document.querySelector(triggerSel);
       if (!triggerEl) return;
 
-      const target = { transformOrigin: '50% 50%' };
+      // Trigger range depends on whether this is a page-wide group or
+      // section-bound:
+      //   page-wide  → animate over the full document scroll
+      //                (top-of-body at top-of-viewport → bottom-of-body
+      //                 at bottom-of-viewport). Scroll = 0 is progress 0,
+      //                so initial position = drawn position.
+      //   section    → animate while the section sweeps through the
+      //                viewport (top-of-section at bottom-of-viewport →
+      //                bottom-of-section at top-of-viewport).
+      const isPageWide = !group.trigger || group.trigger === 'body' || group.trigger === 'html';
+      const stStart = isPageWide ? 'top top'       : 'top bottom';
+      const stEnd   = isPageWide ? 'bottom bottom' : 'bottom top';
+
+      // Rotation/scale origin: for geometric primitives, rotate around
+      // the shape's geometric center (cx, cy) rather than its bounding
+      // box center — the two differ for odd-vertex polygons and stars,
+      // which would otherwise drift visually when rotated.
+      let originAttr = '50% 50%';
+      let useViewBoxOrigin = false;
+      if (line.params) {
+        const pa = line.params;
+        if ('cx' in pa && 'cy' in pa) {
+          originAttr = pa.cx + 'px ' + pa.cy + 'px';
+          useViewBoxOrigin = true;
+        } else if ('x' in pa && 'y' in pa && 'w' in pa && 'h' in pa) {
+          originAttr = (pa.x + pa.w / 2) + 'px ' + (pa.y + pa.h / 2) + 'px';
+          useViewBoxOrigin = true;
+        }
+      }
+      if (useViewBoxOrigin) pathEl.style.transformBox = 'view-box';
+
+      const target = { transformOrigin: originAttr };
       let hasMotion = false;
       if (typeof behaviors.translateX === 'number') { target.x        = behaviors.translateX; hasMotion = true; }
       if (typeof behaviors.translateY === 'number') { target.y        = behaviors.translateY; hasMotion = true; }
@@ -241,12 +274,12 @@
 
       if (hasMotion) {
         gsap.fromTo(pathEl,
-          { x: 0, y: 0, rotation: 0, transformOrigin: '50% 50%' },
+          { x: 0, y: 0, rotation: 0, transformOrigin: originAttr },
           Object.assign({}, target, {
             scrollTrigger: {
               trigger: triggerEl,
-              start: 'top bottom',
-              end: 'bottom top',
+              start: stStart,
+              end:   stEnd,
               scrub: 1
             }
           })
@@ -287,8 +320,8 @@
             ease: 'none',
             scrollTrigger: {
               trigger: triggerEl,
-              start: 'top bottom',
-              end: 'bottom top',
+              start: stStart,
+              end:   stEnd,
               scrub: 1
             }
           }

@@ -240,13 +240,17 @@ body.editor {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.3rem 0.4rem;
+  padding: 0.4rem 0.5rem;
   border-radius: 3px;
   cursor: pointer;
+  /* Slightly redder + lighter than the line rows below so a group
+     header reads as distinct from its children at a glance. */
+  background: #312828;
+  color: #f0f0f0;
 }
-.ed-group-row:hover { background: #2c2c2c; }
+.ed-group-row:hover { background: #3a2f2f; }
 .ed-group.is-active > .ed-group-row {
-  background: #333;
+  background: #3f3232;
   outline: 1px solid var(--accent);
 }
 .ed-group-name { flex: 1; }

@@ -106,7 +106,8 @@ $payload = json_encode([
   </div>
 
   <div class="ed-view" role="toolbar" aria-label="View options">
-    <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
+    <button type="button" id="labels-btn"     title="Show / hide name labels on every named line">Labels</button>
+    <button type="button" id="select-all-btn" title="Select all lines on this page — drag any one to move every line together">Select all</button>
   </div>
 
   <div class="ed-spacer"></div>
