@@ -226,6 +226,14 @@
     }
     if (hasLS && localStorage.getItem('ed-show-diag-grid') === '1') {
       renderRuntimeDiagGrid(layer);
+      // Diagnostic-mode aids: force scroll to top so the first view
+      // sits at progress = 0 (shapes at their authored coords, no
+      // translate applied), and show a small floating indicator that
+      // reports the current scroll progress. Both help the user
+      // compare runtime positions to the editor canvas without scroll
+      // -driven animations getting in the way.
+      try { window.scrollTo(0, 0); } catch (e) { /* not all envs */ }
+      mountScrollProgressIndicator();
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
@@ -406,6 +414,39 @@
    * doesn't obscure shape colors. Inserted as the FIRST child of the
    * SVG so it always sits behind everything else.
    */
+  /**
+   * Small floating "scroll: N%" indicator pinned to the top-right of
+   * the viewport. Only shown alongside the diagnostic grid (since it
+   * piggybacks on the same Grid toggle in the editor). Lets the
+   * author tell at a glance whether a shape's apparent position is
+   * affected by scroll-driven animation: at 0%, lines sit at their
+   * authored coords; anywhere else, translates / rotations are
+   * partially applied.
+   */
+  function mountScrollProgressIndicator() {
+    if (document.getElementById('diag-scroll-progress')) return;
+    const el = document.createElement('div');
+    el.id = 'diag-scroll-progress';
+    el.style.cssText =
+      'position:fixed;top:8px;right:8px;z-index:200;' +
+      'background:rgba(0,0,0,0.78);color:#FF00FF;' +
+      'font-family:ui-monospace,monospace;font-size:13px;' +
+      'padding:0.35em 0.7em;border-radius:4px;' +
+      'pointer-events:none;letter-spacing:0.04em;';
+    document.body.appendChild(el);
+
+    function update() {
+      const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      const p = max > 0 ? (window.scrollY / max) : 0;
+      el.textContent = 'scroll ' + (p * 100).toFixed(1) + '%' +
+                       ' · y=' + Math.round(window.scrollY) +
+                       ' / ' + Math.round(max);
+    }
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+  }
+
   function renderRuntimeDiagGrid(layer) {
     const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
     const g = document.createElementNS(SVG_NS_LOCAL, 'g');
