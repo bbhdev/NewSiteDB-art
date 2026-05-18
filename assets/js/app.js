@@ -226,14 +226,11 @@
     }
     if (hasLS && localStorage.getItem('ed-show-diag-grid') === '1') {
       renderRuntimeDiagGrid(layer);
-      // Diagnostic-mode aids: force scroll to top so the first view
-      // sits at progress = 0 (shapes at their authored coords, no
-      // translate applied), and show a small floating indicator that
-      // reports the current scroll progress. Both help the user
-      // compare runtime positions to the editor canvas without scroll
-      // -driven animations getting in the way.
       try { window.scrollTo(0, 0); } catch (e) { /* not all envs */ }
       mountScrollProgressIndicator();
+      // Per-line bbox-vs-params dump runs after motion setup below so
+      // it observes the actual rendered transform.
+      window.__diagLines = lines;
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
@@ -388,6 +385,49 @@
         );
       }
     });
+
+    // Diagnostic dump: for every named line, log
+    //   { id, name, expected_cx, expected_cy, bbox_cx, bbox_cy,
+    //     shift_x, shift_y, transform_attr }
+    // so the author can pinpoint whether the shift is in the d-string
+    // (params vs bbox center) or in the applied transform.
+    if (hasLS && localStorage.getItem('ed-show-diag-grid') === '1') {
+      requestAnimationFrame(function () {
+        const rows = [];
+        lines.forEach(function (line) {
+          if (line.hidden || !line.name) return;
+          const pathEl = layer.querySelector('path[data-line-id="' + line.id + '"]');
+          if (!pathEl) return;
+          let expCx = null, expCy = null;
+          if (line.params) {
+            const pa = line.params;
+            if ('cx' in pa && 'cy' in pa) { expCx = pa.cx; expCy = pa.cy; }
+            else if ('x' in pa && 'y' in pa && 'w' in pa && 'h' in pa) {
+              expCx = pa.x + pa.w / 2; expCy = pa.y + pa.h / 2;
+            }
+          }
+          let bbCx = null, bbCy = null;
+          try {
+            const b = pathEl.getBBox();
+            bbCx = b.x + b.width / 2;
+            bbCy = b.y + b.height / 2;
+          } catch (e) { /* malformed */ }
+          rows.push({
+            id: line.id,
+            name: line.name,
+            kind: line.kind || '',
+            expected_cx: expCx, expected_cy: expCy,
+            bbox_cx: bbCx != null ? +bbCx.toFixed(1) : null,
+            bbox_cy: bbCy != null ? +bbCy.toFixed(1) : null,
+            shift_x: (expCx != null && bbCx != null) ? +(bbCx - expCx).toFixed(1) : null,
+            shift_y: (expCy != null && bbCy != null) ? +(bbCy - expCy).toFixed(1) : null,
+            transform: pathEl.getAttribute('transform')
+          });
+        });
+        if (rows.length && console.table) console.table(rows);
+        else console.log('[lines diag]', rows);
+      });
+    }
   }
 
   /**
