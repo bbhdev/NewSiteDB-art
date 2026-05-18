@@ -17,3 +17,6 @@ Thumbs.db
 /content/*/lines.json
 /content/*/groups.json
 /content/*/page.json
+/content/*/*/lines.json
+/content/*/*/groups.json
+/content/_shared/classes.json

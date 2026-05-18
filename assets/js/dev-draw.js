@@ -77,18 +77,23 @@
   // ── State ─────────────────────────────────────────────────────────
   const initial = JSON.parse(document.getElementById('editor-data').textContent);
   const state = {
-    pageId: initial.pageId,
-    groups: initial.groups.length ? initial.groups : [defaultGroup()],
-    lines:  initial.lines,
+    pageId:  initial.pageId,
+    classId: initial.classId || 'wide',
+    // Site-wide class breakpoints (read-only here; managed via the
+    // migration script + future Settings entry). Phase 3 will use
+    // them for the picker chrome.
+    classes: Array.isArray(initial.classes) ? initial.classes : [],
+    groups:  initial.groups.length ? initial.groups : [defaultGroup()],
+    lines:   initial.lines,
     palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
-    // Per-page drawing dimensions. The server-side template emits the
-    // SVG with the correct viewBox + sizes on first paint; this state
-    // is the source of truth for any later in-editor change (via the
-    // Canvas panel) and is round-tripped through Save.
-    page: Object.assign(
-      { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 },
-      initial.page || {}
-    ),
+    // Nested per-page config (v3): { useClasses: [...], dims: { <classId>: {pageW,pageH,canvasW,canvasH} } }.
+    // state.page is a live reference into pageConfig.dims[classId] so
+    // Canvas-panel edits write to the right slot without a separate
+    // sync step.
+    pageConfig: initial.page && initial.page.dims
+      ? initial.page
+      : { useClasses: ['wide'], dims: { wide: { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 } } },
+    page: null,  // assigned below once pageConfig is in place
     openGroupIds:   {},        // groupId → true when expanded in sidebar
     activeGroupId:  null,
     // Multi-select: ordered array of object ids (formerly `selectedLineId`).
@@ -118,6 +123,17 @@
     showRuntimeDump: localStorage.getItem('ed-show-runtime-dump') === '1',
     dirty: false
   };
+  // Ensure the current class has a dims slot in pageConfig — fall
+  // back to defaults if missing (e.g. server emitted a class id with
+  // no dims, or pageConfig is stale).
+  if (!state.pageConfig.dims[state.classId]) {
+    state.pageConfig.dims[state.classId] = { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 };
+  }
+  // state.page is a live alias into pageConfig.dims[classId]: editing
+  // state.page.pageW updates the right entry of the nested config,
+  // and switching class (Phase 3) just reassigns this reference.
+  state.page = state.pageConfig.dims[state.classId];
+
   state.activeGroupId = state.groups[0].id;
   state.openGroupIds[state.activeGroupId] = true;
 
@@ -312,9 +328,10 @@
   function snapshot() {
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
     const snap = {
-      groups:  deepCopy(state.groups),
-      lines:   deepCopy(state.lines),
-      palette: deepCopy(state.palette),
+      groups:     deepCopy(state.groups),
+      lines:      deepCopy(state.lines),
+      palette:    deepCopy(state.palette),
+      pageConfig: deepCopy(state.pageConfig),
       selectedIds:    state.selectedIds.slice(),
       activeGroupId:  state.activeGroupId
     };
@@ -341,6 +358,17 @@
     state.groups  = deepCopy(snap.groups);
     state.lines   = deepCopy(snap.lines);
     state.palette = deepCopy(snap.palette);
+    if (snap.pageConfig) {
+      state.pageConfig = deepCopy(snap.pageConfig);
+      // Re-bind the live alias and re-paint the canvas if dims changed.
+      if (!state.pageConfig.dims[state.classId]) {
+        state.pageConfig.dims[state.classId] =
+          { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 };
+      }
+      state.page = state.pageConfig.dims[state.classId];
+      applyPageConfig();
+      renderCanvasPanel();
+    }
     state.selectedIds   = (snap.selectedIds || []).slice();
     state.activeGroupId = snap.activeGroupId;
     state.dirty = true;
@@ -2851,10 +2879,11 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           page:    state.pageId,
+          classId: state.classId,
           groups:  state.groups,
           lines:   state.lines,
           palette: state.palette,
-          pageCfg: state.page
+          pageCfg: state.pageConfig
         })
       });
       const body = await res.json().catch(function () { return {}; });

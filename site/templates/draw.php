@@ -23,10 +23,21 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-$groups  = $targetPage ? $readJson($targetPage->root() . '/groups.json') : [];
-$lines   = $targetPage ? $readJson($targetPage->root() . '/lines.json')  : [];
-$palette = $readJson(kirby()->root('content') . '/colors.json');
-$pageCfg = $targetPage ? art_load_page_config($targetPage->root()) : art_default_page_config();
+// Editor is single-class-aware in Phase 2: it loads the "wide" class
+// hardcoded. Phase 3 introduces the class picker and the editor will
+// load whichever class the user is editing.
+$classes   = art_load_classes(kirby()->root('content'));
+$pageCfg   = $targetPage ? art_load_page_config($targetPage->root())
+                        : ['useClasses' => ['wide'], 'dims' => ['wide' => art_default_dims()]];
+$classId   = in_array('wide', $pageCfg['useClasses'], true)
+    ? 'wide'
+    : ($pageCfg['useClasses'][0] ?? 'wide');
+$classData = $targetPage
+    ? art_load_class_data($targetPage->root(), $classId)
+    : ['lines' => [], 'groups' => []];
+$lines     = $classData['lines'];
+$groups    = $classData['groups'];
+$palette   = $readJson(kirby()->root('content') . '/colors.json');
 
 // Default palette if the file doesn't exist yet — gives the editor
 // something to pick from on first run.
@@ -52,6 +63,8 @@ $v = option('version', 'dev');
 
 $payload = json_encode([
   'pageId'             => $targetSlug,
+  'classId'            => $classId,
+  'classes'            => $classes,
   'groups'             => $groups,
   'lines'              => $lines,
   'palette'            => $palette,
@@ -159,22 +172,24 @@ $payload = json_encode([
     Click anywhere on the canvas to set the rotation pivot · <kbd>Esc</kbd> to cancel
   </div>
 
-<?php $vb = art_viewbox($pageCfg); ?>
+<?php
+  $dims = $pageCfg['dims'][$classId] ?? art_default_dims();
+  $vb   = art_viewbox($dims);
+?>
   <main class="ed-canvas-wrap">
-    <!-- Canvas geometry is driven by the page's page.json (Phase 1+).
-         The page area is the central pageW×pageH zone at (0, 0); the
-         viewBox extends symmetrically around it to canvasW×canvasH so
-         lines that drift on/off the page have room to live. The
-         drawing surface renders at 1px = 1 viewBox unit by default;
-         zoom multiplies that. -->
+    <!-- Canvas geometry is driven by the current class's dims (from
+         page.json's dims[<classId>]). The page area is the central
+         pageW×pageH zone at (0, 0); the viewBox extends symmetrically
+         around it to canvasW×canvasH so lines that drift on/off the
+         page have room to live. 1px = 1 viewBox unit at zoom 1.0. -->
     <svg id="draw-surface"
-         viewBox="<?= art_viewbox_attr($pageCfg) ?>"
-         width="<?= $pageCfg['canvasW'] ?>" height="<?= $pageCfg['canvasH'] ?>"
+         viewBox="<?= art_viewbox_attr($dims) ?>"
+         width="<?= $dims['canvasW'] ?>" height="<?= $dims['canvasH'] ?>"
          preserveAspectRatio="xMidYMid meet"
          xmlns="http://www.w3.org/2000/svg">
       <g id="bg-layer">
-        <rect class="bg-outer" x="<?= $vb['x'] ?>" y="<?= $vb['y'] ?>" width="<?= $pageCfg['canvasW'] ?>" height="<?= $pageCfg['canvasH'] ?>" />
-        <rect class="bg-page"  x="0" y="0" width="<?= $pageCfg['pageW'] ?>" height="<?= $pageCfg['pageH'] ?>" />
+        <rect class="bg-outer" x="<?= $vb['x'] ?>" y="<?= $vb['y'] ?>" width="<?= $dims['canvasW'] ?>" height="<?= $dims['canvasH'] ?>" />
+        <rect class="bg-page"  x="0" y="0" width="<?= $dims['pageW'] ?>" height="<?= $dims['pageH'] ?>" />
       </g>
       <g id="grid"></g>
       <g id="committed-lines"></g>

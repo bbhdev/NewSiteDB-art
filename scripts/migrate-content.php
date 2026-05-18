@@ -31,7 +31,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 2;
+const CONTENT_SCHEMA_VERSION = 3;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -39,6 +39,11 @@ $SCHEMA_HISTORY = [
     2 => 'Adds content/<slug>/page.json with { pageW, pageH, canvasW, canvasH }.'
        . ' Hardcoded viewBox removed from code; editor + runtime read dims'
        . ' from page.json (defaults preserve v1 visuals on existing content).',
+    3 => 'Introduces screen classes. Site-wide content/_shared/classes.json'
+       . ' (narrow / medium / wide). page.json nests to { useClasses, dims:'
+       . ' {<classId>:{pageW,pageH,canvasW,canvasH}} }. Per-page lines + groups'
+       . ' move into content/<slug>/<classId>/ subfolders (all classes cloned'
+       . ' identically from v2 content so visuals survive).',
 ];
 
 /**
@@ -74,7 +79,98 @@ $MIGRATIONS = [
             json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
         ) !== false;
     },
+
+    2 => function (string $pageRoot, bool $dryRun): bool {
+        // v2 → v3: introduce per-class layout.
+        //   1) ensure site-wide content/_shared/classes.json exists
+        //   2) restructure page.json: flat dims → { useClasses, dims }
+        //   3) clone <pageRoot>/lines.json + groups.json into
+        //      <pageRoot>/narrow/ + /medium/ + /wide/ (all three start
+        //      identical so the runtime has data for every class)
+        // Old lines.json / groups.json at the page root are LEFT in
+        // place — recoverable safety net; v3+ readers ignore them.
+        $contentDir = dirname($pageRoot);
+        if (!ensureSiteClasses($contentDir, $dryRun)) return false;
+
+        $marker = $pageRoot . '/page.json';
+        if (!is_file($marker)) {
+            fwrite(STDERR, "  $pageRoot: page.json missing (v1→v2 prerequisite). Run prior step first.\n");
+            return false;
+        }
+        $old = json_decode(file_get_contents($marker), true) ?: [];
+
+        $flatDims = [
+            'pageW'   => isset($old['pageW'])   ? $old['pageW']   : 1200,
+            'pageH'   => isset($old['pageH'])   ? $old['pageH']   : 800,
+            'canvasW' => isset($old['canvasW']) ? $old['canvasW'] : 2400,
+            'canvasH' => isset($old['canvasH']) ? $old['canvasH'] : 1600,
+        ];
+        $classes = ['narrow', 'medium', 'wide'];
+        $nested = [
+            'useClasses' => $classes,
+            'dims'       => array_fill_keys($classes, $flatDims),
+        ];
+        // Preserve unknown top-level keys (skip the v2 dim keys + the
+        // marker; the runner manages _schemaVersion).
+        foreach ($old as $k => $v) {
+            $isDimKey  = in_array($k, ['pageW', 'pageH', 'canvasW', 'canvasH'], true);
+            $isMarker  = $k === '_schemaVersion';
+            if (!$isDimKey && !$isMarker && !isset($nested[$k])) $nested[$k] = $v;
+        }
+
+        $linesData  = is_file($pageRoot . '/lines.json')
+            ? file_get_contents($pageRoot . '/lines.json')  : null;
+        $groupsData = is_file($pageRoot . '/groups.json')
+            ? file_get_contents($pageRoot . '/groups.json') : null;
+
+        if ($dryRun) {
+            echo "    would rewrite $marker → v3 (useClasses + dims)\n";
+            foreach ($classes as $c) {
+                echo "    would clone lines.json + groups.json into $pageRoot/$c/\n";
+            }
+            return true;
+        }
+
+        foreach ($classes as $classId) {
+            $dir = $pageRoot . '/' . $classId;
+            if (!is_dir($dir) && !mkdir($dir, 0755, true)) return false;
+            if ($linesData  !== null) file_put_contents($dir . '/lines.json',  $linesData);
+            if ($groupsData !== null) file_put_contents($dir . '/groups.json', $groupsData);
+        }
+
+        return file_put_contents(
+            $marker,
+            json_encode($nested, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
+        ) !== false;
+    },
 ];
+
+/**
+ * Create content/_shared/classes.json with the default 3-class
+ * breakpoint set if it doesn't exist. Called from the v2→v3
+ * migration; idempotent so re-running across multiple pages is
+ * safe.
+ */
+function ensureSiteClasses(string $contentDir, bool $dryRun): bool
+{
+    $sharedDir = $contentDir . '/_shared';
+    $marker    = $sharedDir . '/classes.json';
+    if (is_file($marker)) return true;
+    $defaults = [
+        ['id' => 'narrow', 'name' => 'Narrow', 'minWidth' => 0,    'maxWidth' => 640],
+        ['id' => 'medium', 'name' => 'Medium', 'minWidth' => 641,  'maxWidth' => 1100],
+        ['id' => 'wide',   'name' => 'Wide',   'minWidth' => 1101, 'maxWidth' => null],
+    ];
+    if ($dryRun) {
+        echo "    would create $marker with default 3-class breakpoint set\n";
+        return true;
+    }
+    if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) return false;
+    return file_put_contents(
+        $marker,
+        json_encode($defaults, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
+    ) !== false;
+}
 
 // ─── CLI entry ──────────────────────────────────────────────────────
 

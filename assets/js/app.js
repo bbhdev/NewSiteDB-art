@@ -137,25 +137,88 @@
     let data;
     try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
 
-    const groups     = Array.isArray(data.groups)     ? data.groups     : [];
-    const lines      = Array.isArray(data.lines)      ? data.lines      : [];
+    // v3 payload shape:
+    //   classes    — [{id, name, minWidth, maxWidth}, …] site-wide breakpoints
+    //   page       — { useClasses, dims: { <classId>: {pageW,pageH,canvasW,canvasH} } }
+    //   byClass    — { <classId>: { lines, groups } }
+    //   palette    — site-wide colors
+    //   svgImports — page-level dropped SVGs (not class-varying)
+    const classes    = Array.isArray(data.classes)    ? data.classes    : [];
+    const pageCfg    = (data.page && typeof data.page === 'object') ? data.page : {};
+    const byClass    = (data.byClass && typeof data.byClass === 'object') ? data.byClass : {};
     const palette    = Array.isArray(data.palette)    ? data.palette    : [];
     const svgImports = Array.isArray(data.svgImports) ? data.svgImports : [];
-    // Per-page drawing dimensions. The template emits matching values
-    // in the SVG's viewBox attribute; this copy is what the diagnostic
-    // overlays use to draw the page-area outline + grid bounds.
-    const page = Object.assign(
-      { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 },
-      data.page || {}
-    );
 
-    if (!lines.length && !svgImports.length) return;
+    const useClasses = Array.isArray(pageCfg.useClasses) ? pageCfg.useClasses : [];
+    const dimsByClass = (pageCfg.dims && typeof pageCfg.dims === 'object') ? pageCfg.dims : {};
+
+    // No data at all → nothing to render; bail early so we don't even
+    // bind the resize listener.
+    const anyClassHasContent = useClasses.some(function (id) {
+      const c = byClass[id];
+      return c && ((Array.isArray(c.lines) && c.lines.length) || (Array.isArray(c.groups) && c.groups.length));
+    });
+    if (!anyClassHasContent && !svgImports.length) return;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const groupById = {};
-    groups.forEach(function (g) { groupById[g.id] = g; });
     const paletteById = {};
     palette.forEach(function (c) { paletteById[c.id] = c; });
+
+    // ── Class selection ────────────────────────────────────────────
+    function pickClassFor(width) {
+      // Among the classes this page uses, prefer one whose [min, max]
+      // contains the viewport width. If none matches (gap between
+      // breakpoints, or viewport above the largest defined max with
+      // no unbounded class), fall back to the class with the largest
+      // minWidth ≤ width, else the first useClass.
+      const usable = classes.filter(function (c) { return useClasses.indexOf(c.id) !== -1 && byClass[c.id]; });
+      if (!usable.length) return null;
+      for (let i = 0; i < usable.length; i++) {
+        const c = usable[i];
+        const minOk = (c.minWidth == null || width >= c.minWidth);
+        const maxOk = (c.maxWidth == null || width <= c.maxWidth);
+        if (minOk && maxOk) return c.id;
+      }
+      let best = usable[0].id, bestMin = -Infinity;
+      for (let i = 0; i < usable.length; i++) {
+        const c = usable[i];
+        const mw = c.minWidth || 0;
+        if (mw <= width && mw > bestMin) { best = c.id; bestMin = mw; }
+      }
+      return best;
+    }
+
+    // Track ScrollTriggers we own so re-render (on class boundary
+    // cross) can tear them down cleanly without touching unrelated
+    // triggers elsewhere in the page.
+    const ownTriggers = [];
+    let currentClassId = null;
+
+    function renderForClass(classId) {
+      // Tear down previous render.
+      ownTriggers.forEach(function (t) { try { t.kill(); } catch (e) {} });
+      ownTriggers.length = 0;
+      layer.innerHTML = '';
+      currentClassId = classId;
+
+      const cls    = byClass[classId] || {};
+      const lines  = Array.isArray(cls.lines)  ? cls.lines  : [];
+      const groups = Array.isArray(cls.groups) ? cls.groups : [];
+      const dims   = dimsByClass[classId]
+        || { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 };
+      const groupById = {};
+      groups.forEach(function (g) { groupById[g.id] = g; });
+
+      // Apply this class's viewBox so authored coords land where
+      // intended for this viewport size.
+      const vbx = -(dims.canvasW - dims.pageW) / 2;
+      const vby = -(dims.canvasH - dims.pageH) / 2;
+      layer.setAttribute('viewBox', vbx + ' ' + vby + ' ' + dims.canvasW + ' ' + dims.canvasH);
+
+      renderClassContent(lines, groups, groupById, dims);
+    }
+
+    function renderClassContent(lines, groups, groupById, page) {
 
     /**
      * Resolve a stroke value. Lines and group defaults store a palette
@@ -351,7 +414,7 @@
       // setup so per-element triggers can't apply a mid-viewport progress
       // at scrollY=0.
       if (hasMotion && !diagMode) {
-        ScrollTrigger.create({
+        ownTriggers.push(ScrollTrigger.create({
           trigger: stConfig.trigger,
           start:   stConfig.start,
           end:     stConfig.end,
@@ -367,7 +430,7 @@
               'rotate(' + pr + ' ' + originX + ' ' + originY + ')'
             );
           }
-        });
+        }));
       }
 
       // Draw-in: stroke-dash reveal across the same scroll range.
@@ -399,7 +462,7 @@
         pathEl.setAttribute('stroke-dasharray', '1 1');
         const dir = behaviors.drawInDirection === 'reverse' ? -1 : 1;
         pathEl.setAttribute('stroke-dashoffset', String(dir));
-        gsap.fromTo(pathEl,
+        const tween = gsap.fromTo(pathEl,
           { attr: { 'stroke-dashoffset': dir } },
           {
             attr: { 'stroke-dashoffset': 0 },
@@ -407,6 +470,7 @@
             scrollTrigger: stConfig
           }
         );
+        if (tween && tween.scrollTrigger) ownTriggers.push(tween.scrollTrigger);
       }
     });
 
@@ -454,6 +518,25 @@
         else console.log('[lines diag]', rows);
       });
     }
+    }  // ← end renderClassContent
+
+    // ── Bootstrap: pick initial class, render, listen for resize ──
+    const initialClassId = pickClassFor(window.innerWidth)
+      || (useClasses[0] || 'wide');
+    renderForClass(initialClassId);
+
+    // Re-pick on resize across a class boundary; snap-reload (no
+    // cross-fade for now). Debounced because resize fires repeatedly
+    // during a drag.
+    let resizeTimer = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () {
+        const w = window.innerWidth;
+        const nextId = pickClassFor(w);
+        if (nextId && nextId !== currentClassId) renderForClass(nextId);
+      }, 150);
+    });
   }
 
   /**
