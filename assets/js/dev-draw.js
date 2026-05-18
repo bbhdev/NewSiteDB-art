@@ -855,6 +855,17 @@
    * kind-appropriate smoothing + optional Z closure.
    */
   function regenerateLineD(line) {
+    computeLineD(line);
+    // Whenever a line's geometry-derived d (or points / params /
+    // segments) is updated, push the change up to the master so
+    // sibling instances in other classes follow along. Phase 5
+    // mental model: a shape edit IS a master edit. Per-class
+    // shape overrides remain possible (via line.overrides) — sync
+    // skips any key explicitly overridden on this line.
+    syncLineGeometryToMaster(line);
+  }
+
+  function computeLineD(line) {
     // Geometric primitives generate `d` from their `params` table.
     if (PRIMITIVES[line.kind] && line.params) {
       line.d = PRIMITIVES[line.kind].generateD(line.params);
@@ -876,6 +887,48 @@
     let d = pathFromPoints(line.points, smooth);
     if (line.closed) d += ' Z';
     line.d = d;
+  }
+
+  /**
+   * Push the geometry-defining visual keys (params / points /
+   * segments / d / kind / smoothed / closed / filled) from `line`
+   * onto its master, then re-render every sibling instance in any
+   * other class that doesn't already override the key. Bails if
+   * the line has no master link, or during initial load (no
+   * masters available yet). Each propagated key is deep-copied to
+   * avoid shared references across classes.
+   */
+  function syncLineGeometryToMaster(line) {
+    if (!line || !line.masterId) return;
+    if (!Array.isArray(state.masters)) return;
+    const m = state.masters.find(function (x) { return x.id === line.masterId; });
+    if (!m) return;
+    const GEOM_KEYS = ['kind', 'points', 'segments', 'params', 'd',
+                       'smoothed', 'closed', 'filled'];
+    GEOM_KEYS.forEach(function (k) {
+      if (line[k] === undefined) return;
+      if (isVisualOverridden(line, k)) return;
+      m[k] = deepCopyIfNeeded(line[k]);
+    });
+    state.pageConfig.useClasses.forEach(function (cid) {
+      if (cid === state.classId) return;
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      lines.forEach(function (sib) {
+        if (sib.masterId !== line.masterId) return;
+        GEOM_KEYS.forEach(function (k) {
+          if (line[k] === undefined) return;
+          if (isVisualOverridden(sib, k)) return;
+          sib[k] = deepCopyIfNeeded(line[k]);
+        });
+        // d may need a fresh compute if the kind / params / points
+        // changed (e.g., a primitive resize); computeLineD reads the
+        // sibling's now-updated fields and writes back to sib.d.
+        computeLineD(sib);
+      });
+    });
+  }
+  function deepCopyIfNeeded(v) {
+    return (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
   }
 
   /**
@@ -3042,17 +3095,24 @@
 
   function renderSelectionPanel() {
     selectionPanel.innerHTML = '';
+    const wasSingleSelect = state.selectedIds.length === 1;
     // Multi-select takes precedence: show a compact bulk-actions panel.
     // Single selection shows the full line params panel (unchanged).
     // Otherwise fall through to the active group's settings.
     if (state.selectedIds.length > 1) {
       renderMultiSelectionPanel();
-    } else if (state.selectedIds.length === 1) {
+    } else if (wasSingleSelect) {
       const line = state.lines.find(function (l) { return l.id === primarySelectedId(); });
       if (line) renderLinePanel(line);
     } else if (state.activeGroupId) {
       const g = state.groups.find(function (g) { return g.id === state.activeGroupId; });
       if (g) renderGroupPanel(g);
+    }
+    // When a single object is selected, scroll the sidebar so the
+    // line panel is visible — saves the user from manually scrolling
+    // past the groups list to reach params.
+    if (wasSingleSelect && selectionPanel.scrollIntoView) {
+      selectionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }
 
@@ -3959,9 +4019,21 @@
       redo();
       return;
     }
+    // Save — Cmd/Ctrl+S works everywhere (overrides the browser's
+    // save-page-as), plain S works outside text inputs.
+    if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      save();
+      return;
+    }
     if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
-    // Skip tool / view shortcuts when a modifier is held (Cmd+S, Cmd+F,
-    // etc. should stay native — not silently swap the active tool).
+    if (e.key === 's' || e.key === 'S') {
+      e.preventDefault();
+      save();
+      return;
+    }
+    // Skip remaining view shortcuts when a modifier is held — let
+    // the browser handle Cmd+anything-else natively.
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {
       // Escape cancels the set-rotate-origin gesture before anything
@@ -3981,13 +4053,9 @@
       if (state.selectedIds.length) { e.preventDefault(); deleteSelected(); }
       return;
     }
-    // Tool shortcuts
-    if (e.key === 's' || e.key === 'S') setActiveTool('select');
-    if (e.key === 'f' || e.key === 'F') setActiveTool('freehand');
-    if (e.key === 'o' || e.key === 'O') setActiveTool('freehandClosed');
-    if (e.key === 'l' || e.key === 'L') setActiveTool('line');
-    if (e.key === 'c' || e.key === 'C') setActiveTool('lineChain');
-    if (e.key === 'b' || e.key === 'B') setActiveTool('bezier');
+    // (Drawing-tool shortcuts removed — tools are now reached only
+    // via the Create-object wizard, so single-key activations no
+    // longer match the UI surface.)
     // Zoom shortcuts
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn();  }
     if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }

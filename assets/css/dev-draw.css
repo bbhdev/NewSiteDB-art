@@ -109,9 +109,12 @@ body.editor {
 }
 .ed-toolbar button:hover:not(:disabled) { background: #4a4a4a; }
 .ed-toolbar button:disabled { opacity: 0.3; cursor: not-allowed; }
-.ed-toolbar button.is-active {
-  background: var(--accent);
-  color: white;
+/* State buttons (Select, class tabs) — active = orange outline,
+   so they read as a non-action toggle. Distinct from action
+   buttons (Save) which stay solid accent. */
+.ed-tool.is-active {
+  background: #2a2a2a;
+  color: #fff;
   border-color: var(--accent);
 }
 .ed-tool-settings {
@@ -201,7 +204,9 @@ body.editor {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  scrollbar-width: none;
 }
+.ed-sidebar::-webkit-scrollbar { display: none; }
 .ed-canvas-wrap {
   flex: 1;
   background: #111;
