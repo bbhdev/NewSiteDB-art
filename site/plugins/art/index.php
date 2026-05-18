@@ -230,7 +230,15 @@ function art_resolve_instance(array $instance, array $mastersById): array
     if (is_array($overrides) || is_object($overrides)) {
         $ovArr = (array) $overrides;
         foreach ($ovArr as $k => $v) {
-            $line[$k] = $v;
+            // params is special: instance.overrides.params holds the
+            // overridden SUB-keys only. Merge so master.params keeps
+            // providing defaults for any sub-key not overridden.
+            if ($k === 'params' && is_array($v)
+                && isset($line['params']) && is_array($line['params'])) {
+                $line['params'] = array_merge($line['params'], $v);
+            } else {
+                $line[$k] = $v;
+            }
         }
     }
     $line['id']        = $instance['id'] ?? null;

@@ -112,13 +112,30 @@
     const line = master ? Object.assign({}, master) : {};
     delete line.id; // master.id is not the instance.id
     const ov = (inst.overrides && typeof inst.overrides === 'object') ? inst.overrides : {};
-    Object.keys(ov).forEach(function (k) { line[k] = ov[k]; });
+    Object.keys(ov).forEach(function (k) {
+      // params is special: instance.overrides.params is a SUB-KEY
+      // map (only the overridden sub-keys), not a wholesale
+      // replacement. Merge so master.params provides defaults for
+      // any sub-key not overridden, and the override fills the rest.
+      // Pre-v0.2.20 data may store params as a full object — the
+      // merge is identical-result for that case too (every sub-key
+      // happens to be in the override).
+      if (k === 'params' && ov[k] && typeof ov[k] === 'object'
+          && master && master.params && typeof master.params === 'object') {
+        line.params = Object.assign({}, master.params, ov.params);
+      } else {
+        line[k] = ov[k];
+      }
+    });
     line.id        = inst.id;
     line.groupId   = inst.groupId;
     line.masterId  = inst.masterId || null;
     line.hidden    = !(inst.visible === undefined ? true : inst.visible);
     // Copy so editor mutations don't leak back into the source.
     line.overrides = Object.assign({}, ov);
+    if (ov.params && typeof ov.params === 'object') {
+      line.overrides.params = Object.assign({}, ov.params);
+    }
     return line;
   }
 
@@ -514,6 +531,49 @@
   }
 
   /**
+   * Edit a single param sub-key (e.g. star.points) from the panel
+   * with master-edit intent: the value becomes the canonical one,
+   * propagates to every class's instance of this master, and any
+   * stale per-class override on this exact sub-key is cleared
+   * (because the user just authored a definitive value for it).
+   * Position overrides on cx/cy survive — they're a different
+   * sub-key.
+   */
+  function setMasterParamSubkey(lineId, subkey, value) {
+    const line = state.lines.find(function (l) { return l.id === lineId; });
+    if (!line) return;
+    if (!line.params) line.params = {};
+    line.params[subkey] = value;
+    computeLineD(line);
+    if (line.masterId) {
+      const m = state.masters.find(function (x) { return x.id === line.masterId; });
+      if (m) {
+        if (!m.params) m.params = {};
+        m.params[subkey] = value;
+        computeLineD(m);
+      }
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+        lines.forEach(function (l) {
+          if (l.masterId !== line.masterId) return;
+          if (!l.params) l.params = {};
+          l.params[subkey] = value;
+          computeLineD(l);
+          // Clear stale sub-key override on this class — the user
+          // is asserting the new value as canonical.
+          if (l.overrides && l.overrides.params
+              && Object.prototype.hasOwnProperty.call(l.overrides.params, subkey)) {
+            delete l.overrides.params[subkey];
+            if (!Object.keys(l.overrides.params).length) delete l.overrides.params;
+          }
+        });
+      });
+    }
+    state.dirty = true;
+    renderLines();
+  }
+
+  /**
    * Clear all geometry-related overrides on a line and pull its
    * params / points / segments / d back from the master. Used to
    * re-sync a class that drifted from the canonical shape — either
@@ -599,14 +659,37 @@
         const overrides = (line.overrides && typeof line.overrides === 'object')
           ? Object.assign({}, line.overrides)
           : {};
+        // Carry over explicit params sub-key overrides as a fresh
+        // object so we don't mutate state.byClass below.
+        if (overrides.params && typeof overrides.params === 'object') {
+          overrides.params = Object.assign({}, overrides.params);
+        }
         MASTER_VISUAL_KEYS.forEach(function (k) {
-          if (k in overrides) return;
           if (line[k] === undefined) return;
+          if (k === 'params') return; // sub-key path below
+          if (k in overrides) return;
           const mv = master ? master[k] : undefined;
           if (JSON.stringify(line[k]) !== JSON.stringify(mv)) {
             overrides[k] = line[k];
           }
         });
+        // params divergence — sub-key granularity. Any sub-key that
+        // differs from master.params and isn't already explicitly
+        // overridden gets added to overrides.params. Lets the user
+        // have a position override (cx/cy) AND retain master-linked
+        // shape sub-keys on the same instance.
+        if (line.params && typeof line.params === 'object') {
+          const mp = (master && master.params && typeof master.params === 'object')
+            ? master.params : {};
+          let op = (overrides.params && typeof overrides.params === 'object')
+            ? overrides.params : null;
+          Object.keys(line.params).forEach(function (sk) {
+            if (op && Object.prototype.hasOwnProperty.call(op, sk)) return;
+            if (JSON.stringify(line.params[sk]) === JSON.stringify(mp[sk])) return;
+            if (!op) { op = {}; overrides.params = op; }
+            op[sk] = line.params[sk];
+          });
+        }
         return {
           id:        line.id,
           masterId:  mid,
@@ -935,28 +1018,51 @@
     if (!Array.isArray(state.masters)) return;
     const m = state.masters.find(function (x) { return x.id === line.masterId; });
     if (!m) return;
-    // `d` is intentionally excluded — it's a derived value. We copy
-    // the source keys, then computeLineD on master + each sibling
-    // so d always matches that record's own source values (no
-    // params-from-A-with-d-from-B Frankenstein).
-    const GEOM_KEYS = ['kind', 'points', 'segments', 'params',
-                       'smoothed', 'closed', 'filled'];
-    GEOM_KEYS.forEach(function (k) {
+    // `d` is intentionally excluded — derived, recomputed per record
+    // below. `params` is handled at sub-key granularity so a position
+    // override on cx/cy doesn't block a shape edit on points/sides/r.
+    const SIMPLE_KEYS = ['kind', 'points', 'segments',
+                         'smoothed', 'closed', 'filled'];
+    SIMPLE_KEYS.forEach(function (k) {
       if (line[k] === undefined) return;
       if (isVisualOverridden(line, k)) return;
       m[k] = deepCopyIfNeeded(line[k]);
     });
+    if (line.params && typeof line.params === 'object') {
+      if (!m.params || typeof m.params !== 'object') m.params = {};
+      const lineParamOv = (line.overrides && typeof line.overrides.params === 'object')
+        ? line.overrides.params : {};
+      Object.keys(line.params).forEach(function (sk) {
+        if (Object.prototype.hasOwnProperty.call(lineParamOv, sk)) return;
+        m.params[sk] = line.params[sk];
+      });
+    }
     computeLineD(m); // refresh master.d from its (possibly-new) source
     state.pageConfig.useClasses.forEach(function (cid) {
       if (cid === state.classId) return;
       const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
       lines.forEach(function (sib) {
         if (sib.masterId !== line.masterId) return;
-        GEOM_KEYS.forEach(function (k) {
+        SIMPLE_KEYS.forEach(function (k) {
           if (line[k] === undefined) return;
           if (isVisualOverridden(sib, k)) return;
           sib[k] = deepCopyIfNeeded(line[k]);
         });
+        if (line.params && typeof line.params === 'object') {
+          if (!sib.params || typeof sib.params !== 'object') sib.params = {};
+          const sibParamOv = (sib.overrides && typeof sib.overrides.params === 'object')
+            ? sib.overrides.params : {};
+          const lineParamOv = (line.overrides && typeof line.overrides.params === 'object')
+            ? line.overrides.params : {};
+          Object.keys(line.params).forEach(function (sk) {
+            // Sibling override on this sub-key — keep its local value.
+            if (Object.prototype.hasOwnProperty.call(sibParamOv, sk)) return;
+            // Line's value for this sub-key is itself overridden
+            // locally — don't propagate the local-only value to others.
+            if (Object.prototype.hasOwnProperty.call(lineParamOv, sk)) return;
+            sib.params[sk] = line.params[sk];
+          });
+        }
         computeLineD(sib);
       });
     });
@@ -996,7 +1102,16 @@
           line.params[k] = origParams[k] + (i === 0 ? dx : dy);
         }
       });
-      line.overrides.params = deepCopyIfNeeded(line.params);
+      // Per-class position override — record ONLY the position
+      // sub-keys we just shifted. Other params sub-keys (radius,
+      // sides, etc.) stay master-linked and continue to propagate
+      // on later shape edits.
+      if (!line.overrides.params || typeof line.overrides.params !== 'object') {
+        line.overrides.params = {};
+      }
+      keys.forEach(function (k) {
+        if (k in line.params) line.overrides.params[k] = line.params[k];
+      });
     } else if (origPoints) {
       line.points = origPoints.map(function (p) { return { x: p.x + dx, y: p.y + dy }; });
       line.overrides.points = deepCopyIfNeeded(line.points);
@@ -3377,19 +3492,18 @@
     }
 
     // Primitive parameters (cx/cy/r for circle, w/h/r for rect, etc.).
-    // Editing any value regenerates the path live.
+    // Editing any value regenerates the path live. Panel edits are
+    // treated as explicit authorial intent — they propagate to the
+    // master and every sibling instance via setMasterParamSubkey,
+    // even when this class has a stale per-class override on the
+    // same sub-key (the override is cleared for that sub-key).
     if (PRIMITIVES[line.kind] && line.params) {
       wrap.appendChild(divider('Parameters'));
       const PRIM = PRIMITIVES[line.kind];
       PRIM.paramFields.forEach(function (entry) {
         const key = entry[0], label = entry[1];
         wrap.appendChild(numberField(label, line.params[key], function (v) {
-          line.params = Object.assign({}, line.params, function () {
-            const patch = {}; patch[key] = v; return patch;
-          }());
-          regenerateLineD(line);
-          state.dirty = true;
-          renderLines();
+          setMasterParamSubkey(line.id, key, v);
           scheduleSnapshot();
         }));
       });
