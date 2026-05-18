@@ -41,8 +41,6 @@
   const selectionPanel = document.getElementById('selection-panel');
   const handlesG       = document.getElementById('handles-layer');
   const labelsG        = document.getElementById('labels-layer');
-  const labelsBtn      = document.getElementById('labels-btn');
-  const gridBtn        = document.getElementById('grid-btn');
   const settingsBtn    = document.getElementById('settings-btn');
   const selectAllBtn   = document.getElementById('select-all-btn');
   const newGroupBtn    = document.getElementById('new-group-btn');
@@ -63,7 +61,7 @@
   const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
-                     labelsG, labelsBtn, gridBtn, settingsBtn, selectAllBtn,
+                     labelsG, settingsBtn, selectAllBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
                      saveBtn, saveStatus, clearLinesBtn, helpBtn,
@@ -1565,7 +1563,6 @@
   function toggleDiagGrid() {
     state.showDiagGrid = !state.showDiagGrid;
     localStorage.setItem('ed-show-diag-grid', state.showDiagGrid ? '1' : '0');
-    gridBtn.classList.toggle('is-active', state.showDiagGrid);
     renderDiagGrid();
   }
   /**
@@ -1592,6 +1589,26 @@
 
     const body = document.createElement('div');
     body.className = 'ed-modal-body ed-settings-body';
+
+    body.appendChild(settingRow({
+      label: 'Name labels',
+      help:  'Show / hide the name label on every named line. The same ' +
+             'flag drives the editor canvas and the live site, so you can ' +
+             'compare placements across both.',
+      value: state.showLabels,
+      onChange: function (v) { if (v !== state.showLabels) toggleLabels(); }
+    }));
+
+    body.appendChild(settingRow({
+      label: 'Coordinate grid',
+      help:  'Diagnostic grid: cyan lines at 50px step, coords every 100px. ' +
+             'Renders on the live site too — useful for verifying where ' +
+             'authored coords land in each surface. With it on, the live ' +
+             'site also pins to scrollY=0 and skips scroll-driven motion ' +
+             'so shapes show at their authored coords.',
+      value: state.showDiagGrid,
+      onChange: function (v) { if (v !== state.showDiagGrid) toggleDiagGrid(); }
+    }));
 
     body.appendChild(settingRow({
       label: 'Runtime dump',
@@ -1794,7 +1811,6 @@
   function toggleLabels() {
     state.showLabels = !state.showLabels;
     localStorage.setItem('ed-show-labels', state.showLabels ? '1' : '0');
-    labelsBtn.classList.toggle('is-active', state.showLabels);
     renderLabels();
   }
 
@@ -2805,10 +2821,6 @@
   zoomLevelEl.title = 'Click to type an exact zoom percentage';
   undoBtn.addEventListener('click', undo);
   redoBtn.addEventListener('click', redo);
-  labelsBtn.addEventListener('click', toggleLabels);
-  labelsBtn.classList.toggle('is-active', state.showLabels);
-  gridBtn.addEventListener('click', toggleDiagGrid);
-  gridBtn.classList.toggle('is-active', state.showDiagGrid);
   renderDiagGrid(); // initial paint if the flag was already on
   settingsBtn.addEventListener('click', showSettings);
   selectAllBtn.addEventListener('click', toggleSelectAll);

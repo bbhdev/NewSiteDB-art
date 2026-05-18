@@ -109,9 +109,7 @@ $payload = json_encode([
     <button type="button" id="redo-btn" title="Redo (Cmd+Shift+Z)">↷</button>
   </div>
 
-  <div class="ed-view" role="toolbar" aria-label="View options">
-    <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
-    <button type="button" id="grid-btn"   title="Show / hide diagnostic coordinate grid (cyan, 50px step, coords every 100px). Renders on the live site too — useful for comparing where authored coords land in each surface.">Grid</button>
+  <div class="ed-view" role="toolbar" aria-label="Save and settings">
     <button type="button" id="save-btn"     class="ed-save">Save</button>
     <button type="button" id="settings-btn" class="ed-settings" title="Settings — editor preferences and diagnostic toggles" aria-label="Settings">⚙</button>
     <span id="save-status" class="ed-status" aria-live="polite"></span>

@@ -146,9 +146,9 @@ body.editor {
 .ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 .ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
 .ed-toolbar .ed-settings {
-  font-size: 1.1em;
+  font-size: 1.6rem;
   line-height: 1;
-  padding: 0 0.4rem;
+  padding: 0 0.5rem;
 }
 .ed-status { min-width: 8em; color: #9c9; font-size: 0.85em; padding-left: 0.4rem; }
 .ed-status.is-error { color: #f88; }
