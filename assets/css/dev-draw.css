@@ -540,10 +540,23 @@ body.editor {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-.ed-create-types {
+.ed-create-types-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.4rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+.ed-create-types-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.ed-create-types-col h5 {
+  margin: 0 0 0.15rem;
+  font-size: 0.75em;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
 }
 .ed-create-type {
   display: flex;
@@ -569,7 +582,7 @@ body.editor {
 .ed-create-dests {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
 }
 .ed-create-dest {
   display: flex;
@@ -578,7 +591,45 @@ body.editor {
   color: #ddd;
   font-size: 0.9em;
 }
-.ed-create-dest input:disabled + span { color: #888; }
+.ed-create-dest.is-current {
+  /* Current class — read-only row with check + label + badge. */
+  color: #fff;
+  padding-left: 0.05rem;
+}
+.ed-create-dest-check {
+  display: inline-flex;
+  width: 1em;
+  justify-content: center;
+  color: var(--accent);
+  font-weight: 700;
+}
+.ed-create-dest-badge {
+  font-size: 0.75em;
+  color: #888;
+  background: #1f1f1f;
+  border: 1px solid #333;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+/* Save-button success flash — quick green-tinted pulse so the
+   user's eyes (already on the button) see the confirmation. */
+@keyframes ed-save-flash {
+  0%   { background: var(--accent); border-color: var(--accent); }
+  20%  { background: #2c8a4a;        border-color: #3aa860; }
+  100% { background: var(--accent); border-color: var(--accent); }
+}
+.ed-toolbar .ed-save.is-flash-success {
+  animation: ed-save-flash 0.9s ease-out;
+}
+
+/* Hide canvas-wrap scrollbars (panning is via the canvas itself;
+   bars eat real estate and look noisy). */
+.ed-canvas-wrap {
+  scrollbar-width: none;          /* Firefox */
+}
+.ed-canvas-wrap::-webkit-scrollbar { display: none; } /* Chromium/WebKit */
 
 /* Optional name labels — always legible against any line color.
    Text uses paint-order: stroke fill with a wide white stroke under

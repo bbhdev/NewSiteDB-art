@@ -1624,19 +1624,24 @@
   // shortcut) drawing still works the legacy way — the line just
   // doesn't get auto-instanced.
   state.wizard = null;
-  // Tool ids paired with the human label for the type list.
-  const CREATE_TYPES = [
-    { id: 'freehand',       label: 'Freehand',  hint: 'click-drag organic stroke' },
-    { id: 'freehandClosed', label: 'Loop',      hint: 'closed freehand, auto-fills' },
-    { id: 'line',           label: 'Line',      hint: 'click-drag straight' },
-    { id: 'lineChain',      label: 'Chain',     hint: 'click anchors, Esc to finish' },
-    { id: 'bezier',         label: 'Bezier',    hint: 'click anchors, smooth curve' },
-    { id: 'circle',         label: 'Circle',    hint: 'click center, drag radius' },
-    { id: 'ellipse',        label: 'Ellipse',   hint: 'click center, drag rx/ry' },
-    { id: 'rect',           label: 'Rect',      hint: 'click corner, drag size' },
-    { id: 'polygon',        label: 'Polygon',   hint: 'triangle/N-gon (set Sides)' },
-    { id: 'star',           label: 'Star',      hint: 'N-pointed' }
+  // Tool ids paired with the human label for the type list. Two
+  // categories: free-form lines on one side, geometric primitives on
+  // the other.
+  const CREATE_TYPES_LINES = [
+    { id: 'freehand',       label: 'Freehand', hint: 'click-drag organic stroke' },
+    { id: 'freehandClosed', label: 'Loop',     hint: 'closed freehand, auto-fills' },
+    { id: 'line',           label: 'Line',     hint: 'click-drag straight' },
+    { id: 'lineChain',      label: 'Chain',    hint: 'click anchors, Esc to finish' },
+    { id: 'bezier',         label: 'Bezier',   hint: 'click anchors, smooth curve' }
   ];
+  const CREATE_TYPES_PRIMITIVES = [
+    { id: 'circle',  label: 'Circle',  hint: 'click center, drag radius' },
+    { id: 'ellipse', label: 'Ellipse', hint: 'click center, drag rx/ry' },
+    { id: 'rect',    label: 'Rect',    hint: 'click corner, drag size' },
+    { id: 'polygon', label: 'Polygon', hint: 'triangle/N-gon (set Sides)' },
+    { id: 'star',    label: 'Star',    hint: 'N-pointed' }
+  ];
+  const CREATE_TYPES = CREATE_TYPES_LINES.concat(CREATE_TYPES_PRIMITIVES);
 
   function showCreateModal() {
     if (state.wizard) return; // already mid-wizard
@@ -1659,12 +1664,9 @@
     const body = document.createElement('div');
     body.className = 'ed-modal-body';
 
-    // Type selection grid.
-    const typesWrap = document.createElement('div');
-    typesWrap.className = 'ed-create-types';
     let pickedType = null;
-    let startBtn = null;
-    CREATE_TYPES.forEach(function (t) {
+    let startBtn   = null;
+    function makeTypeButton(t, col) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'ed-create-type';
@@ -1672,18 +1674,39 @@
       b.innerHTML = '<strong>' + t.label + '</strong><span>' + t.hint + '</span>';
       b.addEventListener('click', function () {
         pickedType = t.id;
-        typesWrap.querySelectorAll('.ed-create-type').forEach(function (n) {
+        body.querySelectorAll('.ed-create-type').forEach(function (n) {
           n.classList.toggle('is-active', n === b);
         });
         if (startBtn) startBtn.disabled = false;
       });
-      typesWrap.appendChild(b);
-    });
+      col.appendChild(b);
+    }
 
     const typesHead = document.createElement('h4');
     typesHead.textContent = 'Type';
     body.appendChild(typesHead);
-    body.appendChild(typesWrap);
+
+    // Side-by-side: Lines (left) and Primitives (right).
+    const typesGrid = document.createElement('div');
+    typesGrid.className = 'ed-create-types-grid';
+
+    const linesCol = document.createElement('div');
+    linesCol.className = 'ed-create-types-col';
+    const linesHead = document.createElement('h5');
+    linesHead.textContent = 'Lines';
+    linesCol.appendChild(linesHead);
+    CREATE_TYPES_LINES.forEach(function (t) { makeTypeButton(t, linesCol); });
+
+    const primsCol = document.createElement('div');
+    primsCol.className = 'ed-create-types-col';
+    const primsHead = document.createElement('h5');
+    primsHead.textContent = 'Primitives';
+    primsCol.appendChild(primsHead);
+    CREATE_TYPES_PRIMITIVES.forEach(function (t) { makeTypeButton(t, primsCol); });
+
+    typesGrid.appendChild(linesCol);
+    typesGrid.appendChild(primsCol);
+    body.appendChild(typesGrid);
 
     // Destination classes for the current page (only).
     const destHead = document.createElement('h4');
@@ -1697,19 +1720,31 @@
     destsWrap.className = 'ed-create-dests';
     useClasses.forEach(function (cid) {
       const def = state.classes.find(function (c) { return c.id === cid; });
-      const lbl = document.createElement('label');
-      lbl.className = 'ed-create-dest';
-      const chk = document.createElement('input');
-      chk.type = 'checkbox';
-      chk.checked = true;
-      chk.disabled = (cid === state.classId); // current class is mandatory
-      chk.addEventListener('change', function () { destState[cid] = chk.checked; });
-      lbl.appendChild(chk);
-      const span = document.createElement('span');
-      span.textContent = (def && def.name ? def.name : cid)
-        + (cid === state.classId ? ' (drawing here)' : '');
-      lbl.appendChild(span);
-      destsWrap.appendChild(lbl);
+      const labelText = (def && def.name) ? def.name : cid;
+      if (cid === state.classId) {
+        // Current class: always included, no toggle. Shown as a
+        // check mark + label + "(current — drawing here)" badge so
+        // the meaning is unambiguous.
+        const row = document.createElement('div');
+        row.className = 'ed-create-dest is-current';
+        row.innerHTML = '<span class="ed-create-dest-check">✓</span>'
+                      + '<span class="ed-create-dest-label">' + labelText + '</span>'
+                      + '<span class="ed-create-dest-badge">drawing here</span>';
+        destsWrap.appendChild(row);
+      } else {
+        const lbl = document.createElement('label');
+        lbl.className = 'ed-create-dest';
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = true;
+        chk.addEventListener('change', function () { destState[cid] = chk.checked; });
+        lbl.appendChild(chk);
+        const span = document.createElement('span');
+        span.className = 'ed-create-dest-label';
+        span.textContent = labelText;
+        lbl.appendChild(span);
+        destsWrap.appendChild(lbl);
+      }
     });
     body.appendChild(destsWrap);
 
@@ -3542,6 +3577,10 @@
         throw new Error(body.error || ('HTTP ' + res.status));
       }
       state.dirty = false;
+      // Flash the Save button itself (where the user's eyes already
+      // are) instead of relying on the status text aside.
+      saveBtn.classList.add('is-flash-success');
+      setTimeout(function () { saveBtn.classList.remove('is-flash-success'); }, 900);
       saveStatus.textContent = 'Saved.';
       setTimeout(function () { saveStatus.textContent = ''; }, 2500);
     } catch (err) {

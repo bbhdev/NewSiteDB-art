@@ -22,12 +22,20 @@ if (!$targetPage) {
 }
 
 // Build the page-picker options. Skip the /dev tree (the editor
-// itself) and the error page.
+// itself), the error page, and any "subpage" that's really a
+// class folder our migration created inside each page (Kirby
+// treats every folder as a page).
+$contentRoot = kirby()->root('content');
+$classes     = art_load_classes($contentRoot);
+$classIds    = array_map(function ($c) { return $c['id']; }, $classes);
 $pageOptions = [];
 foreach (kirby()->site()->index() as $p) {
     $id = $p->id();
-    if ($id === 'dev' || strpos($id, 'dev/') === 0) continue;
-    if ($id === 'error') continue;
+    if ($id === 'dev' || strpos($id, 'dev/')   === 0) continue;
+    if ($id === 'error' || strpos($id, 'error/') === 0) continue;
+    $segments = explode('/', $id);
+    $last = end($segments);
+    if (in_array($last, $classIds, true)) continue;
     $pageOptions[] = [
         'id'    => $id,
         'title' => $p->title()->value(),
@@ -44,8 +52,6 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-$contentRoot = kirby()->root('content');
-$classes     = art_load_classes($contentRoot);
 $pageCfg     = $targetPage ? art_load_page_config($targetPage->root())
                           : ['useClasses' => ['wide'], 'dims' => ['wide' => art_default_dims()]];
 $masters     = art_load_masters($contentRoot);
@@ -117,6 +123,7 @@ $payload = json_encode([
 <header class="ed-toolbar">
   <div class="ed-brand">
     <span class="ed-brand-mark">Lines</span>
+    <span class="ed-version">v<?= esc($v) ?></span>
     <label class="ed-page-picker" title="Switch target page (reloads the editor)">
       <select id="page-select">
         <?php foreach ($pageOptions as $opt): ?>
@@ -152,7 +159,6 @@ $payload = json_encode([
                 title="Edit the <?= esc($label) ?> class"><?= esc($label) ?></button>
       <?php endforeach; ?>
     </div>
-    <span class="ed-version">v<?= esc($v) ?></span>
   </div>
 
   <div class="ed-tools" role="toolbar" aria-label="Selection">
