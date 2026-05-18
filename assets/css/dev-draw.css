@@ -510,6 +510,9 @@ body.editor {
   gap: 0.6rem;
   pointer-events: auto;
 }
+/* The `hidden` attribute's default display:none is weaker than the
+   class's display:flex above, so re-assert it explicitly. */
+.ed-wizard-banner[hidden] { display: none; }
 .ed-wizard-banner .ed-mini {
   font-size: 0.85em;
   padding: 0.25rem 0.6rem;
