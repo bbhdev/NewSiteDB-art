@@ -2,17 +2,38 @@
 /**
  * /dev/draw editor template.
  *
- * Loads the current groups + lines for the target page (set via the
- * page's TargetPage field), inlines them as JSON, and hands off to
- * dev-draw.js for the editor UI.
+ * Loads ALL classes' lines + groups for the target page so the
+ * editor can hot-swap class without a page reload. The target page
+ * itself is URL-driven (?page=<slug>), falling back to the editor's
+ * TargetPage field for first-load convenience.
  */
 
-$targetSlug = $page->targetPage()->or('home')->value();
-$targetPage = kirby()->page($targetSlug);
+$requestedPage = kirby()->request()->get('page');
+$targetSlug    = (is_string($requestedPage) && $requestedPage !== '')
+    ? $requestedPage
+    : $page->targetPage()->or('home')->value();
+$targetPage    = kirby()->page($targetSlug);
 
-// Read the live .json file if it exists, otherwise fall back to the
-// committed .example.json seed. Live files are gitignored — see
-// site/snippets/lines-layer.php for the full rationale.
+// Fall back to home if the requested page doesn't exist, so a
+// bookmarked-but-renamed page still loads something.
+if (!$targetPage) {
+    $targetSlug = 'home';
+    $targetPage = kirby()->page('home');
+}
+
+// Build the page-picker options. Skip the /dev tree (the editor
+// itself) and the error page.
+$pageOptions = [];
+foreach (kirby()->site()->index() as $p) {
+    $id = $p->id();
+    if ($id === 'dev' || strpos($id, 'dev/') === 0) continue;
+    if ($id === 'error') continue;
+    $pageOptions[] = [
+        'id'    => $id,
+        'title' => $p->title()->value(),
+    ];
+}
+
 $readJson = function ($path) {
   if (!file_exists($path)) {
     $seed = preg_replace('/\.json$/', '.example.json', $path);
@@ -23,20 +44,27 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-// Editor is single-class-aware in Phase 2: it loads the "wide" class
-// hardcoded. Phase 3 introduces the class picker and the editor will
-// load whichever class the user is editing.
 $classes   = art_load_classes(kirby()->root('content'));
 $pageCfg   = $targetPage ? art_load_page_config($targetPage->root())
                         : ['useClasses' => ['wide'], 'dims' => ['wide' => art_default_dims()]];
-$classId   = in_array('wide', $pageCfg['useClasses'], true)
+
+// Load every class's lines + groups; the editor switches between
+// them in-memory.
+$byClass = [];
+foreach ($pageCfg['useClasses'] as $cid) {
+    $byClass[$cid] = $targetPage
+        ? art_load_class_data($targetPage->root(), $cid)
+        : ['lines' => [], 'groups' => []];
+}
+
+// Default initial class for first paint. JS may override from
+// localStorage right after init so the user's last-used class for
+// this session takes effect.
+$initialClassId = in_array('wide', $pageCfg['useClasses'], true)
     ? 'wide'
     : ($pageCfg['useClasses'][0] ?? 'wide');
-$classData = $targetPage
-    ? art_load_class_data($targetPage->root(), $classId)
-    : ['lines' => [], 'groups' => []];
-$lines     = $classData['lines'];
-$groups    = $classData['groups'];
+$initialDims    = $pageCfg['dims'][$initialClassId] ?? art_default_dims();
+
 $palette   = $readJson(kirby()->root('content') . '/colors.json');
 
 // Default palette if the file doesn't exist yet — gives the editor
@@ -63,10 +91,10 @@ $v = option('version', 'dev');
 
 $payload = json_encode([
   'pageId'             => $targetSlug,
-  'classId'            => $classId,
+  'pages'              => $pageOptions,
+  'classId'            => $initialClassId,
   'classes'            => $classes,
-  'groups'             => $groups,
-  'lines'              => $lines,
+  'byClass'            => $byClass,
   'palette'            => $palette,
   'page'               => $pageCfg,
   'triggerSuggestions' => $triggerSuggestions,
@@ -86,8 +114,31 @@ $payload = json_encode([
 
 <header class="ed-toolbar">
   <div class="ed-brand">
-    Lines · <span class="ed-target"><?= esc($targetSlug) ?></span>
-    · <span class="ed-version">v<?= esc($v) ?></span>
+    <span class="ed-brand-mark">Lines</span>
+    <label class="ed-page-picker" title="Switch target page (reloads the editor)">
+      <select id="page-select">
+        <?php foreach ($pageOptions as $opt): ?>
+          <option value="<?= esc($opt['id']) ?>"<?= $opt['id'] === $targetSlug ? ' selected' : '' ?>>
+            <?= esc($opt['title'] ?: $opt['id']) ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+    <div class="ed-class-tabs" role="tablist" aria-label="Screen class">
+      <?php foreach ($pageCfg['useClasses'] as $cid):
+        $cdef = null;
+        foreach ($classes as $c) if ($c['id'] === $cid) { $cdef = $c; break; }
+        $label = $cdef['name'] ?? ucfirst($cid);
+      ?>
+        <button type="button"
+                class="ed-class-tab<?= $cid === $initialClassId ? ' is-active' : '' ?>"
+                data-class-id="<?= esc($cid) ?>"
+                role="tab"
+                aria-selected="<?= $cid === $initialClassId ? 'true' : 'false' ?>"
+                title="Edit the <?= esc($label) ?> class"><?= esc($label) ?></button>
+      <?php endforeach; ?>
+    </div>
+    <span class="ed-version">v<?= esc($v) ?></span>
   </div>
 
   <div class="ed-tools" role="toolbar" aria-label="Selection">
@@ -138,6 +189,8 @@ $payload = json_encode([
     <section class="ed-panel" id="canvas-panel">
       <header class="ed-panel-head">
         <h3>Canvas</h3>
+        <button type="button" id="clone-class-btn" class="ed-mini"
+                title="Copy another class's lines + groups into this one as a starting point. The dims of this class are not changed.">Clone from…</button>
       </header>
       <div id="canvas-fields" class="ed-canvas-fields"></div>
     </section>
@@ -173,7 +226,7 @@ $payload = json_encode([
   </div>
 
 <?php
-  $dims = $pageCfg['dims'][$classId] ?? art_default_dims();
+  $dims = $initialDims;
   $vb   = art_viewbox($dims);
 ?>
   <main class="ed-canvas-wrap">

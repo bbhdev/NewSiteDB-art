@@ -76,24 +76,46 @@
 
   // ── State ─────────────────────────────────────────────────────────
   const initial = JSON.parse(document.getElementById('editor-data').textContent);
+
+  // localStorage-remembered last class for this browser (any page).
+  // Applied on init if it's a class the loaded page actually uses;
+  // otherwise the server's initial pick wins.
+  const rememberedClass = (function () {
+    try { return localStorage.getItem('ed-last-class'); } catch (e) { return null; }
+  })();
+  const useClasses = (initial.page && Array.isArray(initial.page.useClasses))
+    ? initial.page.useClasses
+    : ['wide'];
+  const startClassId = (rememberedClass && useClasses.indexOf(rememberedClass) !== -1)
+    ? rememberedClass
+    : (initial.classId || useClasses[0] || 'wide');
+
+  // byClass: { <classId>: { lines, groups } } — full per-class data
+  // for the loaded page. state.lines / state.groups are getters that
+  // resolve through byClass[classId]; mutations there (push, splice,
+  // assignments) reach the canonical store so class hot-swap reads
+  // fresh data.
+  const initialByClass = (initial.byClass && typeof initial.byClass === 'object')
+    ? initial.byClass : {};
+  // Ensure every useClass has a slot; missing ones get empty arrays
+  // so getters never throw.
+  useClasses.forEach(function (cid) {
+    if (!initialByClass[cid]) initialByClass[cid] = { lines: [], groups: [] };
+    if (!Array.isArray(initialByClass[cid].lines))  initialByClass[cid].lines  = [];
+    if (!Array.isArray(initialByClass[cid].groups)) initialByClass[cid].groups = [];
+  });
+
   const state = {
     pageId:  initial.pageId,
-    classId: initial.classId || 'wide',
-    // Site-wide class breakpoints (read-only here; managed via the
-    // migration script + future Settings entry). Phase 3 will use
-    // them for the picker chrome.
+    pages:   Array.isArray(initial.pages)   ? initial.pages   : [],
+    classId: startClassId,
     classes: Array.isArray(initial.classes) ? initial.classes : [],
-    groups:  initial.groups.length ? initial.groups : [defaultGroup()],
-    lines:   initial.lines,
+    byClass: initialByClass,
     palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
-    // Nested per-page config (v3): { useClasses: [...], dims: { <classId>: {pageW,pageH,canvasW,canvasH} } }.
-    // state.page is a live reference into pageConfig.dims[classId] so
-    // Canvas-panel edits write to the right slot without a separate
-    // sync step.
+    // Nested per-page config (v3): { useClasses, dims }.
     pageConfig: initial.page && initial.page.dims
       ? initial.page
       : { useClasses: ['wide'], dims: { wide: { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 } } },
-    page: null,  // assigned below once pageConfig is in place
     openGroupIds:   {},        // groupId → true when expanded in sidebar
     activeGroupId:  null,
     // Multi-select: ordered array of object ids (formerly `selectedLineId`).
@@ -123,16 +145,39 @@
     showRuntimeDump: localStorage.getItem('ed-show-runtime-dump') === '1',
     dirty: false
   };
-  // Ensure the current class has a dims slot in pageConfig — fall
-  // back to defaults if missing (e.g. server emitted a class id with
-  // no dims, or pageConfig is stale).
-  if (!state.pageConfig.dims[state.classId]) {
-    state.pageConfig.dims[state.classId] = { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 };
-  }
-  // state.page is a live alias into pageConfig.dims[classId]: editing
-  // state.page.pageW updates the right entry of the nested config,
-  // and switching class (Phase 3) just reassigns this reference.
-  state.page = state.pageConfig.dims[state.classId];
+  // Make sure every useClass has a dims slot + a byClass entry, so
+  // getters never see undefined.
+  useClasses.forEach(function (cid) {
+    if (!state.pageConfig.dims[cid]) {
+      state.pageConfig.dims[cid] = { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 };
+    }
+  });
+
+  // Live aliases tied to state.classId. Reads/writes go through
+  // byClass[classId] and pageConfig.dims[classId] so all mutations
+  // (push, splice, assign) reach the canonical store. Switching
+  // class doesn't need any field-by-field copy step — the getter
+  // simply resolves to the new slot.
+  Object.defineProperty(state, 'lines', {
+    enumerable: true,
+    get: function () { return state.byClass[state.classId].lines;  },
+    set: function (v) { state.byClass[state.classId].lines = v;    }
+  });
+  Object.defineProperty(state, 'groups', {
+    enumerable: true,
+    get: function () { return state.byClass[state.classId].groups; },
+    set: function (v) { state.byClass[state.classId].groups = v;   }
+  });
+  Object.defineProperty(state, 'page', {
+    enumerable: true,
+    get: function () { return state.pageConfig.dims[state.classId];      },
+    set: function (v) { state.pageConfig.dims[state.classId] = v;        }
+  });
+
+  // If the current class has no groups at all (empty class — e.g.,
+  // fresh page with no content yet), seed it with a default group so
+  // the line-creation tools have somewhere to put their output.
+  if (!state.groups.length) state.groups = [defaultGroup()];
 
   state.activeGroupId = state.groups[0].id;
   state.openGroupIds[state.activeGroupId] = true;
@@ -328,10 +373,10 @@
   function snapshot() {
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
     const snap = {
-      groups:     deepCopy(state.groups),
-      lines:      deepCopy(state.lines),
+      byClass:    deepCopy(state.byClass),
       palette:    deepCopy(state.palette),
       pageConfig: deepCopy(state.pageConfig),
+      classId:    state.classId,
       selectedIds:    state.selectedIds.slice(),
       activeGroupId:  state.activeGroupId
     };
@@ -355,20 +400,21 @@
   }
 
   function restoreFromSnapshot(snap) {
-    state.groups  = deepCopy(snap.groups);
-    state.lines   = deepCopy(snap.lines);
+    state.byClass = deepCopy(snap.byClass);
     state.palette = deepCopy(snap.palette);
-    if (snap.pageConfig) {
-      state.pageConfig = deepCopy(snap.pageConfig);
-      // Re-bind the live alias and re-paint the canvas if dims changed.
-      if (!state.pageConfig.dims[state.classId]) {
-        state.pageConfig.dims[state.classId] =
-          { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 };
-      }
-      state.page = state.pageConfig.dims[state.classId];
-      applyPageConfig();
-      renderCanvasPanel();
+    if (snap.pageConfig) state.pageConfig = deepCopy(snap.pageConfig);
+    // If the snapshot was taken while a different class was active,
+    // honor that — undo restores both content and viewing class.
+    if (snap.classId && state.byClass[snap.classId]) {
+      state.classId = snap.classId;
+      document.querySelectorAll('.ed-class-tab').forEach(function (b) {
+        const on = b.dataset.classId === state.classId;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
     }
+    applyPageConfig();
+    renderCanvasPanel();
     state.selectedIds   = (snap.selectedIds || []).slice();
     state.activeGroupId = snap.activeGroupId;
     state.dirty = true;
@@ -1572,6 +1618,85 @@
         applyPageConfig();
         scheduleSnapshot();
       }));
+    });
+  }
+
+  /**
+   * Switch the active class. Live aliases (state.lines / .groups /
+   * .page) auto-flip via their getters; we just need to refresh the
+   * UI: canvas geometry, sidebar lists, selection state, and the
+   * tab-active styling. Tab clicks come here AND so does the
+   * remembered-class restore on init.
+   */
+  function switchClass(newClassId) {
+    if (!newClassId || newClassId === state.classId) return;
+    if (!state.byClass[newClassId]) return; // unknown class — ignore
+    // Drop any in-flight tool state — chain anchors / bezier handles
+    // are coordinates in the OLD class's logical space and have no
+    // meaning in the new one.
+    state.chainPoints  = null;
+    state.bezierPoints = null;
+    previewG.innerHTML = '';
+    state.classId = newClassId;
+    try { localStorage.setItem('ed-last-class', newClassId); } catch (e) {}
+    // Selection refers to IDs in the previous class; clear it.
+    state.selectedIds = [];
+    state.activeGroupId = (state.groups[0] && state.groups[0].id) || null;
+    state.openGroupIds = {};
+    if (state.activeGroupId) state.openGroupIds[state.activeGroupId] = true;
+    applyPageConfig();
+    renderCanvasPanel();
+    renderAll();
+    centerOnPage();
+    // Tab styling.
+    document.querySelectorAll('.ed-class-tab').forEach(function (b) {
+      const on = b.dataset.classId === state.classId;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+
+  /**
+   * Prompt the user to pick a source class to clone from, then copy
+   * its lines + groups into the current class. Dims stay untouched
+   * (class-specific by design — copying them would defeat the point
+   * of having separate classes). Snapshots so the action is
+   * undoable.
+   */
+  function cloneClassFromPicker() {
+    const others = state.pageConfig.useClasses.filter(function (cid) {
+      return cid !== state.classId && state.byClass[cid];
+    });
+    if (!others.length) {
+      alert('No other class to clone from on this page.');
+      return;
+    }
+    const labelOf = function (cid) {
+      const c = state.classes.find(function (x) { return x.id === cid; });
+      return c ? c.name : cid;
+    };
+    const buttons = others.map(function (cid) {
+      return { label: labelOf(cid) + ' (' + cid + ')', value: cid };
+    });
+    buttons.push({ label: 'Cancel', value: null, className: 'ed-mini' });
+    showChoiceDialog({
+      title:   'Clone into ' + labelOf(state.classId),
+      message: 'Replace this class\'s lines and groups with a copy from another class. The dims of this class are not changed.',
+      buttons: buttons
+    }).then(function (sourceId) {
+      if (!sourceId) return;
+      const src = state.byClass[sourceId];
+      state.byClass[state.classId] = {
+        lines:  deepCopy(src.lines),
+        groups: deepCopy(src.groups)
+      };
+      state.selectedIds   = [];
+      state.activeGroupId = (state.groups[0] && state.groups[0].id) || null;
+      state.openGroupIds  = {};
+      if (state.activeGroupId) state.openGroupIds[state.activeGroupId] = true;
+      state.dirty = true;
+      snapshot();
+      renderAll();
     });
   }
 
@@ -2879,9 +3004,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           page:    state.pageId,
-          classId: state.classId,
-          groups:  state.groups,
-          lines:   state.lines,
+          byClass: state.byClass,    // every class's lines + groups
           palette: state.palette,
           pageCfg: state.pageConfig
         })
@@ -2928,6 +3051,51 @@
   redoBtn.addEventListener('click', redo);
   renderDiagGrid(); // initial paint if the flag was already on
   settingsBtn.addEventListener('click', showSettings);
+
+  // Page picker — reloads with ?page=<slug>. If the user has unsaved
+  // changes we confirm first; otherwise switch immediately.
+  const pageSelect = document.getElementById('page-select');
+  if (pageSelect) {
+    pageSelect.addEventListener('change', function () {
+      const slug = pageSelect.value;
+      if (slug === state.pageId) return;
+      if (state.dirty && !confirm('Unsaved changes will be lost. Switch page anyway?')) {
+        pageSelect.value = state.pageId;
+        return;
+      }
+      window.location.assign('/dev/draw?page=' + encodeURIComponent(slug));
+    });
+  }
+
+  // Class tabs — hot-swap (no reload). state.classId update flips
+  // the live aliases for lines / groups / page, then re-renders.
+  document.querySelectorAll('.ed-class-tab').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      switchClass(btn.dataset.classId);
+    });
+  });
+
+  // Apply remembered class on init if it differs from the server's
+  // initial pick (template emitted a class for first paint; we may
+  // hot-swap immediately to honor the user's preference).
+  if (state.classId !== (initial.classId || 'wide')) {
+    // The template emitted SVG dims for initial.classId; rebind the
+    // canvas to the chosen class.
+    applyPageConfig();
+    document.querySelectorAll('.ed-class-tab').forEach(function (b) {
+      const on = b.dataset.classId === state.classId;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+
+  // Clone-from-class action — copies another class's lines + groups
+  // into the current class. Canvas dims are left alone (they're
+  // class-specific by design).
+  const cloneClassBtn = document.getElementById('clone-class-btn');
+  if (cloneClassBtn) {
+    cloneClassBtn.addEventListener('click', cloneClassFromPicker);
+  }
   selectAllBtn.addEventListener('click', toggleSelectAll);
   updateSelectAllButton();
 

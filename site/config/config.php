@@ -13,13 +13,13 @@ return [
   /*
    * Routes for the /dev/draw editor.
    *
-   *   POST /dev/draw/save  — persists per-class groups + lines for a
-   *                          given (page, classId) into
-   *                          content/<page>/<classId>/{groups,lines}.json,
-   *                          the per-page nested drawing config to
-   *                          page.json, and the site-wide palette to
-   *                          content/colors.json.
-   *                          Body: { page, classId, groups, lines, palette?, pageCfg? }
+   *   POST /dev/draw/save  — persists every class's groups + lines
+   *                          for the target page (so unsaved edits to
+   *                          a non-active class can't be lost when
+   *                          the editor switches class), the per-page
+   *                          nested drawing config to page.json, and
+   *                          the site-wide palette to content/colors.json.
+   *                          Body: { page, byClass:{<classId>:{lines,groups}}, palette?, pageCfg? }
    */
   'routes' => [
     [
@@ -30,15 +30,11 @@ return [
         $body  = $kirby->request()->body()->toArray();
 
         $pageId  = $body['page']    ?? null;
-        $classId = $body['classId'] ?? null;  // which class's lines/groups we're writing
-        $groups  = $body['groups']  ?? null;
-        $lines   = $body['lines']   ?? null;
+        $byClass = $body['byClass'] ?? null;  // map of classId → { lines, groups }
         $palette = $body['palette'] ?? null;  // optional — site-wide
         $pageCfg = $body['pageCfg'] ?? null;  // optional — nested page config
 
-        if (!is_string($pageId) || !is_string($classId) || $classId === ''
-            || !is_array($groups) || !is_array($lines)
-            || !preg_match('/^[a-z0-9_-]+$/i', $classId)) {
+        if (!is_string($pageId) || !is_array($byClass) || !$byClass) {
           return new Kirby\Http\Response(
             json_encode(['ok' => false, 'error' => 'Missing or invalid body fields.']),
             'application/json',
@@ -58,20 +54,36 @@ return [
         $root = $page->root();
         $opts = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES;
 
-        // Per-class files: lines + groups for the class being edited.
-        // The classId is validated above to match [a-z0-9_-]+; reject
-        // anything outside that to avoid escaping into parent dirs.
-        $classDir = $root . '/' . $classId;
-        if (!is_dir($classDir) && !mkdir($classDir, 0755, true)) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Could not create class dir: ' . $classId]),
-            'application/json', 500
-          );
+        // Per-class files: lines + groups for every class in the
+        // payload. Each classId is validated against [a-z0-9_-]+ so a
+        // malicious payload can't escape into parent directories.
+        $writeOk = true;
+        foreach ($byClass as $classId => $cls) {
+          if (!is_string($classId) || !preg_match('/^[a-z0-9_-]+$/i', $classId)) {
+            return new Kirby\Http\Response(
+              json_encode(['ok' => false, 'error' => 'Invalid classId: ' . $classId]),
+              'application/json', 400
+            );
+          }
+          if (!is_array($cls) || !isset($cls['lines']) || !isset($cls['groups'])
+              || !is_array($cls['lines']) || !is_array($cls['groups'])) {
+            return new Kirby\Http\Response(
+              json_encode(['ok' => false, 'error' => 'Class ' . $classId . ' missing lines/groups arrays']),
+              'application/json', 400
+            );
+          }
+          $classDir = $root . '/' . $classId;
+          if (!is_dir($classDir) && !mkdir($classDir, 0755, true)) {
+            return new Kirby\Http\Response(
+              json_encode(['ok' => false, 'error' => 'Could not create class dir: ' . $classId]),
+              'application/json', 500
+            );
+          }
+          $writeOk = $writeOk
+            && file_put_contents($classDir . '/groups.json', json_encode($cls['groups'], $opts) . "\n") !== false
+            && file_put_contents($classDir . '/lines.json',  json_encode($cls['lines'],  $opts) . "\n") !== false;
+          if (!$writeOk) break;
         }
-        $writeOk = (
-          file_put_contents($classDir . '/groups.json', json_encode($groups, $opts) . "\n") !== false &&
-          file_put_contents($classDir . '/lines.json',  json_encode($lines,  $opts) . "\n") !== false
-        );
 
         // Per-page nested config (v3+): { useClasses, dims:{<classId>:{...}} }.
         // Merge into existing page.json so unknown fields (like

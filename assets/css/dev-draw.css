@@ -31,13 +31,48 @@ body.editor {
   min-height: 48px;
 }
 .ed-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   margin-right: 0.5rem;
 }
-.ed-target {
-  color: #999;
-  font-weight: 400;
+.ed-brand-mark { color: #ddd; }
+.ed-page-picker select {
+  background: #2a2a2a;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ed-page-picker select:hover { background: #333; }
+.ed-class-tabs {
+  display: flex;
+  gap: 0.1rem;
+  padding-left: 0.2rem;
+  border-left: 1px solid #444;
+  margin-left: 0.2rem;
+}
+.ed-class-tab {
+  background: transparent !important;
+  color: #888 !important;
+  border: 1px solid transparent !important;
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem !important;
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.ed-class-tab:hover:not(.is-active) { color: #ccc !important; background: #2a2a2a !important; }
+.ed-class-tab.is-active {
+  background: #2a2a2a !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
 }
 .ed-version {
   color: #666;
