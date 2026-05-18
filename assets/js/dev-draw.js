@@ -1654,8 +1654,27 @@
     const prev = TOOLS[state.activeToolId];
     if (prev && prev.cancel) prev.cancel();
     state.activeToolId = id;
-    toolButtons.forEach(function (b) { b.classList.toggle('is-active', b.dataset.tool === id); });
+    refreshSelectButtonStates();
     renderToolSettings();
+  }
+
+  /**
+   * Update the Select / Select-all button visuals. The Select
+   * button reads as active only when the select tool is current
+   * AND select-all isn't on — otherwise both buttons would show
+   * active state at the same time, which is visually confusing.
+   */
+  function refreshSelectButtonStates() {
+    const all = (typeof allObjectsSelected === 'function')
+      ? allObjectsSelected() : false;
+    toolButtons.forEach(function (b) {
+      if (b.dataset.tool === 'select') {
+        b.classList.toggle('is-active',
+          state.activeToolId === 'select' && !all);
+      } else if (b.dataset.tool) {
+        b.classList.toggle('is-active', b.dataset.tool === state.activeToolId);
+      }
+    });
   }
 
   function renderToolSettings() {
@@ -2613,6 +2632,9 @@
     const all = allObjectsSelected();
     selectAllBtn.classList.toggle('is-active', all);
     selectAllBtn.textContent = all ? 'Deselect all' : 'Select all';
+    // Re-derive Select's active state so it isn't visually
+    // co-active with Select-all.
+    refreshSelectButtonStates();
   }
 
   /**
