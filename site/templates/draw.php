@@ -44,17 +44,18 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-$classes   = art_load_classes(kirby()->root('content'));
-$pageCfg   = $targetPage ? art_load_page_config($targetPage->root())
-                        : ['useClasses' => ['wide'], 'dims' => ['wide' => art_default_dims()]];
+$contentRoot = kirby()->root('content');
+$classes     = art_load_classes($contentRoot);
+$pageCfg     = $targetPage ? art_load_page_config($targetPage->root())
+                          : ['useClasses' => ['wide'], 'dims' => ['wide' => art_default_dims()]];
+$masters     = art_load_masters($contentRoot);
 
-// Load every class's lines + groups; the editor switches between
-// them in-memory.
+// Per-class instances + groups (v4 shape: { instances, groups }).
 $byClass = [];
 foreach ($pageCfg['useClasses'] as $cid) {
     $byClass[$cid] = $targetPage
         ? art_load_class_data($targetPage->root(), $cid)
-        : ['lines' => [], 'groups' => []];
+        : ['instances' => [], 'groups' => []];
 }
 
 // Default initial class for first paint. JS may override from
@@ -65,7 +66,7 @@ $initialClassId = in_array('wide', $pageCfg['useClasses'], true)
     : ($pageCfg['useClasses'][0] ?? 'wide');
 $initialDims    = $pageCfg['dims'][$initialClassId] ?? art_default_dims();
 
-$palette   = $readJson(kirby()->root('content') . '/colors.json');
+$palette   = art_load_palette($contentRoot);
 
 // Default palette if the file doesn't exist yet — gives the editor
 // something to pick from on first run.
@@ -94,6 +95,7 @@ $payload = json_encode([
   'pages'              => $pageOptions,
   'classId'            => $initialClassId,
   'classes'            => $classes,
+  'masters'            => $masters,
   'byClass'            => $byClass,
   'palette'            => $palette,
   'page'               => $pageCfg,

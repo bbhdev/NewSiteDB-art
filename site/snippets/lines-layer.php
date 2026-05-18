@@ -3,16 +3,24 @@
  * Lines layer — fixed-position SVG overlay that renders the page's
  * scroll-driven line system.
  *
- * Reads (v3+):
+ * Reads (v4+):
  *
  *   content/_shared/classes.json
  *     — site-wide screen-class breakpoints.
  *
+ *   content/_shared/masters.json
+ *     — site-wide canonical visual definitions per object.
+ *
+ *   content/_shared/palette.json
+ *     — site-wide color palette.
+ *
  *   content/<slug>/page.json
  *     — { useClasses, dims:{<classId>:{pageW,pageH,canvasW,canvasH}} }
  *
- *   content/<slug>/<classId>/{lines.json,groups.json}
- *     — per-class authored content.
+ *   content/<slug>/<classId>/instances.json + groups.json
+ *     — per-class authored content. Instances reference masters by
+ *       id and carry per-class overrides; the snippet resolves them
+ *       to fully-baked line records before inlining for app.js.
  *
  * The runtime in app.js picks a class by viewport width, applies
  * that class's dims to the SVG, and renders the class's lines. On
@@ -30,19 +38,27 @@
 $root        = $page->root();
 $contentRoot = kirby()->root('content');
 
-$classes   = art_load_classes($contentRoot);
-$pageCfg   = art_load_page_config($root);
-$palette   = is_file($contentRoot . '/colors.json')
-    ? (json_decode(file_get_contents($contentRoot . '/colors.json'), true) ?: [])
-    : (is_file($contentRoot . '/colors.example.json')
-        ? (json_decode(file_get_contents($contentRoot . '/colors.example.json'), true) ?: [])
-        : []);
+$classes = art_load_classes($contentRoot);
+$pageCfg = art_load_page_config($root);
+$palette = art_load_palette($contentRoot);
+$masters = art_load_masters($contentRoot);
+$mastersById = [];
+foreach ($masters as $m) {
+    if (isset($m['id'])) $mastersById[$m['id']] = $m;
+}
 
-// Load each class's lines + groups. byClass is keyed by classId so
-// the runtime can switch classes without a network round-trip.
+// Per-class resolved lines: each instance is composed with its
+// master so the runtime keeps consuming flat line records (no
+// awareness of the master/instance split needed there).
 $byClass = [];
 foreach ($pageCfg['useClasses'] as $classId) {
-    $byClass[$classId] = art_load_class_data($root, $classId);
+    $data = art_load_class_data($root, $classId);
+    $lines = [];
+    foreach ($data['instances'] as $inst) {
+        if (!is_array($inst)) continue;
+        $lines[] = art_resolve_instance($inst, $mastersById);
+    }
+    $byClass[$classId] = ['lines' => $lines, 'groups' => $data['groups']];
 }
 
 // SVG imports stay page-level (rare, not class-varying).

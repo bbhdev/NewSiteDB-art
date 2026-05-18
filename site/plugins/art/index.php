@@ -114,17 +114,50 @@ function art_normalize_dims(array $raw): array
 }
 
 /**
- * Read a single class's lines + groups for a given page. Resolution
- * walks a candidate list per file so all of these work without
- * special-casing:
+ * Read all site-wide master visual definitions (v4+). Empty array
+ * when masters.json is absent (fresh clone before migration).
  *
- *   - v3 live content    → <pageRoot>/<classId>/lines.json
- *   - v1/v2 unmigrated   → <pageRoot>/lines.json
- *   - fresh-clone seed   → <pageRoot>/lines.example.json
+ * @return list<array>
+ */
+function art_load_masters(string $contentDir): array
+{
+    $marker = $contentDir . '/_shared/masters.json';
+    if (!is_file($marker)) return [];
+    $data = json_decode(file_get_contents($marker), true);
+    return is_array($data) ? $data : [];
+}
+
+/**
+ * Read the site-wide design palette. v4+ canonical location is
+ * content/_shared/palette.json; falls back to legacy
+ * content/colors.json and finally content/colors.example.json so
+ * pre-migration content + fresh clones still work.
  *
- * Same chain for groups.json. Empty arrays returned on miss.
+ * @return list<array>
+ */
+function art_load_palette(string $contentDir): array
+{
+    $candidates = [
+        $contentDir . '/_shared/palette.json',
+        $contentDir . '/colors.json',
+        $contentDir . '/colors.example.json',
+    ];
+    foreach ($candidates as $path) {
+        if (is_file($path)) {
+            $data = json_decode(file_get_contents($path), true);
+            if (is_array($data)) return $data;
+        }
+    }
+    return [];
+}
+
+/**
+ * Per-class instance records (v4+). Falls back to v3 lines.json (and
+ * legacy locations) and wraps each entry as a master-less instance
+ * so pre-migration content still renders something. Same chain for
+ * groups.json (per-class).
  *
- * @return array{lines:array,groups:array}
+ * @return array{instances:list<array>,groups:list<array>}
  */
 function art_load_class_data(string $pageRoot, string $classId): array
 {
@@ -138,18 +171,69 @@ function art_load_class_data(string $pageRoot, string $classId): array
         }
         return [];
     };
-    return [
-        'lines'  => $readFirst([
+    // Prefer v4 instances.json. If absent, wrap legacy lines.json so
+    // every old-shape line becomes a master-less instance whose
+    // overrides carry the full visual payload (matches what
+    // art_resolve_instance would produce when masterId is null).
+    $instances = $readFirst([$classDir . '/instances.json']);
+    if (!$instances) {
+        $legacy = $readFirst([
             $classDir . '/lines.json',
             $pageRoot . '/lines.json',
             $pageRoot . '/lines.example.json',
-        ]),
-        'groups' => $readFirst([
-            $classDir . '/groups.json',
-            $pageRoot . '/groups.json',
-            $pageRoot . '/groups.example.json',
-        ]),
-    ];
+        ]);
+        $instances = array_map(function ($line) {
+            $line = is_array($line) ? $line : [];
+            $behaviors = is_array($line['overrides'] ?? null) ? $line['overrides'] : [];
+            $visual    = $line;
+            unset($visual['id'], $visual['groupId'], $visual['hidden'], $visual['overrides']);
+            return [
+                'id'        => $line['id'] ?? null,
+                'masterId'  => null,
+                'visible'   => empty($line['hidden']),
+                'groupId'   => $line['groupId'] ?? null,
+                'overrides' => (object) array_merge($behaviors, $visual),
+            ];
+        }, $legacy);
+    }
+    $groups = $readFirst([
+        $classDir . '/groups.json',
+        $pageRoot . '/groups.json',
+        $pageRoot . '/groups.example.json',
+    ]);
+    return ['instances' => $instances, 'groups' => $groups];
+}
+
+/**
+ * Compose a fully-baked line record from a master + its instance
+ * overrides. Same shape every line had pre-v4, so the editor and
+ * runtime renderers consume it unchanged. `masterId` is carried
+ * along so the editor can round-trip back to (master, instance).
+ *
+ * Resolution order: master visual props → instance overrides win.
+ * Instance-specific fields (id, groupId, hidden) overlay on top.
+ */
+function art_resolve_instance(array $instance, array $mastersById): array
+{
+    $line = [];
+    $masterId = $instance['masterId'] ?? null;
+    if ($masterId && isset($mastersById[$masterId])) {
+        $line = $mastersById[$masterId];
+        // master.id is the master's id; strip so it doesn't leak as
+        // line.id below.
+        unset($line['id']);
+    }
+    $overrides = $instance['overrides'] ?? null;
+    if (is_array($overrides) || is_object($overrides)) {
+        foreach ((array) $overrides as $k => $v) {
+            $line[$k] = $v;
+        }
+    }
+    $line['id']       = $instance['id'] ?? null;
+    $line['groupId']  = $instance['groupId'] ?? null;
+    $line['hidden']   = !($instance['visible'] ?? true);
+    if ($masterId)  $line['masterId'] = $masterId;
+    return $line;
 }
 
 /**

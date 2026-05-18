@@ -19,4 +19,7 @@ Thumbs.db
 /content/*/page.json
 /content/*/*/lines.json
 /content/*/*/groups.json
+/content/*/*/instances.json
 /content/_shared/classes.json
+/content/_shared/masters.json
+/content/_shared/palette.json

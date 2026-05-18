@@ -13,13 +13,18 @@ return [
   /*
    * Routes for the /dev/draw editor.
    *
-   *   POST /dev/draw/save  — persists every class's groups + lines
-   *                          for the target page (so unsaved edits to
-   *                          a non-active class can't be lost when
-   *                          the editor switches class), the per-page
-   *                          nested drawing config to page.json, and
-   *                          the site-wide palette to content/colors.json.
-   *                          Body: { page, byClass:{<classId>:{lines,groups}}, palette?, pageCfg? }
+   *   POST /dev/draw/save  — persists, atomically per save, every
+   *                          class's groups + instances for the target
+   *                          page (so unsaved edits to a non-active
+   *                          class can't be lost when the editor
+   *                          switches class), the site-wide masters
+   *                          file, the per-page nested drawing config
+   *                          to page.json, and the site-wide palette
+   *                          to _shared/palette.json.
+   *                          Body: {
+   *                            page, masters?, palette?, pageCfg?,
+   *                            byClass: { <classId>: { instances, groups } }
+   *                          }
    */
   'routes' => [
     [
@@ -30,7 +35,8 @@ return [
         $body  = $kirby->request()->body()->toArray();
 
         $pageId  = $body['page']    ?? null;
-        $byClass = $body['byClass'] ?? null;  // map of classId → { lines, groups }
+        $byClass = $body['byClass'] ?? null;  // map of classId → { instances, groups }
+        $masters = $body['masters'] ?? null;  // optional — site-wide visual definitions
         $palette = $body['palette'] ?? null;  // optional — site-wide
         $pageCfg = $body['pageCfg'] ?? null;  // optional — nested page config
 
@@ -54,7 +60,7 @@ return [
         $root = $page->root();
         $opts = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES;
 
-        // Per-class files: lines + groups for every class in the
+        // Per-class files: instances + groups for every class in the
         // payload. Each classId is validated against [a-z0-9_-]+ so a
         // malicious payload can't escape into parent directories.
         $writeOk = true;
@@ -65,10 +71,10 @@ return [
               'application/json', 400
             );
           }
-          if (!is_array($cls) || !isset($cls['lines']) || !isset($cls['groups'])
-              || !is_array($cls['lines']) || !is_array($cls['groups'])) {
+          if (!is_array($cls) || !isset($cls['instances']) || !isset($cls['groups'])
+              || !is_array($cls['instances']) || !is_array($cls['groups'])) {
             return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Class ' . $classId . ' missing lines/groups arrays']),
+              json_encode(['ok' => false, 'error' => 'Class ' . $classId . ' missing instances/groups arrays']),
               'application/json', 400
             );
           }
@@ -80,9 +86,27 @@ return [
             );
           }
           $writeOk = $writeOk
-            && file_put_contents($classDir . '/groups.json', json_encode($cls['groups'], $opts) . "\n") !== false
-            && file_put_contents($classDir . '/lines.json',  json_encode($cls['lines'],  $opts) . "\n") !== false;
+            && file_put_contents($classDir . '/groups.json',    json_encode($cls['groups'],    $opts) . "\n") !== false
+            && file_put_contents($classDir . '/instances.json', json_encode($cls['instances'], $opts) . "\n") !== false;
           if (!$writeOk) break;
+        }
+
+        // Site-wide masters (visual definitions). The editor sends
+        // the full list every save so deletions propagate; we
+        // overwrite atomically. Skipped silently when the body omits
+        // it (older clients / probe requests).
+        if (is_array($masters)) {
+          $sharedDir = $kirby->root('content') . '/_shared';
+          if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
+            return new Kirby\Http\Response(
+              json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
+              'application/json', 500
+            );
+          }
+          $writeOk = $writeOk && (
+            file_put_contents($sharedDir . '/masters.json',
+              json_encode($masters, $opts) . "\n") !== false
+          );
         }
 
         // Per-page nested config (v3+): { useClasses, dims:{<classId>:{...}} }.
@@ -119,11 +143,17 @@ return [
           );
         }
 
-        // Site-wide file: the design palette is shared across pages, so
-        // it lives at the content root rather than under any one page.
+        // Site-wide palette (v4 canonical location).
         if (is_array($palette)) {
+          $sharedDir = $kirby->root('content') . '/_shared';
+          if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
+            return new Kirby\Http\Response(
+              json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
+              'application/json', 500
+            );
+          }
           $writeOk = $writeOk && (
-            file_put_contents($kirby->root('content') . '/colors.json',
+            file_put_contents($sharedDir . '/palette.json',
               json_encode($palette, $opts) . "\n") !== false
           );
         }

@@ -31,7 +31,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 3;
+const CONTENT_SCHEMA_VERSION = 4;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -44,6 +44,14 @@ $SCHEMA_HISTORY = [
        . ' {<classId>:{pageW,pageH,canvasW,canvasH}} }. Per-page lines + groups'
        . ' move into content/<slug>/<classId>/ subfolders (all classes cloned'
        . ' identically from v2 content so visuals survive).',
+    4 => 'Master / instance split. Visual identity (kind, params, stroke, width,'
+       . ' name, geometry) moves into site-wide content/_shared/masters.json.'
+       . ' Per-class files become instances.json — each entry references a'
+       . ' master by id, plus per-class { visible, groupId, overrides } (where'
+       . ' overrides can include any master prop diverging from canonical, plus'
+       . ' the existing behavior overrides). content/colors.json moves to'
+       . ' content/_shared/palette.json. Legacy lines.json + colors.json are'
+       . ' left in place as a recoverable safety net; v4 readers ignore them.',
 ];
 
 /**
@@ -143,7 +151,177 @@ $MIGRATIONS = [
             json_encode($nested, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
         ) !== false;
     },
+
+    3 => function (string $pageRoot, bool $dryRun): bool {
+        // v3 → v4: master / instance split.
+        //   1) ensure content/_shared/palette.json (moved from colors.json)
+        //   2) for each line in each class, extract visual identity into a
+        //      master; keep behaviors + position-style overrides on the
+        //      instance. Identical lines across classes share one master
+        //      (same lineId → same master); divergent visual props on
+        //      non-canonical classes become instance overrides.
+        //   3) write per-class instances.json next to (deprecated) lines.json
+        //   4) merge into / write site-wide _shared/masters.json
+        $contentDir = dirname($pageRoot);
+        $pageSlug   = basename($pageRoot);
+
+        if (!ensureSharedPalette($contentDir, $dryRun)) return false;
+
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) {
+            fwrite(STDERR, "  $pageRoot: page.json missing (v3 prerequisite).\n");
+            return false;
+        }
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = is_array($cfg['useClasses'] ?? null) ? $cfg['useClasses'] : ['wide'];
+
+        // Visual keys live on masters. Everything else (groupId,
+        // hidden, overrides) is instance-side.
+        $visualKeys = ['kind', 'points', 'params', 'segments', 'smoothed',
+                       'closed', 'filled', 'd', 'stroke', 'width', 'name'];
+
+        // Pass 1: pick canonical visuals per lineId. Prefer the "wide"
+        // class as canonical when present (Phase 2 cloned everything
+        // from there); otherwise first-encountered wins.
+        $orderedClasses = [];
+        if (in_array('wide', $useClasses, true)) $orderedClasses[] = 'wide';
+        foreach ($useClasses as $cid) {
+            if ($cid !== 'wide') $orderedClasses[] = $cid;
+        }
+
+        $canonByLineId = [];   // lineId → visual array (master content)
+        $rawByClass    = [];   // classId → array of raw lines (preserved)
+        foreach ($useClasses as $cid) {
+            $linesFile = $pageRoot . '/' . $cid . '/lines.json';
+            $rawByClass[$cid] = is_file($linesFile)
+                ? (json_decode(file_get_contents($linesFile), true) ?: [])
+                : [];
+        }
+        foreach ($orderedClasses as $cid) {
+            foreach ($rawByClass[$cid] as $line) {
+                $lid = $line['id'] ?? null;
+                if (!is_string($lid) || $lid === '') continue;
+                if (isset($canonByLineId[$lid])) continue;
+                $visual = [];
+                foreach ($visualKeys as $vk) {
+                    if (array_key_exists($vk, $line)) $visual[$vk] = $line[$vk];
+                }
+                $canonByLineId[$lid] = $visual;
+            }
+        }
+
+        // Build masters keyed by deterministic ID = m-<8 hex of pageSlug/lineId>.
+        // Deterministic so re-running the migration after a partial failure
+        // gives the same IDs (idempotency at the master level).
+        $masterIdByLineId = [];
+        $newMasters       = [];
+        foreach ($canonByLineId as $lid => $visual) {
+            $mid = 'm-' . substr(md5($pageSlug . '/' . $lid), 0, 8);
+            $masterIdByLineId[$lid] = $mid;
+            $newMasters[] = array_merge(['id' => $mid], $visual);
+        }
+
+        // Per-class instances: every line becomes an instance referencing
+        // its master, with overrides for any visual prop diverging from
+        // canonical PLUS the line's existing behavior overrides.
+        $instancesByClass = [];
+        foreach ($useClasses as $cid) {
+            $instances = [];
+            foreach ($rawByClass[$cid] as $line) {
+                $lid = $line['id'] ?? null;
+                if (!is_string($lid) || $lid === '' || !isset($masterIdByLineId[$lid])) continue;
+                $mid    = $masterIdByLineId[$lid];
+                $canon  = $canonByLineId[$lid];
+                // Compute visual divergence.
+                $visualOverrides = [];
+                foreach ($visualKeys as $vk) {
+                    if (array_key_exists($vk, $line)) {
+                        $a = $line[$vk]; $b = $canon[$vk] ?? null;
+                        // Use loose compare on the JSON representation —
+                        // tolerates int/float differences in coords, etc.
+                        if (json_encode($a) !== json_encode($b)) {
+                            $visualOverrides[$vk] = $a;
+                        }
+                    }
+                }
+                $behaviorOverrides = is_array($line['overrides'] ?? null) ? $line['overrides'] : [];
+                $merged = array_merge($behaviorOverrides, $visualOverrides);
+                $instances[] = [
+                    'id'        => $lid,
+                    'masterId'  => $mid,
+                    'visible'   => empty($line['hidden']),
+                    'groupId'   => $line['groupId'] ?? null,
+                    'overrides' => (object) $merged,
+                ];
+            }
+            $instancesByClass[$cid] = $instances;
+        }
+
+        if ($dryRun) {
+            echo "    would write " . count($newMasters) . " master(s) for page '$pageSlug' into _shared/masters.json\n";
+            foreach ($instancesByClass as $cid => $insts) {
+                echo "    would write " . count($insts) . " instance(s) into $pageRoot/$cid/instances.json\n";
+            }
+            return true;
+        }
+
+        // Merge into existing masters.json (preserve other pages' masters).
+        $mastersPath = $contentDir . '/_shared/masters.json';
+        $existing    = is_file($mastersPath)
+            ? (json_decode(file_get_contents($mastersPath), true) ?: [])
+            : [];
+        $newIds = array_column($newMasters, 'id');
+        $all    = [];
+        foreach ($existing as $em) {
+            if (is_array($em) && isset($em['id']) && !in_array($em['id'], $newIds, true)) {
+                $all[] = $em;
+            }
+        }
+        foreach ($newMasters as $m) $all[] = $m;
+        if (!is_dir($contentDir . '/_shared') && !mkdir($contentDir . '/_shared', 0755, true)) return false;
+        if (file_put_contents($mastersPath,
+                json_encode($all, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+            return false;
+        }
+
+        // Per-class instances.json (lines.json left as a safety net).
+        foreach ($instancesByClass as $cid => $insts) {
+            $classDir = $pageRoot . '/' . $cid;
+            if (!is_dir($classDir) && !mkdir($classDir, 0755, true)) return false;
+            if (file_put_contents($classDir . '/instances.json',
+                    json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+                return false;
+            }
+        }
+
+        return true;
+    },
 ];
+
+/**
+ * Move content/colors.json → content/_shared/palette.json (copy,
+ * don't delete — the legacy file is a safety net). Idempotent.
+ * Called once per page by the v3→v4 migration; subsequent calls
+ * notice the destination already exists and exit.
+ */
+function ensureSharedPalette(string $contentDir, bool $dryRun): bool
+{
+    $dest = $contentDir . '/_shared/palette.json';
+    if (is_file($dest)) return true;
+    $src = $contentDir . '/colors.json';
+    if (!is_file($src)) {
+        // Try the example seed for fresh clones.
+        $seed = $contentDir . '/colors.example.json';
+        if (!is_file($seed)) return true; // nothing to move
+        $src = $seed;
+    }
+    if ($dryRun) {
+        echo "    would copy $src → $dest\n";
+        return true;
+    }
+    if (!is_dir($contentDir . '/_shared') && !mkdir($contentDir . '/_shared', 0755, true)) return false;
+    return copy($src, $dest);
+}
 
 /**
  * Create content/_shared/classes.json with the default 3-class

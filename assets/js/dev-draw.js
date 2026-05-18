@@ -74,6 +74,51 @@
     return;
   }
 
+  // ── Master / instance plumbing (v4+) ─────────────────────────────
+  // The editor operates on flat "line" records (resolved master ⊕
+  // instance overrides). Masters + instances are the on-disk shape;
+  // load (below) resolves them in, save (decomposeForSave, further
+  // down) writes them back out. WIDE is treated as the canonical
+  // class — its line values become the master values on save, and
+  // divergent values in other classes become per-instance overrides.
+  //
+  // Declared here (above state init) so resolveInstanceJS is callable
+  // at load time without TDZ trouble.
+  const MASTER_VISUAL_KEYS = [
+    'kind', 'points', 'params', 'segments',
+    'smoothed', 'closed', 'filled',
+    'd', 'stroke', 'width', 'name'
+  ];
+
+  /**
+   * Compose a flat line record from an instance + the master library.
+   * Returns the same shape Phase 3's editor manipulated, so tool /
+   * mutation code stays unchanged.
+   */
+  function resolveInstanceJS(inst, mby) {
+    if (!inst) return {};
+    const master = inst.masterId ? mby[inst.masterId] : null;
+    const line = master ? Object.assign({}, master) : {};
+    delete line.id; // master.id is not the instance.id
+    const ov = inst.overrides;
+    const behaviorOverrides = {};
+    if (ov && typeof ov === 'object') {
+      Object.keys(ov).forEach(function (k) {
+        if (MASTER_VISUAL_KEYS.indexOf(k) !== -1) {
+          line[k] = ov[k];
+        } else {
+          behaviorOverrides[k] = ov[k];
+        }
+      });
+    }
+    line.id        = inst.id;
+    line.groupId   = inst.groupId;
+    line.masterId  = inst.masterId || null;
+    line.hidden    = !(inst.visible === undefined ? true : inst.visible);
+    line.overrides = behaviorOverrides;
+    return line;
+  }
+
   // ── State ─────────────────────────────────────────────────────────
   const initial = JSON.parse(document.getElementById('editor-data').textContent);
 
@@ -90,19 +135,42 @@
     ? rememberedClass
     : (initial.classId || useClasses[0] || 'wide');
 
-  // byClass: { <classId>: { lines, groups } } — full per-class data
-  // for the loaded page. state.lines / state.groups are getters that
-  // resolve through byClass[classId]; mutations there (push, splice,
-  // assignments) reach the canonical store so class hot-swap reads
-  // fresh data.
+  // Site-wide masters (v4+): { id, kind, params, ... } — visual
+  // identity. Carried through state so the save step can decompose
+  // current per-class line records back into (master + instance)
+  // pairs. Internally the editor still operates on flat "line"
+  // records (resolved master ⊕ instance overrides) so existing
+  // tool / mutation code is unchanged from Phase 3.
+  const initialMasters = Array.isArray(initial.masters) ? initial.masters : [];
+
+  // byClass: { <classId>: { lines, groups, instances } }
+  //   - lines      → editor's working model; resolveInstance(inst, mby)
+  //                  per entry on load. Mutations write here directly,
+  //                  the same as Phase 3.
+  //   - instances  → original per-class records as loaded from the
+  //                  server. Used only as the seed for `lines`; on save
+  //                  we rebuild fresh from `lines` + masters.
+  //   - groups     → per-class behavior groups (unchanged).
   const initialByClass = (initial.byClass && typeof initial.byClass === 'object')
     ? initial.byClass : {};
-  // Ensure every useClass has a slot; missing ones get empty arrays
-  // so getters never throw.
   useClasses.forEach(function (cid) {
-    if (!initialByClass[cid]) initialByClass[cid] = { lines: [], groups: [] };
-    if (!Array.isArray(initialByClass[cid].lines))  initialByClass[cid].lines  = [];
-    if (!Array.isArray(initialByClass[cid].groups)) initialByClass[cid].groups = [];
+    if (!initialByClass[cid]) initialByClass[cid] = {};
+    if (!Array.isArray(initialByClass[cid].instances)) initialByClass[cid].instances = [];
+    if (!Array.isArray(initialByClass[cid].groups))    initialByClass[cid].groups    = [];
+  });
+
+  // Resolve each class's instances against the master library into
+  // flat line records. masters lookup is built once per load.
+  const mastersById = {};
+  initialMasters.forEach(function (m) { if (m && m.id) mastersById[m.id] = m; });
+  useClasses.forEach(function (cid) {
+    initialByClass[cid].lines = initialByClass[cid].instances.map(function (inst) {
+      return resolveInstanceJS(inst, mastersById);
+    });
+    // The raw instances were only seed data; the editor mutates
+    // byClass[cid].lines directly from here on. Drop them so there's
+    // a single source of truth in memory.
+    delete initialByClass[cid].instances;
   });
 
   const state = {
@@ -111,6 +179,7 @@
     classId: startClassId,
     classes: Array.isArray(initial.classes) ? initial.classes : [],
     byClass: initialByClass,
+    masters: initialMasters,
     palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
     // Nested per-page config (v3): { useClasses, dims }.
     pageConfig: initial.page && initial.page.dims
@@ -370,10 +439,126 @@
 
   function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
 
+  /**
+   * Pick the canonical class for master values. Wide if available,
+   * else the first useClass. Master saves take their visual values
+   * from this class; other classes record divergences as overrides.
+   */
+  function canonicalClassId() {
+    const u = state.pageConfig.useClasses || [];
+    return u.indexOf('wide') !== -1 ? 'wide' : (u[0] || 'wide');
+  }
+
+  /**
+   * Decompose state.byClass[].lines + state.masters into the v4 on-
+   * disk shape for save. Four passes:
+   *   1. Mint a masterId for any line that doesn't have one yet
+   *      (freshly drawn since last save).
+   *   2. Pick a "source class" per master — canonical class when it
+   *      has an instance, else the first class that does. The
+   *      source class's line values become the master values.
+   *   3. Rebuild masters from their source classes.
+   *   4. Emit per-class instances; each carries any behavior
+   *      overrides PLUS visual divergences from its master.
+   *   5. Drop masters with no referencing instance.
+   */
+  function decomposeForSave() {
+    const canonical = canonicalClassId();
+    const useClasses = state.pageConfig.useClasses || [];
+    const masterMap = {};
+    state.masters.forEach(function (m) {
+      if (m && m.id) masterMap[m.id] = Object.assign({}, m);
+    });
+
+    // Pass 1: mint missing masterIds.
+    useClasses.forEach(function (cid) {
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      lines.forEach(function (line) {
+        if (!line.masterId) {
+          line.masterId = 'm-' + Math.random().toString(36).slice(2, 10);
+        }
+      });
+    });
+
+    // Pass 2: pick source class per master (canonical wins; otherwise
+    // first-seen in declared useClasses order).
+    const masterSourceClass = {};
+    useClasses.forEach(function (cid) {
+      if (cid === canonical) return;
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      lines.forEach(function (line) {
+        if (line.masterId && !masterSourceClass[line.masterId]) {
+          masterSourceClass[line.masterId] = cid;
+        }
+      });
+    });
+    if (state.byClass[canonical]) {
+      (state.byClass[canonical].lines || []).forEach(function (line) {
+        if (line.masterId) masterSourceClass[line.masterId] = canonical;
+      });
+    }
+
+    // Pass 3: rebuild masters from source class line values.
+    Object.keys(masterSourceClass).forEach(function (mid) {
+      const cid = masterSourceClass[mid];
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      const line = lines.find(function (l) { return l.masterId === mid; });
+      if (!line) return;
+      const m = { id: mid };
+      MASTER_VISUAL_KEYS.forEach(function (k) {
+        if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
+      });
+      masterMap[mid] = m;
+    });
+
+    // Pass 4: per-class instances with overrides.
+    const byClass = {};
+    const usedMasterIds = {};
+    useClasses.forEach(function (cid) {
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      const groups = (state.byClass[cid] && state.byClass[cid].groups) || [];
+      const instances = lines.map(function (line) {
+        const mid = line.masterId;
+        const master = masterMap[mid];
+        const overrides = {};
+        if (line.overrides && typeof line.overrides === 'object') {
+          Object.keys(line.overrides).forEach(function (k) {
+            overrides[k] = line.overrides[k];
+          });
+        }
+        MASTER_VISUAL_KEYS.forEach(function (k) {
+          if (line[k] === undefined) return;
+          const lv = line[k];
+          const mv = master ? master[k] : undefined;
+          if (JSON.stringify(lv) !== JSON.stringify(mv)) {
+            overrides[k] = lv;
+          }
+        });
+        usedMasterIds[mid] = true;
+        return {
+          id:        line.id,
+          masterId:  mid,
+          visible:   !line.hidden,
+          groupId:   line.groupId || null,
+          overrides: overrides
+        };
+      });
+      byClass[cid] = { instances: instances, groups: groups };
+    });
+
+    // Drop unreferenced masters.
+    const masters = Object.keys(masterMap)
+      .filter(function (mid) { return usedMasterIds[mid]; })
+      .map(function (mid) { return masterMap[mid]; });
+
+    return { masters: masters, byClass: byClass };
+  }
+
   function snapshot() {
     if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
     const snap = {
       byClass:    deepCopy(state.byClass),
+      masters:    deepCopy(state.masters),
       palette:    deepCopy(state.palette),
       pageConfig: deepCopy(state.pageConfig),
       classId:    state.classId,
@@ -401,6 +586,7 @@
 
   function restoreFromSnapshot(snap) {
     state.byClass = deepCopy(snap.byClass);
+    if (Array.isArray(snap.masters)) state.masters = deepCopy(snap.masters);
     state.palette = deepCopy(snap.palette);
     if (snap.pageConfig) state.pageConfig = deepCopy(snap.pageConfig);
     // If the snapshot was taken while a different class was active,
@@ -2999,12 +3185,22 @@
     saveStatus.classList.remove('is-error');
     saveStatus.textContent = 'Saving…';
     try {
+      // Decompose flat per-class lines back into the v4 on-disk shape:
+      //   masters[]                — site-wide visual definitions
+      //   byClass[cid].instances[] — per-class refs + overrides
+      // state.masters is refreshed too so the next save sees the
+      // current values (e.g., after renaming or restyling in canonical
+      // class).
+      const decomposed = decomposeForSave();
+      state.masters = decomposed.masters;
+
       const res = await fetch('/dev/draw/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           page:    state.pageId,
-          byClass: state.byClass,    // every class's lines + groups
+          masters: decomposed.masters,
+          byClass: decomposed.byClass,
           palette: state.palette,
           pageCfg: state.pageConfig
         })
