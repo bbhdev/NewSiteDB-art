@@ -339,19 +339,33 @@ $MIGRATIONS = [
  */
 function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
 {
+    $verbose = $GLOBALS['VERBOSE_RETROFIT'] ?? false;
+    $log = function (string $m) use ($verbose) {
+        if ($verbose) echo $m;
+    };
     $mastersPath = $contentDir . '/_shared/masters.json';
-    if (!is_file($mastersPath)) return true;
+    if (!is_file($mastersPath)) {
+        $log("    no _shared/masters.json — nothing to do\n");
+        return true;
+    }
     $masters = json_decode(file_get_contents($mastersPath), true);
-    if (!is_array($masters)) return true;
+    if (!is_array($masters)) {
+        $log("    masters.json couldn't decode as array — bailing\n");
+        return true;
+    }
 
     // Collect master → first-instance-id mapping by scanning every
     // page's class folders. We only need ONE instance per master to
     // pick a name, so first-found wins.
     $instanceIdByMaster = [];
-    foreach (glob($contentDir . '/*', GLOB_ONLYDIR) ?: [] as $pageDir) {
+    $pageDirs = glob($contentDir . '/*', GLOB_ONLYDIR) ?: [];
+    $log("    scanned " . count($pageDirs) . " page-dir candidate(s) under content/\n");
+    foreach ($pageDirs as $pageDir) {
         $name = basename($pageDir);
         if ($name === '' || $name[0] === '_' || $name[0] === '.') continue;
-        foreach (glob($pageDir . '/*', GLOB_ONLYDIR) ?: [] as $classDir) {
+        $classDirs = glob($pageDir . '/*', GLOB_ONLYDIR) ?: [];
+        $log("    page '$name' has " . count($classDirs) . " subdir(s)\n");
+        foreach ($classDirs as $classDir) {
             $instPath = $classDir . '/instances.json';
             if (!is_file($instPath)) continue;
             $insts = json_decode(file_get_contents($instPath), true);
@@ -367,6 +381,7 @@ function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
             }
         }
     }
+    $log("    collected " . count($instanceIdByMaster) . " master→instance id mapping(s)\n");
 
     // Patch masters with names where missing.
     $mastersChanged = false;
@@ -396,6 +411,7 @@ function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
             $insts = json_decode(file_get_contents($instPath), true);
             if (!is_array($insts)) continue;
             $changed = false;
+            $log("    inspecting $instPath (" . count($insts) . " instance(s))\n");
             foreach ($insts as &$inst) {
                 if (!is_array($inst)) continue;
                 // Repair: PHP's json_decode(assoc=true) turns "{}" into
@@ -427,6 +443,7 @@ function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
                 }
             }
             unset($inst);
+            $log("    → " . ($changed ? "changed; will write" : "no changes needed") . "\n");
             if ($changed) $instanceFilesChanged[$instPath] = $insts;
         }
     }
@@ -438,12 +455,19 @@ function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
     }
 
     if ($mastersChanged) {
+        $log("    writing $mastersPath\n");
         if (file_put_contents($mastersPath,
                 json_encode($masters, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
             return false;
         }
+    } else {
+        $log("    masters already named — not rewriting\n");
+    }
+    if (!$instanceFilesChanged) {
+        $log("    no instance files needed changes\n");
     }
     foreach ($instanceFilesChanged as $path => $insts) {
+        $log("    writing $path\n");
         if (file_put_contents($path,
                 json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
             return false;
@@ -538,6 +562,7 @@ function main(array $argv): int
 function repairNames(string $contentDir, array $opts): int
 {
     $dry = $opts['dry-run'];
+    $GLOBALS['VERBOSE_RETROFIT'] = true;
     echo ($dry ? "[dry run] " : "") . "running name retrofit on $contentDir\n";
     $ok = ensureMasterAndInstanceNames($contentDir, $dry);
     if (!$ok) { fwrite(STDERR, "name retrofit failed.\n"); return 1; }
