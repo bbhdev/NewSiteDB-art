@@ -1045,6 +1045,10 @@
         if (sib.masterId !== line.masterId) return;
         SIMPLE_KEYS.forEach(function (k) {
           if (line[k] === undefined) return;
+          // Source-line override means "this change is local"; don't
+          // push the value out to siblings any more than we pushed
+          // it up to the master.
+          if (isVisualOverridden(line, k)) return;
           if (isVisualOverridden(sib, k)) return;
           sib[k] = deepCopyIfNeeded(line[k]);
         });
