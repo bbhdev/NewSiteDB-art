@@ -112,6 +112,7 @@ $payload = json_encode([
   <div class="ed-view" role="toolbar" aria-label="View options">
     <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
     <button type="button" id="grid-btn"   title="Show / hide diagnostic coordinate grid (cyan, 50px step, coords every 100px). Renders on the live site too — useful for comparing where authored coords land in each surface.">Grid</button>
+    <button type="button" id="dump-btn"   title="Live site only: when on, dump a console.table of every named line's expected center (params), actual bbox center, shift, and transform attribute at page load. Useful for diagnosing position drift between editor and runtime.">Dump</button>
   </div>
 
   <div class="ed-spacer"></div>

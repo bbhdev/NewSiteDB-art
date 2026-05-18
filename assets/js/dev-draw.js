@@ -43,6 +43,7 @@
   const labelsG        = document.getElementById('labels-layer');
   const labelsBtn      = document.getElementById('labels-btn');
   const gridBtn        = document.getElementById('grid-btn');
+  const dumpBtn        = document.getElementById('dump-btn');
   const selectAllBtn   = document.getElementById('select-all-btn');
   const newGroupBtn    = document.getElementById('new-group-btn');
   const newColorBtn    = document.getElementById('new-color-btn');
@@ -62,7 +63,7 @@
   const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
-                     labelsG, labelsBtn, gridBtn, selectAllBtn,
+                     labelsG, labelsBtn, gridBtn, dumpBtn, selectAllBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
                      saveBtn, saveStatus, clearLinesBtn, helpBtn,
@@ -104,6 +105,11 @@
     // on the live site too. Handy for comparing where authored coords
     // actually land in each surface.
     showDiagGrid: localStorage.getItem('ed-show-diag-grid') === '1',
+    // Live-site only: dump a console.table of every named line's
+    // expected/actual centers + transform at page load. Kept behind a
+    // separate toggle so the table only appears when we're actively
+    // diagnosing a position drift — Grid alone shouldn't pay the cost.
+    showRuntimeDump: localStorage.getItem('ed-show-runtime-dump') === '1',
     dirty: false
   };
   state.activeGroupId = state.groups[0].id;
@@ -1562,6 +1568,12 @@
     gridBtn.classList.toggle('is-active', state.showDiagGrid);
     renderDiagGrid();
   }
+  function toggleRuntimeDump() {
+    state.showRuntimeDump = !state.showRuntimeDump;
+    localStorage.setItem('ed-show-runtime-dump',
+      state.showRuntimeDump ? '1' : '0');
+    dumpBtn.classList.toggle('is-active', state.showRuntimeDump);
+  }
 
   function resolveStroke(ref) {
     if (!ref) return null;
@@ -2731,6 +2743,8 @@
   gridBtn.addEventListener('click', toggleDiagGrid);
   gridBtn.classList.toggle('is-active', state.showDiagGrid);
   renderDiagGrid(); // initial paint if the flag was already on
+  dumpBtn.addEventListener('click', toggleRuntimeDump);
+  dumpBtn.classList.toggle('is-active', state.showRuntimeDump);
   selectAllBtn.addEventListener('click', toggleSelectAll);
   updateSelectAllButton();
 

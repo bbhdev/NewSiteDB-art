@@ -219,7 +219,8 @@
     // enables them they see the same aids on the live site too.
     // Other visitors don't have the flags set → no overlay.
     const hasLS = (typeof localStorage !== 'undefined');
-    const diagMode = hasLS && localStorage.getItem('ed-show-diag-grid') === '1';
+    const diagMode    = hasLS && localStorage.getItem('ed-show-diag-grid')    === '1';
+    const dumpMode    = hasLS && localStorage.getItem('ed-show-runtime-dump') === '1';
     if (hasLS && localStorage.getItem('ed-show-labels') === '1') {
       renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
       // Page-area outline + reference markers (see v0.1.21).
@@ -229,9 +230,6 @@
       renderRuntimeDiagGrid(layer);
       try { window.scrollTo(0, 0); } catch (e) { /* not all envs */ }
       mountScrollProgressIndicator();
-      // Per-line bbox-vs-params dump runs after motion setup below so
-      // it observes the actual rendered transform.
-      window.__diagLines = lines;
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
@@ -409,8 +407,10 @@
     //   { id, name, expected_cx, expected_cy, bbox_cx, bbox_cy,
     //     shift_x, shift_y, transform_attr }
     // so the author can pinpoint whether the shift is in the d-string
-    // (params vs bbox center) or in the applied transform.
-    if (diagMode) {
+    // (params vs bbox center) or in the applied transform. Gated
+    // behind its own toggle so the cost (one rAF + getBBox per named
+    // line) is only paid when explicitly requested.
+    if (dumpMode) {
       requestAnimationFrame(function () {
         const rows = [];
         lines.forEach(function (line) {
