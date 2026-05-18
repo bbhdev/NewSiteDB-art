@@ -514,6 +514,38 @@
   }
 
   /**
+   * Clear all geometry-related overrides on a line and pull its
+   * params / points / segments / d back from the master. Used to
+   * re-sync a class that drifted from the canonical shape — either
+   * because the user drag-translated here (which deliberately
+   * snapshots a per-class override) or because a legacy pre-sync
+   * save baked in an override the user didn't intend to keep.
+   */
+  function resetLineGeometryToMaster(id) {
+    const line = state.lines.find(function (l) { return l.id === id; });
+    if (!line || !line.masterId) return;
+    const m = state.masters.find(function (x) { return x.id === line.masterId; });
+    if (!m) return;
+    const GEOM_KEYS = ['kind', 'points', 'segments', 'params', 'd',
+                       'smoothed', 'closed', 'filled'];
+    if (!line.overrides) line.overrides = {};
+    GEOM_KEYS.forEach(function (k) {
+      if (Object.prototype.hasOwnProperty.call(line.overrides, k)) {
+        delete line.overrides[k];
+      }
+      if (m[k] !== undefined) line[k] = deepCopyIfNeeded(m[k]);
+    });
+    // d may now be stale (master.d wasn't updated when we cleared
+    // per-class overrides). Recompute from the freshly-pulled
+    // master geometry; computeLineD writes back to line.d directly
+    // without re-triggering the master sync.
+    computeLineD(line);
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  /**
    * Decompose state.byClass[].lines + state.masters into the v4 on-
    * disk shape for save. Now that line.overrides is the explicit
    * override map, the save side is mostly bookkeeping:
@@ -903,13 +935,18 @@
     if (!Array.isArray(state.masters)) return;
     const m = state.masters.find(function (x) { return x.id === line.masterId; });
     if (!m) return;
-    const GEOM_KEYS = ['kind', 'points', 'segments', 'params', 'd',
+    // `d` is intentionally excluded — it's a derived value. We copy
+    // the source keys, then computeLineD on master + each sibling
+    // so d always matches that record's own source values (no
+    // params-from-A-with-d-from-B Frankenstein).
+    const GEOM_KEYS = ['kind', 'points', 'segments', 'params',
                        'smoothed', 'closed', 'filled'];
     GEOM_KEYS.forEach(function (k) {
       if (line[k] === undefined) return;
       if (isVisualOverridden(line, k)) return;
       m[k] = deepCopyIfNeeded(line[k]);
     });
+    computeLineD(m); // refresh master.d from its (possibly-new) source
     state.pageConfig.useClasses.forEach(function (cid) {
       if (cid === state.classId) return;
       const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
@@ -920,9 +957,6 @@
           if (isVisualOverridden(sib, k)) return;
           sib[k] = deepCopyIfNeeded(line[k]);
         });
-        // d may need a fresh compute if the kind / params / points
-        // changed (e.g., a primitive resize); computeLineD reads the
-        // sibling's now-updated fields and writes back to sib.d.
         computeLineD(sib);
       });
     });
@@ -933,6 +967,15 @@
 
   /**
    * Apply a translation (dx, dy) to a line's authored form.
+   *
+   * Conceptually a drag-translate is a per-class "movement" — the
+   * user is placing this object somewhere in this class, not
+   * reshaping it for everyone. So the moved geometry key is also
+   * recorded into line.overrides, which makes syncLineGeometryToMaster
+   * skip it on the next regenerateLineD. Result: drag-to-move stays
+   * local; handle drags / panel edits / shape changes still
+   * propagate to master + sibling classes.
+   *
    *   - Geometric primitives shift only their position keys (cx/cy or
    *     x/y) so the whole shape moves rigidly without distortion.
    *   - Manual lines shift every point AND every segment control point
@@ -944,6 +987,7 @@
    *     one line moves.)
    */
   function translateLine(line, origPoints, origSegments, origParams, origOverrides, dx, dy) {
+    if (!line.overrides) line.overrides = {};
     if (PRIMITIVES[line.kind] && origParams) {
       const keys = PRIMITIVES[line.kind].positionKeys;
       line.params = Object.assign({}, origParams);
@@ -952,8 +996,10 @@
           line.params[k] = origParams[k] + (i === 0 ? dx : dy);
         }
       });
+      line.overrides.params = deepCopyIfNeeded(line.params);
     } else if (origPoints) {
       line.points = origPoints.map(function (p) { return { x: p.x + dx, y: p.y + dy }; });
+      line.overrides.points = deepCopyIfNeeded(line.points);
       if (line.kind === 'manual' && Array.isArray(origSegments)) {
         line.segments = origSegments.map(function (s) {
           return {
@@ -964,10 +1010,10 @@
             endpoint: s.endpoint ? { x: s.endpoint.x + dx, y: s.endpoint.y + dy } : null
           };
         });
+        line.overrides.segments = deepCopyIfNeeded(line.segments);
       }
     }
     if (origOverrides) {
-      if (!line.overrides) line.overrides = {};
       if (Number.isFinite(origOverrides.rotateOriginX)) {
         line.overrides.rotateOriginX = origOverrides.rotateOriginX + dx;
       }
@@ -3294,6 +3340,33 @@
     wrap.appendChild(checkboxField('Visible', !line.hidden, function (v) {
       updateLine(line.id, { hidden: !v });
     }));
+
+    // "Reset shape to master" — appears only when this instance has
+    // any geometry override (drag-to-translate creates one; legacy
+    // pre-v0.2.17 per-class edits left some behind). Click clears
+    // those overrides and pulls the master's geometry back.
+    const GEOM_OVERRIDE_KEYS = ['params', 'points', 'segments', 'd', 'kind', 'smoothed', 'closed', 'filled'];
+    const hasGeomOverride = line.masterId && line.overrides
+      && GEOM_OVERRIDE_KEYS.some(function (k) {
+        return Object.prototype.hasOwnProperty.call(line.overrides, k);
+      });
+    if (hasGeomOverride) {
+      const row = document.createElement('div');
+      row.className = 'ed-field';
+      const lbl = document.createElement('label');
+      lbl.textContent = 'Shape';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ed-mini';
+      btn.textContent = '↺ Reset to master';
+      btn.title = 'Clear this class\'s shape override and pull the canonical shape from the master.';
+      btn.addEventListener('click', function () {
+        resetLineGeometryToMaster(line.id);
+      });
+      row.appendChild(lbl);
+      row.appendChild(btn);
+      wrap.appendChild(row);
+    }
 
     // Smoothing toggle is only meaningful for the freehand kinds — for
     // straight-line and chain kinds the regenerator ignores it.
