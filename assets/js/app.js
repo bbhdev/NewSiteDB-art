@@ -219,12 +219,13 @@
     // enables them they see the same aids on the live site too.
     // Other visitors don't have the flags set → no overlay.
     const hasLS = (typeof localStorage !== 'undefined');
+    const diagMode = hasLS && localStorage.getItem('ed-show-diag-grid') === '1';
     if (hasLS && localStorage.getItem('ed-show-labels') === '1') {
       renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
       // Page-area outline + reference markers (see v0.1.21).
       renderRuntimePageGuide(layer);
     }
-    if (hasLS && localStorage.getItem('ed-show-diag-grid') === '1') {
+    if (diagMode) {
       renderRuntimeDiagGrid(layer);
       try { window.scrollTo(0, 0); } catch (e) { /* not all envs */ }
       mountScrollProgressIndicator();
@@ -328,7 +329,12 @@
         'translate(0 0) rotate(0 ' + originX + ' ' + originY + ')'
       );
 
-      if (hasMotion) {
+      // Diagnostic mode (Grid toggle on): paths render at their authored
+      // d coordinates with identity transform — matches the editor canvas
+      // exactly so the author can compare positions. Skip ScrollTrigger
+      // setup so per-element triggers can't apply a mid-viewport progress
+      // at scrollY=0.
+      if (hasMotion && !diagMode) {
         ScrollTrigger.create({
           trigger: stConfig.trigger,
           start:   stConfig.start,
@@ -370,7 +376,9 @@
       // Direction:
       //   forward  — dashoffset animates from +1 to 0; reveals begin → end.
       //   reverse  — dashoffset animates from −1 to 0; reveals end → begin.
-      if (behaviors.drawIn) {
+      // Diagnostic mode: skip the drawIn reveal so the full path is
+      // visible at scroll=0 (matches the editor's render).
+      if (behaviors.drawIn && !diagMode) {
         pathEl.setAttribute('pathLength',       '1');
         pathEl.setAttribute('stroke-dasharray', '1 1');
         const dir = behaviors.drawInDirection === 'reverse' ? -1 : 1;
@@ -391,7 +399,7 @@
     //     shift_x, shift_y, transform_attr }
     // so the author can pinpoint whether the shift is in the d-string
     // (params vs bbox center) or in the applied transform.
-    if (hasLS && localStorage.getItem('ed-show-diag-grid') === '1') {
+    if (diagMode) {
       requestAnimationFrame(function () {
         const rows = [];
         lines.forEach(function (line) {
