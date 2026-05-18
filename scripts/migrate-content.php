@@ -9,9 +9,14 @@
  * brings any installation forward to the current target version.
  *
  * Usage (from project root):
- *   php scripts/migrate-content.php --status    Report version per page.
- *   php scripts/migrate-content.php --dry-run   Show what would change.
- *   php scripts/migrate-content.php             Apply pending migrations.
+ *   php scripts/migrate-content.php --status         Report version per page.
+ *   php scripts/migrate-content.php --dry-run        Show what would change.
+ *   php scripts/migrate-content.php                  Apply pending migrations.
+ *   php scripts/migrate-content.php --repair-names   Force-run the v4→v5 name
+ *                                                    retrofit even if marker
+ *                                                    is already past v5 — for
+ *                                                    masters/instances that
+ *                                                    missed the step.
  *
  * Adding a new migration (when a phase changes the on-disk shape):
  *   1. Append an entry to $MIGRATIONS keyed by the FROM version,
@@ -519,17 +524,37 @@ function main(array $argv): int
     }
 
     if ($opts['status']) return printStatus($pages);
+    if ($opts['repair-names']) return repairNames($contentDir, $opts);
     return runMigrations($pages, $opts);
+}
+
+/**
+ * Force-run the v4→v5 name retrofit regardless of the current
+ * schema marker. Use when the schema is already at v5 (or beyond)
+ * but masters / instances are missing their `name` fields — e.g.
+ * because an older migration step ran before the name logic was
+ * added. Idempotent.
+ */
+function repairNames(string $contentDir, array $opts): int
+{
+    $dry = $opts['dry-run'];
+    echo ($dry ? "[dry run] " : "") . "running name retrofit on $contentDir\n";
+    $ok = ensureMasterAndInstanceNames($contentDir, $dry);
+    if (!$ok) { fwrite(STDERR, "name retrofit failed.\n"); return 1; }
+    echo ($dry ? "[dry run] " : "") . "name retrofit complete.\n";
+    return 0;
 }
 
 function parseArgs(array $args): ?array
 {
-    $opts = ['dry-run' => false, 'status' => false];
+    $opts = ['dry-run' => false, 'status' => false, 'repair-names' => false];
     foreach ($args as $a) {
-        if      ($a === '--dry-run') $opts['dry-run'] = true;
-        elseif  ($a === '--status')  $opts['status']  = true;
+        if      ($a === '--dry-run')     $opts['dry-run']      = true;
+        elseif  ($a === '--status')      $opts['status']       = true;
+        elseif  ($a === '--repair-names')$opts['repair-names'] = true;
         elseif  ($a === '--help' || $a === '-h') {
-            echo "Usage: php scripts/migrate-content.php [--status|--dry-run]\n";
+            echo "Usage: php scripts/migrate-content.php "
+               . "[--status | --dry-run | --repair-names]\n";
             return null;
         } else {
             fwrite(STDERR, "unknown arg: $a (try --help)\n");
