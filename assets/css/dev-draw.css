@@ -145,7 +145,12 @@ body.editor {
 }
 .ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 .ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
-.ed-status { min-width: 8em; color: #9c9; font-size: 0.85em; }
+.ed-toolbar .ed-settings {
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 0.4rem;
+}
+.ed-status { min-width: 8em; color: #9c9; font-size: 0.85em; padding-left: 0.4rem; }
 .ed-status.is-error { color: #f88; }
 
 /* ── body layout ─────────────────────────────────────────────────── */
@@ -626,6 +631,29 @@ body.editor {
   color: #fff;
 }
 .ed-modal-buttons button.ed-primary:hover { filter: brightness(1.1); }
+
+.ed-settings-body { padding: 0.75rem 0.9rem; }
+.ed-setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #333;
+}
+.ed-setting-row:last-child { border-bottom: none; }
+.ed-setting-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.ed-setting-main label { color: #ddd; font-weight: 500; }
+.ed-setting-help {
+  margin: 0;
+  color: #999;
+  font-size: 0.85em;
+  line-height: 1.35;
+}
 
 /* Info-trigger button used as the per-tool help icon. Accent-bordered
    so it pops out of the dark toolbar — was nearly invisible before. */

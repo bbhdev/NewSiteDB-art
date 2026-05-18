@@ -43,7 +43,7 @@
   const labelsG        = document.getElementById('labels-layer');
   const labelsBtn      = document.getElementById('labels-btn');
   const gridBtn        = document.getElementById('grid-btn');
-  const dumpBtn        = document.getElementById('dump-btn');
+  const settingsBtn    = document.getElementById('settings-btn');
   const selectAllBtn   = document.getElementById('select-all-btn');
   const newGroupBtn    = document.getElementById('new-group-btn');
   const newColorBtn    = document.getElementById('new-color-btn');
@@ -63,7 +63,7 @@
   const redoBtn      = document.getElementById('redo-btn');
 
   const required = { svg, canvasWrap, gridG, linesG, previewG, handlesG,
-                     labelsG, labelsBtn, gridBtn, dumpBtn, selectAllBtn,
+                     labelsG, labelsBtn, gridBtn, settingsBtn, selectAllBtn,
                      toolSettingsEl, groupsListEl, paletteListEl,
                      selectionPanel, newGroupBtn, newColorBtn,
                      saveBtn, saveStatus, clearLinesBtn, helpBtn,
@@ -1568,11 +1568,78 @@
     gridBtn.classList.toggle('is-active', state.showDiagGrid);
     renderDiagGrid();
   }
-  function toggleRuntimeDump() {
-    state.showRuntimeDump = !state.showRuntimeDump;
-    localStorage.setItem('ed-show-runtime-dump',
-      state.showRuntimeDump ? '1' : '0');
-    dumpBtn.classList.toggle('is-active', state.showRuntimeDump);
+  /**
+   * Settings modal. Holds preferences that don't deserve a top-level
+   * toolbar slot — currently just the runtime-dump diagnostic toggle.
+   * Add new settings here as the editor grows (each one is a row with
+   * a label, optional help text, and an input).
+   */
+  function showSettings() {
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal';
+
+    const h = document.createElement('div');
+    h.className = 'ed-modal-header';
+    const t = document.createElement('h3'); t.textContent = 'Settings';
+    h.appendChild(t);
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close'; x.textContent = '×';
+    x.addEventListener('click', cleanup);
+    h.appendChild(x);
+    modal.appendChild(h);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body ed-settings-body';
+
+    body.appendChild(settingRow({
+      label: 'Runtime dump',
+      help:  'Live site only. When on, logs a console.table of every named ' +
+             'line’s expected center, actual bbox center, shift, and ' +
+             'transform attribute at page load. Use this when diagnosing ' +
+             'position drift between the editor and the live site.',
+      value: state.showRuntimeDump,
+      onChange: function (v) {
+        state.showRuntimeDump = v;
+        localStorage.setItem('ed-show-runtime-dump', v ? '1' : '0');
+      }
+    }));
+
+    modal.appendChild(body);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
+    });
+  }
+
+  function settingRow(spec) {
+    const row = document.createElement('div');
+    row.className = 'ed-setting-row';
+    const main = document.createElement('div');
+    main.className = 'ed-setting-main';
+    const lbl = document.createElement('label'); lbl.textContent = spec.label;
+    const inp = document.createElement('input');
+    inp.type = 'checkbox'; inp.checked = !!spec.value;
+    inp.addEventListener('change', function () { spec.onChange(inp.checked); });
+    main.appendChild(lbl); main.appendChild(inp);
+    row.appendChild(main);
+    if (spec.help) {
+      const help = document.createElement('p');
+      help.className = 'ed-setting-help';
+      help.textContent = spec.help;
+      row.appendChild(help);
+    }
+    return row;
   }
 
   function resolveStroke(ref) {
@@ -2743,8 +2810,7 @@
   gridBtn.addEventListener('click', toggleDiagGrid);
   gridBtn.classList.toggle('is-active', state.showDiagGrid);
   renderDiagGrid(); // initial paint if the flag was already on
-  dumpBtn.addEventListener('click', toggleRuntimeDump);
-  dumpBtn.classList.toggle('is-active', state.showRuntimeDump);
+  settingsBtn.addEventListener('click', showSettings);
   selectAllBtn.addEventListener('click', toggleSelectAll);
   updateSelectAllButton();
 

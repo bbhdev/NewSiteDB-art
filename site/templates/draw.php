@@ -112,13 +112,12 @@ $payload = json_encode([
   <div class="ed-view" role="toolbar" aria-label="View options">
     <button type="button" id="labels-btn" title="Show / hide name labels on every named line">Labels</button>
     <button type="button" id="grid-btn"   title="Show / hide diagnostic coordinate grid (cyan, 50px step, coords every 100px). Renders on the live site too — useful for comparing where authored coords land in each surface.">Grid</button>
-    <button type="button" id="dump-btn"   title="Live site only: when on, dump a console.table of every named line's expected center (params), actual bbox center, shift, and transform attribute at page load. Useful for diagnosing position drift between editor and runtime.">Dump</button>
+    <button type="button" id="save-btn"     class="ed-save">Save</button>
+    <button type="button" id="settings-btn" class="ed-settings" title="Settings — editor preferences and diagnostic toggles" aria-label="Settings">⚙</button>
+    <span id="save-status" class="ed-status" aria-live="polite"></span>
   </div>
 
   <div class="ed-spacer"></div>
-
-  <button type="button" id="save-btn" class="ed-save">Save</button>
-  <span id="save-status" class="ed-status" aria-live="polite"></span>
 </header>
 
 <div class="ed-body">
@@ -145,7 +144,7 @@ $payload = json_encode([
 
     <div class="ed-sidebar-footer">
       <button type="button" id="help-btn"        class="ed-mini">? Help</button>
-      <button type="button" id="clear-lines-btn" class="ed-mini ed-danger">Clear all lines</button>
+      <button type="button" id="clear-lines-btn" class="ed-mini ed-danger">Clear the canvas</button>
     </div>
   </aside>
 
