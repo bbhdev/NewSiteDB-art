@@ -348,7 +348,22 @@ function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
         $log("    no _shared/masters.json — nothing to do\n");
         return true;
     }
-    $masters = json_decode(file_get_contents($mastersPath), true);
+    $raw = file_get_contents($mastersPath);
+    $log("    masters.json size: " . strlen($raw) . " bytes\n");
+    if ($raw !== '') {
+        // Show the first few characters in hex to spot BOM, encoding,
+        // or unexpected whitespace.
+        $head = substr($raw, 0, 16);
+        $hex = '';
+        for ($i = 0; $i < strlen($head); $i++) {
+            $hex .= sprintf('%02x ', ord($head[$i]));
+        }
+        $log("    first bytes (hex): $hex\n");
+    }
+    $masters = json_decode($raw, true);
+    if ($masters === null && json_last_error() !== JSON_ERROR_NONE) {
+        $log("    json_decode error: " . json_last_error_msg() . "\n");
+    }
     if (!is_array($masters)) {
         $log("    masters.json couldn't decode as array — bailing\n");
         return true;
