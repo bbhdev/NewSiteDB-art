@@ -131,6 +131,7 @@ $payload = json_encode([
       </select>
     </label>
     <div class="ed-class-tabs" role="tablist" aria-label="Screen class">
+      <!-- DEBUG: pageCfg useClasses = <?= json_encode($pageCfg['useClasses'] ?? null) ?> ; targetPage root = <?= $targetPage ? esc($targetPage->root()) : 'null' ?> ; page.json exists = <?= ($targetPage && is_file($targetPage->root() . '/page.json')) ? 'yes' : 'no' ?> -->
       <?php foreach ($pageCfg['useClasses'] as $cid): ?>
         <?php
           $label = ucfirst($cid);
