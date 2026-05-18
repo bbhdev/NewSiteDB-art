@@ -31,23 +31,49 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 1;
+const CONTENT_SCHEMA_VERSION = 2;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
        . ' lines; hardcoded viewBox; single design per page (no classes).',
+    2 => 'Adds content/<slug>/page.json with { pageW, pageH, canvasW, canvasH }.'
+       . ' Hardcoded viewBox removed from code; editor + runtime read dims'
+       . ' from page.json (defaults preserve v1 visuals on existing content).',
 ];
 
 /**
  * Migrations are keyed by the FROM-version they upgrade away from.
  * Each callable receives the page-root directory path and a dry-run
- * flag, and returns true on success. Empty array = no migrations
- * registered yet (Phase 0).
+ * flag, and returns true on success. The runner stamps the new
+ * `_schemaVersion` marker into page.json after the callable returns —
+ * migrations don't manage that field themselves.
  *
  * @var array<int, callable(string $pageRoot, bool $dryRun): bool>
  */
 $MIGRATIONS = [
-    // 1 => function ($pageRoot, $dryRun) { /* Phase 1 will add this */ },
+    1 => function (string $pageRoot, bool $dryRun): bool {
+        // v1 → v2: write page.json with the dimensions the hardcoded
+        // viewBox previously used (1200×800 page, 2400×1600 canvas).
+        // A page.json that already exists (e.g. hand-written) is
+        // preserved; we only fill in missing dim fields.
+        $marker = $pageRoot . '/page.json';
+        $existing = is_file($marker)
+            ? (json_decode(file_get_contents($marker), true) ?: [])
+            : [];
+        $defaults = ['pageW' => 1200, 'pageH' => 800, 'canvasW' => 2400, 'canvasH' => 1600];
+        $merged = $existing;
+        foreach ($defaults as $k => $v) {
+            if (!isset($merged[$k])) $merged[$k] = $v;
+        }
+        if ($dryRun) {
+            echo "    would write $marker with " . json_encode($merged) . "\n";
+            return true;
+        }
+        return file_put_contents(
+            $marker,
+            json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
+        ) !== false;
+    },
 ];
 
 // ─── CLI entry ──────────────────────────────────────────────────────

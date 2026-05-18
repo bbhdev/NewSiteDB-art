@@ -15,9 +15,10 @@ return [
    *
    *   POST /dev/draw/save  — persists groups + lines for a given page
    *                          to content/<page>/groups.json + lines.json,
-   *                          and the site-wide palette to
-   *                          content/colors.json.
-   *                          Body: { page, groups, lines, palette? }
+   *                          the per-page drawing config (page area +
+   *                          canvas dimensions) to page.json, and the
+   *                          site-wide palette to content/colors.json.
+   *                          Body: { page, groups, lines, palette?, pageCfg? }
    */
   'routes' => [
     [
@@ -31,6 +32,7 @@ return [
         $groups  = $body['groups']  ?? null;
         $lines   = $body['lines']   ?? null;
         $palette = $body['palette'] ?? null;  // optional — site-wide
+        $pageCfg = $body['pageCfg'] ?? null;  // optional — per-page drawing dims
 
         if (!is_string($pageId) || !is_array($groups) || !is_array($lines)) {
           return new Kirby\Http\Response(
@@ -57,6 +59,25 @@ return [
           file_put_contents($root . '/groups.json', json_encode($groups, $opts) . "\n") !== false &&
           file_put_contents($root . '/lines.json',  json_encode($lines,  $opts) . "\n") !== false
         );
+
+        // Per-page drawing config: page area + canvas dimensions. Only
+        // the four known dim keys are written; the _schemaVersion field
+        // on disk is preserved (managed by the migrator, not the editor).
+        if (is_array($pageCfg)) {
+          $existing = is_file($root . '/page.json')
+            ? (json_decode(file_get_contents($root . '/page.json'), true) ?: [])
+            : [];
+          $merged = $existing;
+          foreach (['pageW', 'pageH', 'canvasW', 'canvasH'] as $k) {
+            if (isset($pageCfg[$k]) && is_numeric($pageCfg[$k]) && $pageCfg[$k] > 0) {
+              $merged[$k] = (float) $pageCfg[$k];
+            }
+          }
+          $writeOk = $writeOk && (
+            file_put_contents($root . '/page.json',
+              json_encode($merged, $opts) . "\n") !== false
+          );
+        }
 
         // Site-wide file: the design palette is shared across pages, so
         // it lives at the content root rather than under any one page.

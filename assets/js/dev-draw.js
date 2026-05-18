@@ -18,15 +18,15 @@
   'use strict';
 
   // ── Coordinate space ──────────────────────────────────────────────
-  // Editor SVG matches the runtime viewBox: -600 -400 2400 1600.
-  // The central 1200×800 (0,0 → 1200,800) is the visible page area;
-  // outside is off-page space for slide-in effects. Pointer events are
-  // converted to logical viewBox coords by clientToSvg(), which reads
-  // the viewBox attribute live so this works even after the surface
-  // is scrolled or zoomed.
+  // The editor SVG matches the runtime layer: page area sits at
+  // (0, 0) – (pageW, pageH), and the viewBox extends symmetrically
+  // around it to canvasW × canvasH so off-page lines have room. All
+  // four dimensions are per-page data (state.page), so changing them
+  // re-skins the canvas at runtime — see applyPageConfig() below.
+  // Pointer events are converted to logical viewBox coords by
+  // clientToSvg(), which reads the viewBox attribute live so this
+  // works after scrolling, zooming, or resizing the canvas.
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  const PAGE_W = 1200;
-  const PAGE_H = 800;
 
   // ── DOM refs ──────────────────────────────────────────────────────
   const svg        = document.getElementById('draw-surface');
@@ -81,6 +81,14 @@
     groups: initial.groups.length ? initial.groups : [defaultGroup()],
     lines:  initial.lines,
     palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
+    // Per-page drawing dimensions. The server-side template emits the
+    // SVG with the correct viewBox + sizes on first paint; this state
+    // is the source of truth for any later in-editor change (via the
+    // Canvas panel) and is round-tripped through Save.
+    page: Object.assign(
+      { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 },
+      initial.page || {}
+    ),
     openGroupIds:   {},        // groupId → true when expanded in sidebar
     activeGroupId:  null,
     // Multi-select: ordered array of object ids (formerly `selectedLineId`).
@@ -362,8 +370,8 @@
 
   // ── Zoom ──────────────────────────────────────────────────────────
   // Zoom is implemented by scaling the SVG element's CSS width/height
-  // away from its base 2400×1600 pixel size. The viewBox stays fixed
-  // at -600 -400 2400 1600, so authored coordinates don't change with
+  // away from its base canvasW × canvasH pixel size. The viewBox
+  // stays fixed (per state.page), so authored coordinates don't change with
   // zoom; only the rendered scale does. clientToSvg already reads
   // rect.width / rect.height, so pointer-to-viewBox math keeps working
   // at any zoom level without changes.
@@ -386,8 +394,8 @@
     const contentY = (canvasWrap.scrollTop  + wrapY) / state.zoom;
 
     state.zoom = newZoom;
-    svg.style.width  = (2400 * newZoom) + 'px';
-    svg.style.height = (1600 * newZoom) + 'px';
+    svg.style.width  = (state.page.canvasW * newZoom) + 'px';
+    svg.style.height = (state.page.canvasH * newZoom) + 'px';
 
     // Put the same logical content position back under the anchor by
     // adjusting scroll.
@@ -1472,6 +1480,40 @@
   }
 
   // ── Rendering ─────────────────────────────────────────────────────
+
+  /**
+   * Push state.page values onto the SVG: recompute the viewBox, the
+   * <svg> width/height (at zoom 1.0, then re-applied by setZoom),
+   * the background outer + page rectangles, the page-area grid, and
+   * the diagnostic grid bounds. Called on first paint and after any
+   * Canvas-panel edit.
+   */
+  function applyPageConfig() {
+    const pw = state.page.pageW, ph = state.page.pageH;
+    const cw = state.page.canvasW, ch = state.page.canvasH;
+    const vbx = -(cw - pw) / 2;
+    const vby = -(ch - ph) / 2;
+    svg.setAttribute('viewBox', vbx + ' ' + vby + ' ' + cw + ' ' + ch);
+    svg.setAttribute('width',  cw);
+    svg.setAttribute('height', ch);
+    svg.style.width  = (cw * state.zoom) + 'px';
+    svg.style.height = (ch * state.zoom) + 'px';
+
+    const outer = svg.querySelector('.bg-outer');
+    if (outer) {
+      outer.setAttribute('x', vbx); outer.setAttribute('y', vby);
+      outer.setAttribute('width', cw); outer.setAttribute('height', ch);
+    }
+    const pageRect = svg.querySelector('.bg-page');
+    if (pageRect) {
+      pageRect.setAttribute('width', pw);
+      pageRect.setAttribute('height', ph);
+    }
+
+    renderGrid();
+    renderDiagGrid();
+  }
+
   function createPath(cls, d) {
     const p = document.createElementNS(SVG_NS, 'path');
     if (cls) p.setAttribute('class', cls);
@@ -1479,20 +1521,47 @@
     return p;
   }
 
+  // Per-page Canvas panel (sidebar): pageW/H + canvasW/H number inputs
+  // that re-render the canvas live and mark dirty for Save. Kept
+  // intentionally validation-light — invalid combos (e.g. canvasW <
+  // pageW) produce a weird-looking but non-crashing canvas, and the
+  // user can correct via the same panel.
+  const canvasFieldsEl = document.getElementById('canvas-fields');
+  function renderCanvasPanel() {
+    if (!canvasFieldsEl) return;
+    canvasFieldsEl.innerHTML = '';
+    const labels = {
+      pageW:   'Page width',
+      pageH:   'Page height',
+      canvasW: 'Canvas width',
+      canvasH: 'Canvas height'
+    };
+    ['pageW', 'pageH', 'canvasW', 'canvasH'].forEach(function (key) {
+      canvasFieldsEl.appendChild(numberField(labels[key], state.page[key], function (v) {
+        if (!Number.isFinite(v) || v <= 0) return; // ignore mid-edit garbage
+        state.page[key] = v;
+        state.dirty = true;
+        applyPageConfig();
+        scheduleSnapshot();
+      }));
+    });
+  }
+
   function renderGrid() {
     gridG.innerHTML = '';
-    // Grid covers only the page area (0–1200, 0–800). Off-page space
-    // stays solid #181818 so the user can see which side of the live
-    // viewport they're authoring in.
-    for (let x = 100; x < PAGE_W; x += 100) {
+    // Grid covers only the page area (0–pageW, 0–pageH). Off-page
+    // space stays solid #181818 so the user can see which side of
+    // the live viewport they're authoring in.
+    const pw = state.page.pageW, ph = state.page.pageH;
+    for (let x = 100; x < pw; x += 100) {
       const l = document.createElementNS(SVG_NS, 'line');
       l.setAttribute('x1', x); l.setAttribute('x2', x);
-      l.setAttribute('y1', 0); l.setAttribute('y2', PAGE_H);
+      l.setAttribute('y1', 0); l.setAttribute('y2', ph);
       gridG.appendChild(l);
     }
-    for (let y = 100; y < PAGE_H; y += 100) {
+    for (let y = 100; y < ph; y += 100) {
       const l = document.createElementNS(SVG_NS, 'line');
-      l.setAttribute('x1', 0); l.setAttribute('x2', PAGE_W);
+      l.setAttribute('x1', 0); l.setAttribute('x2', pw);
       l.setAttribute('y1', y); l.setAttribute('y2', y);
       gridG.appendChild(l);
     }
@@ -1520,7 +1589,13 @@
     ensureDiagGridLayer();
     diagGridG.innerHTML = '';
     if (!state.showDiagGrid) return;
-    const X0 = -600, X1 = 1800, Y0 = -400, Y1 = 1200;
+    // Grid bounds = the full viewBox: page area + symmetric bleed
+    // around it. Bleed thickness on each side = (canvas - page) / 2,
+    // matching the SVG's actual viewBox offset.
+    const pw = state.page.pageW, ph = state.page.pageH;
+    const bleedX = (state.page.canvasW - pw) / 2;
+    const bleedY = (state.page.canvasH - ph) / 2;
+    const X0 = -bleedX, X1 = pw + bleedX, Y0 = -bleedY, Y1 = ph + bleedY;
     const STEP = 50, LABEL_STEP = 100;
     for (let x = X0; x <= X1; x += STEP) {
       const l = document.createElementNS(SVG_NS, 'line');
@@ -2778,7 +2853,8 @@
           page:    state.pageId,
           groups:  state.groups,
           lines:   state.lines,
-          palette: state.palette
+          palette: state.palette,
+          pageCfg: state.page
         })
       });
       const body = await res.json().catch(function () { return {}; });
@@ -2840,14 +2916,18 @@
     setZoom(state.zoom * factor, e.clientX, e.clientY);
   }, { passive: false });
 
-  // Center the page area in the scrollable canvas on first load so the
-  // user starts looking at the live viewport rather than empty off-page
-  // space. The surface is 2400×1600; the page area starts at SVG pixel
-  // (600, 400) — center the wrap on that point.
+  // Center the page area in the scrollable canvas on first load so
+  // the user starts looking at the live viewport rather than empty
+  // off-page space. The page area's top-left corner sits at SVG
+  // pixel ((canvas-page)/2) in each axis — center the wrap on the
+  // page's midpoint, scaled by current zoom.
   function centerOnPage() {
     const wrap = canvasWrap;
-    wrap.scrollLeft = 600 + PAGE_W / 2 - wrap.clientWidth  / 2;
-    wrap.scrollTop  = 400 + PAGE_H / 2 - wrap.clientHeight / 2;
+    const pw = state.page.pageW, ph = state.page.pageH;
+    const bleedX = (state.page.canvasW - pw) / 2;
+    const bleedY = (state.page.canvasH - ph) / 2;
+    wrap.scrollLeft = (bleedX + pw / 2) * state.zoom - wrap.clientWidth  / 2;
+    wrap.scrollTop  = (bleedY + ph / 2) * state.zoom - wrap.clientHeight / 2;
   }
 
   // Pointer events → active tool. Pointer capture keeps the stroke
@@ -3149,7 +3229,8 @@
 
   // Initial render. Snapshot the loaded state so the user always has
   // at least one history entry (and can't undo into emptiness).
-  renderGrid();
+  applyPageConfig();    // paints viewBox, page rect, bg, grids from state.page
+  renderCanvasPanel();  // sidebar inputs for pageW/H + canvasW/H
   setActiveTool('select');
   snapshot();
   renderAll();

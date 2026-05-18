@@ -141,6 +141,13 @@
     const lines      = Array.isArray(data.lines)      ? data.lines      : [];
     const palette    = Array.isArray(data.palette)    ? data.palette    : [];
     const svgImports = Array.isArray(data.svgImports) ? data.svgImports : [];
+    // Per-page drawing dimensions. The template emits matching values
+    // in the SVG's viewBox attribute; this copy is what the diagnostic
+    // overlays use to draw the page-area outline + grid bounds.
+    const page = Object.assign(
+      { pageW: 1200, pageH: 800, canvasW: 2400, canvasH: 1600 },
+      data.page || {}
+    );
 
     if (!lines.length && !svgImports.length) return;
 
@@ -224,10 +231,10 @@
     if (hasLS && localStorage.getItem('ed-show-labels') === '1') {
       renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
       // Page-area outline + reference markers (see v0.1.21).
-      renderRuntimePageGuide(layer);
+      renderRuntimePageGuide(layer, page);
     }
     if (diagMode) {
-      renderRuntimeDiagGrid(layer);
+      renderRuntimeDiagGrid(layer, page);
       try { window.scrollTo(0, 0); } catch (e) { /* not all envs */ }
       mountScrollProgressIndicator();
     }
@@ -506,12 +513,16 @@
     window.addEventListener('resize', update);
   }
 
-  function renderRuntimeDiagGrid(layer) {
+  function renderRuntimeDiagGrid(layer, page) {
     const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
     const g = document.createElementNS(SVG_NS_LOCAL, 'g');
     g.setAttribute('id', 'runtime-diag-grid');
     g.style.pointerEvents = 'none';
-    const X0 = -600, X1 = 1800, Y0 = -400, Y1 = 1200;
+    // Grid spans the full viewBox: page area + symmetric bleed.
+    const bleedX = (page.canvasW - page.pageW) / 2;
+    const bleedY = (page.canvasH - page.pageH) / 2;
+    const X0 = -bleedX, X1 = page.pageW + bleedX;
+    const Y0 = -bleedY, Y1 = page.pageH + bleedY;
     const STEP = 50, LABEL_STEP = 100;
     function ln(x1, y1, x2, y2, opacity) {
       const l = document.createElementNS(SVG_NS_LOCAL, 'line');
@@ -548,14 +559,15 @@
     layer.insertBefore(g, layer.firstChild);
   }
 
-  function renderRuntimePageGuide(layer) {
+  function renderRuntimePageGuide(layer, page) {
     const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
+    const pw = page.pageW, ph = page.pageH;
 
     const rect = document.createElementNS(SVG_NS_LOCAL, 'rect');
     rect.setAttribute('x', 0);
     rect.setAttribute('y', 0);
-    rect.setAttribute('width',  1200);
-    rect.setAttribute('height', 800);
+    rect.setAttribute('width',  pw);
+    rect.setAttribute('height', ph);
     rect.setAttribute('fill', 'none');
     rect.setAttribute('stroke', '#9a4');
     rect.setAttribute('stroke-width', 1);
@@ -564,15 +576,15 @@
     rect.style.pointerEvents = 'none';
     layer.appendChild(rect);
 
-    // Reference markers — viewBox corners + center. Each is a small
+    // Reference markers — page-area corners + center. Each is a small
     // crosshair + coord label so the author can spot-check the
     // viewBox-to-viewport mapping.
     const marks = [
-      { x: 0,    y: 0,    label: '(0, 0)'     },
-      { x: 1200, y: 0,    label: '(1200, 0)'  },
-      { x: 0,    y: 800,  label: '(0, 800)'   },
-      { x: 1200, y: 800,  label: '(1200, 800)'},
-      { x: 600,  y: 400,  label: '(600, 400)' }
+      { x: 0,  y: 0,  label: '(0, 0)' },
+      { x: pw, y: 0,  label: '(' + pw + ', 0)' },
+      { x: 0,  y: ph, label: '(0, ' + ph + ')' },
+      { x: pw, y: ph, label: '(' + pw + ', ' + ph + ')' },
+      { x: pw / 2, y: ph / 2, label: '(' + (pw / 2) + ', ' + (ph / 2) + ')' }
     ];
     marks.forEach(function (m) {
       const g = document.createElementNS(SVG_NS_LOCAL, 'g');

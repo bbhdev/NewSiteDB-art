@@ -26,6 +26,7 @@ $readJson = function ($path) {
 $groups  = $targetPage ? $readJson($targetPage->root() . '/groups.json') : [];
 $lines   = $targetPage ? $readJson($targetPage->root() . '/lines.json')  : [];
 $palette = $readJson(kirby()->root('content') . '/colors.json');
+$pageCfg = $targetPage ? art_load_page_config($targetPage->root()) : art_default_page_config();
 
 // Default palette if the file doesn't exist yet — gives the editor
 // something to pick from on first run.
@@ -54,6 +55,7 @@ $payload = json_encode([
   'groups'             => $groups,
   'lines'              => $lines,
   'palette'            => $palette,
+  'page'               => $pageCfg,
   'triggerSuggestions' => $triggerSuggestions,
   'version'            => $v
 ], JSON_UNESCAPED_SLASHES);
@@ -120,6 +122,13 @@ $payload = json_encode([
 
 <div class="ed-body">
   <aside class="ed-sidebar">
+    <section class="ed-panel" id="canvas-panel">
+      <header class="ed-panel-head">
+        <h3>Canvas</h3>
+      </header>
+      <div id="canvas-fields" class="ed-canvas-fields"></div>
+    </section>
+
     <section class="ed-panel">
       <header class="ed-panel-head">
         <h3>Design colors</h3>
@@ -150,21 +159,22 @@ $payload = json_encode([
     Click anywhere on the canvas to set the rotation pivot · <kbd>Esc</kbd> to cancel
   </div>
 
+<?php $vb = art_viewbox($pageCfg); ?>
   <main class="ed-canvas-wrap">
-    <!-- viewBox spans -600..1800 horizontally and -400..1200 vertically.
-         The central 1200×800 area (0,0 → 1200,800) is the live page
-         viewport; everything outside is off-page space, useful for
-         lines that slide in via scroll-triggered translates.
-         Surface is rendered at 1px=1 viewBox unit (2400×1600px) and
-         lives inside an overflow:auto wrap so the user can scroll. -->
+    <!-- Canvas geometry is driven by the page's page.json (Phase 1+).
+         The page area is the central pageW×pageH zone at (0, 0); the
+         viewBox extends symmetrically around it to canvasW×canvasH so
+         lines that drift on/off the page have room to live. The
+         drawing surface renders at 1px = 1 viewBox unit by default;
+         zoom multiplies that. -->
     <svg id="draw-surface"
-         viewBox="-600 -400 2400 1600"
-         width="2400" height="1600"
+         viewBox="<?= art_viewbox_attr($pageCfg) ?>"
+         width="<?= $pageCfg['canvasW'] ?>" height="<?= $pageCfg['canvasH'] ?>"
          preserveAspectRatio="xMidYMid meet"
          xmlns="http://www.w3.org/2000/svg">
       <g id="bg-layer">
-        <rect class="bg-outer" x="-600" y="-400" width="2400" height="1600" />
-        <rect class="bg-page"  x="0"    y="0"    width="1200" height="800" />
+        <rect class="bg-outer" x="<?= $vb['x'] ?>" y="<?= $vb['y'] ?>" width="<?= $pageCfg['canvasW'] ?>" height="<?= $pageCfg['canvasH'] ?>" />
+        <rect class="bg-page"  x="0" y="0" width="<?= $pageCfg['pageW'] ?>" height="<?= $pageCfg['pageH'] ?>" />
       </g>
       <g id="grid"></g>
       <g id="committed-lines"></g>

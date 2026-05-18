@@ -319,15 +319,14 @@ body.editor {
 /* ── canvas SVG ──────────────────────────────────────────────────── */
 #draw-surface {
   display: block;
-  /* Fixed pixel size (1px = 1 viewBox unit). The wrap is overflow:auto
-     so this is what makes the canvas scrollable in both directions.
+  /* Pixel size = canvasW × canvasH at zoom 1.0, set on the <svg>
+     element by the template's width/height attributes (and updated
+     by setZoom() via inline style). The wrap is overflow:auto so
+     this is what makes the canvas scrollable in both directions.
      Opt out of the global `svg { max-width: 100% }` rule — without
      this override, the surface gets clamped to the wrap's width and
-     its rendered aspect ratio diverges from the viewBox, which throws
-     off pointer-to-viewBox coordinate mapping the further you draw
-     from center. */
-  width: 2400px;
-  height: 1600px;
+     its rendered aspect ratio diverges from the viewBox, which
+     throws off pointer-to-viewBox coordinate mapping. */
   max-width: none;
   max-height: none;
   cursor: crosshair;
