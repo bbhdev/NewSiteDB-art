@@ -281,30 +281,30 @@ function runMigrations(array $pages, array $opts): int
     foreach ($pages as $slug => $root) {
         $cur = detectSchemaVersion($root);
         if ($cur === $target) {
-            echo "${tag}[$slug] v$cur — up to date.\n";
+            echo "{$tag}[$slug] v$cur — up to date.\n";
             continue;
         }
         if ($cur > $target) {
-            fwrite(STDERR, "${tag}[$slug] v$cur — FUTURE schema, refusing to downgrade.\n");
+            fwrite(STDERR, "{$tag}[$slug] v$cur — FUTURE schema, refusing to downgrade.\n");
             continue;
         }
-        echo "${tag}[$slug] v$cur → v$target\n";
+        echo "{$tag}[$slug] v$cur → v$target\n";
         for ($from = $cur; $from < $target; $from++) {
             if (!isset($MIGRATIONS[$from])) {
-                fwrite(STDERR, "${tag}  no migration registered from v$from — abort.\n");
+                fwrite(STDERR, "{$tag}  no migration registered from v$from — abort.\n");
                 return 1;
             }
-            echo "${tag}  applying v$from → v" . ($from + 1) . "\n";
+            echo "{$tag}  applying v$from → v" . ($from + 1) . "\n";
             $ok = ($MIGRATIONS[$from])($root, $dryRun);
             if (!$ok) {
-                fwrite(STDERR, "${tag}  migration v$from failed — abort.\n");
+                fwrite(STDERR, "{$tag}  migration v$from failed — abort.\n");
                 return 1;
             }
             if (!$dryRun) writeSchemaMarker($root, $from + 1);
             $stepCount++;
         }
     }
-    echo "\n${tag}applied $stepCount migration step(s) across " . count($pages) . " page(s).\n";
+    echo "\n{$tag}applied $stepCount migration step(s) across " . count($pages) . " page(s).\n";
     if ($stepCount === 0) echo "(nothing to do)\n";
     return 0;
 }
