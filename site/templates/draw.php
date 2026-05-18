@@ -118,23 +118,35 @@ $payload = json_encode([
     <label class="ed-page-picker" title="Switch target page (reloads the editor)">
       <select id="page-select">
         <?php foreach ($pageOptions as $opt): ?>
+          <?php
+            $title = $opt['title'] !== '' ? $opt['title'] : $opt['id'];
+            $label = ($title !== $opt['id'])
+                ? $title . ' (' . $opt['id'] . ')'
+                : $opt['id'];
+          ?>
           <option value="<?= esc($opt['id']) ?>"<?= $opt['id'] === $targetSlug ? ' selected' : '' ?>>
-            <?= esc($opt['title'] ?: $opt['id']) ?>
+            <?= esc($label) ?>
           </option>
         <?php endforeach; ?>
       </select>
     </label>
     <div class="ed-class-tabs" role="tablist" aria-label="Screen class">
-      <?php foreach ($pageCfg['useClasses'] as $cid):
-        $cdef = null;
-        foreach ($classes as $c) if ($c['id'] === $cid) { $cdef = $c; break; }
-        $label = $cdef['name'] ?? ucfirst($cid);
-      ?>
+      <?php foreach ($pageCfg['useClasses'] as $cid): ?>
+        <?php
+          $label = ucfirst($cid);
+          foreach ($classes as $c) {
+              if ($c['id'] === $cid) {
+                  $label = $c['name'] ?: ucfirst($cid);
+                  break;
+              }
+          }
+          $isActive = $cid === $initialClassId;
+        ?>
         <button type="button"
-                class="ed-class-tab<?= $cid === $initialClassId ? ' is-active' : '' ?>"
+                class="ed-class-tab<?= $isActive ? ' is-active' : '' ?>"
                 data-class-id="<?= esc($cid) ?>"
                 role="tab"
-                aria-selected="<?= $cid === $initialClassId ? 'true' : 'false' ?>"
+                aria-selected="<?= $isActive ? 'true' : 'false' ?>"
                 title="Edit the <?= esc($label) ?> class"><?= esc($label) ?></button>
       <?php endforeach; ?>
     </div>
