@@ -538,6 +538,12 @@
         return {
           id:        line.id,
           masterId:  mid,
+          // Denormalized name for human readability of instances.json.
+          // The resolver doesn't read it (line.name comes from master
+          // + override); kept fresh on every save.
+          name:      (line.name != null && line.name !== '')
+                       ? line.name
+                       : (masterMap[mid] && masterMap[mid].name ? masterMap[mid].name : line.id),
           visible:   !line.hidden,
           groupId:   line.groupId || null,
           overrides: overrides

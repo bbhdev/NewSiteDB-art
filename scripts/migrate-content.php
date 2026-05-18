@@ -31,7 +31,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 4;
+const CONTENT_SCHEMA_VERSION = 5;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -52,6 +52,12 @@ $SCHEMA_HISTORY = [
        . ' the existing behavior overrides). content/colors.json moves to'
        . ' content/_shared/palette.json. Legacy lines.json + colors.json are'
        . ' left in place as a recoverable safety net; v4 readers ignore them.',
+    5 => 'Ensures every master AND every instance has a human-readable `name`'
+       . ' field. Masters get their canonical line id (e.g. "amb-1", "dozeng")'
+       . ' as a default name when none was set. Each instance gets a top-level'
+       . ' `name` denormalized from its master (informational only — the'
+       . ' resolver still reads name from master + overrides). Purpose: keep'
+       . ' the JSON files self-describing when read by a human.',
 ];
 
 /**
@@ -218,6 +224,11 @@ $MIGRATIONS = [
         foreach ($canonByLineId as $lid => $visual) {
             $mid = 'm-' . substr(md5($pageSlug . '/' . $lid), 0, 8);
             $masterIdByLineId[$lid] = $mid;
+            // Default name = original line id — usually carries semantic
+            // meaning (amb-1, dozeng, …). User can rename via the panel.
+            if (!isset($visual['name']) || $visual['name'] === '') {
+                $visual['name'] = $lid;
+            }
             $newMasters[] = array_merge(['id' => $mid], $visual);
         }
 
@@ -246,9 +257,15 @@ $MIGRATIONS = [
                 }
                 $behaviorOverrides = is_array($line['overrides'] ?? null) ? $line['overrides'] : [];
                 $merged = array_merge($behaviorOverrides, $visualOverrides);
+                // Per-instance name: own name if set, else inherit the
+                // master's name (which itself defaults to lineId). Kept
+                // at top level for human readability of the JSON file;
+                // the resolver ignores it and reads master.name.
+                $instanceName = $line['name'] ?? ($canonByLineId[$lid]['name'] ?? $lid);
                 $instances[] = [
                     'id'        => $lid,
                     'masterId'  => $mid,
+                    'name'      => $instanceName,
                     'visible'   => empty($line['hidden']),
                     'groupId'   => $line['groupId'] ?? null,
                     'overrides' => (object) $merged,
@@ -296,7 +313,139 @@ $MIGRATIONS = [
 
         return true;
     },
+
+    4 => function (string $pageRoot, bool $dryRun): bool {
+        // v4 → v5: ensure every master and every instance has a `name`
+        // field. Operates on site-wide data — re-running per-page is
+        // idempotent (no-op after first page finishes).
+        return ensureMasterAndInstanceNames(dirname($pageRoot), $dryRun);
+    },
 ];
+
+/**
+ * Backfill `name` on every master and every instance across the
+ * site (v4 → v5 retrofit). For each unnamed master, picks the first
+ * referencing instance's id (a human-meaningful label like
+ * "amb-1" or "dozeng"); falls back to the master id when no
+ * instance is found. For each instance, denormalizes the master's
+ * name into a top-level `name` field for JSON readability — the
+ * resolver doesn't read it, so it's informational only.
+ * Idempotent: re-running noops once names exist.
+ */
+function ensureMasterAndInstanceNames(string $contentDir, bool $dryRun): bool
+{
+    $mastersPath = $contentDir . '/_shared/masters.json';
+    if (!is_file($mastersPath)) return true;
+    $masters = json_decode(file_get_contents($mastersPath), true);
+    if (!is_array($masters)) return true;
+
+    // Collect master → first-instance-id mapping by scanning every
+    // page's class folders. We only need ONE instance per master to
+    // pick a name, so first-found wins.
+    $instanceIdByMaster = [];
+    foreach (glob($contentDir . '/*', GLOB_ONLYDIR) ?: [] as $pageDir) {
+        $name = basename($pageDir);
+        if ($name === '' || $name[0] === '_' || $name[0] === '.') continue;
+        foreach (glob($pageDir . '/*', GLOB_ONLYDIR) ?: [] as $classDir) {
+            $instPath = $classDir . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            foreach ($insts as $inst) {
+                if (!is_array($inst)) continue;
+                $mid = $inst['masterId'] ?? null;
+                $iid = $inst['id']       ?? null;
+                if (is_string($mid) && is_string($iid)
+                    && !isset($instanceIdByMaster[$mid])) {
+                    $instanceIdByMaster[$mid] = $iid;
+                }
+            }
+        }
+    }
+
+    // Patch masters with names where missing.
+    $mastersChanged = false;
+    foreach ($masters as &$m) {
+        if (!is_array($m) || !isset($m['id'])) continue;
+        if (isset($m['name']) && is_string($m['name']) && $m['name'] !== '') continue;
+        $m['name'] = $instanceIdByMaster[$m['id']] ?? $m['id'];
+        $mastersChanged = true;
+    }
+    unset($m);
+
+    // Build master lookup AFTER patching so denormalization uses the
+    // new names.
+    $masterById = [];
+    foreach ($masters as $m) {
+        if (is_array($m) && isset($m['id'])) $masterById[$m['id']] = $m;
+    }
+
+    // Patch instances with denormalized names.
+    $instanceFilesChanged = [];
+    foreach (glob($contentDir . '/*', GLOB_ONLYDIR) ?: [] as $pageDir) {
+        $name = basename($pageDir);
+        if ($name === '' || $name[0] === '_' || $name[0] === '.') continue;
+        foreach (glob($pageDir . '/*', GLOB_ONLYDIR) ?: [] as $classDir) {
+            $instPath = $classDir . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            $changed = false;
+            foreach ($insts as &$inst) {
+                if (!is_array($inst)) continue;
+                // Repair: PHP's json_decode(assoc=true) turns "{}" into
+                // an empty array, and re-encode keeps it as "[]" — but
+                // overrides is conceptually a map, not a list. Cast back
+                // to stdClass so the next write produces "{}". Visible
+                // only when retrofitting older v4 data.
+                if (isset($inst['overrides']) && is_array($inst['overrides']) && empty($inst['overrides'])) {
+                    $inst['overrides'] = (object) [];
+                    $changed = true;
+                }
+                if (!isset($inst['name']) || !is_string($inst['name']) || $inst['name'] === '') {
+                    $mid = $inst['masterId'] ?? null;
+                    $candidate = ($mid && isset($masterById[$mid]['name']))
+                        ? $masterById[$mid]['name']
+                        : ($inst['id'] ?? null);
+                    if ($candidate !== null) {
+                        // Insert `name` right after masterId for
+                        // consistency with the v3→v4 emission order.
+                        $reordered = [];
+                        foreach ($inst as $k => $v) {
+                            $reordered[$k] = $v;
+                            if ($k === 'masterId') $reordered['name'] = $candidate;
+                        }
+                        if (!isset($reordered['name'])) $reordered['name'] = $candidate;
+                        $inst = $reordered;
+                        $changed = true;
+                    }
+                }
+            }
+            unset($inst);
+            if ($changed) $instanceFilesChanged[$instPath] = $insts;
+        }
+    }
+
+    if ($dryRun) {
+        if ($mastersChanged) echo "    would add names to " . count($masters) . " master entries in $mastersPath\n";
+        foreach ($instanceFilesChanged as $p => $_) echo "    would denormalize names into $p\n";
+        return true;
+    }
+
+    if ($mastersChanged) {
+        if (file_put_contents($mastersPath,
+                json_encode($masters, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+            return false;
+        }
+    }
+    foreach ($instanceFilesChanged as $path => $insts) {
+        if (file_put_contents($path,
+                json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+            return false;
+        }
+    }
+    return true;
+}
 
 /**
  * Move content/colors.json → content/_shared/palette.json (copy,
