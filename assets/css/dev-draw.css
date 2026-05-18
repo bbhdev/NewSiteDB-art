@@ -296,6 +296,28 @@ body.editor {
   align-items: center;
   gap: 0.5rem;
 }
+.ed-field.ed-master-linked {
+  grid-template-columns: 5em 1fr auto;
+}
+.ed-link-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #666;
+  font-size: 0.85em;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ed-link-toggle:hover { color: #ccc; border-color: #444; background: #1a1a1a; }
+.ed-field.is-overridden > .ed-link-toggle {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ed-field.is-overridden input[type="text"],
+.ed-field.is-overridden input[type="number"] {
+  border-left: 2px solid var(--accent);
+}
 .ed-field > label {
   color: #aaa;
   font-size: 0.85em;

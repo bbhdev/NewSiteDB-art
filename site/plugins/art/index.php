@@ -206,9 +206,11 @@ function art_load_class_data(string $pageRoot, string $classId): array
 
 /**
  * Compose a fully-baked line record from a master + its instance
- * overrides. Same shape every line had pre-v4, so the editor and
- * runtime renderers consume it unchanged. `masterId` is carried
- * along so the editor can round-trip back to (master, instance).
+ * overrides. Same shape every line had pre-v4, so the runtime
+ * consumes it unchanged. `masterId` is carried along, and the
+ * original overrides map is preserved at line.overrides so the
+ * runtime's behavior pipeline (translate / rotate / drawIn keys)
+ * still finds its inputs.
  *
  * Resolution order: master visual props → instance overrides win.
  * Instance-specific fields (id, groupId, hidden) overlay on top.
@@ -224,14 +226,17 @@ function art_resolve_instance(array $instance, array $mastersById): array
         unset($line['id']);
     }
     $overrides = $instance['overrides'] ?? null;
+    $ovArr = [];
     if (is_array($overrides) || is_object($overrides)) {
-        foreach ((array) $overrides as $k => $v) {
+        $ovArr = (array) $overrides;
+        foreach ($ovArr as $k => $v) {
             $line[$k] = $v;
         }
     }
-    $line['id']       = $instance['id'] ?? null;
-    $line['groupId']  = $instance['groupId'] ?? null;
-    $line['hidden']   = !($instance['visible'] ?? true);
+    $line['id']        = $instance['id'] ?? null;
+    $line['groupId']   = $instance['groupId'] ?? null;
+    $line['hidden']    = !($instance['visible'] ?? true);
+    $line['overrides'] = $ovArr;
     if ($masterId)  $line['masterId'] = $masterId;
     return $line;
 }

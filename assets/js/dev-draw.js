@@ -78,44 +78,42 @@
   // The editor operates on flat "line" records (resolved master ⊕
   // instance overrides). Masters + instances are the on-disk shape;
   // load (below) resolves them in, save (decomposeForSave, further
-  // down) writes them back out. WIDE is treated as the canonical
-  // class — its line values become the master values on save, and
-  // divergent values in other classes become per-instance overrides.
-  //
-  // Declared here (above state init) so resolveInstanceJS is callable
-  // at load time without TDZ trouble.
+  // down) writes them back out. line.overrides keeps the explicit
+  // override map (both visual + behavior keys), so the editor can
+  // tell at any moment whether a given property is master-linked
+  // (no entry in overrides) or instance-overridden (entry present).
+  // Declared here (above state init) so resolveInstanceJS is
+  // callable at load time without TDZ trouble.
   const MASTER_VISUAL_KEYS = [
     'kind', 'points', 'params', 'segments',
     'smoothed', 'closed', 'filled',
     'd', 'stroke', 'width', 'name'
   ];
+  // Master-linkable visual keys exposed by the panel UI. Other
+  // master-visual keys (kind, d, points, segments) aren't directly
+  // edited as a single field, so they don't need a link toggle yet.
+  const PANEL_LINKABLE_KEYS = ['stroke', 'width', 'name', 'filled', 'smoothed', 'closed'];
 
   /**
    * Compose a flat line record from an instance + the master library.
-   * Returns the same shape Phase 3's editor manipulated, so tool /
-   * mutation code stays unchanged.
+   * Returns the same shape Phase 3's editor manipulated, plus a
+   * line.overrides map carrying ALL explicit overrides (visual +
+   * behavior). Tool / mutation code reads line.<key> as before; the
+   * presence of line.overrides[key] is the master-linkage signal.
    */
   function resolveInstanceJS(inst, mby) {
     if (!inst) return {};
     const master = inst.masterId ? mby[inst.masterId] : null;
     const line = master ? Object.assign({}, master) : {};
     delete line.id; // master.id is not the instance.id
-    const ov = inst.overrides;
-    const behaviorOverrides = {};
-    if (ov && typeof ov === 'object') {
-      Object.keys(ov).forEach(function (k) {
-        if (MASTER_VISUAL_KEYS.indexOf(k) !== -1) {
-          line[k] = ov[k];
-        } else {
-          behaviorOverrides[k] = ov[k];
-        }
-      });
-    }
+    const ov = (inst.overrides && typeof inst.overrides === 'object') ? inst.overrides : {};
+    Object.keys(ov).forEach(function (k) { line[k] = ov[k]; });
     line.id        = inst.id;
     line.groupId   = inst.groupId;
     line.masterId  = inst.masterId || null;
     line.hidden    = !(inst.visible === undefined ? true : inst.visible);
-    line.overrides = behaviorOverrides;
+    // Copy so editor mutations don't leak back into the source.
+    line.overrides = Object.assign({}, ov);
     return line;
   }
 
@@ -440,78 +438,118 @@
   function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
 
   /**
-   * Pick the canonical class for master values. Wide if available,
-   * else the first useClass. Master saves take their visual values
-   * from this class; other classes record divergences as overrides.
+   * Is the given visual property currently overridden on this line?
+   * (Behavior keys read the same map but are never "linked to
+   * master" — they're per-instance by design.)
    */
-  function canonicalClassId() {
-    const u = state.pageConfig.useClasses || [];
-    return u.indexOf('wide') !== -1 ? 'wide' : (u[0] || 'wide');
+  function isVisualOverridden(line, key) {
+    return !!(line && line.overrides
+           && Object.prototype.hasOwnProperty.call(line.overrides, key));
+  }
+
+  /**
+   * Edit a visual property of a line. Routing:
+   *   - If the property is currently overridden on this instance,
+   *     stay in override scope: update line[key] AND line.overrides[key].
+   *   - Else the property is master-linked: update master[key], then
+   *     propagate to every line in every class that resolves to the
+   *     same master AND doesn't have its own override on this key.
+   *
+   * For lines with no masterId (legacy or detached), the edit lands
+   * locally and a master is minted at save time.
+   */
+  function setLineVisualProp(id, key, value) {
+    const line = state.lines.find(function (l) { return l.id === id; });
+    if (!line) return;
+    if (isVisualOverridden(line, key)) {
+      line[key] = value;
+      line.overrides[key] = value;
+    } else if (line.masterId) {
+      const m = state.masters.find(function (x) { return x.id === line.masterId; });
+      if (m) m[key] = value;
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+        lines.forEach(function (l) {
+          if (l.masterId !== line.masterId) return;
+          if (isVisualOverridden(l, key)) return;
+          l[key] = value;
+        });
+      });
+    } else {
+      // No master link yet — mutate locally; decompose mints a
+      // master from this on save.
+      line[key] = value;
+    }
+    state.dirty = true;
+  }
+
+  /**
+   * Flip a visual property's linkage:
+   *   linked → overridden  : snapshot the line's current value into
+   *                          line.overrides[key].
+   *   overridden → linked  : delete line.overrides[key] and pull the
+   *                          master's value (if any) back onto the
+   *                          line so the displayed value matches.
+   * Either direction marks the doc dirty.
+   */
+  function toggleVisualOverride(id, key) {
+    const line = state.lines.find(function (l) { return l.id === id; });
+    if (!line) return;
+    if (!line.overrides) line.overrides = {};
+    if (isVisualOverridden(line, key)) {
+      delete line.overrides[key];
+      if (line.masterId) {
+        const m = state.masters.find(function (x) { return x.id === line.masterId; });
+        if (m && m[key] !== undefined) line[key] = m[key];
+      }
+    } else {
+      line.overrides[key] = line[key];
+    }
+    state.dirty = true;
   }
 
   /**
    * Decompose state.byClass[].lines + state.masters into the v4 on-
-   * disk shape for save. Four passes:
-   *   1. Mint a masterId for any line that doesn't have one yet
-   *      (freshly drawn since last save).
-   *   2. Pick a "source class" per master — canonical class when it
-   *      has an instance, else the first class that does. The
-   *      source class's line values become the master values.
-   *   3. Rebuild masters from their source classes.
-   *   4. Emit per-class instances; each carries any behavior
-   *      overrides PLUS visual divergences from its master.
-   *   5. Drop masters with no referencing instance.
+   * disk shape for save. Now that line.overrides is the explicit
+   * override map, the save side is mostly bookkeeping:
+   *
+   *   1. Mint masterIds for any lines drawn since last load. Stamp
+   *      a fresh master from their current visual values.
+   *   2. Copy state.masters as-is; freshly-drawn shapes contribute
+   *      their new masters. (Edits made in linked mode already
+   *      mutated state.masters in place — no rebuild needed.)
+   *   3. For each line, emit { id, masterId, name, visible,
+   *      groupId, overrides } where overrides = line.overrides
+   *      verbatim. Drop masters with no instance reference.
    */
   function decomposeForSave() {
-    const canonical = canonicalClassId();
     const useClasses = state.pageConfig.useClasses || [];
     const masterMap = {};
     state.masters.forEach(function (m) {
       if (m && m.id) masterMap[m.id] = Object.assign({}, m);
     });
 
-    // Pass 1: mint missing masterIds.
+    // Pass 1: mint masters for any lines that don't have one yet.
     useClasses.forEach(function (cid) {
       const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
       lines.forEach(function (line) {
-        if (!line.masterId) {
-          line.masterId = 'm-' + Math.random().toString(36).slice(2, 10);
-        }
+        if (line.masterId && masterMap[line.masterId]) return;
+        const mid = line.masterId || ('m-' + Math.random().toString(36).slice(2, 10));
+        line.masterId = mid;
+        const m = { id: mid };
+        MASTER_VISUAL_KEYS.forEach(function (k) {
+          if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
+        });
+        if (m.name === undefined) m.name = line.name || line.id;
+        masterMap[mid] = m;
       });
     });
 
-    // Pass 2: pick source class per master (canonical wins; otherwise
-    // first-seen in declared useClasses order).
-    const masterSourceClass = {};
-    useClasses.forEach(function (cid) {
-      if (cid === canonical) return;
-      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
-      lines.forEach(function (line) {
-        if (line.masterId && !masterSourceClass[line.masterId]) {
-          masterSourceClass[line.masterId] = cid;
-        }
-      });
-    });
-    if (state.byClass[canonical]) {
-      (state.byClass[canonical].lines || []).forEach(function (line) {
-        if (line.masterId) masterSourceClass[line.masterId] = canonical;
-      });
-    }
-
-    // Pass 3: rebuild masters from source class line values.
-    Object.keys(masterSourceClass).forEach(function (mid) {
-      const cid = masterSourceClass[mid];
-      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
-      const line = lines.find(function (l) { return l.masterId === mid; });
-      if (!line) return;
-      const m = { id: mid };
-      MASTER_VISUAL_KEYS.forEach(function (k) {
-        if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
-      });
-      masterMap[mid] = m;
-    });
-
-    // Pass 4: per-class instances with overrides.
+    // Pass 2: per-class instances. overrides start with line.overrides
+    // (explicit master-link toggles + behavior overrides) and gain any
+    // visual key whose value diverges from the master (catches drag /
+    // handle-edit mutations on params, points, segments, d that don't
+    // route through the link-toggle flow).
     const byClass = {};
     const usedMasterIds = {};
     useClasses.forEach(function (cid) {
@@ -519,28 +557,24 @@
       const groups = (state.byClass[cid] && state.byClass[cid].groups) || [];
       const instances = lines.map(function (line) {
         const mid = line.masterId;
+        usedMasterIds[mid] = true;
         const master = masterMap[mid];
-        const overrides = {};
-        if (line.overrides && typeof line.overrides === 'object') {
-          Object.keys(line.overrides).forEach(function (k) {
-            overrides[k] = line.overrides[k];
-          });
-        }
+        const overrides = (line.overrides && typeof line.overrides === 'object')
+          ? Object.assign({}, line.overrides)
+          : {};
         MASTER_VISUAL_KEYS.forEach(function (k) {
+          if (k in overrides) return;
           if (line[k] === undefined) return;
-          const lv = line[k];
           const mv = master ? master[k] : undefined;
-          if (JSON.stringify(lv) !== JSON.stringify(mv)) {
-            overrides[k] = lv;
+          if (JSON.stringify(line[k]) !== JSON.stringify(mv)) {
+            overrides[k] = line[k];
           }
         });
-        usedMasterIds[mid] = true;
         return {
           id:        line.id,
           masterId:  mid,
           // Denormalized name for human readability of instances.json.
-          // The resolver doesn't read it (line.name comes from master
-          // + override); kept fresh on every save.
+          // The resolver doesn't read it; kept fresh on every save.
           name:      (line.name != null && line.name !== '')
                        ? line.name
                        : (masterMap[mid] && masterMap[mid].name ? masterMap[mid].name : line.id),
@@ -2887,9 +2921,15 @@
     const wrap = document.createElement('div');
     wrap.className = 'ed-settings';
 
-    wrap.appendChild(textField('Name', line.name || '', function (v) {
-      updateLine(line.id, { name: v });
-    }, 'optional'));
+    wrap.appendChild(wrapWithMasterLink(
+      textField('Name', line.name || '', function (v) {
+        setLineVisualProp(line.id, 'name', v);
+        scheduleSnapshot();
+        renderLines();
+        renderGroupsList();
+      }, 'optional'),
+      line.id, 'name'
+    ));
 
     // Visibility — toggle off to hide on the live site without
     // deleting. Useful for trying variants. Renders faded in the
@@ -2929,12 +2969,23 @@
     }
 
     wrap.appendChild(divider('Appearance'));
-    wrap.appendChild(strokeField('Color', line.stroke, function (v) {
-      updateLine(line.id, { stroke: v });
-    }));
-    wrap.appendChild(overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
-      updateLine(line.id, { width: v });
-    }));
+    wrap.appendChild(wrapWithMasterLink(
+      strokeField('Color', line.stroke, function (v) {
+        setLineVisualProp(line.id, 'stroke', v);
+        scheduleSnapshot();
+        renderLines();
+        renderGroupsList();
+      }),
+      line.id, 'stroke'
+    ));
+    wrap.appendChild(wrapWithMasterLink(
+      overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
+        setLineVisualProp(line.id, 'width', v);
+        scheduleSnapshot();
+        renderLines();
+      }),
+      line.id, 'width'
+    ));
 
     wrap.appendChild(divider('Behavior'));
     const ov = line.overrides || {};
@@ -2971,6 +3022,41 @@
   }
 
   // ── Field constructors ────────────────────────────────────────────
+
+  /**
+   * Wrap a `.ed-field` element with a master-link toggle button.
+   * The button shows "🔗" when the property is linked to the master
+   * (edits propagate to every class) and "✎" when the property is
+   * overridden on this instance (edits stay local). Clicking flips
+   * the state via toggleVisualOverride() and re-renders the panel
+   * so the new state is reflected.
+   *
+   * Returns the same fieldEl so callers can wrap inline.
+   */
+  function wrapWithMasterLink(fieldEl, lineId, key) {
+    const line = state.lines.find(function (l) { return l.id === lineId; });
+    if (!line || !line.masterId) return fieldEl; // no master to link against
+    const overridden = isVisualOverridden(line, key);
+    fieldEl.classList.add('ed-master-linked');
+    if (overridden) fieldEl.classList.add('is-overridden');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ed-link-toggle';
+    btn.textContent = overridden ? '✎' : '🔗';
+    btn.title = overridden
+      ? 'Overridden in this class — click to revert to master (value will sync to all classes)'
+      : 'Linked to master — edits propagate to every class. Click to override locally.';
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      toggleVisualOverride(lineId, key);
+      snapshot();
+      renderSelectionPanel();
+      renderLines();
+    });
+    fieldEl.appendChild(btn);
+    return fieldEl;
+  }
+
   function textField(label, value, onChange, placeholder) {
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';
