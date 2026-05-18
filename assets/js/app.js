@@ -274,9 +274,20 @@
                        'its lines will render but not animate.');
           return;
         }
+        // Natural 'top bottom' start = scrollY at which the trigger's
+        // top reaches the bottom of the viewport. For elements already
+        // partially or fully on-screen at page load this is NEGATIVE,
+        // which would otherwise give progress > 0 at scrollY=0 and put
+        // paths somewhere other than their authored coords on first
+        // paint. Clamp to 0 so the runtime matches the editor at the
+        // top of the page; below-the-fold triggers are unaffected.
         stConfig = {
           trigger: triggerEl,
-          start: 'top bottom',
+          start: function () {
+            const r = triggerEl.getBoundingClientRect();
+            const natural = r.top + window.scrollY - window.innerHeight;
+            return Math.max(0, natural);
+          },
           end:   'bottom top',
           scrub: 1
         };
