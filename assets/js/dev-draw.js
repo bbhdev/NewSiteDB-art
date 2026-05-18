@@ -50,6 +50,11 @@
   const clearLinesBtn  = document.getElementById('clear-lines-btn');
   const helpBtn        = document.getElementById('help-btn');
   const setOriginBanner = document.getElementById('set-origin-banner');
+  const wizardBanner    = document.getElementById('wizard-banner');
+  const wizardLabel     = document.getElementById('wizard-banner-label');
+  const wizardSaveBtn   = document.getElementById('wizard-save-btn');
+  const wizardCancelBtn = document.getElementById('wizard-cancel-btn');
+  const createObjectBtn = document.getElementById('create-object-btn');
 
   // Defensive: if any required element is missing, the user is probably
   // serving stale cached HTML against fresh JS (or vice-versa). Log
@@ -1608,6 +1613,234 @@
     }
   }
 
+  // ── Create-object wizard (Phase 5) ───────────────────────────────
+  // Default state is select. Drawing starts via "Create object",
+  // which opens a modal to pick the type + destination classes. The
+  // tool then activates; the user draws one shape; commitLine
+  // detects the wizard is active and mints a master immediately so
+  // the draft has a stable identity. The user tweaks; Save object
+  // replicates instances into the other selected classes; Cancel
+  // tears the draft down. Without the wizard active (e.g. keyboard
+  // shortcut) drawing still works the legacy way — the line just
+  // doesn't get auto-instanced.
+  state.wizard = null;
+  // Tool ids paired with the human label for the type list.
+  const CREATE_TYPES = [
+    { id: 'freehand',       label: 'Freehand',  hint: 'click-drag organic stroke' },
+    { id: 'freehandClosed', label: 'Loop',      hint: 'closed freehand, auto-fills' },
+    { id: 'line',           label: 'Line',      hint: 'click-drag straight' },
+    { id: 'lineChain',      label: 'Chain',     hint: 'click anchors, Esc to finish' },
+    { id: 'bezier',         label: 'Bezier',    hint: 'click anchors, smooth curve' },
+    { id: 'circle',         label: 'Circle',    hint: 'click center, drag radius' },
+    { id: 'ellipse',        label: 'Ellipse',   hint: 'click center, drag rx/ry' },
+    { id: 'rect',           label: 'Rect',      hint: 'click corner, drag size' },
+    { id: 'polygon',        label: 'Polygon',   hint: 'triangle/N-gon (set Sides)' },
+    { id: 'star',           label: 'Star',      hint: 'N-pointed' }
+  ];
+
+  function showCreateModal() {
+    if (state.wizard) return; // already mid-wizard
+
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal ed-create-modal';
+
+    const h = document.createElement('div');
+    h.className = 'ed-modal-header';
+    const t = document.createElement('h3'); t.textContent = 'Create object';
+    h.appendChild(t);
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close'; x.textContent = '×';
+    x.addEventListener('click', cleanup);
+    h.appendChild(x);
+    modal.appendChild(h);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body';
+
+    // Type selection grid.
+    const typesWrap = document.createElement('div');
+    typesWrap.className = 'ed-create-types';
+    let pickedType = null;
+    let startBtn = null;
+    CREATE_TYPES.forEach(function (t) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ed-create-type';
+      b.title = t.hint;
+      b.innerHTML = '<strong>' + t.label + '</strong><span>' + t.hint + '</span>';
+      b.addEventListener('click', function () {
+        pickedType = t.id;
+        typesWrap.querySelectorAll('.ed-create-type').forEach(function (n) {
+          n.classList.toggle('is-active', n === b);
+        });
+        if (startBtn) startBtn.disabled = false;
+      });
+      typesWrap.appendChild(b);
+    });
+
+    const typesHead = document.createElement('h4');
+    typesHead.textContent = 'Type';
+    body.appendChild(typesHead);
+    body.appendChild(typesWrap);
+
+    // Destination classes for the current page (only).
+    const destHead = document.createElement('h4');
+    destHead.textContent = 'Show in classes';
+    body.appendChild(destHead);
+
+    const useClasses = state.pageConfig.useClasses || [];
+    const destState = {};
+    useClasses.forEach(function (cid) { destState[cid] = true; });
+    const destsWrap = document.createElement('div');
+    destsWrap.className = 'ed-create-dests';
+    useClasses.forEach(function (cid) {
+      const def = state.classes.find(function (c) { return c.id === cid; });
+      const lbl = document.createElement('label');
+      lbl.className = 'ed-create-dest';
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.checked = true;
+      chk.disabled = (cid === state.classId); // current class is mandatory
+      chk.addEventListener('change', function () { destState[cid] = chk.checked; });
+      lbl.appendChild(chk);
+      const span = document.createElement('span');
+      span.textContent = (def && def.name ? def.name : cid)
+        + (cid === state.classId ? ' (drawing here)' : '');
+      lbl.appendChild(span);
+      destsWrap.appendChild(lbl);
+    });
+    body.appendChild(destsWrap);
+
+    modal.appendChild(body);
+
+    // Buttons.
+    const btnRow = document.createElement('div');
+    btnRow.className = 'ed-modal-buttons';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cleanup);
+    btnRow.appendChild(cancelBtn);
+    startBtn = document.createElement('button');
+    startBtn.textContent = 'Start drawing';
+    startBtn.className = 'ed-primary';
+    startBtn.disabled = true;
+    startBtn.addEventListener('click', function () {
+      const destinations = useClasses.filter(function (c) { return destState[c]; });
+      // Current class is always a destination (the input was disabled
+      // for it, but reading destState[currentClass] is true anyway).
+      cleanup();
+      beginWizard(pickedType, destinations);
+    });
+    btnRow.appendChild(startBtn);
+    modal.appendChild(btnRow);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
+    });
+  }
+
+  function beginWizard(toolId, destinations) {
+    state.wizard = {
+      type:        toolId,
+      destinations: destinations,
+      draftId:     null,
+      draftMasterId: null
+    };
+    setActiveTool(toolId);
+    showWizardBanner('Drafting new ' + (CREATE_TYPES.find(function (t) { return t.id === toolId; }) || { label: toolId }).label);
+  }
+
+  function showWizardBanner(text, draftCaptured) {
+    if (!wizardBanner) return;
+    wizardLabel.textContent = text;
+    wizardSaveBtn.disabled = !draftCaptured;
+    wizardBanner.hidden = false;
+  }
+  function hideWizardBanner() { if (wizardBanner) wizardBanner.hidden = true; }
+
+  /**
+   * Called from commitLine when a tool finishes drawing a shape
+   * during wizard mode. Mints a master from the line's current
+   * visual values, attaches the new masterId to the line so the
+   * editor's master-link toggle works immediately, and switches
+   * the tool back to Select so the user can tweak.
+   */
+  function captureWizardDraft(line) {
+    if (!state.wizard || state.wizard.draftId) return;
+    const mid = 'm-' + Math.random().toString(36).slice(2, 10);
+    const m = { id: mid };
+    MASTER_VISUAL_KEYS.forEach(function (k) {
+      if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
+    });
+    if (!m.name) m.name = line.name || line.id;
+    state.masters.push(m);
+    line.masterId = mid;
+    state.wizard.draftId       = line.id;
+    state.wizard.draftMasterId = mid;
+    setActiveTool('select');
+    const typeLabel = (CREATE_TYPES.find(function (t) { return t.id === state.wizard.type; }) || { label: state.wizard.type }).label;
+    showWizardBanner('Drafting new ' + typeLabel + ' — tweak then Save object', true);
+  }
+
+  /**
+   * Finalize the wizard: replicate the draft instance into every
+   * other selected destination class (same id, same masterId, no
+   * overrides) so the new object appears across classes at the
+   * authored position. Exits wizard mode.
+   */
+  function saveWizardObject() {
+    if (!state.wizard || !state.wizard.draftId) return;
+    const w = state.wizard;
+    const line = state.lines.find(function (l) { return l.id === w.draftId; });
+    if (!line) { cancelWizard(); return; }
+    w.destinations.forEach(function (cid) {
+      if (cid === state.classId) return;
+      if (!state.byClass[cid]) return;
+      // Don't duplicate if for some reason an instance already exists here.
+      if (state.byClass[cid].lines.some(function (l) { return l.id === line.id; })) return;
+      const copy = deepCopy(line);
+      // Fresh override map — the new instance inherits visuals from
+      // the master and starts with no class-specific overrides.
+      copy.overrides = {};
+      state.byClass[cid].lines.push(copy);
+    });
+    state.wizard = null;
+    hideWizardBanner();
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  function cancelWizard() {
+    if (!state.wizard) return;
+    const w = state.wizard;
+    if (w.draftId) {
+      state.byClass[state.classId].lines =
+        state.byClass[state.classId].lines.filter(function (l) { return l.id !== w.draftId; });
+      state.selectedIds = state.selectedIds.filter(function (id) { return id !== w.draftId; });
+    }
+    if (w.draftMasterId) {
+      state.masters = state.masters.filter(function (m) { return m.id !== w.draftMasterId; });
+    }
+    state.wizard = null;
+    hideWizardBanner();
+    setActiveTool('select');
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
   // ── Line + group mutations ────────────────────────────────────────
   /**
    * Create a new line and select it. Tools pass meta describing the
@@ -1641,6 +1874,13 @@
     state.lines.push(line);
     selectOnly(line.id);
     state.dirty = true;
+    // Wizard hook: if a "Create object" flow is active and this is
+    // the first shape drawn in it, mint a master, attach it, and
+    // switch the tool back to Select so the user can tweak. The
+    // wizard banner's Save / Cancel buttons take it from here.
+    if (state.wizard && !state.wizard.draftId) {
+      captureWizardDraft(line);
+    }
     snapshot();
     renderAll();
   }
@@ -3340,6 +3580,11 @@
   renderDiagGrid(); // initial paint if the flag was already on
   settingsBtn.addEventListener('click', showSettings);
 
+  // Create-object wizard wiring.
+  if (createObjectBtn) createObjectBtn.addEventListener('click', showCreateModal);
+  if (wizardSaveBtn)   wizardSaveBtn.addEventListener('click',   saveWizardObject);
+  if (wizardCancelBtn) wizardCancelBtn.addEventListener('click', cancelWizard);
+
   // Page picker — reloads with ?page=<slug>. If the user has unsaved
   // changes we confirm first; otherwise switch immediately.
   const pageSelect = document.getElementById('page-select');
@@ -3683,6 +3928,9 @@
       // Escape cancels the set-rotate-origin gesture before anything
       // else, since it's the most "active" mode the user can be in.
       if (settingOrigin) { exitSetRotateOrigin(); return; }
+      // Wizard takes priority next — if the user has begun a create
+      // flow (with or without a drawn draft), Esc tears it down.
+      if (state.wizard) { cancelWizard(); return; }
       const tool = TOOLS[state.activeToolId];
       if (tool && tool.cancel) tool.cancel();
       clearSelection();

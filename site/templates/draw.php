@@ -160,20 +160,9 @@ $payload = json_encode([
     <button type="button" class="ed-tool" id="select-all-btn" title="Select every object on this page — drag any one to move them all together. Cmd/Shift-click objects to build a custom multi-selection.">Select all</button>
   </div>
 
-  <div class="ed-tools" role="toolbar" aria-label="Drawing tools">
-    <button type="button" class="ed-tool" data-tool="freehand"       title="Freehand (F)">Freehand</button>
-    <button type="button" class="ed-tool" data-tool="freehandClosed" title="Closed loop (O) — freehand stroke auto-closes and fills">Loop</button>
-    <button type="button" class="ed-tool" data-tool="line"           title="Line (L)">Line</button>
-    <button type="button" class="ed-tool" data-tool="lineChain"      title="Line chain (C) — click to extend, Esc/double-click to finish">Chain</button>
-    <button type="button" class="ed-tool" data-tool="bezier"         title="Bezier (B) — click anchors, smooth curve through them; Esc/double-click to finish">Bezier</button>
-  </div>
-
-  <div class="ed-tools" role="toolbar" aria-label="Geometric primitives">
-    <button type="button" class="ed-tool" data-tool="circle"  title="Circle — click center, drag for radius">Circle</button>
-    <button type="button" class="ed-tool" data-tool="ellipse" title="Ellipse — click center, drag for rx/ry">Ellipse</button>
-    <button type="button" class="ed-tool" data-tool="rect"    title="Rectangle — click corner, drag for size">Rect</button>
-    <button type="button" class="ed-tool" data-tool="polygon" title="Polygon (triangle / diamond / pentagon / N-gon by setting Sides)">Polygon</button>
-    <button type="button" class="ed-tool" data-tool="star"    title="N-pointed star">Star</button>
+  <div class="ed-tools" role="toolbar" aria-label="Create">
+    <button type="button" id="create-object-btn" class="ed-create-btn"
+            title="Create a new object — opens a panel to pick the shape type and the classes it should appear in">+ Create object</button>
   </div>
 
   <div class="ed-tool-settings" id="tool-settings"></div>
@@ -237,6 +226,12 @@ $payload = json_encode([
 
   <div class="ed-mode-banner" id="set-origin-banner" hidden>
     Click anywhere on the canvas to set the rotation pivot · <kbd>Esc</kbd> to cancel
+  </div>
+
+  <div class="ed-mode-banner ed-wizard-banner" id="wizard-banner" hidden>
+    <span id="wizard-banner-label">Drafting new object</span>
+    <button type="button" id="wizard-save-btn"   class="ed-mini ed-primary">Save object</button>
+    <button type="button" id="wizard-cancel-btn" class="ed-mini ed-danger">Cancel</button>
   </div>
 
 <?php

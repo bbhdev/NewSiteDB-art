@@ -503,6 +503,80 @@ body.editor {
   font-size: 0.9em;
 }
 
+/* Wizard banner — has buttons so it can't be pointer-events:none. */
+.ed-wizard-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  pointer-events: auto;
+}
+.ed-wizard-banner .ed-mini {
+  font-size: 0.85em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+  cursor: pointer;
+}
+.ed-wizard-banner .ed-mini:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+.ed-wizard-banner .ed-mini:disabled { opacity: 0.45; cursor: not-allowed; }
+.ed-wizard-banner .ed-mini.ed-danger { color: #fcc; border-color: rgba(255,180,180,0.5); }
+
+/* Create-object toolbar button. */
+.ed-create-btn {
+  font-weight: 600;
+}
+
+/* Create-object modal. */
+.ed-create-modal { min-width: 28rem; }
+.ed-create-modal .ed-modal-body h4 {
+  margin: 0.6rem 0 0.3rem;
+  font-size: 0.85em;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ed-create-types {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.4rem;
+}
+.ed-create-type {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  background: #222;
+  border: 1px solid #444;
+  color: #ddd;
+  padding: 0.45rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.ed-create-type strong { font-size: 0.95em; color: #fff; }
+.ed-create-type span   { font-size: 0.78em; color: #888; }
+.ed-create-type:hover { background: #2a2a2a; }
+.ed-create-type.is-active {
+  border-color: var(--accent);
+  background: #2a2a2a;
+}
+.ed-create-dests {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ed-create-dest {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #ddd;
+  font-size: 0.9em;
+}
+.ed-create-dest input:disabled + span { color: #888; }
+
 /* Optional name labels — always legible against any line color.
    Text uses paint-order: stroke fill with a wide white stroke under
    a black fill, so it reads as black text with a white halo on either
