@@ -654,6 +654,37 @@
     else state.selectedIds.push(id);
   }
   function clearSelection() { state.selectedIds = []; }
+
+  // ── Scope-mode helpers ────────────────────────────────────────────
+  // state.mode === 'all' → mutating actions fan out across every
+  // class that has the same master. state.mode === 'one' → only the
+  // current class is touched. These helpers centralize the "for each
+  // sibling instance / group of this master / name in other classes"
+  // loops so callers stay terse.
+
+  function forSiblingsOf(masterId, fn) {
+    if (!masterId) return;
+    state.pageConfig.useClasses.forEach(function (cid) {
+      if (cid === state.classId) return;
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      bucket.lines.forEach(function (sib) {
+        if (sib.masterId === masterId) fn(sib, cid, bucket);
+      });
+    });
+  }
+  function forSiblingGroupsByName(groupName, fn) {
+    if (!groupName) return;
+    state.pageConfig.useClasses.forEach(function (cid) {
+      if (cid === state.classId) return;
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.groups)) return;
+      bucket.groups.forEach(function (g) {
+        if (g.name === groupName) fn(g, cid, bucket);
+      });
+    });
+  }
+  function modeIsAll() { return state.mode === 'all'; }
   // The "primary" selection is the most recently added id; the params
   // panel renders this one's fields when exactly one object is selected.
   function primarySelectedId() {
@@ -1046,6 +1077,20 @@
   function resetPositionOffset(lineId) {
     const line = state.lines.find(function (l) { return l.id === lineId; });
     if (!line) return;
+    snapPositionOffsetToZero(line);
+    // 'all' mode: every sibling-class instance snaps back too.
+    // 'one' mode: just this class — sibling positions stay where
+    // the user left them.
+    if (modeIsAll() && line.masterId) {
+      forSiblingsOf(line.masterId, function (sib) {
+        snapPositionOffsetToZero(sib);
+      });
+    }
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+  function snapPositionOffsetToZero(line) {
     line.positionOffset = { dx: 0, dy: 0 };
     if (line.masterId && line.params) {
       const m = state.masters.find(function (x) { return x.id === line.masterId; });
@@ -1062,9 +1107,6 @@
       }
     }
     computeLineD(line);
-    state.dirty = true;
-    snapshot();
-    renderAll();
   }
 
   /**
@@ -2010,10 +2052,14 @@
         title:   'Merge — divergence detected',
         message: msg,
         html:    true,
+        // Primary button picks by state.mode — matches the user's
+        // current intent. They can still pick the other path.
         buttons: [
-          { label: 'Cancel',                value: null },
-          { label: 'Current class only',    value: 'current' },
-          { label: 'Apply everywhere',      value: 'all', className: 'ed-primary' }
+          { label: 'Cancel',             value: null },
+          { label: 'Current class only', value: 'current',
+            className: modeIsAll() ? '' : 'ed-primary' },
+          { label: 'Apply everywhere',   value: 'all',
+            className: modeIsAll() ? 'ed-primary' : '' }
         ]
       });
       if (!choice) return;
@@ -3460,15 +3506,36 @@
   // Move N lines into a new group in one transaction. Used by the
   // sidebar drag-and-drop: when the dragged line is part of the
   // current multi-selection the whole selection follows.
+  //
+  // 'all' mode also moves every sibling-class instance of the same
+  // masters into the same-named target group of their class. If a
+  // class doesn't have a same-name group yet, its sibling stays
+  // put (we don't auto-create groups here — the user already had
+  // to pick the destination via drag-and-drop, so creation is out
+  // of band).
   function moveLinesToGroup(lineIds, newGroupId) {
     let changed = false;
+    const movedMasterIds = {};
     lineIds.forEach(function (id) {
       const line = state.lines.find(function (l) { return l.id === id; });
       if (!line || line.groupId === newGroupId) return;
       line.groupId = newGroupId;
+      if (line.masterId) movedMasterIds[line.masterId] = true;
       changed = true;
     });
     if (!changed) return;
+    if (modeIsAll()) {
+      const targetGroup = state.groups.find(function (g) { return g.id === newGroupId; });
+      const targetName = targetGroup ? targetGroup.name : null;
+      if (targetName) {
+        Object.keys(movedMasterIds).forEach(function (mid) {
+          forSiblingsOf(mid, function (sib, cid, bucket) {
+            const peer = bucket.groups.find(function (g) { return g.name === targetName; });
+            if (peer) sib.groupId = peer.id;
+          });
+        });
+      }
+    }
     // Auto-open the destination group so the user sees the move land.
     state.openGroupIds[newGroupId] = true;
     state.activeGroupId = newGroupId;
@@ -3478,21 +3545,22 @@
   }
 
   function addGroup() {
-    // A new group is a site-wide concept (you almost always want it
-    // on every screen-class), so create a same-name group in every
-    // class. Each class gets its own id; rename / delete still acts
-    // per-class. activeGroupId follows the one in the current class.
+    // 'all' mode: a new group fans out across every class with the
+    // same name (each class gets its own id). 'one' mode: just
+    // this class — useful for class-specific groupings that the
+    // other classes shouldn't carry.
     const name = 'Group ' + (state.groups.length + 1);
+    const tmpl = {
+      name: name,
+      trigger: null,
+      defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
+    };
     let activeIdForCurrentClass = null;
-    state.pageConfig.useClasses.forEach(function (cid) {
+    const fanout = modeIsAll() ? state.pageConfig.useClasses : [state.classId];
+    fanout.forEach(function (cid) {
       const bucket = state.byClass[cid];
       if (!bucket || !Array.isArray(bucket.groups)) return;
-      const g = {
-        id: uid('g'),
-        name: name,
-        trigger: null,
-        defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
-      };
+      const g = Object.assign({ id: uid('g') }, tmpl);
       bucket.groups.push(g);
       if (cid === state.classId) activeIdForCurrentClass = g.id;
     });
@@ -3515,12 +3583,13 @@
    */
   function deleteGroup(id, alsoDeleteLines) {
     if (alsoDeleteLines) {
-      // Cascade site-wide via masterId — matches single-line delete
-      // semantics ("removing an object means removing it everywhere
-      // it appears"). The GROUP itself is still class-local (groups
-      // are per-class), so removing the group leaves same-named
-      // groups in other classes intact, just emptied of these
-      // particular objects.
+      // 'all' mode: cascade site-wide via masterId — every class
+      // loses these objects. 'one' mode: drop lines from THIS class
+      // only; sibling classes keep their instances + the masters
+      // survive. The GROUP entity itself is class-local in both
+      // cases (deleteGroup affects state.groups for the current
+      // class only). The group's name peers in other classes
+      // survive — emptied if 'all', untouched if 'one'.
       const targetMasterIds = new Set();
       const looseInstanceIds = new Set();
       state.lines.forEach(function (l) {
@@ -3528,7 +3597,10 @@
         if (l.masterId) targetMasterIds.add(l.masterId);
         else            looseInstanceIds.add(l.id);
       });
-      state.pageConfig.useClasses.forEach(function (cid) {
+      const cidsToTouch = modeIsAll()
+        ? state.pageConfig.useClasses
+        : [state.classId];
+      cidsToTouch.forEach(function (cid) {
         const bucket = state.byClass[cid];
         if (!bucket || !Array.isArray(bucket.lines)) return;
         bucket.lines = bucket.lines.filter(function (l) {
@@ -3537,9 +3609,14 @@
           return true;
         });
       });
-      state.masters = state.masters.filter(function (m) {
-        return !targetMasterIds.has(m.id);
-      });
+      // Only prune masters when the cascade reached every class.
+      // 'one' mode leaves masters alone (siblings still reference
+      // them).
+      if (modeIsAll()) {
+        state.masters = state.masters.filter(function (m) {
+          return !targetMasterIds.has(m.id);
+        });
+      }
     }
     if (state.groups.length > 1) {
       state.groups = state.groups.filter(function (g) { return g.id !== id; });
@@ -3566,7 +3643,22 @@
   function updateGroup(id, patch) {
     const g = state.groups.find(function (g) { return g.id === id; });
     if (!g) return;
+    // Capture the pre-patch name BEFORE applying — peer lookup is
+    // by name, and the patch might be a rename. Without this a
+    // rename couldn't find its siblings.
+    const peerName = g.name;
     Object.assign(g, patch);
+    // In 'all' mode, mirror the patch onto same-named groups in
+    // every other class. Lets the user rename or flip visibility
+    // on what is conceptually one group across the site, not have
+    // to walk every class manually. 'one' mode keeps the change
+    // local. (Note: groups are per-class structurally — the patch
+    // applies to whatever same-name peer exists; no peer = no-op.)
+    if (modeIsAll()) {
+      forSiblingGroupsByName(peerName, function (peer) {
+        Object.assign(peer, patch);
+      });
+    }
     state.dirty = true;
     // Only refresh the sidebar (group name, line count). Do NOT re-render
     // the selection panel — that would destroy the input the user is
@@ -3596,6 +3688,16 @@
     // Geometry-affecting fields require regenerating `d` so the canvas
     // (and the live site after save) reflects the new path shape.
     if ('smoothed' in patch || 'closed' in patch) regenerateLineD(l);
+    // In 'all' mode, instance-level fields like `hidden` mirror onto
+    // every sibling-class instance of the same master. Smoothed /
+    // closed go through regenerateLineD's propagation already so we
+    // skip them here. masterId and groupId are class-local by
+    // design and not synced.
+    if (modeIsAll() && l.masterId && 'hidden' in patch) {
+      forSiblingsOf(l.masterId, function (sib) {
+        sib.hidden = patch.hidden;
+      });
+    }
     state.dirty = true;
     renderLines();
     if ('name' in patch) renderGroupsList();
@@ -3606,16 +3708,27 @@
   function updateLineOverride(id, key, value) {
     const l = state.lines.find(function (l) { return l.id === id; });
     if (!l) return;
-    if (!l.overrides) l.overrides = {};
-    if (value === '' || value === null || (typeof value === 'number' && isNaN(value))) {
-      delete l.overrides[key];
-    } else {
-      l.overrides[key] = value;
+    writeBehaviorOverride(l, key, value);
+    // In 'all' mode, behavior-key edits fan out: every sibling-class
+    // instance of the same master gets the same override. 'one' mode
+    // keeps the change local to this class (today's behavior).
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        writeBehaviorOverride(sib, key, value);
+      });
     }
     state.dirty = true;
     renderGroupsList();
     if (typeof value === 'boolean' || value === null) snapshot();
     else scheduleSnapshot();
+  }
+  function writeBehaviorOverride(line, key, value) {
+    if (!line.overrides) line.overrides = {};
+    if (value === '' || value === null || (typeof value === 'number' && isNaN(value))) {
+      delete line.overrides[key];
+    } else {
+      line.overrides[key] = value;
+    }
   }
 
   // ── Rendering ─────────────────────────────────────────────────────
@@ -5468,22 +5581,29 @@
                   'A dialog appears only if other classes hold local changes.';
     merge.addEventListener('click', function () { mergeSelectedIntoOne(); });
     actions.appendChild(merge);
-    const removeLocal = document.createElement('button');
-    removeLocal.className = 'ed-mini';
-    removeLocal.textContent = 'Remove from this class';
-    removeLocal.title = 'Drop these instances in THIS class only; the objects stay in other classes.';
-    removeLocal.addEventListener('click', function () {
-      if (!confirm('Remove ' + n + ' from this class only? They stay in other classes.')) return;
-      removeLinesFromCurrentClass(state.selectedIds.slice());
-    });
-    actions.appendChild(removeLocal);
+    // Delete — one mode-aware button. Label + behavior follow
+    // state.mode: 'all' deletes the objects site-wide; 'one'
+    // removes just this class's instance rows.
     const del = document.createElement('button');
     del.className = 'ed-danger';
-    del.textContent = 'Delete selected';
-    del.title = 'Delete these objects everywhere — every class loses them.';
+    const refreshDelLabel = function () {
+      if (modeIsAll()) {
+        del.textContent = 'Delete (all classes)';
+        del.title = 'Delete these objects everywhere — every class loses them.';
+      } else {
+        del.textContent = 'Remove from this class';
+        del.title = 'Drop these instances in THIS class only; the objects stay in other classes.';
+      }
+    };
+    refreshDelLabel();
     del.addEventListener('click', function () {
-      if (!confirm('Delete ' + n + ' objects? This can be undone (Cmd+Z).')) return;
-      deleteSelected();
+      if (modeIsAll()) {
+        if (!confirm('Delete ' + n + ' objects everywhere? This can be undone (Cmd+Z).')) return;
+        deleteSelected();
+      } else {
+        if (!confirm('Remove ' + n + ' from this class only? They stay in other classes.')) return;
+        removeLinesFromCurrentClass(state.selectedIds.slice());
+      }
     });
     actions.appendChild(del);
     selectionPanel.appendChild(actions);
@@ -5758,26 +5878,21 @@
 
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
-    // "Remove from this class" — drops the instance row in THIS
-    // class only; the object stays in any sibling classes that
-    // had it. Use when the canonical object is fine but THIS
-    // screen-class shouldn't show it (e.g., hide a heavy
-    // ornament on mobile). "Delete object" below is the
-    // site-wide cascade — the main case the user wants 90% of
-    // the time.
-    const removeLocal = document.createElement('button');
-    removeLocal.className = 'ed-mini';
-    removeLocal.textContent = 'Remove from this class';
-    removeLocal.title = 'Drop just this class\'s instance; the object stays in other classes.';
-    removeLocal.addEventListener('click', function () {
-      removeLinesFromCurrentClass([line.id]);
-    });
-    actions.appendChild(removeLocal);
+    // Delete — one mode-aware button. 'all' mode cascades site-
+    // wide; 'one' mode drops just THIS class's instance row.
     const del = document.createElement('button');
     del.className = 'ed-danger';
-    del.textContent = 'Delete object';
-    del.title = 'Delete this object everywhere — every class loses it.';
-    del.addEventListener('click', function () { deleteLine(line.id); });
+    if (modeIsAll()) {
+      del.textContent = 'Delete object (all classes)';
+      del.title = 'Delete this object everywhere — every class loses it.';
+    } else {
+      del.textContent = 'Remove from this class';
+      del.title = 'Drop just this class\'s instance; the object stays in other classes.';
+    }
+    del.addEventListener('click', function () {
+      if (modeIsAll()) deleteLine(line.id);
+      else removeLinesFromCurrentClass([line.id]);
+    });
     actions.appendChild(del);
     selectionPanel.appendChild(actions);
   }
@@ -6386,8 +6501,46 @@
               ? { dx: l.positionOffset.dx || 0, dy: l.positionOffset.dy || 0 }
               : { dx: 0, dy: 0 }
           };
-        }).filter(function (s) { return s; })
+        }).filter(function (s) { return s; }),
+        // In 'all' mode, the same drag delta also applies to every
+        // sibling-class instance of the masters being dragged. Snapshot
+        // their pre-drag state here so pointermove can translate each
+        // by the cumulative dx/dy alongside the current-class lines.
+        // 'one' mode leaves this empty — siblings stay put.
+        origSiblings: []
       };
+      if (modeIsAll()) {
+        const masterIds = {};
+        moveSel.origLines.forEach(function (snap) {
+          const l = state.lines.find(function (x) { return x.id === snap.id; });
+          if (l && l.masterId) masterIds[l.masterId] = true;
+        });
+        Object.keys(masterIds).forEach(function (mid) {
+          forSiblingsOf(mid, function (sib, cid) {
+            moveSel.origSiblings.push({
+              classId: cid,
+              lineId:  sib.id,
+              origPoints: Array.isArray(sib.points)
+                ? sib.points.map(function (p) { return { x: p.x, y: p.y }; })
+                : null,
+              origSegments: Array.isArray(sib.segments)
+                ? sib.segments.map(function (s) {
+                    return {
+                      cmd: s.cmd,
+                      controlPoints: s.controlPoints.map(function (cp) { return { x: cp.x, y: cp.y }; }),
+                      endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null
+                    };
+                  })
+                : null,
+              origParams:    sib.params    ? Object.assign({}, sib.params)    : null,
+              origOverrides: sib.overrides ? Object.assign({}, sib.overrides) : null,
+              origOffset: sib.positionOffset
+                ? { dx: sib.positionOffset.dx || 0, dy: sib.positionOffset.dy || 0 }
+                : { dx: 0, dy: 0 }
+            });
+          });
+        });
+      }
       return; // skip tool dispatch
     }
 
@@ -6421,6 +6574,19 @@
             }
           });
       });
+      // In 'all' mode, mirror the same Δ onto every sibling-class
+      // instance of the dragged masters. No DOM updates needed
+      // (siblings aren't on this class's canvas), just state.
+      if (moveSel.origSiblings && moveSel.origSiblings.length) {
+        moveSel.origSiblings.forEach(function (snap) {
+          const bucket = state.byClass[snap.classId];
+          if (!bucket) return;
+          const sib = bucket.lines.find(function (l) { return l.id === snap.lineId; });
+          if (!sib) return;
+          translateLine(sib, snap.origPoints, snap.origSegments, snap.origParams,
+                        snap.origOverrides, snap.origOffset, dx, dy);
+        });
+      }
       state.dirty = true;
       renderHandles(); // accent dots / single-line handles follow their lines
       renderLabels();  // labels follow their lines too
