@@ -644,6 +644,120 @@ body.editor {
 
 /* Create-object modal. */
 .ed-create-modal { min-width: 28rem; }
+
+/* Master library overlay — wider than the standard modal so the
+   per-master row (preview + meta + chips + actions) fits
+   comfortably. Scroll lives inside the list, not the modal. */
+.ed-library-modal {
+  min-width: 38rem;
+  max-width: 56rem;
+  width: 90vw;
+  max-height: 80vh;
+}
+.ed-library-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+.ed-library-search {
+  background: #111;
+  color: #f0f0f0;
+  border: 1px solid #444;
+  padding: 0.35rem 0.55rem;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.95em;
+  flex: 0 0 auto;
+}
+.ed-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 60vh;
+  padding-right: 0.2rem;
+}
+.ed-library-empty {
+  color: #888;
+  font-style: italic;
+  padding: 1rem;
+  text-align: center;
+}
+.ed-library-row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.6rem;
+  background: #181818;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+}
+.ed-library-row:hover { background: #1d1d1d; }
+.ed-library-preview {
+  width: 48px;
+  height: 48px;
+  background: #232323;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.ed-library-preview.is-placeholder {
+  color: #5a5a5a;
+  font-size: 1.4rem;
+}
+.ed-library-preview svg {
+  width: 100%;
+  height: 100%;
+  color: #d8d8d8;
+}
+.ed-library-meta { min-width: 0; }
+.ed-library-name {
+  color: #fff;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-library-id {
+  color: #888;
+  font-size: 0.78em;
+  font-family: ui-monospace, monospace;
+  margin: 0.05rem 0 0.3rem;
+}
+.ed-library-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+.ed-library-chip {
+  background: #2a2a2a;
+  color: #d8d8d8;
+  border: 1px solid #444;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.78em;
+}
+.ed-library-chip.is-absent {
+  color: #5a5a5a;
+  border-color: #2a2a2a;
+  background: transparent;
+}
+.ed-library-scope {
+  color: var(--accent);
+  font-size: 0.78em;
+}
+.ed-library-scope.is-default { color: #6a6a6a; }
+.ed-library-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
 .ed-create-modal .ed-modal-body h4 {
   margin: 0.6rem 0 0.3rem;
   font-size: 0.85em;

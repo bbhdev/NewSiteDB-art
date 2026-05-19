@@ -207,6 +207,8 @@ $payload = json_encode([
     <button type="button" id="import-svg-btn" class="ed-create-btn"
             title="Import one or more SVG files. Each top-level shape becomes a master + an instance in the current class, dropped into the currently-active group. Create an empty group first if you want them isolated.">⇪ Import SVG</button>
     <input type="file" id="import-svg-input" accept=".svg,image/svg+xml" multiple hidden>
+    <button type="button" id="library-btn" class="ed-create-btn"
+            title="Browse every master across the site — see usage chips per class, scope summary, and delete the canonical object across all classes.">▦ Library</button>
   </div>
 
   <div class="ed-tool-settings" id="tool-settings"></div>

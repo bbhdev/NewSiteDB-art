@@ -3713,6 +3713,266 @@
    * name match exists. Class dims stay untouched. Snapshots so the
    * action is undoable.
    */
+  /**
+   * Master library overlay — full-canvas modal listing every master
+   * in the site, one row per master with a preview, name, class-
+   * usage chips, scope summary, and a delete button. Search filters
+   * by name (substring, case-insensitive). Delete cascades site-
+   * wide through deleteLinesByMasterIds (one instance id from any
+   * class is enough to land all of them).
+   *
+   * v0.6.0 MVP. Inline rename + per-key scope flippers + sort
+   * options are queued for a follow-up.
+   */
+  function showLibraryDialog() {
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal ed-library-modal';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Master library';
+    head.appendChild(title);
+    const close = document.createElement('button');
+    close.className = 'ed-modal-close'; close.textContent = '×';
+    close.addEventListener('click', cleanup);
+    head.appendChild(close);
+    modal.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body ed-library-body';
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.placeholder = 'Filter by name…';
+    search.className = 'ed-library-search';
+    search.addEventListener('input', renderRows);
+    body.appendChild(search);
+
+    const list = document.createElement('div');
+    list.className = 'ed-library-list';
+    body.appendChild(list);
+
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    renderRows();
+    search.focus();
+
+    function renderRows() {
+      list.innerHTML = '';
+      const query = search.value.trim().toLowerCase();
+      const masters = state.masters
+        .filter(function (m) { return m && m.id; })
+        .filter(function (m) {
+          if (!query) return true;
+          const name = String(m.name || '').toLowerCase();
+          return name.indexOf(query) !== -1;
+        });
+      // Stable name sort so the user can scan alphabetically.
+      masters.sort(function (a, b) {
+        return String(a.name || a.id).localeCompare(String(b.name || b.id));
+      });
+      if (!masters.length) {
+        const empty = document.createElement('div');
+        empty.className = 'ed-library-empty';
+        empty.textContent = query
+          ? 'No masters match "' + query + '".'
+          : 'No masters yet. Create or import an object to populate the library.';
+        list.appendChild(empty);
+        return;
+      }
+      masters.forEach(function (m) { list.appendChild(buildRow(m)); });
+    }
+
+    function buildRow(master) {
+      const row = document.createElement('div');
+      row.className = 'ed-library-row';
+
+      // Preview — small SVG fitting the master's bbox into a fixed
+      // square. Falls back to a "no preview" placeholder for
+      // image-kind or shapes without `d`.
+      row.appendChild(buildPreview(master));
+
+      const meta = document.createElement('div');
+      meta.className = 'ed-library-meta';
+      const name = document.createElement('div');
+      name.className = 'ed-library-name';
+      name.textContent = master.name || master.id;
+      meta.appendChild(name);
+      const id = document.createElement('div');
+      id.className = 'ed-library-id';
+      id.textContent = master.id + ' · ' + (master.kind || 'unknown');
+      meta.appendChild(id);
+
+      // Class-usage chips.
+      const chips = document.createElement('div');
+      chips.className = 'ed-library-chips';
+      const usage = countMasterUsage(master.id);
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const cls = state.classes.find(function (c) { return c.id === cid; });
+        const label = cls ? cls.name : cid;
+        const count = usage[cid] || 0;
+        const chip = document.createElement('span');
+        chip.className = 'ed-library-chip' + (count === 0 ? ' is-absent' : '');
+        chip.textContent = label + (count > 1 ? ' ×' + count : '');
+        chip.title = count === 0
+          ? 'Not present in ' + label
+          : count + ' instance' + (count === 1 ? '' : 's') + ' in ' + label;
+        chips.appendChild(chip);
+      });
+      meta.appendChild(chips);
+
+      // Scope summary.
+      const scopeKeys = master.scope && typeof master.scope === 'object'
+        ? Object.keys(master.scope) : [];
+      const scope = document.createElement('div');
+      scope.className = 'ed-library-scope';
+      if (scopeKeys.length) {
+        scope.textContent = 'Local: ' + scopeKeys.join(', ');
+      } else {
+        scope.textContent = 'All canonical';
+        scope.classList.add('is-default');
+      }
+      meta.appendChild(scope);
+
+      row.appendChild(meta);
+
+      // Actions — delete only in this MVP.
+      const actions = document.createElement('div');
+      actions.className = 'ed-library-actions';
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'ed-mini ed-danger';
+      del.textContent = 'Delete';
+      del.title = 'Delete this master and every instance in every class.';
+      del.addEventListener('click', function () {
+        const total = Object.values(usage).reduce(function (s, n) { return s + n; }, 0);
+        if (!confirm('Delete "' + (master.name || master.id) + '"? ' +
+                     'This removes ' + total + ' instance' + (total === 1 ? '' : 's') +
+                     ' across every class.')) return;
+        // Find any instance id to pass to deleteLinesByMasterIds —
+        // that helper resolves the masterId from it and cascades.
+        let sampleLineId = null;
+        let sampleClassId = state.classId;
+        state.pageConfig.useClasses.some(function (cid) {
+          const bucket = state.byClass[cid];
+          if (!bucket) return false;
+          const inst = (bucket.lines || []).find(function (l) { return l.masterId === master.id; });
+          if (inst) { sampleLineId = inst.id; sampleClassId = cid; return true; }
+          return false;
+        });
+        if (sampleLineId) {
+          deleteLinesByMasterIds([sampleLineId], sampleClassId);
+        } else {
+          // Master with no instances anywhere — orphan; drop directly.
+          state.masters = state.masters.filter(function (x) { return x.id !== master.id; });
+          state.dirty = true;
+          snapshot();
+          renderAll();
+        }
+        renderRows();
+      });
+      actions.appendChild(del);
+      row.appendChild(actions);
+
+      return row;
+    }
+
+    function buildPreview(master) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ed-library-preview';
+      // Bake a transient line to compute its d, then fit-scale into
+      // a 48×48 SVG. For image kind we show a 🖼 placeholder since
+      // <image> elements require URL fetches in the modal.
+      if (master.kind === 'image') {
+        wrap.classList.add('is-placeholder');
+        wrap.textContent = '🖼';
+        return wrap;
+      }
+      const tmp = Object.assign({ d: '' }, master);
+      try { computeLineD(tmp); } catch (e) { /* let d stay empty */ }
+      if (!tmp.d) {
+        wrap.classList.add('is-placeholder');
+        wrap.textContent = '·';
+        return wrap;
+      }
+      const svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('viewBox', previewViewBox(tmp));
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', tmp.d);
+      const stroke = resolveStroke(master.stroke || 'text') || 'currentColor';
+      p.setAttribute('stroke', stroke);
+      p.setAttribute('stroke-width', '2');
+      p.setAttribute('vector-effect', 'non-scaling-stroke');
+      p.setAttribute('fill', master.filled ? stroke : 'none');
+      p.setAttribute('stroke-linejoin', master.linejoin || 'round');
+      p.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(p);
+      wrap.appendChild(svg);
+      return wrap;
+    }
+
+    function previewViewBox(line) {
+      // Derive a viewBox from the line's bbox by inspecting params
+      // or points. Falls back to a wide default so badly-formed
+      // entries still render something.
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const eat = function (x, y) {
+        if (x < minX) minX = x; if (y < minY) minY = y;
+        if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+      };
+      if (line.params) {
+        const p = line.params;
+        if ('cx' in p && 'cy' in p) {
+          const r = p.r || Math.max(p.rx || 0, p.ry || 0) || 1;
+          eat(p.cx - r, p.cy - r); eat(p.cx + r, p.cy + r);
+        } else if ('x' in p && 'y' in p && 'w' in p && 'h' in p) {
+          eat(p.x, p.y); eat(p.x + p.w, p.y + p.h);
+        }
+      }
+      if (Array.isArray(line.points)) {
+        line.points.forEach(function (pt) { eat(pt.x, pt.y); });
+      }
+      if (Array.isArray(line.segments)) {
+        line.segments.forEach(function (s) {
+          if (s.endpoint) eat(s.endpoint.x, s.endpoint.y);
+        });
+      }
+      if (!Number.isFinite(minX)) { minX = 0; minY = 0; maxX = 100; maxY = 100; }
+      const w = Math.max(1, maxX - minX);
+      const h = Math.max(1, maxY - minY);
+      const pad = Math.max(w, h) * 0.1;
+      return (minX - pad) + ' ' + (minY - pad) + ' ' +
+             (w + pad * 2) + ' ' + (h + pad * 2);
+    }
+
+    function countMasterUsage(masterId) {
+      const counts = {};
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        if (!bucket || !Array.isArray(bucket.lines)) return;
+        counts[cid] = bucket.lines.filter(function (l) {
+          return l.masterId === masterId;
+        }).length;
+      });
+      return counts;
+    }
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
+    });
+  }
+
   function showCloneDialog() {
     const others = state.pageConfig.useClasses.filter(function (cid) {
       return cid !== state.classId && state.byClass[cid];
@@ -5744,6 +6004,9 @@
 
   // Create-object wizard wiring.
   if (createObjectBtn) createObjectBtn.addEventListener('click', showCreateModal);
+
+  const libraryBtn = document.getElementById('library-btn');
+  if (libraryBtn) libraryBtn.addEventListener('click', showLibraryDialog);
 
   // SVG import — file picker + button wiring. The input is hidden;
   // the button opens it. importSvgFile (defined above) does the
