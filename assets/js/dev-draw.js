@@ -3730,11 +3730,48 @@
     const modal = document.createElement('div');
     modal.className = 'ed-modal ed-library-modal';
 
+    // Filter state: classFilter === null → show every master.
+    // Set to a class id → show only masters with ≥1 instance in
+    // that class. Toggled via the per-class buttons in the header.
+    let classFilter = null;
+
     const head = document.createElement('div');
-    head.className = 'ed-modal-header';
+    head.className = 'ed-modal-header ed-library-header';
     const title = document.createElement('h3');
     title.textContent = 'Master library';
     head.appendChild(title);
+
+    // Class filter buttons — one per screen class, plus an "All"
+    // reset. Active button shows accent border like the class
+    // tabs do, so the visual language is consistent.
+    const filterRow = document.createElement('div');
+    filterRow.className = 'ed-library-filter';
+    const filterButtons = [];
+    const addFilterBtn = function (label, cid) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ed-library-filter-btn' + (classFilter === cid ? ' is-active' : '');
+      b.textContent = label;
+      b.title = cid
+        ? 'Show only masters with an instance in ' + label
+        : 'Show every master';
+      b.addEventListener('click', function () {
+        classFilter = cid;
+        filterButtons.forEach(function (entry) {
+          entry.el.classList.toggle('is-active', entry.cid === classFilter);
+        });
+        renderRows();
+      });
+      filterButtons.push({ el: b, cid: cid });
+      filterRow.appendChild(b);
+    };
+    addFilterBtn('All', null);
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const cls = state.classes.find(function (c) { return c.id === cid; });
+      addFilterBtn(cls ? cls.name : cid, cid);
+    });
+    head.appendChild(filterRow);
+
     const close = document.createElement('button');
     close.className = 'ed-modal-close'; close.textContent = '×';
     close.addEventListener('click', cleanup);
@@ -3767,6 +3804,12 @@
       const masters = state.masters
         .filter(function (m) { return m && m.id; })
         .filter(function (m) {
+          if (!classFilter) return true;
+          const bucket = state.byClass[classFilter];
+          if (!bucket || !Array.isArray(bucket.lines)) return false;
+          return bucket.lines.some(function (l) { return l.masterId === m.id; });
+        })
+        .filter(function (m) {
           if (!query) return true;
           const name = String(m.name || '').toLowerCase();
           return name.indexOf(query) !== -1;
@@ -3778,8 +3821,14 @@
       if (!masters.length) {
         const empty = document.createElement('div');
         empty.className = 'ed-library-empty';
-        empty.textContent = query
-          ? 'No masters match "' + query + '".'
+        const parts = [];
+        if (query) parts.push('matching "' + query + '"');
+        if (classFilter) {
+          const cls = state.classes.find(function (c) { return c.id === classFilter; });
+          parts.push('present in ' + (cls ? cls.name : classFilter));
+        }
+        empty.textContent = parts.length
+          ? 'No masters ' + parts.join(' and ') + '.'
           : 'No masters yet. Create or import an object to populate the library.';
         list.appendChild(empty);
         return;

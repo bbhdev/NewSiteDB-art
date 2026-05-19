@@ -654,6 +654,38 @@ body.editor {
   width: 90vw;
   max-height: 80vh;
 }
+.ed-library-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ed-library-header h3 { flex: 0 0 auto; }
+.ed-library-header .ed-modal-close { margin-left: 0; }
+.ed-library-filter {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-left: 0.8rem;
+  margin-left: 0.5rem;
+  border-left: 1px solid #444;
+}
+.ed-library-filter-btn {
+  background: #1a1a1a;
+  color: #a8a8a8;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 0.2rem 0.6rem;
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.ed-library-filter-btn:hover { background: #2a2a2a; color: #d8d8d8; }
+.ed-library-filter-btn.is-active {
+  background: #2a2a2a;
+  color: #fff;
+  border-color: var(--accent);
+}
 .ed-library-body {
   display: flex;
   flex-direction: column;
