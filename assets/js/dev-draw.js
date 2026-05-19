@@ -3858,7 +3858,19 @@
         }
         const bucket = state.byClass[targetClassId];
         const inst = bucket && bucket.lines.find(function (l) { return l.masterId === master.id; });
-        if (inst) selectOnly(inst.id);
+        if (!inst) return;
+        // Open the instance's group so the line panel renders and
+        // the sidebar's line list expands underneath it.
+        if (inst.groupId) {
+          state.activeGroupId = inst.groupId;
+          state.openGroupIds[inst.groupId] = true;
+        }
+        selectOnly(inst.id);
+        // switchClass already rendered (possibly) — but selectOnly
+        // doesn't touch the DOM, so the selection visuals + line
+        // panel need a fresh paint regardless of whether we
+        // switched class.
+        renderAll();
       });
 
       // Preview — small SVG fitting the master's bbox into a fixed
