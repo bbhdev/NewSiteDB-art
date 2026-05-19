@@ -977,7 +977,8 @@
    * Lines without a masterId (rare — newly-drawn pre-save) just
    * mutate locally; decomposeForSave mints a master from them.
    */
-  function setVisualProp(lineId, keyPath, value) {
+  async function setVisualProp(lineId, keyPath, value, opts) {
+    opts = opts || {};
     const line = state.lines.find(function (l) { return l.id === lineId; });
     if (!line) return;
     const master = line.masterId
@@ -990,6 +991,29 @@
       // Position sub-key — route to positionOffset instead.
       setPositionFromPanel(lineId, subKey, value);
       return;
+    }
+
+    // 'one' mode + canonical scope → refusal dialog. Per the
+    // agreed model, "one" mode never silently bypasses the scope
+    // contract; the user has to deliberately flip scope to local
+    // first. Cascade-style callers (group color cascade, bulk
+    // selection edits) opt out with opts.silent and skip writes
+    // when they'd be canonical in 'one' mode (no clobber, no
+    // dialog).
+    let asyncPath = false;
+    if (state.mode === 'one' && master && !isLocal(master, keyPath)) {
+      if (opts.silent) return;
+      asyncPath = true;
+      const ok = await confirmScopeFlip(master, keyPath);
+      if (!ok) {
+        // User cancelled — re-render the panel so the field
+        // reverts from the user's typed/clicked value to the
+        // unchanged state value.
+        renderSelectionPanel();
+        return;
+      }
+      // confirmScopeFlip already ran setMasterScope(...'local').
+      // Fall through to the local-write branch below.
     }
 
     if (!master || isLocal(master, keyPath)) {
@@ -1044,6 +1068,75 @@
       });
     }
     state.dirty = true;
+    // When we took the async refusal-dialog path the caller's
+    // synchronous side effects (renderLines / scheduleSnapshot)
+    // already fired with pre-write state. Re-trigger now so the
+    // canvas + panel + groups list reflect the post-write reality.
+    if (asyncPath) {
+      scheduleSnapshot();
+      renderLines();
+      if (keyPath === 'stroke' || keyPath === 'width') renderGroupsList();
+      renderSelectionPanel();
+    }
+  }
+
+  /**
+   * Block + ask before writing a canonical visual prop in 'one'
+   * mode. Returns true (flipped, proceed with write) or false
+   * (cancel). On accept: setMasterScope flips the key to local;
+   * the caller writes the value as a normal local override.
+   */
+  async function confirmScopeFlip(master, keyPath) {
+    const niceName = humanizeKeyPath(keyPath);
+    const escHtml = function (s) {
+      const d = document.createElement('div');
+      d.textContent = String(s);
+      return d.innerHTML;
+    };
+    const choice = await showChoiceDialog({
+      title:   'Scope conflict',
+      message: '<p><strong>' + escHtml(niceName) + '</strong> is canonical on this object — ' +
+               'editing it normally affects every class.</p>' +
+               '<p>You\'re in <strong>one-class</strong> mode. Flip ' +
+               '<strong>' + escHtml(niceName) + '</strong> to local so this class can hold its ' +
+               'own value, and apply the edit?</p>',
+      html:    true,
+      buttons: [
+        { label: 'Cancel',         value: null },
+        { label: 'Flip & apply',   value: 'flip', className: 'ed-primary' }
+      ]
+    });
+    if (choice !== 'flip') return false;
+    setMasterScope(master.id, keyPath, 'local');
+    return true;
+  }
+
+  // Pretty key paths for dialogs. "params.r" → "Radius (params.r)";
+  // bare keys → title-cased. Unknown keys fall back to the raw
+  // key path so the user can still recognize the thing.
+  function humanizeKeyPath(keyPath) {
+    const NAMES = {
+      'stroke':           'Color',
+      'width':            'Line width',
+      'linejoin':         'Corners',
+      'smoothed':         'Smooth',
+      'filled':           'Filled',
+      'closed':           'Closed',
+      'name':             'Name',
+      'params.r':         'Radius',
+      'params.rx':        'Radius X',
+      'params.ry':        'Radius Y',
+      'params.rOuter':    'Outer radius',
+      'params.rInner':    'Inner radius',
+      'params.w':         'Width',
+      'params.h':         'Height',
+      'params.sides':     'Sides',
+      'params.points':    'Points',
+      'params.angle':     'Angle',
+      'params.src':       'Image URL',
+      'params.fit':       'Fit'
+    };
+    return NAMES[keyPath] || keyPath;
   }
 
   /**
@@ -5557,7 +5650,13 @@
     const sharedStroke = allStrokes.every(function (s) { return s === allStrokes[0]; })
       ? allStrokes[0] : null;
     settings.appendChild(strokeField('Color', sharedStroke, function (v) {
-      state.selectedIds.forEach(function (id) { setVisualProp(id, 'stroke', v); });
+      // silent: true on bulk writes — in 'one' mode + canonical
+      // stroke, the per-line dialog would fire N times. silent
+      // skips canonical writes in 'one' mode instead, so masters
+      // with canonical color stay unchanged. To bulk-recolor in
+      // 'one' mode, flip stroke to local on each master first
+      // (via the line panel) or switch to 'all'.
+      state.selectedIds.forEach(function (id) { setVisualProp(id, 'stroke', v, { silent: true }); });
       scheduleSnapshot();
       renderLines();
       renderGroupsList();
@@ -5635,15 +5734,17 @@
     wrap.appendChild(divider('Appearance'));
     wrap.appendChild(strokeField('Color', g.defaults.stroke, function (v) {
       updateGroupDefaults(g.id, { stroke: v });
-      // Cascade: clear line.stroke on every line in this group so the
-      // new default actually paints. Group defaults are FALLBACKS in
-      // the resolve order — without this, lines that already have an
-      // explicit stroke would ignore the group change and the user
-      // would see no visual update. setVisualProp routes through
-      // master.scope, so the change propagates across classes.
+      // Cascade: clear line.stroke on every line in this group so
+      // the new default actually paints. silent: true so the
+      // cascade doesn't fire N refusal dialogs in 'one' mode; in
+      // 'one' mode + canonical stroke the silent call just skips
+      // the per-line clear, and lines with explicit strokes keep
+      // them — the user gets the group default for new/un-set
+      // lines only. To force every line to the new color in 'one'
+      // mode, user can switch to 'all' or click each line's color.
       state.lines
         .filter(function (l) { return l.groupId === g.id; })
-        .forEach(function (l) { setVisualProp(l.id, 'stroke', null); });
+        .forEach(function (l) { setVisualProp(l.id, 'stroke', null, { silent: true }); });
       renderLines();
     }));
     // "Line width" — distinguishes the stroke width from primitives'
