@@ -3767,6 +3767,7 @@
         wrap.appendChild(numberField(label, line.params[key], function (v) {
           setVisualProp(line.id, 'params.' + key, v);
           scheduleSnapshot();
+          renderLines();
         }));
       });
       wrap.appendChild(checkboxField('Filled', !!line.filled, function (v) {
