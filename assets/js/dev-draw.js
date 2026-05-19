@@ -3213,6 +3213,25 @@
     deleteLinesByMasterIds([id], state.classId);
   }
 
+  /**
+   * Per-class removal — drop the given instance line ids from THIS
+   * class only. masters + sibling-class instances are untouched, so
+   * the object still exists in classes that had it. If this leaves
+   * a master with zero instances anywhere, the save-time prune in
+   * decomposeForSave drops it. Use when "this class no longer has
+   * this object" but you don't want to delete the canonical object.
+   */
+  function removeLinesFromCurrentClass(lineIds) {
+    if (!lineIds || !lineIds.length) return;
+    const idSet = {};
+    lineIds.forEach(function (id) { idSet[id] = true; });
+    state.lines = state.lines.filter(function (l) { return !idSet[l.id]; });
+    state.selectedIds = state.selectedIds.filter(function (x) { return !idSet[x]; });
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
   // Delete every currently selected object in one go (Backspace / Delete
   // when 1+ objects are selected, including the multi-select case).
   function deleteSelected() {
@@ -4771,9 +4790,19 @@
                   'A dialog appears only if other classes hold local changes.';
     merge.addEventListener('click', function () { mergeSelectedIntoOne(); });
     actions.appendChild(merge);
+    const removeLocal = document.createElement('button');
+    removeLocal.className = 'ed-mini';
+    removeLocal.textContent = 'Remove from this class';
+    removeLocal.title = 'Drop these instances in THIS class only; the objects stay in other classes.';
+    removeLocal.addEventListener('click', function () {
+      if (!confirm('Remove ' + n + ' from this class only? They stay in other classes.')) return;
+      removeLinesFromCurrentClass(state.selectedIds.slice());
+    });
+    actions.appendChild(removeLocal);
     const del = document.createElement('button');
     del.className = 'ed-danger';
     del.textContent = 'Delete selected';
+    del.title = 'Delete these objects everywhere — every class loses them.';
     del.addEventListener('click', function () {
       if (!confirm('Delete ' + n + ' objects? This can be undone (Cmd+Z).')) return;
       deleteSelected();
@@ -5051,12 +5080,26 @@
 
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
+    // "Remove from this class" — drops the instance row in THIS
+    // class only; the object stays in any sibling classes that
+    // had it. Use when the canonical object is fine but THIS
+    // screen-class shouldn't show it (e.g., hide a heavy
+    // ornament on mobile). "Delete object" below is the
+    // site-wide cascade — the main case the user wants 90% of
+    // the time.
+    const removeLocal = document.createElement('button');
+    removeLocal.className = 'ed-mini';
+    removeLocal.textContent = 'Remove from this class';
+    removeLocal.title = 'Drop just this class\'s instance; the object stays in other classes.';
+    removeLocal.addEventListener('click', function () {
+      removeLinesFromCurrentClass([line.id]);
+    });
+    actions.appendChild(removeLocal);
     const del = document.createElement('button');
     del.className = 'ed-danger';
-    del.textContent = 'Delete line';
-    del.addEventListener('click', function () {
-      deleteLine(line.id);
-    });
+    del.textContent = 'Delete object';
+    del.title = 'Delete this object everywhere — every class loses it.';
+    del.addEventListener('click', function () { deleteLine(line.id); });
     actions.appendChild(del);
     selectionPanel.appendChild(actions);
   }
