@@ -13,7 +13,7 @@ body.editor {
   display: flex;
   flex-direction: column;
   background: #2a2a2a;
-  color: #eee;
+  color: #f0f0f0;
   font-family: var(--font-body);
   font-size: 14px;
   overflow: hidden;
@@ -38,10 +38,10 @@ body.editor {
   letter-spacing: 0.02em;
   margin-right: 0.5rem;
 }
-.ed-brand-mark { color: #ddd; }
+.ed-brand-mark { color: #e4e4e4; }
 .ed-page-picker select {
   background: #2a2a2a;
-  color: #ddd;
+  color: #e4e4e4;
   border: 1px solid #444;
   border-radius: 4px;
   padding: 0.2rem 0.4rem;
@@ -59,7 +59,7 @@ body.editor {
 }
 .ed-class-tab {
   background: transparent !important;
-  color: #888 !important;
+  color: #a8a8a8 !important;
   border: 1px solid transparent !important;
   border-radius: 4px;
   padding: 0.25rem 0.6rem !important;
@@ -68,7 +68,7 @@ body.editor {
   font-size: 0.85em;
   cursor: pointer;
 }
-.ed-class-tab:hover:not(.is-active) { color: #ccc !important; background: #2a2a2a !important; }
+.ed-class-tab:hover:not(.is-active) { color: #d8d8d8 !important; background: #2a2a2a !important; }
 .ed-class-tab.is-active {
   background: #2a2a2a !important;
   color: #fff !important;
@@ -85,7 +85,7 @@ body.editor {
   outline-offset: 1px;
 }
 .ed-version {
-  color: #666;
+  color: #909090;
   font-weight: 400;
   font-size: 0.85em;
   font-family: ui-monospace, monospace;
@@ -103,7 +103,7 @@ body.editor {
    Active / save / danger keep their accent variants. */
 .ed-toolbar button {
   background: #3a3a3a;
-  color: #ddd;
+  color: #e4e4e4;
   border: 1px solid #555;
   height: 2rem;
   padding: 0 0.75rem;
@@ -134,7 +134,7 @@ body.editor {
   padding-left: 0.5rem;
   border-left: 1px solid #444;
   min-height: 32px;
-  color: #ccc;
+  color: #d8d8d8;
 }
 .ed-tool-settings label {
   display: inline-flex;
@@ -154,13 +154,13 @@ body.editor {
   display: inline-block;
   min-width: 4em;
   text-align: center;
-  color: #aaa;
+  color: #c0c0c0;
   font-family: ui-monospace, monospace;
   font-size: 0.85em;
   cursor: pointer;
   user-select: none;
 }
-.ed-zoom #zoom-level:hover { color: #ddd; }
+.ed-zoom #zoom-level:hover { color: #e4e4e4; }
 
 .ed-undo {
   display: flex;
@@ -241,7 +241,7 @@ body.editor {
   font-family: var(--font-body);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #aaa;
+  color: #c0c0c0;
   font-weight: 600;
 }
 .ed-mini {
@@ -281,7 +281,7 @@ body.editor {
 }
 .ed-group-name { flex: 1; }
 .ed-group-count {
-  color: #888;
+  color: #a8a8a8;
   font-size: 0.8em;
 }
 .ed-line-list {
@@ -292,7 +292,7 @@ body.editor {
 .ed-line-row {
   padding: 0.2rem 0.4rem;
   font-size: 0.85em;
-  color: #bbb;
+  color: #d8d8d8ccc;
   cursor: pointer;
   border-radius: 2px;
   display: flex;
@@ -300,8 +300,8 @@ body.editor {
 }
 .ed-line-row:hover { background: #2c2c2c; }
 .ed-line-row.is-selected { background: #444; color: #fff; }
-.ed-line-id { font-family: ui-monospace, monospace; font-size: 0.85em; color: #888; }
-.ed-line-name { color: #ddd; }
+.ed-line-id { font-family: ui-monospace, monospace; font-size: 0.85em; color: #a8a8a8; }
+.ed-line-name { color: #e4e4e4; }
 
 /* ── settings panel ──────────────────────────────────────────────── */
 .ed-settings { display: grid; gap: 0.5rem; }
@@ -317,14 +317,14 @@ body.editor {
 .ed-link-toggle {
   background: transparent;
   border: 1px solid transparent;
-  color: #666;
+  color: #909090;
   font-size: 0.85em;
   line-height: 1;
   padding: 0.2rem 0.35rem;
   border-radius: 3px;
   cursor: pointer;
 }
-.ed-link-toggle:hover { color: #ccc; border-color: #444; background: #1a1a1a; }
+.ed-link-toggle:hover { color: #d8d8d8; border-color: #444; background: #1a1a1a; }
 .ed-field.is-overridden > .ed-link-toggle {
   color: var(--accent);
   border-color: var(--accent);
@@ -334,13 +334,13 @@ body.editor {
   border-left: 2px solid var(--accent);
 }
 .ed-field > label {
-  color: #aaa;
+  color: #c0c0c0;
   font-size: 0.85em;
 }
 .ed-field input[type="text"],
 .ed-field input[type="number"] {
   background: #111;
-  color: #eee;
+  color: #f0f0f0;
   border: 1px solid #444;
   padding: 0.25rem 0.4rem;
   border-radius: 3px;
@@ -351,7 +351,7 @@ body.editor {
 .ed-field input[type="checkbox"] { justify-self: start; }
 .ed-field select {
   background: #111;
-  color: #eee;
+  color: #f0f0f0;
   border: 1px solid #444;
   padding: 0.25rem 0.4rem;
   border-radius: 3px;
@@ -361,7 +361,7 @@ body.editor {
 .ed-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .ed-actions button {
   background: #3a3a3a;
-  color: #ddd;
+  color: #e4e4e4;
   border: 1px solid #555;
   padding: 0.3rem 0.6rem;
   border-radius: 3px;
@@ -417,7 +417,7 @@ body.editor {
 }
 #draw-surface path {
   fill: none;
-  stroke: #ddd;
+  stroke: #e4e4e4;
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
@@ -551,7 +551,7 @@ body.editor {
 .ed-create-modal .ed-modal-body h4 {
   margin: 0.6rem 0 0.3rem;
   font-size: 0.85em;
-  color: #aaa;
+  color: #c0c0c0;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -568,7 +568,7 @@ body.editor {
 .ed-create-types-col h5 {
   margin: 0 0 0.15rem;
   font-size: 0.75em;
-  color: #888;
+  color: #a8a8a8;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
@@ -580,7 +580,7 @@ body.editor {
   gap: 0.1rem;
   background: #222;
   border: 1px solid #444;
-  color: #ddd;
+  color: #e4e4e4;
   padding: 0.45rem 0.6rem;
   border-radius: 4px;
   cursor: pointer;
@@ -588,7 +588,7 @@ body.editor {
   text-align: left;
 }
 .ed-create-type strong { font-size: 0.95em; color: #fff; }
-.ed-create-type span   { font-size: 0.78em; color: #888; }
+.ed-create-type span   { font-size: 0.78em; color: #a8a8a8; }
 .ed-create-type:hover { background: #2a2a2a; }
 .ed-create-type.is-active {
   border-color: var(--accent);
@@ -603,7 +603,7 @@ body.editor {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #ddd;
+  color: #e4e4e4;
   font-size: 0.9em;
 }
 .ed-create-dest.is-current {
@@ -620,7 +620,7 @@ body.editor {
 }
 .ed-create-dest-badge {
   font-size: 0.75em;
-  color: #888;
+  color: #a8a8a8;
   background: #1f1f1f;
   border: 1px solid #333;
   padding: 0.05rem 0.4rem;
@@ -671,7 +671,7 @@ body.editor {
   opacity: 0.85;
 }
 #draw-surface path.is-preview {
-  stroke: #888;
+  stroke: #a8a8a8;
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
@@ -697,7 +697,7 @@ body.editor {
   border: 1px solid #555;
 }
 .ed-palette-row input[type="text"] {
-  background: #111; color: #eee; border: 1px solid #444;
+  background: #111; color: #f0f0f0; border: 1px solid #444;
   padding: 0.15rem 0.3rem; border-radius: 3px; font: inherit;
   font-size: 0.85em; min-width: 0;
   width: 100%; box-sizing: border-box;
@@ -725,7 +725,7 @@ body.editor {
 }
 .ed-color-picker .swatch.is-clear {
   background: transparent;
-  color: #888;
+  color: #a8a8a8;
   width: auto; height: 1.5rem;
   border-radius: 3px;
   padding: 0 0.4rem;
@@ -763,7 +763,7 @@ body.editor {
 }
 .ed-modal {
   background: #2a2a2a;
-  color: #eee;
+  color: #f0f0f0;
   border: 1px solid #555;
   border-radius: 6px;
   max-width: 30rem;
@@ -783,7 +783,7 @@ body.editor {
 .ed-modal-close {
   background: transparent;
   border: none;
-  color: #ddd;
+  color: #e4e4e4;
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
@@ -810,7 +810,7 @@ body.editor {
 }
 .ed-modal-buttons button {
   background: #3a3a3a;
-  color: #ddd;
+  color: #e4e4e4;
   border: 1px solid #555;
   border-radius: 4px;
   padding: 0.35rem 0.85rem;
@@ -846,10 +846,10 @@ body.editor {
   justify-content: space-between;
   gap: 1rem;
 }
-.ed-setting-main label { color: #ddd; font-weight: 500; }
+.ed-setting-main label { color: #e4e4e4; font-weight: 500; }
 .ed-setting-help {
   margin: 0;
-  color: #999;
+  color: #b4b4b4;
   font-size: 0.85em;
   line-height: 1.35;
 }
