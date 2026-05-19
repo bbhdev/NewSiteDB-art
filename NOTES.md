@@ -97,3 +97,95 @@ The three concerns from the original note:
     via the Kirby Panel for text/images, not `/dev/draw`.
   - `php -S` is dev-only. Production needs a real PHP-FPM + Apache/
     nginx setup, or a Docker compose with `php:8.2-apache`.
+
+
+## Roadmap (from the v0.3.9 planning chat)
+
+Ordered. Targets are tentative; small items can re-shuffle.
+
+### Quick wins (v0.3.x patches)
+
+  - **v0.3.10 — default object name.** `Object N` (sequential across
+    the page or site-wide; decide on scope) assigned in
+    `commitLine` / `mintMasterForLine`. Fixes labels-don't-render
+    cases that need a non-empty name to behave correctly.
+
+  - **v0.3.11 — button kit polish.** Rename `circle-button` →
+    `c-button`. Add `e-button` (ellipse: `radiusX`, `radiusY`). Make
+    `rr-button` accept `width`, `height`, `cornerRadius` overrides
+    instead of fixed CSS. Self-documenting PHPDoc headers on each
+    snippet listing every param.
+
+  - **v0.3.12 — clone UI.** Move "Clone from…" out of the Canvas
+    section to a small copy-icon next to the class tabs. Replace
+    wholesale-copy with per-group cherry-pick: dialog lists source
+    class's groups with checkboxes (default all checked); on apply,
+    same-name groups in dest are replaced, new ones are added.
+
+
+### Behavior model refactor (the big one — v0.4.x)
+
+  - **v0.4.0 — `behaviors: []` per instance.** Each line gets a list
+    of behavior blocks, each `{ range, kind, params }`. `range` is
+    a scroll-progress interval (later, a time interval too). Runtime
+    registers N ScrollTriggers per line. Authoring UI warns on
+    overlap. Migration: every existing single-block line becomes a
+    single-element `behaviors[]` with range covering the full
+    trigger window. Unlocks chained motions per object.
+
+  - **v0.4.1 — time-based trigger.** Behavior `kind` gains a
+    `trigger.type: 'time'` variant (delay + duration) alongside
+    scroll. Independent of scroll progress; uses a GSAP timeline.
+    Enables on-its-own animations.
+
+  - **v0.4.2 — sticky behavior kind.** New `kind: 'sticky'`. The
+    line gets pulled out of the scrolling SVG into a fixed-position
+    sibling layer for the duration of its range. Useful for
+    HUD-style overlays that should pin while everything else moves.
+
+  - **v0.4.3 — translate-to with viewport tokens.** `kind:
+    'translate-to'` with `from` / `to` accepting tokens —
+    `viewTop`, `viewBottom`, `viewLeft`, `viewRight`, `pageStart`,
+    `pageEnd`, `selector:#foo.top`. Resolved per-frame at runtime.
+    Cleaner authoring than length deltas for "cross the screen"
+    effects.
+
+  - **v0.4.4 — draw-in over time.** Already progressive over scroll;
+    pair with v0.4.1 so a path can draw itself on a timeline
+    instead of with scroll. Composing v0.4.0 + v0.4.1 mostly gets
+    this for free.
+
+
+### Independent features (v0.5.x)
+
+  - **v0.5.0 — SVG import as first-class objects.** User's stated
+    top feature. Drop an SVG into the editor; parse `<path>`,
+    `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`,
+    `<line>`. Flatten `transform=` on parents into the geometry.
+    Map each element to either a `PRIMITIVES.*` kind (when shape
+    matches) or `kind: 'manual'` with explicit segments. New group
+    per import (filename → group name). Unknown colors get added
+    to the palette automatically. Each imported path becomes a
+    master + an instance in the current class — full scope/
+    behavior contract from the moment it lands.
+
+  - **v0.5.1 — photo primitive.** New `kind: 'image'`. Params:
+    `{ x, y, w, h, src, fit }`. Editor: drag-create like rect;
+    panel exposes src (Kirby file picker if we wire into the Panel,
+    otherwise URL text). Runtime: SVG `<image>` with
+    `preserveAspectRatio`. Inherits full scope + behavior contract.
+
+  - **v0.5.2 — bezier with control-point handles.** Infrastructure
+    already in place (`kind: 'manual'`, segments `cmd: 'C'` with
+    cp1/cp2). Add an authoring mode where each anchor exposes its
+    in/out control handles for direct drag. Could absorb the
+    current `kind: 'bezier'` (auto-smoothed) or live alongside.
+
+
+### Bigger workflow surfaces (v0.6.x+)
+
+  - **v0.6.0 — master library overlay.** Full-canvas modal triggered
+    from the toolbar. Sortable + searchable list; each row = preview
+    + name + class-usage chips + scope summary. Inline rename,
+    delete (cascading), scope flip. Not a sidebar — takes over the
+    canvas because library work is occasional and visual.
