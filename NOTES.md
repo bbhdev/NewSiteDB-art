@@ -4,83 +4,96 @@ Open architectural questions worth revisiting. Not a TODO list — items
 here need analysis before they need work.
 
 
-## Master / instance / override propagation
+## Master / instance / scope — current state (v0.3.8+)
 
-### Where we are (as of v0.2.20)
+The propagation-by-side-effect model that drove this note's original
+v0.2.20 entry is gone. v0.3.5 replaced it with a **scope-driven**
+mutation model:
 
-The editor's working model is per-class **resolved lines**:
+  - Every master carries a `scope` map: `keyPath → "local"`. Missing
+    entry = canonical. Default on fresh masters: empty (all canonical).
+  - One mutation entry point — `setVisualProp(lineId, keyPath, value)`
+    — branches on `master.scope[keyPath]`. Canonical: write to master
+    + propagate to every instance. Local: write to `instance.overrides`,
+    this instance only.
+  - **Position** is always per-class via `positionOffset` (not in
+    scope, not toggleable). Primitive position-handle drags and
+    selection drag-translate both feed `positionOffset`.
+  - **Behavior keys** (translateX/Y, rotate, drawIn, drawInDirection,
+    rotateOriginX/Y) are always per-class via `instance.overrides`
+    (independent of scope).
+  - **Structural keys** (`kind`, `d`, `points`, `segments`) have no
+    scope toggle — toggling them local would either be redundant
+    (`d` is derived) or break the master-as-canonical-shape contract.
 
-    state.byClass[cid].lines[i]  =  master visual props  ⊕  instance.overrides
+`decomposeForSave` is now bookkeeping only: `instance.overrides` ==
+behavior keys + scope-local visual keys, no divergence detection.
+`resolveInstanceJS` and PHP `art_resolve_instance` consult
+`master.scope` symmetrically. Migration v6→v7 strips legacy non-
+behavior overrides and seeds `scope: {}` on every master.
 
-Mutations happen on the resolved line. A sync function pushes geometry
-changes back up to the master and out to sibling instances on every
-`regenerateLineD`. The on-disk shape is master + instances; the
-in-memory shape is the resolved view + an explicit `line.overrides`
-map.
+The three concerns from the original note:
 
-The rule we converged on:
-
-  - **Drag-to-translate** writes per-class overrides on position
-    sub-keys only (`params.cx/cy` or `points`/`segments`).
-  - **Panel param edits** go through `setMasterParamSubkey`: they
-    propagate to master + all classes and clear stale sub-key
-    overrides everywhere.
-  - **Handle drags** (shape edits) propagate via the sync.
-  - **Master-link toggle** on `stroke / width / name` flips per-property
-    between linked (propagates) and overridden (local).
-
-`instance.overrides.params` is a SUB-KEY map — splitting a position
-override on `cx/cy` from a shape override on `points` (the
-star-points-count kind), which the v0.2.19 whole-blob model couldn't
-do.
-
-
-### Why this is uncomfortable
-
-  - Two source-of-truths in memory (`state.masters` and
-    `state.byClass[cid].lines`) need to stay coherent. Every mutation
-    site has to know which one to write to (or trigger the sync).
-  - Sub-key behavior diverges between `params` (sub-key overrides)
-    and other visual keys (whole-key overrides). Future visual keys
-    might want sub-key handling too, escalating special-casing.
-  - "Sync after mutation" is a side-effect coupling — easy to forget
-    when adding a new mutation site, easy to fire spuriously, and
-    invisible to anyone reading the mutation code without finding
-    `regenerateLineD`.
-  - Pre-migration data carrying whole-blob `params` overrides still
-    works but doesn't model the user's intent — the user needs to
-    use the "Reset to master" affordance to clean it up.
-
-This works for now and matches the user's mental model, but the
-plumbing is gaining surface area faster than the concept. Worth
-revisiting before adding more sub-key behaviors.
+  - **Two sources of truth in memory** — still technically two
+    (`state.masters` + `state.byClass[cid].lines`), but mutations no
+    longer write to "the resolved line and then sync". They write to
+    the master OR the instance based on scope, and `propagateLineToMaster`
+    only runs from `regenerateLineD` (handle drags, panel edits that
+    touch geometry) to keep siblings coherent with master changes.
+    Position propagation was the messiest case; it's now strictly via
+    `positionOffset`.
+  - **Sub-key asymmetry** — `params` still has sub-key granularity;
+    scalar visual keys are whole-key. The scope map naturally supports
+    both (keyPath is `"params.r"` or `"stroke"`); no special-casing in
+    the mutation path.
+  - **Sync as side-effect coupling** — `propagateLineToMaster` is
+    still implicit on `regenerateLineD`, but its scope is narrow
+    (geometry changes only) and it now skips canonical-locked keys
+    via `isLocal()`. The "did I remember to call sync?" surface is
+    much smaller.
 
 
-### To re-analyze (no rush, but soon)
+## Still on the table
 
-  1. **Restate the current model.** Walk through every mutation site
-     (translateLine, handle drag, panel param edit, link-toggle, freehand
-     point drag, manual segment drag) and trace where the data flows:
-     line, override, master, siblings. Look for asymmetries.
+  1. **Group defaults under scope.** Groups have their own per-class
+     defaults (`stroke`, `width`, behavior keys). These are not in the
+     scope contract — each class has its own copy. If we ever want
+     a "site-wide group preset" abstraction, the scope contract could
+     extend to groups. No demand for this yet.
 
-  2. **Consider the canonical-master rewrite.** Editor state holds only
-     `state.masters` + `state.byClass[cid].instances`. Render composes
-     on the fly. Mutations write directly to master or to an instance
-     override based on explicit intent (button, modifier, mode). No
-     resolved-line cache; no sync function.
+  2. **Structural per-class adaptation.** If a class needs a different
+     `kind` or `points` (e.g., simpler shape on mobile), the scope
+     model can't express it — structural keys are non-toggleable by
+     design. The current escape hatches are: (a) delete the instance
+     on that class, (b) create a separate master per shape variant.
+     If real per-class shape variants become a recurring need, scope
+     could extend to structural keys — but the semantics get hairy
+     ("same logical object, different shape per class" stops being
+     the same object).
 
-     - Render code reads `(master, override)` instead of a flat line.
-     - Drag/handle/panel handlers consult intent: "edit master" vs
-       "edit this instance".
-     - Migration: in-memory state is fundamentally different; tools
-       and rendering need adapting.
+  3. **Behavior keys as canonical with overrides.** Right now behavior
+     is per-class with no master fallback (group defaults play that
+     role). Could become master-canonical with `scope: local` opt-in,
+     parallel to visual keys. Would unify the model — at the cost of
+     a small UX shift (the existing inherit/override checkbox pattern
+     would become 🔗/✎ instead).
 
-  3. **Compare.** Lines-of-code touched, asymmetries removed, edge
-     cases that disappear (or appear), velocity of future features.
-     The propagation approach has worked through Phase 4b + 5 + 5b;
-     it'd need to start cracking somewhere before the rewrite pays
-     for itself.
+  4. **Undo log compaction.** Snapshots are full deep-copies of
+     `state.byClass + state.masters + state.palette`. Lots of churn
+     when scope toggles fire on every keystroke. Not a problem yet
+     (HISTORY_MAX caps it) but if the editor scales, switch to a
+     command-log model.
 
-A reasonable trigger: the moment we need ANOTHER visual key to behave
-like sub-key params (e.g., per-class behavior overrides at a per-key
-granularity), revisit. If the special-cases keep stacking, switch.
+  5. **Web Components wrapper for snippets.** Deferred from the
+     original site plan. Snippets work; wrapper would add nicer
+     authoring syntax (`<rr-button>` etc.). No blocker.
+
+
+## Misc operational notes
+
+  - Sessions are ephemeral remote containers. Anything not committed +
+    pushed is gone when the container is reclaimed.
+  - The editor is mouse-shaped; mobile maintenance is realistically
+    via the Kirby Panel for text/images, not `/dev/draw`.
+  - `php -S` is dev-only. Production needs a real PHP-FPM + Apache/
+    nginx setup, or a Docker compose with `php:8.2-apache`.
