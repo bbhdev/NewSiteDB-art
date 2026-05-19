@@ -234,11 +234,32 @@
 
     // Render JSON-defined lines. Hidden lines (instance or group)
     // are skipped entirely on the live site — the editor's Visible
-    // toggles are the gate.
+    // toggles are the gate. Image-kind lines without a src are also
+    // skipped (no visible content + no placeholder outline outside
+    // the editor).
     lines.forEach(function (line) {
       if (line.hidden) return;
       const group = groupById[line.groupId];
       if (group && group.hidden) return;
+
+      if (line.kind === 'image') {
+        if (!line.params || !line.params.src) return;
+        const fit = line.params.fit === 'slice' ? 'xMidYMid slice'
+                  : line.params.fit === 'fill'  ? 'none'
+                  :                                'xMidYMid meet';
+        const img = document.createElementNS(SVG_NS, 'image');
+        img.setAttributeNS(null, 'href', line.params.src);
+        img.setAttribute('x', line.params.x);
+        img.setAttribute('y', line.params.y);
+        img.setAttribute('width',  line.params.w);
+        img.setAttribute('height', line.params.h);
+        img.setAttribute('preserveAspectRatio', fit);
+        img.dataset.lineId  = line.id;
+        img.dataset.groupId = line.groupId || '';
+        layer.appendChild(img);
+        return;
+      }
+
       const p = document.createElementNS(SVG_NS, 'path');
       p.setAttribute('d', line.d);
       // Effective stroke / width: line value wins, then group default,

@@ -292,6 +292,64 @@
       ],
       positionKeys: ['cx', 'cy'],
       labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    image: {
+      label: 'Image',
+      // Drag-create like rect; the bbox is the image's display area.
+      // The bitmap (or vector) source lands later via the panel's
+      // "Image URL" field. paramFields' third element flags the field
+      // type so the panel emits a text input for src and a select for
+      // fit instead of the default numberField.
+      paramsFromDrag: function (s, e) {
+        return {
+          x: Math.min(s.x, e.x),
+          y: Math.min(s.y, e.y),
+          w: Math.max(1, Math.abs(e.x - s.x)),
+          h: Math.max(1, Math.abs(e.y - s.y)),
+          src: '',
+          fit: 'meet'
+        };
+      },
+      // The "d" we emit is the bbox rect — used as the editor's hit
+      // target and as the fallback outline when no src is set yet.
+      // The visible bitmap is a separate SVG <image> element layered
+      // on top by renderLines / runtime; see the image-kind branch
+      // there.
+      generateD: function (p) { return rectPathD(p.x, p.y, p.w, p.h, 0); },
+      handles: function (p) {
+        return [
+          { id: 'tl', x: p.x,       y: p.y },
+          { id: 'tr', x: p.x + p.w, y: p.y },
+          { id: 'br', x: p.x + p.w, y: p.y + p.h },
+          { id: 'bl', x: p.x,       y: p.y + p.h }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        let x1 = p.x, y1 = p.y, x2 = p.x + p.w, y2 = p.y + p.h;
+        if      (id === 'tl') { x1 = pos.x; y1 = pos.y; }
+        else if (id === 'tr') { x2 = pos.x; y1 = pos.y; }
+        else if (id === 'br') { x2 = pos.x; y2 = pos.y; }
+        else if (id === 'bl') { x1 = pos.x; y2 = pos.y; }
+        const nx = Math.min(x1, x2), ny = Math.min(y1, y2);
+        return Object.assign({}, p, {
+          x: nx, y: ny,
+          w: Math.max(1, Math.abs(x2 - x1)),
+          h: Math.max(1, Math.abs(y2 - y1))
+        });
+      },
+      paramFields: [
+        ['x', 'X'], ['y', 'Y'],
+        ['w', 'Width'], ['h', 'Height'],
+        ['src', 'Image URL', 'text'],
+        ['fit', 'Fit', 'select', [
+          { value: 'meet',  label: 'Fit (letterbox)' },
+          { value: 'slice', label: 'Cover (crop)' },
+          { value: 'fill',  label: 'Stretch' }
+        ]]
+      ],
+      positionKeys: ['x', 'y'],
+      labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
     }
   };
 
@@ -2564,7 +2622,8 @@
     { id: 'ellipse', label: 'Ellipse', hint: 'click center, drag rx/ry' },
     { id: 'rect',    label: 'Rect',    hint: 'click corner, drag size' },
     { id: 'polygon', label: 'Polygon', hint: 'triangle/N-gon (set Sides)' },
-    { id: 'star',    label: 'Star',    hint: 'N-pointed' }
+    { id: 'star',    label: 'Star',    hint: 'N-pointed' },
+    { id: 'image',   label: 'Image',   hint: 'click corner, drag bbox · set URL in panel' }
   ];
   const CREATE_TYPES = CREATE_TYPES_LINES.concat(CREATE_TYPES_PRIMITIVES);
 
@@ -3577,10 +3636,22 @@
     return entry ? entry.value : ref; // legacy literal fallback
   }
 
+  /**
+   * Map an image-kind `fit` value to the SVG preserveAspectRatio
+   * attribute. 'meet' letterboxes, 'slice' fills + crops, 'fill'
+   * stretches (disables aspect preservation). Default: 'meet'.
+   */
+  function imageFitAttr(fit) {
+    if (fit === 'slice') return 'xMidYMid slice';
+    if (fit === 'fill')  return 'none';
+    return 'xMidYMid meet';
+  }
+
   function renderLines() {
     linesG.innerHTML = '';
     state.lines.forEach(function (line) {
       const group = state.groups.find(function (g) { return g.id === line.groupId; });
+      const isImage = line.kind === 'image';
 
       // Invisible wide hit-target so the line is easy to click for
       // selection — picking a 1.5px stroke pixel-perfectly is awful.
@@ -3590,7 +3661,10 @@
       hit.dataset.lineId = line.id;
       linesG.appendChild(hit);
 
-      // Visible path.
+      // Visible path. For image kind it's the bbox outline (so the
+      // user can see where the image lives even before a src is set
+      // or while the bitmap is loading); the actual <image> is
+      // layered on top below.
       const p = createPath('', line.d);
       const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
       const stroke    = resolveStroke(strokeRef);
@@ -3603,8 +3677,19 @@
       //   - `filled` is the source of truth when set explicitly
       //     (true for primitives, true for closed-loop freehand, etc.)
       //   - falls back to `closed` for legacy data without `filled`
-      const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
+      //   - image kind never gets the fill — the bitmap covers it.
+      const wantsFill = !isImage
+        && (line.filled !== undefined ? !!line.filled : !!line.closed);
       if (wantsFill && stroke) p.style.fill = stroke;
+      if (isImage) {
+        p.style.fill = 'none';
+        // Dashed outline when no source yet, so the empty bbox still
+        // reads as "an image is here" rather than just a thin rect.
+        if (!line.params || !line.params.src) {
+          p.style.strokeDasharray = '4 4';
+          if (!stroke) p.style.stroke = '#888';
+        }
+      }
       // Primitives rotate around their geometric center, not their
       // bounding box center — matters for odd-vertex polygons and
       // stars where the two differ. (Runtime applies the same logic;
@@ -3628,6 +3713,24 @@
       if (line.hidden || (group && group.hidden)) p.style.opacity = '0.18';
       p.dataset.lineId = line.id;
       linesG.appendChild(p);
+
+      // Image overlay — emitted only when a src is set. The bitmap
+      // sits on top of the bbox path; if it loads, the dashed
+      // outline behind it is invisible anyway because the image
+      // covers it.
+      if (isImage && line.params && line.params.src) {
+        const img = document.createElementNS(SVG_NS, 'image');
+        img.setAttributeNS(null, 'href', line.params.src);
+        img.setAttribute('x', line.params.x);
+        img.setAttribute('y', line.params.y);
+        img.setAttribute('width',  line.params.w);
+        img.setAttribute('height', line.params.h);
+        img.setAttribute('preserveAspectRatio', imageFitAttr(line.params.fit));
+        img.style.pointerEvents = 'none'; // hit path handles selection
+        if (line.hidden || (group && group.hidden)) img.style.opacity = '0.18';
+        img.dataset.lineId = line.id;
+        linesG.appendChild(img);
+      }
     });
     renderLabels();
     renderHandles();
@@ -4498,17 +4601,32 @@
       const PRIM = PRIMITIVES[line.kind];
       PRIM.paramFields.forEach(function (entry) {
         const key = entry[0], label = entry[1];
-        wrap.appendChild(withScope(numberField(label, line.params[key], function (v) {
+        const type = entry[2] || 'number';
+        const onChange = function (v) {
           setVisualProp(line.id, 'params.' + key, v);
           scheduleSnapshot();
           renderLines();
-        }), line.masterId, 'params.' + key));
+        };
+        let field;
+        if (type === 'text') {
+          field = textField(label, line.params[key] || '', onChange);
+        } else if (type === 'select') {
+          field = selectField(label, line.params[key] || (entry[3][0] && entry[3][0].value),
+                              entry[3], onChange);
+        } else {
+          field = numberField(label, line.params[key], onChange);
+        }
+        wrap.appendChild(withScope(field, line.masterId, 'params.' + key));
       });
-      wrap.appendChild(withScope(checkboxField('Filled', !!line.filled, function (v) {
-        setVisualProp(line.id, 'filled', v);
-        scheduleSnapshot();
-        renderLines();
-      }), line.masterId, 'filled'));
+      // "Filled" only makes sense for filled-shape primitives. Image
+      // kind ignores fill (the bitmap covers the box).
+      if (line.kind !== 'image') {
+        wrap.appendChild(withScope(checkboxField('Filled', !!line.filled, function (v) {
+          setVisualProp(line.id, 'filled', v);
+          scheduleSnapshot();
+          renderLines();
+        }), line.masterId, 'filled'));
+      }
     }
 
     wrap.appendChild(divider('Appearance'));
