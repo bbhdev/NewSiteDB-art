@@ -217,26 +217,56 @@ function art_load_class_data(string $pageRoot, string $classId): array
  */
 function art_resolve_instance(array $instance, array $mastersById): array
 {
+    // Behavior keys (per-class always) and the four position sub-keys
+    // (per-class via positionOffset) sit outside the scope contract.
+    static $BEHAVIOR_KEYS = [
+        'translateX', 'translateY', 'rotate',
+        'drawIn', 'drawInDirection',
+        'rotateOriginX', 'rotateOriginY',
+    ];
+    static $POSITION_SUBKEYS = ['cx', 'cy', 'x', 'y'];
+
     $line = [];
     $masterId = $instance['masterId'] ?? null;
+    $master   = null;
     if ($masterId && isset($mastersById[$masterId])) {
-        $line = $mastersById[$masterId];
+        $master = $mastersById[$masterId];
+        $line   = $master;
         // master.id is the master's id; strip so it doesn't leak as
         // line.id below.
         unset($line['id']);
+    }
+    // master.scope: keyPath => 'local'. Missing key => canonical.
+    $scope = [];
+    if (is_array($master) && isset($master['scope']) && is_array($master['scope'])) {
+        $scope = $master['scope'];
     }
     $overrides = $instance['overrides'] ?? null;
     $ovArr = [];
     if (is_array($overrides) || is_object($overrides)) {
         $ovArr = (array) $overrides;
         foreach ($ovArr as $k => $v) {
-            // params is special: instance.overrides.params holds the
-            // overridden SUB-keys only. Merge so master.params keeps
-            // providing defaults for any sub-key not overridden.
-            if ($k === 'params' && is_array($v)
-                && isset($line['params']) && is_array($line['params'])) {
-                $line['params'] = array_merge($line['params'], $v);
-            } else {
+            // Behavior keys always apply — they're never canonical.
+            if (in_array($k, $BEHAVIOR_KEYS, true)) {
+                $line[$k] = $v;
+                continue;
+            }
+            if ($k === 'params' && (is_array($v) || is_object($v))) {
+                $vArr = (array) $v;
+                if (!isset($line['params']) || !is_array($line['params'])) {
+                    $line['params'] = [];
+                }
+                foreach ($vArr as $sk => $sv) {
+                    // Position is expressed via positionOffset.
+                    if (in_array($sk, $POSITION_SUBKEYS, true)) continue;
+                    if (($scope['params.' . $sk] ?? null) === 'local') {
+                        $line['params'][$sk] = $sv;
+                    }
+                }
+                continue;
+            }
+            // Other visual key — apply only when scope says local.
+            if (($scope[$k] ?? null) === 'local') {
                 $line[$k] = $v;
             }
         }

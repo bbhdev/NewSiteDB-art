@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 6;
+const CONTENT_SCHEMA_VERSION = 7;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -70,6 +70,13 @@ $SCHEMA_HISTORY = [
        . ' are migrated by computing master-vs-instance delta. Whole-array'
        . ' instance.overrides.points / segments are dropped (assumed to be'
        . ' translations; user can rebuild edge cases with handle drags).',
+    7 => 'Scope-driven model. Master gains an optional `scope` map declaring'
+       . ' which props can diverge per-class (canonical default; "local"'
+       . ' permits instance overrides). Instance.overrides keeps only behavior'
+       . ' keys (translateX/Y, rotate, drawIn, …) plus scope-allowed locals.'
+       . ' All visual overrides accumulated under the legacy model are stripped'
+       . ' — they were test artifacts and the user authorized a clean slate.'
+       . ' positionOffset stays as the structural per-class position channel.',
 ];
 
 /**
@@ -430,6 +437,83 @@ $MIGRATIONS = [
                     json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
             } elseif ($changed && $dryRun) {
                 echo "    would add positionOffset + strip position overrides in $instPath\n";
+            }
+        }
+
+        return true;
+    },
+
+    6 => function (string $pageRoot, bool $dryRun): bool {
+        // v6 → v7: introduce master.scope. Default is empty (all
+        // canonical) — the user explicitly authorized clearing any
+        // stale per-instance visual overrides accumulated under the
+        // legacy model, so we drop them on this step. Behavior keys
+        // (translateX/Y, rotate, drawIn, …) are kept; positionOffset
+        // is kept (structural per-class).
+        $contentDir = dirname($pageRoot);
+
+        // Site-wide: add `scope: {}` to every master, once.
+        static $mastersTouched = false;
+        if (!$mastersTouched) {
+            $mastersPath = $contentDir . '/_shared/masters.json';
+            if (is_file($mastersPath)) {
+                $masters = json_decode(file_get_contents($mastersPath), true) ?: [];
+                $changed = false;
+                foreach ($masters as &$m) {
+                    if (is_array($m) && !isset($m['scope'])) {
+                        $m['scope'] = (object) [];
+                        $changed = true;
+                    }
+                }
+                unset($m);
+                if ($changed) {
+                    if ($dryRun) {
+                        echo "    would add empty scope:{} to every master in $mastersPath\n";
+                    } else {
+                        file_put_contents($mastersPath,
+                            json_encode($masters, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                    }
+                }
+            }
+            $mastersTouched = true;
+        }
+
+        // Per-class: strip visual overrides; keep only behavior keys.
+        $BEHAVIOR_KEYS = ['translateX', 'translateY', 'rotate',
+                          'drawIn', 'drawInDirection',
+                          'rotateOriginX', 'rotateOriginY'];
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+        foreach ($useClasses as $cid) {
+            $instPath = $pageRoot . '/' . $cid . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            $changed = false;
+            foreach ($insts as &$inst) {
+                if (!is_array($inst)) continue;
+                $ov = (isset($inst['overrides']) && is_array($inst['overrides']))
+                    ? $inst['overrides'] : [];
+                $clean = [];
+                foreach ($ov as $k => $v) {
+                    if (in_array($k, $BEHAVIOR_KEYS, true)) $clean[$k] = $v;
+                }
+                if (json_encode($ov) !== json_encode($clean)) {
+                    $inst['overrides'] = (object) $clean;
+                    $changed = true;
+                }
+            }
+            unset($inst);
+            if ($changed) {
+                if ($dryRun) {
+                    echo "    would strip stale visual overrides in $instPath\n";
+                } else {
+                    file_put_contents($instPath,
+                        json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                }
             }
         }
 

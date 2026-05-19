@@ -94,10 +94,31 @@
     'smoothed', 'closed', 'filled',
     'd', 'stroke', 'width', 'name'
   ];
-  // Master-linkable visual keys exposed by the panel UI. Other
-  // master-visual keys (kind, d, points, segments) aren't directly
-  // edited as a single field, so they don't need a link toggle yet.
-  const PANEL_LINKABLE_KEYS = ['stroke', 'width', 'name', 'filled', 'smoothed', 'closed'];
+  // Position sub-keys live on positionOffset (not in scope). Owning
+  // them per-class is structural — scope toggles don't apply.
+  const POSITION_PARAM_SUBKEYS = ['cx', 'cy', 'x', 'y'];
+
+  // Behavior keys live on instance.overrides regardless of scope —
+  // they're scroll-driven animation params, always per-class.
+  const BEHAVIOR_KEYS = ['translateX', 'translateY', 'rotate',
+                         'drawIn', 'drawInDirection',
+                         'rotateOriginX', 'rotateOriginY'];
+
+  /**
+   * Read the scope of a property on a master. Returns 'local' or
+   * 'canonical'. Default is canonical when the master has no scope
+   * entry (sparse map — only locals are listed).
+   *
+   * Path is dotted for nested keys: 'stroke', 'params.points',
+   * 'params.sides', etc.
+   */
+  function getScope(master, keyPath) {
+    if (!master || !master.scope) return 'canonical';
+    return master.scope[keyPath] === 'local' ? 'local' : 'canonical';
+  }
+  function isLocal(master, keyPath) {
+    return getScope(master, keyPath) === 'local';
+  }
 
   // PRIMITIVES — geometric kinds the editor knows about. Declared
   // up here (instead of next to the tool definitions further down)
@@ -275,17 +296,28 @@
   };
 
   /**
-   * Compose a flat line record from an instance + the master library.
-   * Returns the same shape Phase 3's editor manipulated, plus a
-   * line.overrides map carrying ALL explicit overrides (visual +
-   * behavior). Tool / mutation code reads line.<key> as before; the
-   * presence of line.overrides[key] is the master-linkage signal.
+   * Compose a flat line record from an instance + the master library
+   * under the scope-driven model (v7+):
+   *
+   *   - Start with master values for all visual props.
+   *   - For each scope-local prop on the master, apply the instance's
+   *     override if present (otherwise keep master's value).
+   *   - Behavior keys (translateX/Y, rotate, drawIn, …) come from the
+   *     instance override regardless of scope — they're always per-
+   *     class by definition.
+   *   - positionOffset is applied to the visual position (params
+   *     cx/cy/x/y, points, segments) so the editor's tools, handles,
+   *     labels, and panel all see the same on-screen coordinates.
+   *
+   * d is recomputed locally from the offset-applied source values.
    */
   function resolveInstanceJS(inst, mby) {
     if (!inst) return {};
     const master = inst.masterId ? mby[inst.masterId] : null;
     const line = master ? Object.assign({}, master) : {};
-    delete line.id; // master.id is not the instance.id
+    delete line.id;     // master.id != instance.id
+    delete line.scope;  // master-level metadata, not a line prop
+
     // Deep-copy mutable nested values so per-class mutations don't
     // leak back into the master record via shared references.
     if (line.params && typeof line.params === 'object') {
@@ -305,42 +337,53 @@
         };
       });
     }
+
+    // Apply overrides:
+    //   - Behavior keys: kept on line.overrides for the runtime's
+    //     behavior pipeline; not merged onto the line itself.
+    //   - Visual keys: applied to line[k] iff scope says local.
+    //   - params: handled at sub-key level (each sub-key consulted
+    //     against scope).
     const ov = (inst.overrides && typeof inst.overrides === 'object') ? inst.overrides : {};
+    const cleanOverrides = {}; // what we'll keep on line.overrides
     Object.keys(ov).forEach(function (k) {
-      // params is special: instance.overrides.params is a SUB-KEY
-      // map (only the overridden sub-keys), not a wholesale
-      // replacement. Merge so master.params provides defaults for
-      // any sub-key not overridden, and the override fills the rest.
+      if (BEHAVIOR_KEYS.indexOf(k) !== -1) {
+        cleanOverrides[k] = ov[k];
+        return;
+      }
       if (k === 'params' && ov[k] && typeof ov[k] === 'object'
           && master && master.params && typeof master.params === 'object') {
-        line.params = Object.assign({}, master.params, ov.params);
-      } else {
-        line[k] = ov[k];
+        const opParams = {};
+        Object.keys(ov[k]).forEach(function (sk) {
+          if (isLocal(master, 'params.' + sk)) {
+            line.params[sk] = ov[k][sk];
+            opParams[sk] = ov[k][sk];
+          }
+        });
+        if (Object.keys(opParams).length) cleanOverrides.params = opParams;
+        return;
       }
+      if (master && isLocal(master, k)) {
+        line[k] = ov[k];
+        cleanOverrides[k] = ov[k];
+      }
+      // Else: the override targets a canonical key; drop it.
     });
+
     line.id        = inst.id;
     line.groupId   = inst.groupId;
     line.masterId  = inst.masterId || null;
     line.hidden    = !(inst.visible === undefined ? true : inst.visible);
-    line.overrides = Object.assign({}, ov);
-    if (ov.params && typeof ov.params === 'object') {
-      line.overrides.params = Object.assign({}, ov.params);
-    }
-    // positionOffset — per-class translation from the master's
-    // canonical anchor. Applied in-place so the editor's tools,
-    // handles, label positioning, and the panel all see the visual
-    // (offset-applied) values without each having to remember to
-    // add the offset. d is recomputed below from the now-offset
-    // source. On save, decomposeForSave strips the offset back out
-    // to keep master.params canonical on disk.
-    const offX = (inst.positionOffset && Number.isFinite(inst.positionOffset.dx)) ? inst.positionOffset.dx : 0;
-    const offY = (inst.positionOffset && Number.isFinite(inst.positionOffset.dy)) ? inst.positionOffset.dy : 0;
+    line.overrides = cleanOverrides;
+
+    // positionOffset — structural per-class translation.
+    const offX = (inst.positionOffset && Number.isFinite(inst.positionOffset.dx))
+                 ? inst.positionOffset.dx : 0;
+    const offY = (inst.positionOffset && Number.isFinite(inst.positionOffset.dy))
+                 ? inst.positionOffset.dy : 0;
     line.positionOffset = { dx: offX, dy: offY };
     if (offX !== 0 || offY !== 0) {
       if (line.params && typeof line.params === 'object') {
-        // Deep copy params so mutating offset-applied values doesn't
-        // leak back into the master record.
-        line.params = Object.assign({}, line.params);
         ['cx', 'x'].forEach(function (k) {
           if (Number.isFinite(line.params[k])) line.params[k] += offX;
         });
@@ -366,10 +409,11 @@
           };
         });
       }
-      // Re-derive d from the offset-applied source so handle picking
-      // + hit-testing + rendering all agree on where the shape lives.
-      computeLineD(line);
     }
+    // Always recompute d locally — visual overrides may have changed
+    // params/points/segments since master.d was last derived, and a
+    // zero positionOffset wouldn't otherwise trigger a refresh.
+    computeLineD(line);
     return line;
   }
 
@@ -694,173 +738,137 @@
   function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
 
   /**
-   * Is the given visual property currently overridden on this line?
-   * (Behavior keys read the same map but are never "linked to
-   * master" — they're per-instance by design.)
-   */
-  function isVisualOverridden(line, key) {
-    return !!(line && line.overrides
-           && Object.prototype.hasOwnProperty.call(line.overrides, key));
-  }
-
-  /**
-   * Edit a visual property of a line. Routing:
-   *   - If the property is currently overridden on this instance,
-   *     stay in override scope: update line[key] AND line.overrides[key].
-   *   - Else the property is master-linked: update master[key], then
-   *     propagate to every line in every class that resolves to the
-   *     same master AND doesn't have its own override on this key.
+   * Single mutation entry point for ANY visual prop.
    *
-   * For lines with no masterId (legacy or detached), the edit lands
-   * locally and a master is minted at save time.
+   *   - If master.scope[keyPath] === 'local': write the instance's
+   *     override and update line[key] only on the current line.
+   *   - Else (canonical): write master[key] and propagate to every
+   *     instance of that master across every class.
+   *
+   * For params sub-keys the keyPath is 'params.<sub-key>' and the
+   * write happens at sub-key granularity on both master.params and
+   * each instance's line.params. Position sub-keys
+   * (cx / cy / x / y) bypass this entirely — they go through
+   * setPositionFromPanel which writes to positionOffset.
+   *
+   * Lines without a masterId (rare — newly-drawn pre-save) just
+   * mutate locally; decomposeForSave mints a master from them.
    */
-  function setLineVisualProp(id, key, value) {
-    const line = state.lines.find(function (l) { return l.id === id; });
-    if (!line) return;
-    if (isVisualOverridden(line, key)) {
-      line[key] = value;
-      line.overrides[key] = value;
-    } else if (line.masterId) {
-      const m = state.masters.find(function (x) { return x.id === line.masterId; });
-      if (m) m[key] = value;
-      state.pageConfig.useClasses.forEach(function (cid) {
-        const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
-        lines.forEach(function (l) {
-          if (l.masterId !== line.masterId) return;
-          if (isVisualOverridden(l, key)) return;
-          l[key] = value;
-        });
-      });
-    } else {
-      // No master link yet — mutate locally; decompose mints a
-      // master from this on save.
-      line[key] = value;
-    }
-    state.dirty = true;
-  }
-
-  /**
-   * Flip a visual property's linkage:
-   *   linked → overridden  : snapshot the line's current value into
-   *                          line.overrides[key].
-   *   overridden → linked  : delete line.overrides[key] and pull the
-   *                          master's value (if any) back onto the
-   *                          line so the displayed value matches.
-   * Either direction marks the doc dirty.
-   */
-  function toggleVisualOverride(id, key) {
-    const line = state.lines.find(function (l) { return l.id === id; });
-    if (!line) return;
-    if (!line.overrides) line.overrides = {};
-    if (isVisualOverridden(line, key)) {
-      delete line.overrides[key];
-      if (line.masterId) {
-        const m = state.masters.find(function (x) { return x.id === line.masterId; });
-        if (m && m[key] !== undefined) line[key] = m[key];
-      }
-    } else {
-      line.overrides[key] = line[key];
-    }
-    state.dirty = true;
-  }
-
-  /**
-   * Edit a single param sub-key (e.g. star.points) from the panel
-   * with master-edit intent: the value becomes the canonical one,
-   * propagates to every class's instance of this master, and any
-   * stale per-class override on this exact sub-key is cleared
-   * (because the user just authored a definitive value for it).
-   * Position overrides on cx/cy survive — they're a different
-   * sub-key.
-   */
-  // params sub-keys treated as positional (per-class via positionOffset
-  // rather than master values). Editing one of these in the panel
-  // shifts the current instance's offset; other classes don't follow.
-  const POSITION_PARAM_SUBKEYS = ['cx', 'cy', 'x', 'y'];
-
-  function setMasterParamSubkey(lineId, subkey, value) {
+  function setVisualProp(lineId, keyPath, value) {
     const line = state.lines.find(function (l) { return l.id === lineId; });
     if (!line) return;
-    if (POSITION_PARAM_SUBKEYS.indexOf(subkey) !== -1) {
-      // Position edit — adjust positionOffset on this instance so
-      // the typed value becomes the visual coord. Don't touch the
-      // master; don't touch siblings.
-      if (!line.params) line.params = {};
-      if (!line.positionOffset) line.positionOffset = { dx: 0, dy: 0 };
-      const master = (line.masterId)
-        ? state.masters.find(function (x) { return x.id === line.masterId; })
-        : null;
-      const canonical = (master && master.params && Number.isFinite(master.params[subkey]))
-        ? master.params[subkey] : 0;
-      const isX = (subkey === 'cx' || subkey === 'x');
-      if (isX) line.positionOffset.dx = value - canonical;
-      else     line.positionOffset.dy = value - canonical;
-      line.params[subkey] = value;
-      computeLineD(line);
-      state.dirty = true;
-      renderLines();
+    const master = line.masterId
+      ? state.masters.find(function (x) { return x.id === line.masterId; })
+      : null;
+    const parts = keyPath.split('.');
+    const isParamSub = (parts[0] === 'params' && parts.length === 2);
+    const subKey = isParamSub ? parts[1] : null;
+    if (isParamSub && POSITION_PARAM_SUBKEYS.indexOf(subKey) !== -1) {
+      // Position sub-key — route to positionOffset instead.
+      setPositionFromPanel(lineId, subKey, value);
       return;
     }
-    // Non-position sub-key: canonical edit on the master, propagates
-    // to every sibling instance that doesn't carry its own override
-    // on this sub-key.
-    if (!line.params) line.params = {};
-    line.params[subkey] = value;
-    computeLineD(line);
-    if (line.masterId) {
-      const m = state.masters.find(function (x) { return x.id === line.masterId; });
-      if (m) {
-        if (!m.params) m.params = {};
-        m.params[subkey] = value;
-        computeLineD(m);
+
+    if (!master || isLocal(master, keyPath)) {
+      // Local scope (or no master to write to) → instance-only.
+      if (isParamSub) {
+        if (!line.params) line.params = {};
+        line.params[subKey] = value;
+        if (!line.overrides) line.overrides = {};
+        if (!line.overrides.params || typeof line.overrides.params !== 'object') {
+          line.overrides.params = {};
+        }
+        line.overrides.params[subKey] = value;
+      } else {
+        line[keyPath] = value;
+        if (!line.overrides) line.overrides = {};
+        line.overrides[keyPath] = value;
+      }
+      computeLineD(line);
+    } else {
+      // Canonical scope → master + every instance of the master.
+      if (isParamSub) {
+        if (!master.params) master.params = {};
+        master.params[subKey] = value;
+        computeLineD(master);
+      } else {
+        master[keyPath] = value;
+        computeLineD(master);
       }
       state.pageConfig.useClasses.forEach(function (cid) {
         const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
         lines.forEach(function (l) {
-          if (l.masterId !== line.masterId) return;
-          if (!l.params) l.params = {};
-          l.params[subkey] = value;
-          computeLineD(l);
-          // Clear stale sub-key override on this class — the user
-          // is asserting the new value as canonical.
-          if (l.overrides && l.overrides.params
-              && Object.prototype.hasOwnProperty.call(l.overrides.params, subkey)) {
-            delete l.overrides.params[subkey];
-            if (!Object.keys(l.overrides.params).length) delete l.overrides.params;
+          if (l.masterId !== master.id) return;
+          if (isParamSub) {
+            if (!l.params) l.params = {};
+            l.params[subKey] = value;
+            // Any per-class override on this sub-key would have been
+            // ignored at resolve time (scope is canonical), but tidy
+            // up the override map anyway.
+            if (l.overrides && l.overrides.params
+                && Object.prototype.hasOwnProperty.call(l.overrides.params, subKey)) {
+              delete l.overrides.params[subKey];
+              if (!Object.keys(l.overrides.params).length) delete l.overrides.params;
+            }
+          } else {
+            l[keyPath] = value;
+            if (l.overrides && Object.prototype.hasOwnProperty.call(l.overrides, keyPath)) {
+              delete l.overrides[keyPath];
+            }
           }
+          computeLineD(l);
         });
       });
     }
+    state.dirty = true;
+  }
+
+  /**
+   * Update positionOffset to make a param sub-key (cx/cy/x/y) equal
+   * the typed value on the current instance only. Master is not
+   * touched; other classes don't follow.
+   */
+  function setPositionFromPanel(lineId, subKey, value) {
+    const line = state.lines.find(function (l) { return l.id === lineId; });
+    if (!line) return;
+    if (!line.params) line.params = {};
+    if (!line.positionOffset) line.positionOffset = { dx: 0, dy: 0 };
+    const master = line.masterId
+      ? state.masters.find(function (x) { return x.id === line.masterId; })
+      : null;
+    const canonical = (master && master.params && Number.isFinite(master.params[subKey]))
+      ? master.params[subKey] : 0;
+    const isXAxis = (subKey === 'cx' || subKey === 'x');
+    if (isXAxis) line.positionOffset.dx = value - canonical;
+    else         line.positionOffset.dy = value - canonical;
+    line.params[subKey] = value;
+    computeLineD(line);
     state.dirty = true;
     renderLines();
   }
 
   /**
-   * Clear all geometry-related overrides on a line and pull its
-   * params / points / segments / d back from the master. Used to
-   * re-sync a class that drifted from the canonical shape — either
-   * because the user drag-translated here (which deliberately
-   * snapshots a per-class override) or because a legacy pre-sync
-   * save baked in an override the user didn't intend to keep.
+   * Zero a line's positionOffset, snapping it back to the master's
+   * canonical placement. Only the current class is affected.
    */
-  function resetLineGeometryToMaster(id) {
-    const line = state.lines.find(function (l) { return l.id === id; });
-    if (!line || !line.masterId) return;
-    const m = state.masters.find(function (x) { return x.id === line.masterId; });
-    if (!m) return;
-    const GEOM_KEYS = ['kind', 'points', 'segments', 'params', 'd',
-                       'smoothed', 'closed', 'filled'];
-    if (!line.overrides) line.overrides = {};
-    GEOM_KEYS.forEach(function (k) {
-      if (Object.prototype.hasOwnProperty.call(line.overrides, k)) {
-        delete line.overrides[k];
-      }
-      if (m[k] !== undefined) line[k] = deepCopyIfNeeded(m[k]);
-    });
-    // Also zero the positionOffset — Reset means "snap back to the
-    // master in every respect, including class-specific placement".
+  function resetPositionOffset(lineId) {
+    const line = state.lines.find(function (l) { return l.id === lineId; });
+    if (!line) return;
     line.positionOffset = { dx: 0, dy: 0 };
-    // Recompute d from the freshly-pulled master geometry.
+    if (line.masterId && line.params) {
+      const m = state.masters.find(function (x) { return x.id === line.masterId; });
+      if (m && m.params) {
+        ['cx', 'cy', 'x', 'y'].forEach(function (k) {
+          if (Number.isFinite(m.params[k])) line.params[k] = m.params[k];
+        });
+      }
+    }
+    if (line.masterId && Array.isArray(line.points)) {
+      const m = state.masters.find(function (x) { return x.id === line.masterId; });
+      if (m && Array.isArray(m.points)) {
+        line.points = m.points.map(function (p) { return { x: p.x, y: p.y }; });
+      }
+    }
     computeLineD(line);
     state.dirty = true;
     snapshot();
@@ -868,34 +876,108 @@
   }
 
   /**
-   * Decompose state.byClass[].lines + state.masters into the v4 on-
-   * disk shape for save. Now that line.overrides is the explicit
-   * override map, the save side is mostly bookkeeping:
+   * Flip scope on a master property. Local ⇄ canonical. When going
+   * canonical-to-local we keep current per-instance values as
+   * overrides so the visible state doesn't jump. When going
+   * local-to-canonical we drop all instance overrides on that key;
+   * everyone snaps to master.
+   */
+  function setMasterScope(masterId, keyPath, newScope) {
+    const m = state.masters.find(function (x) { return x.id === masterId; });
+    if (!m) return;
+    if (!m.scope || typeof m.scope !== 'object') m.scope = {};
+    if (newScope === 'local') {
+      m.scope[keyPath] = 'local';
+      // Snapshot each instance's current value into its overrides
+      // (so what's visible right now becomes the new local value).
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+        lines.forEach(function (l) {
+          if (l.masterId !== masterId) return;
+          if (!l.overrides) l.overrides = {};
+          const parts = keyPath.split('.');
+          if (parts[0] === 'params' && parts.length === 2) {
+            if (!l.overrides.params) l.overrides.params = {};
+            if (l.params && l.params[parts[1]] !== undefined) {
+              l.overrides.params[parts[1]] = l.params[parts[1]];
+            }
+          } else if (l[keyPath] !== undefined) {
+            l.overrides[keyPath] = l[keyPath];
+          }
+        });
+      });
+    } else {
+      delete m.scope[keyPath];
+      // Drop instance overrides on this key + snap line values back
+      // to master.
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+        lines.forEach(function (l) {
+          if (l.masterId !== masterId) return;
+          const parts = keyPath.split('.');
+          if (parts[0] === 'params' && parts.length === 2) {
+            if (l.overrides && l.overrides.params
+                && Object.prototype.hasOwnProperty.call(l.overrides.params, parts[1])) {
+              delete l.overrides.params[parts[1]];
+              if (!Object.keys(l.overrides.params).length) delete l.overrides.params;
+            }
+            if (m.params && m.params[parts[1]] !== undefined && l.params) {
+              l.params[parts[1]] = m.params[parts[1]];
+            }
+          } else {
+            if (l.overrides) delete l.overrides[keyPath];
+            if (m[keyPath] !== undefined) l[keyPath] = m[keyPath];
+          }
+          computeLineD(l);
+        });
+      });
+    }
+    state.dirty = true;
+  }
+
+  /**
+   * Decompose state.byClass[].lines + state.masters into the on-disk
+   * shape for save. Under the scope-driven model the save side is
+   * pure bookkeeping — all routing happened at edit time:
    *
-   *   1. Mint masterIds for any lines drawn since last load. Stamp
-   *      a fresh master from their current visual values.
-   *   2. Copy state.masters as-is; freshly-drawn shapes contribute
-   *      their new masters. (Edits made in linked mode already
-   *      mutated state.masters in place — no rebuild needed.)
-   *   3. For each line, emit { id, masterId, name, visible,
-   *      groupId, overrides } where overrides = line.overrides
-   *      verbatim. Drop masters with no instance reference.
+   *   - Canonical edits (default scope) mutated master + every
+   *     instance in place via setVisualProp / propagateLineToMaster.
+   *   - Local edits (scope flipped to 'local') landed in
+   *     line.overrides. Behavior keys always land there too.
+   *   - Position lives in line.positionOffset, never in overrides.
+   *
+   * So the per-instance overrides we emit equal line.overrides,
+   * filtered defensively against the master's current scope: any
+   * stray canonical-scoped visual key in there gets dropped.
+   *
+   * Pass 1 mints masters for freshly drawn lines (empty scope,
+   * snapshot of current visual values). Pass 2 emits per-class
+   * instances. Unreferenced masters are pruned.
    */
   function decomposeForSave() {
     const useClasses = state.pageConfig.useClasses || [];
     const masterMap = {};
     state.masters.forEach(function (m) {
-      if (m && m.id) masterMap[m.id] = Object.assign({}, m);
+      if (!m || !m.id) return;
+      const copy = Object.assign({}, m);
+      if (m.scope && typeof m.scope === 'object') {
+        copy.scope = Object.assign({}, m.scope);
+      } else {
+        copy.scope = {};
+      }
+      masterMap[m.id] = copy;
     });
 
     // Pass 1: mint masters for any lines that don't have one yet.
+    // Fresh masters get empty scope (all keys canonical) + a
+    // snapshot of the line's current visual values.
     useClasses.forEach(function (cid) {
       const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
       lines.forEach(function (line) {
         if (line.masterId && masterMap[line.masterId]) return;
         const mid = line.masterId || ('m-' + Math.random().toString(36).slice(2, 10));
         line.masterId = mid;
-        const m = { id: mid };
+        const m = { id: mid, scope: {} };
         MASTER_VISUAL_KEYS.forEach(function (k) {
           if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
         });
@@ -904,11 +986,9 @@
       });
     });
 
-    // Pass 2: per-class instances. overrides start with line.overrides
-    // (explicit master-link toggles + behavior overrides) and gain any
-    // visual key whose value diverges from the master (catches drag /
-    // handle-edit mutations on params, points, segments, d that don't
-    // route through the link-toggle flow).
+    // Pass 2: per-class instances. Filter overrides through the
+    // master's scope: keep behavior keys + scope-local visual keys.
+    // Drop anything else (canonical visual keys, position sub-keys).
     const byClass = {};
     const usedMasterIds = {};
     useClasses.forEach(function (cid) {
@@ -918,100 +998,33 @@
         const mid = line.masterId;
         usedMasterIds[mid] = true;
         const master = masterMap[mid];
-        const overrides = (line.overrides && typeof line.overrides === 'object')
-          ? Object.assign({}, line.overrides)
-          : {};
-        // Carry over explicit params sub-key overrides as a fresh
-        // object so we don't mutate state.byClass below.
-        if (overrides.params && typeof overrides.params === 'object') {
-          overrides.params = Object.assign({}, overrides.params);
-        }
-        // v6+: line values are visual (master + positionOffset). To
-        // compute divergence vs master we have to first strip the
-        // offset back out, otherwise every positionOffset != 0
-        // instance would emit redundant cx/cy/x/y + shifted points
-        // overrides. Build canonical-form snapshots once per line.
+        const cleanOverrides = {};
+        const src = (line.overrides && typeof line.overrides === 'object')
+          ? line.overrides : {};
+        Object.keys(src).forEach(function (k) {
+          if (BEHAVIOR_KEYS.indexOf(k) !== -1) {
+            cleanOverrides[k] = src[k];
+            return;
+          }
+          if (k === 'params' && src.params && typeof src.params === 'object') {
+            const cleanParams = {};
+            Object.keys(src.params).forEach(function (sk) {
+              if (POSITION_PARAM_SUBKEYS.indexOf(sk) !== -1) return;
+              if (master && isLocal(master, 'params.' + sk)) {
+                cleanParams[sk] = src.params[sk];
+              }
+            });
+            if (Object.keys(cleanParams).length) cleanOverrides.params = cleanParams;
+            return;
+          }
+          if (master && isLocal(master, k)) {
+            cleanOverrides[k] = src[k];
+          }
+        });
         const offDx = (line.positionOffset && Number.isFinite(line.positionOffset.dx))
           ? line.positionOffset.dx : 0;
         const offDy = (line.positionOffset && Number.isFinite(line.positionOffset.dy))
           ? line.positionOffset.dy : 0;
-        const POSITION_SUBKEYS = ['cx', 'cy', 'x', 'y'];
-
-        MASTER_VISUAL_KEYS.forEach(function (k) {
-          if (line[k] === undefined) return;
-          if (k === 'params' || k === 'points' || k === 'segments') return; // handled below
-          if (k in overrides) return;
-          const mv = master ? master[k] : undefined;
-          if (JSON.stringify(line[k]) !== JSON.stringify(mv)) {
-            overrides[k] = line[k];
-          }
-        });
-        // params divergence — sub-key granularity. Position sub-keys
-        // (cx/cy/x/y) are skipped because position is expressed as
-        // positionOffset, not as a per-key override. Other sub-keys
-        // are compared in canonical form (= line value minus
-        // offset, which equals master.params[sk] when in sync).
-        if (line.params && typeof line.params === 'object') {
-          const mp = (master && master.params && typeof master.params === 'object')
-            ? master.params : {};
-          let op = (overrides.params && typeof overrides.params === 'object')
-            ? overrides.params : null;
-          Object.keys(line.params).forEach(function (sk) {
-            if (POSITION_SUBKEYS.indexOf(sk) !== -1) return;
-            if (op && Object.prototype.hasOwnProperty.call(op, sk)) return;
-            if (JSON.stringify(line.params[sk]) === JSON.stringify(mp[sk])) return;
-            if (!op) { op = {}; overrides.params = op; }
-            op[sk] = line.params[sk];
-          });
-        }
-        // points / segments — visual values have offset baked in.
-        // Compare canonical (offset-stripped) values to master. If
-        // they differ, it's a true shape override; if they match (the
-        // common case where offset is the only delta), no override.
-        if (Array.isArray(line.points) && master && Array.isArray(master.points)
-            && !('points' in overrides)) {
-          const same = line.points.length === master.points.length
-            && line.points.every(function (p, i) {
-                 const m = master.points[i] || {};
-                 return Math.abs((p.x || 0) - offDx - (m.x || 0)) < 1e-6
-                     && Math.abs((p.y || 0) - offDy - (m.y || 0)) < 1e-6;
-               });
-          if (!same) {
-            overrides.points = line.points.map(function (p) {
-              return { x: (p.x || 0) - offDx, y: (p.y || 0) - offDy };
-            });
-          }
-        }
-        if (Array.isArray(line.segments) && master && Array.isArray(master.segments)
-            && !('segments' in overrides)) {
-          const same = line.segments.length === master.segments.length
-            && line.segments.every(function (s, i) {
-                 const m = master.segments[i];
-                 if (!m || s.cmd !== m.cmd) return false;
-                 const sePt = s.endpoint, mePt = m.endpoint;
-                 if ((!sePt) !== (!mePt)) return false;
-                 if (sePt && mePt && (
-                       Math.abs(sePt.x - offDx - mePt.x) > 1e-6
-                    || Math.abs(sePt.y - offDy - mePt.y) > 1e-6
-                 )) return false;
-                 // Skip detailed controlPoints compare for V1; if
-                 // endpoints + cmd match, treat as not-diverged.
-                 return true;
-               });
-          if (!same) {
-            overrides.segments = line.segments.map(function (s) {
-              return {
-                cmd: s.cmd,
-                controlPoints: (s.controlPoints || []).map(function (cp) {
-                  return { x: (cp.x || 0) - offDx, y: (cp.y || 0) - offDy };
-                }),
-                endpoint: s.endpoint
-                  ? { x: (s.endpoint.x || 0) - offDx, y: (s.endpoint.y || 0) - offDy }
-                  : null
-              };
-            });
-          }
-        }
         return {
           id:        line.id,
           masterId:  mid,
@@ -1019,11 +1032,11 @@
           // The resolver doesn't read it; kept fresh on every save.
           name:      (line.name != null && line.name !== '')
                        ? line.name
-                       : (masterMap[mid] && masterMap[mid].name ? masterMap[mid].name : line.id),
+                       : (master && master.name ? master.name : line.id),
           visible:   !line.hidden,
           groupId:   line.groupId || null,
           positionOffset: { dx: offDx, dy: offDy },
-          overrides: overrides
+          overrides: cleanOverrides
         };
       });
       byClass[cid] = { instances: instances, groups: groups };
@@ -1299,15 +1312,138 @@
    * `points` is the source of truth and we generate from scratch with
    * kind-appropriate smoothing + optional Z closure.
    */
+  /**
+   * Recompute the line's d from its current source values, AND
+   * (scope-permitting) push shape changes back to the master + every
+   * sibling instance. Used by callers that mutate line.params /
+   * line.points / line.segments directly (handle drags etc.) and
+   * want the change to take effect across classes the way the user
+   * expects from a master edit.
+   *
+   * Note this is the v0.3.5 successor to the old sync function but
+   * far simpler — scope tells it exactly which keys are canonical
+   * (propagate) vs local (don't). It does NOT walk override maps
+   * looking for per-key local toggles; there are none under v7.
+   */
   function regenerateLineD(line) {
     computeLineD(line);
-    // Whenever a line's geometry-derived d (or points / params /
-    // segments) is updated, push the change up to the master so
-    // sibling instances in other classes follow along. Phase 5
-    // mental model: a shape edit IS a master edit. Per-class
-    // shape overrides remain possible (via line.overrides) — sync
-    // skips any key explicitly overridden on this line.
-    syncLineGeometryToMaster(line);
+    propagateLineToMaster(line);
+  }
+
+  function propagateLineToMaster(line) {
+    if (!line || !line.masterId) return;
+    const m = state.masters.find(function (x) { return x.id === line.masterId; });
+    if (!m) return;
+    const offX = (line.positionOffset && line.positionOffset.dx) || 0;
+    const offY = (line.positionOffset && line.positionOffset.dy) || 0;
+    const SCALAR_KEYS = ['kind', 'smoothed', 'closed', 'filled'];
+    const POINT_KEYS  = ['points', 'segments'];
+
+    // Push canonical-form values onto the master, only for keys whose
+    // scope is canonical. Skip the rest — they're either always per-
+    // class (position) or explicitly opted into local scope.
+    SCALAR_KEYS.forEach(function (k) {
+      if (line[k] === undefined) return;
+      if (isLocal(m, k)) return;
+      m[k] = line[k];
+    });
+    POINT_KEYS.forEach(function (k) {
+      if (line[k] === undefined) return;
+      if (isLocal(m, k)) return;
+      if (k === 'points' && Array.isArray(line.points)) {
+        m.points = line.points.map(function (p) {
+          return { x: (p.x || 0) - offX, y: (p.y || 0) - offY };
+        });
+      } else if (k === 'segments' && Array.isArray(line.segments)) {
+        m.segments = line.segments.map(function (s) {
+          return {
+            cmd: s.cmd,
+            controlPoints: (s.controlPoints || []).map(function (cp) {
+              return { x: (cp.x || 0) - offX, y: (cp.y || 0) - offY };
+            }),
+            endpoint: s.endpoint
+              ? { x: (s.endpoint.x || 0) - offX, y: (s.endpoint.y || 0) - offY }
+              : null
+          };
+        });
+      }
+    });
+    if (line.params && typeof line.params === 'object') {
+      if (!m.params || typeof m.params !== 'object') m.params = {};
+      Object.keys(line.params).forEach(function (sk) {
+        // Position sub-keys are always per-class via positionOffset
+        // — they never write to master. Absorbed below.
+        if (POSITION_PARAM_SUBKEYS.indexOf(sk) !== -1) return;
+        if (isLocal(m, 'params.' + sk)) return;
+        m.params[sk] = line.params[sk];
+      });
+      // Re-derive source line's positionOffset from the post-edit
+      // visual coords vs the (unchanged) canonical master coords. This
+      // keeps handle-drag-on-primitive-center as a per-class move
+      // without touching siblings — matches selection-drag-translate
+      // semantics.
+      POSITION_PARAM_SUBKEYS.forEach(function (sk) {
+        if (line.params[sk] === undefined) return;
+        if (m.params[sk] === undefined) return;
+        if (!line.positionOffset) line.positionOffset = { dx: 0, dy: 0 };
+        const isXAxis = (sk === 'cx' || sk === 'x');
+        const delta = line.params[sk] - m.params[sk];
+        if (isXAxis) line.positionOffset.dx = delta;
+        else         line.positionOffset.dy = delta;
+      });
+    }
+    computeLineD(m);
+
+    // Push the canonical master state back out to every other instance,
+    // re-applying each one's positionOffset on the way.
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      lines.forEach(function (sib) {
+        if (sib.masterId !== m.id) return;
+        if (sib === line) return;
+        const sibOffX = (sib.positionOffset && sib.positionOffset.dx) || 0;
+        const sibOffY = (sib.positionOffset && sib.positionOffset.dy) || 0;
+        SCALAR_KEYS.forEach(function (k) {
+          if (m[k] === undefined) return;
+          if (isLocal(m, k)) return;
+          sib[k] = m[k];
+        });
+        POINT_KEYS.forEach(function (k) {
+          if (m[k] === undefined) return;
+          if (isLocal(m, k)) return;
+          if (k === 'points' && Array.isArray(m.points)) {
+            sib.points = m.points.map(function (p) {
+              return { x: (p.x || 0) + sibOffX, y: (p.y || 0) + sibOffY };
+            });
+          } else if (k === 'segments' && Array.isArray(m.segments)) {
+            sib.segments = m.segments.map(function (s) {
+              return {
+                cmd: s.cmd,
+                controlPoints: (s.controlPoints || []).map(function (cp) {
+                  return { x: (cp.x || 0) + sibOffX, y: (cp.y || 0) + sibOffY };
+                }),
+                endpoint: s.endpoint
+                  ? { x: (s.endpoint.x || 0) + sibOffX, y: (s.endpoint.y || 0) + sibOffY }
+                  : null
+              };
+            });
+          }
+        });
+        if (m.params && typeof m.params === 'object') {
+          if (!sib.params || typeof sib.params !== 'object') sib.params = {};
+          Object.keys(m.params).forEach(function (sk) {
+            if (isLocal(m, 'params.' + sk)) return;
+            if (POSITION_PARAM_SUBKEYS.indexOf(sk) !== -1) {
+              const isXAxis = (sk === 'cx' || sk === 'x');
+              sib.params[sk] = m.params[sk] + (isXAxis ? sibOffX : sibOffY);
+            } else {
+              sib.params[sk] = m.params[sk];
+            }
+          });
+        }
+        computeLineD(sib);
+      });
+    });
   }
 
   function computeLineD(line) {
@@ -1334,162 +1470,29 @@
     line.d = d;
   }
 
-  /**
-   * Push the geometry-defining visual keys (params / points /
-   * segments / d / kind / smoothed / closed / filled) from `line`
-   * onto its master, then re-render every sibling instance in any
-   * other class that doesn't already override the key. Bails if
-   * the line has no master link, or during initial load (no
-   * masters available yet). Each propagated key is deep-copied to
-   * avoid shared references across classes.
-   */
-  /**
-   * Strip positionOffset from a geometry value so we can push it up
-   * to the master in canonical (offset-free) coords. Mirrors
-   * resolveInstanceJS's offset application, but in reverse.
-   */
-  function stripOffsetCanonical(value, offX, offY, kind) {
-    if (kind === 'params' && value && typeof value === 'object') {
-      const out = Object.assign({}, value);
-      ['cx', 'x'].forEach(function (k) {
-        if (Number.isFinite(out[k])) out[k] -= offX;
-      });
-      ['cy', 'y'].forEach(function (k) {
-        if (Number.isFinite(out[k])) out[k] -= offY;
-      });
-      return out;
-    }
-    if (kind === 'points' && Array.isArray(value)) {
-      return value.map(function (p) {
-        return { x: (p.x || 0) - offX, y: (p.y || 0) - offY };
-      });
-    }
-    if (kind === 'segments' && Array.isArray(value)) {
-      return value.map(function (s) {
-        return {
-          cmd: s.cmd,
-          controlPoints: (s.controlPoints || []).map(function (cp) {
-            return { x: (cp.x || 0) - offX, y: (cp.y || 0) - offY };
-          }),
-          endpoint: s.endpoint
-            ? { x: (s.endpoint.x || 0) - offX, y: (s.endpoint.y || 0) - offY }
-            : null
-        };
-      });
-    }
-    return value;
-  }
-
-  /**
-   * Apply positionOffset to canonical-form geometry — inverse of
-   * stripOffsetCanonical, used when sync'ing canonical master values
-   * back out to a sibling's offset-applied view.
-   */
-  function applyOffsetCanonical(value, offX, offY, kind) {
-    return stripOffsetCanonical(value, -offX, -offY, kind);
-  }
-
-  function syncLineGeometryToMaster(line) {
-    if (!line || !line.masterId) return;
-    if (!Array.isArray(state.masters)) return;
-    const m = state.masters.find(function (x) { return x.id === line.masterId; });
-    if (!m) return;
-    const offX = (line.positionOffset && Number.isFinite(line.positionOffset.dx))
-      ? line.positionOffset.dx : 0;
-    const offY = (line.positionOffset && Number.isFinite(line.positionOffset.dy))
-      ? line.positionOffset.dy : 0;
-    // `d` is intentionally excluded — derived, recomputed per record
-    // below. `params` is handled at sub-key granularity. Position-
-    // bearing geometry (points / segments / params.cx/cy/x/y) has the
-    // offset stripped before going to master so canonical values stay
-    // canonical regardless of which class's instance triggered the sync.
-    const SIMPLE_KEYS = ['kind', 'smoothed', 'closed', 'filled'];
-    const GEOM_KEYS   = ['points', 'segments'];
-    SIMPLE_KEYS.forEach(function (k) {
-      if (line[k] === undefined) return;
-      if (isVisualOverridden(line, k)) return;
-      m[k] = deepCopyIfNeeded(line[k]);
-    });
-    GEOM_KEYS.forEach(function (k) {
-      if (line[k] === undefined) return;
-      if (isVisualOverridden(line, k)) return;
-      m[k] = stripOffsetCanonical(line[k], offX, offY, k);
-    });
-    if (line.params && typeof line.params === 'object') {
-      if (!m.params || typeof m.params !== 'object') m.params = {};
-      const lineParamOv = (line.overrides && typeof line.overrides.params === 'object')
-        ? line.overrides.params : {};
-      const canonical = stripOffsetCanonical(line.params, offX, offY, 'params');
-      Object.keys(canonical).forEach(function (sk) {
-        if (Object.prototype.hasOwnProperty.call(lineParamOv, sk)) return;
-        m.params[sk] = canonical[sk];
-      });
-    }
-    computeLineD(m); // refresh master.d from its (possibly-new) canonical source
-    state.pageConfig.useClasses.forEach(function (cid) {
-      if (cid === state.classId) return;
-      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
-      lines.forEach(function (sib) {
-        if (sib.masterId !== line.masterId) return;
-        const sibOffX = (sib.positionOffset && Number.isFinite(sib.positionOffset.dx))
-          ? sib.positionOffset.dx : 0;
-        const sibOffY = (sib.positionOffset && Number.isFinite(sib.positionOffset.dy))
-          ? sib.positionOffset.dy : 0;
-        SIMPLE_KEYS.forEach(function (k) {
-          if (line[k] === undefined) return;
-          if (isVisualOverridden(line, k)) return;
-          if (isVisualOverridden(sib, k)) return;
-          sib[k] = deepCopyIfNeeded(line[k]);
-        });
-        GEOM_KEYS.forEach(function (k) {
-          if (line[k] === undefined) return;
-          if (isVisualOverridden(line, k)) return;
-          if (isVisualOverridden(sib, k)) return;
-          // Re-apply with the sibling's offset (canonical → sibling's view).
-          sib[k] = applyOffsetCanonical(m[k], sibOffX, sibOffY, k);
-        });
-        if (line.params && typeof line.params === 'object') {
-          if (!sib.params || typeof sib.params !== 'object') sib.params = {};
-          const sibParamOv = (sib.overrides && typeof sib.overrides.params === 'object')
-            ? sib.overrides.params : {};
-          const lineParamOv = (line.overrides && typeof line.overrides.params === 'object')
-            ? line.overrides.params : {};
-          // m.params is canonical now (just set above). Re-apply sibling's offset.
-          const sibParamsResolved = applyOffsetCanonical(m.params, sibOffX, sibOffY, 'params');
-          Object.keys(sibParamsResolved).forEach(function (sk) {
-            if (Object.prototype.hasOwnProperty.call(sibParamOv, sk)) return;
-            if (Object.prototype.hasOwnProperty.call(lineParamOv, sk)) return;
-            sib.params[sk] = sibParamsResolved[sk];
-          });
-        }
-        computeLineD(sib);
-      });
-    });
-  }
-  function deepCopyIfNeeded(v) {
-    return (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
-  }
+  // (v0.3.5 removed: stripOffsetCanonical / applyOffsetCanonical /
+  // syncLineGeometryToMaster / deepCopyIfNeeded — propagation now
+  // happens at the call site via setVisualProp / setMasterScope.
+  // regenerateLineD's sync hook is gone too; it just calls
+  // computeLineD.)
 
   /**
    * Apply a translation (dx, dy) to a line's authored form.
    *
-   * Conceptually a drag-translate is a per-class "movement" — the
-   * user is placing this object somewhere in this class, not
-   * reshaping it for everyone. So the moved geometry key is also
-   * recorded into line.overrides, which makes syncLineGeometryToMaster
-   * skip it on the next regenerateLineD. Result: drag-to-move stays
-   * local; handle drags / panel edits / shape changes still
-   * propagate to master + sibling classes.
+   * Drag-translate is structurally per-class — the user is placing
+   * this object somewhere in this class, not reshaping it for
+   * everyone. The drag is recorded as positionOffset on the
+   * instance; line.params / points / segments are recomputed to
+   * their visual (offset-applied) form so handles + panel display
+   * stay accurate. The master and sibling instances are not
+   * touched. (Handle drags + panel edits route through
+   * regenerateLineD → propagateLineToMaster, which DOES propagate.)
    *
    *   - Geometric primitives shift only their position keys (cx/cy or
    *     x/y) so the whole shape moves rigidly without distortion.
    *   - Manual lines shift every point AND every segment control point
    *     so authored curves keep their shape.
    *   - Everything else just shifts points.
-   *   - Any per-line rotateOriginX/Y override is shifted too so the
-   *     pivot follows the line. (Group defaults are NOT touched — they
-   *     are shared by every line in the group and shouldn't move when
-   *     one line moves.)
    */
   function translateLine(line, origPoints, origSegments, origParams, origOverrides, origOffset, dx, dy) {
     if (!line.overrides) line.overrides = {};
@@ -3705,15 +3708,12 @@
     const wrap = document.createElement('div');
     wrap.className = 'ed-settings';
 
-    wrap.appendChild(wrapWithMasterLink(
-      textField('Name', line.name || '', function (v) {
-        setLineVisualProp(line.id, 'name', v);
-        scheduleSnapshot();
-        renderLines();
-        renderGroupsList();
-      }, 'optional'),
-      line.id, 'name'
-    ));
+    wrap.appendChild(textField('Name', line.name || '', function (v) {
+      setVisualProp(line.id, 'name', v);
+      scheduleSnapshot();
+      renderLines();
+      renderGroupsList();
+    }, 'optional'));
 
     // Visibility — toggle off to hide on the live site without
     // deleting. Useful for trying variants. Renders faded in the
@@ -3722,28 +3722,22 @@
       updateLine(line.id, { hidden: !v });
     }));
 
-    // "Reset shape to master" — appears only when this instance has
-    // any geometry override (drag-to-translate creates one; legacy
-    // pre-v0.2.17 per-class edits left some behind). Click clears
-    // those overrides and pulls the master's geometry back.
-    const GEOM_OVERRIDE_KEYS = ['params', 'points', 'segments', 'd', 'kind', 'smoothed', 'closed', 'filled'];
-    const hasGeomOverride = line.masterId && line.overrides
-      && GEOM_OVERRIDE_KEYS.some(function (k) {
-        return Object.prototype.hasOwnProperty.call(line.overrides, k);
-      });
-    if (hasGeomOverride) {
+    // "Reset position" — visible only when this instance has a
+    // non-zero positionOffset. Snaps the instance back to the master's
+    // canonical position. Doesn't touch other classes.
+    const hasOffset = line.positionOffset
+      && (Math.abs(line.positionOffset.dx) > 0.0001 || Math.abs(line.positionOffset.dy) > 0.0001);
+    if (hasOffset) {
       const row = document.createElement('div');
       row.className = 'ed-field';
       const lbl = document.createElement('label');
-      lbl.textContent = 'Shape';
+      lbl.textContent = 'Position';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ed-mini';
       btn.textContent = '↺ Reset to master';
-      btn.title = 'Clear this class\'s shape override and pull the canonical shape from the master.';
-      btn.addEventListener('click', function () {
-        resetLineGeometryToMaster(line.id);
-      });
+      btn.title = 'Clear this class\'s position offset so the object snaps back to the master\'s canonical placement.';
+      btn.addEventListener('click', function () { resetPositionOffset(line.id); });
       row.appendChild(lbl);
       row.appendChild(btn);
       wrap.appendChild(row);
@@ -3753,49 +3747,46 @@
     // straight-line and chain kinds the regenerator ignores it.
     if (line.kind === 'freehand' || line.kind === 'freehandClosed') {
       wrap.appendChild(checkboxField('Smooth', !!line.smoothed, function (v) {
-        updateLine(line.id, { smoothed: v });
+        setVisualProp(line.id, 'smoothed', v);
+        scheduleSnapshot();
+        renderLines();
       }));
     }
 
     // Primitive parameters (cx/cy/r for circle, w/h/r for rect, etc.).
-    // Editing any value regenerates the path live. Panel edits are
-    // treated as explicit authorial intent — they propagate to the
-    // master and every sibling instance via setMasterParamSubkey,
-    // even when this class has a stale per-class override on the
-    // same sub-key (the override is cleared for that sub-key).
+    // setVisualProp routes the edit by master.scope:
+    //   - canonical sub-key → master + all instances follow.
+    //   - local sub-key → instance override only.
+    //   - position sub-keys (cx/cy/x/y) → positionOffset (per-class).
     if (PRIMITIVES[line.kind] && line.params) {
       wrap.appendChild(divider('Parameters'));
       const PRIM = PRIMITIVES[line.kind];
       PRIM.paramFields.forEach(function (entry) {
         const key = entry[0], label = entry[1];
         wrap.appendChild(numberField(label, line.params[key], function (v) {
-          setMasterParamSubkey(line.id, key, v);
+          setVisualProp(line.id, 'params.' + key, v);
           scheduleSnapshot();
         }));
       });
       wrap.appendChild(checkboxField('Filled', !!line.filled, function (v) {
-        updateLine(line.id, { filled: v });
+        setVisualProp(line.id, 'filled', v);
+        scheduleSnapshot();
+        renderLines();
       }));
     }
 
     wrap.appendChild(divider('Appearance'));
-    wrap.appendChild(wrapWithMasterLink(
-      strokeField('Color', line.stroke, function (v) {
-        setLineVisualProp(line.id, 'stroke', v);
-        scheduleSnapshot();
-        renderLines();
-        renderGroupsList();
-      }),
-      line.id, 'stroke'
-    ));
-    wrap.appendChild(wrapWithMasterLink(
-      overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
-        setLineVisualProp(line.id, 'width', v);
-        scheduleSnapshot();
-        renderLines();
-      }),
-      line.id, 'width'
-    ));
+    wrap.appendChild(strokeField('Color', line.stroke, function (v) {
+      setVisualProp(line.id, 'stroke', v);
+      scheduleSnapshot();
+      renderLines();
+      renderGroupsList();
+    }));
+    wrap.appendChild(overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
+      setVisualProp(line.id, 'width', v);
+      scheduleSnapshot();
+      renderLines();
+    }));
 
     wrap.appendChild(divider('Behavior'));
     const ov = line.overrides || {};
@@ -3832,40 +3823,9 @@
   }
 
   // ── Field constructors ────────────────────────────────────────────
-
-  /**
-   * Wrap a `.ed-field` element with a master-link toggle button.
-   * The button shows "🔗" when the property is linked to the master
-   * (edits propagate to every class) and "✎" when the property is
-   * overridden on this instance (edits stay local). Clicking flips
-   * the state via toggleVisualOverride() and re-renders the panel
-   * so the new state is reflected.
-   *
-   * Returns the same fieldEl so callers can wrap inline.
-   */
-  function wrapWithMasterLink(fieldEl, lineId, key) {
-    const line = state.lines.find(function (l) { return l.id === lineId; });
-    if (!line || !line.masterId) return fieldEl; // no master to link against
-    const overridden = isVisualOverridden(line, key);
-    fieldEl.classList.add('ed-master-linked');
-    if (overridden) fieldEl.classList.add('is-overridden');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'ed-link-toggle';
-    btn.textContent = overridden ? '✎' : '🔗';
-    btn.title = overridden
-      ? 'Overridden in this class — click to revert to master (value will sync to all classes)'
-      : 'Linked to master — edits propagate to every class. Click to override locally.';
-    btn.addEventListener('click', function (e) {
-      e.preventDefault();
-      toggleVisualOverride(lineId, key);
-      snapshot();
-      renderSelectionPanel();
-      renderLines();
-    });
-    fieldEl.appendChild(btn);
-    return fieldEl;
-  }
+  // (v0.3.5 removed: wrapWithMasterLink — the per-instance master-
+  // link toggle is gone. Scope is now master-level, configured via
+  // Settings, not surfaced in the line panel.)
 
   function textField(label, value, onChange, placeholder) {
     const wrap = document.createElement('div');
