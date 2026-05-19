@@ -671,6 +671,109 @@
    * opts.html     — if true, message is HTML; otherwise plain text
    * opts.buttons  — [{ label, value, className? }, …]
    */
+  /**
+   * Zoom dialog — a small modal with a number input, a "Reset to
+   * 100%" button, and Apply / Cancel. Replaces the bare prompt()
+   * so the user can reach 100% in one click instead of having to
+   * type the value (the typing flow stays available for exact
+   * percents like 175). Apply or Enter commits; Cancel or Esc
+   * aborts. Out-of-range inputs (25–400) flash the input border
+   * and don't commit.
+   */
+  function showZoomDialog() {
+    const current = Math.round(state.zoom * 100);
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    const t = document.createElement('h3'); t.textContent = 'Zoom';
+    head.appendChild(t);
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close'; x.textContent = '×';
+    x.addEventListener('click', cleanup);
+    head.appendChild(x);
+    modal.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body';
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '0.5rem';
+    row.style.flexWrap = 'wrap';
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.min = '25';
+    inp.max = '400';
+    inp.step = '5';
+    inp.value = String(current);
+    inp.style.width = '5.5em';
+    const pct = document.createElement('span'); pct.textContent = '%';
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'ed-mini';
+    reset.textContent = '100%';
+    reset.title = 'Reset to 100%';
+    reset.addEventListener('click', function () {
+      inp.value = '100';
+      apply();
+    });
+    const range = document.createElement('span');
+    range.style.color = '#888';
+    range.style.fontSize = '0.85em';
+    range.textContent = 'range 25–400';
+    row.appendChild(inp);
+    row.appendChild(pct);
+    row.appendChild(reset);
+    row.appendChild(range);
+    body.appendChild(row);
+    modal.appendChild(body);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'ed-modal-buttons';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', cleanup);
+    btnRow.appendChild(cancel);
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'ed-primary';
+    applyBtn.textContent = 'Apply';
+    applyBtn.addEventListener('click', apply);
+    btnRow.appendChild(applyBtn);
+    modal.appendChild(btnRow);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    inp.focus();
+    inp.select();
+
+    function apply() {
+      const v = parseFloat(inp.value);
+      if (!Number.isFinite(v) || v < 25 || v > 400) {
+        inp.style.borderColor = '#f88';
+        inp.focus();
+        return;
+      }
+      setZoom(v / 100);
+      cleanup();
+    }
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') cleanup();
+      else if (e.key === 'Enter') apply();
+    }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
+    });
+  }
+
   function showChoiceDialog(opts) {
     return new Promise(function (resolve) {
       const overlay = document.createElement('div');
@@ -5552,18 +5655,12 @@
   helpBtn.addEventListener('click', function () { showHelp('general'); });
   zoomInBtn.addEventListener('click',  function () { zoomIn();  });
   zoomOutBtn.addEventListener('click', function () { zoomOut(); });
-  // Click the percentage to type an exact zoom value. Most fine-
-  // grained way to dial in a target zoom for direct comparison with
-  // the live page. Out-of-range / unparseable inputs are ignored.
-  // (Reset to 100% is just typing 100.)
-  zoomLevelEl.addEventListener('click', function () {
-    const current = Math.round(state.zoom * 100);
-    const input = prompt('Zoom percent (25 – 400):', current);
-    if (input == null) return;
-    const v = parseFloat(input);
-    if (Number.isFinite(v) && v >= 25 && v <= 400) setZoom(v / 100);
-  });
-  zoomLevelEl.title = 'Click to type an exact zoom percentage';
+  // Click the percentage to open a small zoom dialog. Lets the user
+  // either type an exact percent OR hit "100%" for a one-click
+  // return to fit-to-canvas — the easy reset that the bare prompt()
+  // dialog used to require typing.
+  zoomLevelEl.addEventListener('click', showZoomDialog);
+  zoomLevelEl.title = 'Click to set an exact zoom percentage';
   undoBtn.addEventListener('click', undo);
   redoBtn.addEventListener('click', redo);
   renderDiagGrid(); // initial paint if the flag was already on
