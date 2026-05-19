@@ -1771,28 +1771,13 @@
     }
 
     const first = srcLines[0];
-    const merged = {
-      id: uid('l'),
-      kind: 'manual',
-      segments: combinedSegments,
-      points: combinedSegments
-        .filter(function (s) { return s.endpoint; })
-        .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; }),
-      closed: combinedSegments.some(function (s) { return s.cmd === 'Z'; }),
-      smoothed: false,
-      filled:   !!first.filled,
-      stroke:   first.stroke || null,
-      width:    first.width != null ? first.width : null,
-      linejoin: first.linejoin || null,
-      d: '',
-      positionOffset: { dx: 0, dy: 0 },
-      groupId: first.groupId || state.activeGroupId,
-      overrides: {}
-    };
-    computeLineD(merged);
+    const firstGroup = state.groups.find(function (g) { return g.id === first.groupId; });
+    const targetGroupName = firstGroup ? firstGroup.name : null;
+    const mergedName = first.name || nextDefaultName();
 
-    // Cascade delete the originals (site-wide via their masterIds),
-    // then push the merged line + mint its master.
+    // Cascade delete the originals (site-wide via their masterIds).
+    // Drop the originals BEFORE minting the new master + per-class
+    // instances so naming / group fallback logic sees a clean state.
     const targetMasterIds = new Set();
     srcLines.forEach(function (l) { if (l.masterId) targetMasterIds.add(l.masterId); });
     state.pageConfig.useClasses.forEach(function (cid) {
@@ -1806,9 +1791,78 @@
       return !targetMasterIds.has(m.id);
     });
 
-    state.lines.push(merged);
-    mintMasterForLine(merged);
-    selectOnly(merged.id);
+    // Make sure every class has a target group to receive the merged
+    // line — same rule as the SVG import path.
+    if (targetGroupName) ensureGroupInAllClasses(targetGroupName);
+
+    // Mint the canonical merged master once.
+    const cloneSegment = function (s) {
+      return {
+        cmd: s.cmd,
+        controlPoints: (s.controlPoints || []).map(function (cp) { return { x: cp.x, y: cp.y }; }),
+        endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null,
+        arcArgs: s.arcArgs ? Object.assign({}, s.arcArgs) : undefined
+      };
+    };
+    const masterSegments = combinedSegments.map(cloneSegment);
+    const masterPoints = masterSegments
+      .filter(function (s) { return s.endpoint; })
+      .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; });
+    const masterClosed = masterSegments.some(function (s) { return s.cmd === 'Z'; });
+    const mid = 'm-' + Math.random().toString(36).slice(2, 10);
+    const masterRec = {
+      id: mid,
+      scope: {},
+      kind: 'manual',
+      segments: masterSegments,
+      points: masterPoints,
+      closed: masterClosed,
+      smoothed: false,
+      filled:   !!first.filled,
+      stroke:   first.stroke || null,
+      width:    first.width != null ? first.width : null,
+      linejoin: first.linejoin || null,
+      name: mergedName
+    };
+    computeLineD(masterRec);
+    state.masters.push(masterRec);
+
+    // Drop an instance into every class — same canonical merged
+    // object across the site, parallel to the SVG import flow.
+    let currentClassLineId = null;
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket) return;
+      let groupId = null;
+      if (targetGroupName) {
+        const g = bucket.groups.find(function (g) { return g.name === targetGroupName; });
+        if (g) groupId = g.id;
+      }
+      if (!groupId && bucket.groups[0]) groupId = bucket.groups[0].id;
+      const line = {
+        id: uid('l'),
+        masterId: mid,
+        kind: 'manual',
+        segments: masterSegments.map(cloneSegment),
+        points: masterPoints.map(function (p) { return { x: p.x, y: p.y }; }),
+        closed: masterClosed,
+        smoothed: false,
+        filled:   !!first.filled,
+        stroke:   first.stroke || null,
+        width:    first.width != null ? first.width : null,
+        linejoin: first.linejoin || null,
+        d: '',
+        positionOffset: { dx: 0, dy: 0 },
+        groupId: groupId,
+        overrides: {},
+        name: mergedName
+      };
+      computeLineD(line);
+      bucket.lines.push(line);
+      if (cid === state.classId) currentClassLineId = line.id;
+    });
+
+    if (currentClassLineId) selectOnly(currentClassLineId);
     state.dirty = true;
     snapshot();
     renderAll();
