@@ -465,9 +465,13 @@ body.editor {
 #draw-surface .bg-outer { fill: #181818; pointer-events: none; }
 #draw-surface .bg-page  {
   fill: #232323;
-  stroke: #4a4a4a;
-  stroke-width: 1;
-  stroke-dasharray: 8 4;
+  /* Was #4a4a4a / 1px — nearly invisible against #232323. Brighter
+     stroke + 2px width (non-scaling so it stays crisp at any zoom)
+     gives the page boundary a real presence without competing
+     visually with authored content. */
+  stroke: #7a7a7a;
+  stroke-width: 2;
+  stroke-dasharray: 10 5;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
