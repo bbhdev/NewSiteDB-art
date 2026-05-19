@@ -604,8 +604,13 @@
   // the line-creation tools have somewhere to put their output.
   if (!state.groups.length) state.groups = [defaultGroup()];
 
-  state.activeGroupId = state.groups[0].id;
-  state.openGroupIds[state.activeGroupId] = true;
+  // Editor opens in a neutral state — no group active, none expanded,
+  // selection panel empty. Picking a group row or an object lights up
+  // the right panel. commitLine + finalizeSvgImport fall back to the
+  // first group when activeGroupId is null so a fresh draw still has
+  // somewhere to land.
+  state.activeGroupId = null;
+  state.openGroupIds  = {};
 
   function defaultPalette() {
     return [
@@ -1719,7 +1724,10 @@
   // is selected, ready for an immediate "Merge into one" if the
   // drawing arrived as several files.
   function finalizeSvgImport(importedLines) {
-    const activeGroup = state.groups.find(function (g) { return g.id === state.activeGroupId; });
+    // Active group when set, else first group, else fall through to
+    // the "Imported" group that ensureGroupInAllClasses will mint.
+    const activeGroup = state.groups.find(function (g) { return g.id === state.activeGroupId; })
+                     || state.groups[0];
     const targetName  = activeGroup ? activeGroup.name : 'Imported';
     // Make sure every class has a group with this name; create
     // empties where missing so each class's instance has somewhere
@@ -3142,7 +3150,7 @@
       // class-specific shift yet. Drag-translate later will populate
       // positionOffset; the master keeps the drawn position.
       positionOffset: { dx: 0, dy: 0 },
-      groupId: state.activeGroupId,
+      groupId: state.activeGroupId || (state.groups[0] && state.groups[0].id) || null,
       overrides: {}
     };
     regenerateLineD(line);
