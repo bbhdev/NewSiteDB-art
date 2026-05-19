@@ -341,7 +341,13 @@
     }
 
     // Animate each rendered line per its group's behaviors + overrides.
-    layer.querySelectorAll('path[data-line-id]').forEach(function (pathEl) {
+    // Walk every renderable line element (paths AND images both
+    // carry data-line-id) so the scroll-driven transform pipeline
+    // below applies to images too. v0.5.17 added a static
+    // positionOffset transform on images but didn't wire them to
+    // the scrub pipeline; broadening the selector here picks them
+    // up so translateX / translateY / rotate behaviors take effect.
+    layer.querySelectorAll('[data-line-id]').forEach(function (pathEl) {
       const group = groupById[pathEl.dataset.groupId];
       if (!group) return;
 
@@ -502,7 +508,11 @@
       //   reverse  — dashoffset animates from −1 to 0; reveals end → begin.
       // Diagnostic mode: skip the drawIn reveal so the full path is
       // visible at scroll=0 (matches the editor's render).
-      if (behaviors.drawIn && !diagMode) {
+      // Draw-in: stroke-dash reveal across the same scroll range.
+      // Path-only — <image> has no stroke for dashing, so this is
+      // a no-op there (would just clutter the element with dash
+      // attrs that do nothing).
+      if (behaviors.drawIn && !diagMode && pathEl.tagName.toLowerCase() === 'path') {
         pathEl.setAttribute('pathLength',       '1');
         pathEl.setAttribute('stroke-dasharray', '1 1');
         const dir = behaviors.drawInDirection === 'reverse' ? -1 : 1;
