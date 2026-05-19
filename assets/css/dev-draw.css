@@ -330,9 +330,11 @@ body.editor {
   border-color: var(--accent);
 }
 .ed-field.is-overridden input[type="text"],
-.ed-field.is-overridden input[type="number"] {
+.ed-field.is-overridden input[type="number"],
+.ed-field.is-overridden select {
   border-left: 2px solid var(--accent);
 }
+.ed-field.is-overridden > label { color: var(--accent); }
 .ed-field > label {
   color: #c0c0c0;
   font-size: 0.85em;

@@ -2283,7 +2283,7 @@
   function captureWizardDraft(line) {
     if (!state.wizard || state.wizard.draftId) return;
     const mid = 'm-' + Math.random().toString(36).slice(2, 10);
-    const m = { id: mid };
+    const m = { id: mid, scope: {} };
     MASTER_VISUAL_KEYS.forEach(function (k) {
       if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
     });
@@ -2388,9 +2388,26 @@
     // wizard banner's Save / Cancel buttons take it from here.
     if (state.wizard && !state.wizard.draftId) {
       captureWizardDraft(line);
+    } else {
+      // Mint a master right away so the line participates in the
+      // scope contract from the first paint (otherwise the scope
+      // toggles wouldn't appear until after Save → reload).
+      mintMasterForLine(line);
     }
     snapshot();
     renderAll();
+  }
+
+  function mintMasterForLine(line) {
+    if (line.masterId) return;
+    const mid = 'm-' + Math.random().toString(36).slice(2, 10);
+    const m = { id: mid, scope: {} };
+    MASTER_VISUAL_KEYS.forEach(function (k) {
+      if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
+    });
+    if (!m.name) m.name = line.name || line.id;
+    state.masters.push(m);
+    line.masterId = mid;
   }
 
   function deleteLine(id) {
@@ -3709,12 +3726,12 @@
     const wrap = document.createElement('div');
     wrap.className = 'ed-settings';
 
-    wrap.appendChild(textField('Name', line.name || '', function (v) {
+    wrap.appendChild(withScope(textField('Name', line.name || '', function (v) {
       setVisualProp(line.id, 'name', v);
       scheduleSnapshot();
       renderLines();
       renderGroupsList();
-    }, 'optional'));
+    }, 'optional'), line.masterId, 'name'));
 
     // Visibility — toggle off to hide on the live site without
     // deleting. Useful for trying variants. Renders faded in the
@@ -3747,11 +3764,11 @@
     // Smoothing toggle is only meaningful for the freehand kinds — for
     // straight-line and chain kinds the regenerator ignores it.
     if (line.kind === 'freehand' || line.kind === 'freehandClosed') {
-      wrap.appendChild(checkboxField('Smooth', !!line.smoothed, function (v) {
+      wrap.appendChild(withScope(checkboxField('Smooth', !!line.smoothed, function (v) {
         setVisualProp(line.id, 'smoothed', v);
         scheduleSnapshot();
         renderLines();
-      }));
+      }), line.masterId, 'smoothed'));
     }
 
     // Primitive parameters (cx/cy/r for circle, w/h/r for rect, etc.).
@@ -3764,36 +3781,36 @@
       const PRIM = PRIMITIVES[line.kind];
       PRIM.paramFields.forEach(function (entry) {
         const key = entry[0], label = entry[1];
-        wrap.appendChild(numberField(label, line.params[key], function (v) {
+        wrap.appendChild(withScope(numberField(label, line.params[key], function (v) {
           setVisualProp(line.id, 'params.' + key, v);
           scheduleSnapshot();
           renderLines();
-        }));
+        }), line.masterId, 'params.' + key));
       });
-      wrap.appendChild(checkboxField('Filled', !!line.filled, function (v) {
+      wrap.appendChild(withScope(checkboxField('Filled', !!line.filled, function (v) {
         setVisualProp(line.id, 'filled', v);
         scheduleSnapshot();
         renderLines();
-      }));
+      }), line.masterId, 'filled'));
     }
 
     wrap.appendChild(divider('Appearance'));
-    wrap.appendChild(strokeField('Color', line.stroke, function (v) {
+    wrap.appendChild(withScope(strokeField('Color', line.stroke, function (v) {
       setVisualProp(line.id, 'stroke', v);
       scheduleSnapshot();
       renderLines();
       renderGroupsList();
-    }));
-    wrap.appendChild(overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
+    }), line.masterId, 'stroke'));
+    wrap.appendChild(withScope(overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
       setVisualProp(line.id, 'width', v);
       scheduleSnapshot();
       renderLines();
-    }));
+    }), line.masterId, 'width'));
     // Stroke corner style. On a filled shape with a same-color stroke
     // (the default for primitives), `round` produces the bulgy
     // rounded-tip effect that scales with line width; `miter` keeps
     // sharp geometric points; `bevel` flattens them.
-    wrap.appendChild(selectField('Corners', line.linejoin || 'round',
+    wrap.appendChild(withScope(selectField('Corners', line.linejoin || 'round',
       [
         { value: 'round', label: 'Round' },
         { value: 'miter', label: 'Miter' },
@@ -3803,7 +3820,7 @@
         setVisualProp(line.id, 'linejoin', v);
         scheduleSnapshot();
         renderLines();
-      }));
+      }), line.masterId, 'linejoin'));
 
     wrap.appendChild(divider('Behavior'));
     const ov = line.overrides || {};
@@ -3842,7 +3859,60 @@
   // ── Field constructors ────────────────────────────────────────────
   // (v0.3.5 removed: wrapWithMasterLink — the per-instance master-
   // link toggle is gone. Scope is now master-level, configured via
-  // Settings, not surfaced in the line panel.)
+  // the scopeToggle below.)
+
+  /**
+   * Per-master scope toggle button. Flips one keyPath between
+   * canonical (lives on master, propagates to every instance) and
+   * local (lives in instance.overrides, this instance only). The
+   * button itself reads master.scope; setMasterScope handles the
+   * actual flip + cleanup. Returns null for keys outside the scope
+   * contract (position sub-keys, kind, d, points, segments) so the
+   * caller can `if (tog) field.appendChild(tog)` without checks.
+   */
+  function scopeToggle(masterId, keyPath) {
+    if (!masterId) return null;
+    if (keyPath === 'kind' || keyPath === 'd'
+        || keyPath === 'points' || keyPath === 'segments') return null;
+    const parts = keyPath.split('.');
+    if (parts[0] === 'params' && POSITION_PARAM_SUBKEYS.indexOf(parts[1]) !== -1) {
+      return null;
+    }
+    const master = state.masters.find(function (m) { return m.id === masterId; });
+    if (!master) return null;
+    const local = isLocal(master, keyPath);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ed-link-toggle';
+    btn.textContent = local ? '✎' : '🔗';
+    btn.title = local
+      ? 'LOCAL — this property is per-class (overrides live on each instance). Click to make it canonical (one value on the master, propagates to every class).'
+      : 'CANONICAL — this property lives on the master and propagates to every class. Click to make it LOCAL so each class can hold its own value.';
+    btn.addEventListener('click', function () {
+      setMasterScope(masterId, keyPath, local ? 'canonical' : 'local');
+      snapshot();
+      renderSelectionPanel();
+      renderLines();
+    });
+    return btn;
+  }
+
+  /**
+   * Decorate a field row (`.ed-field`) with a scope toggle. No-op
+   * when the keyPath isn't scope-able. Adds `.ed-master-linked` to
+   * widen the row's grid track for the toggle, and `.is-overridden`
+   * when the master scope is local so the field reads as "diverged
+   * from master" (accent border + colored toggle icon).
+   */
+  function withScope(field, masterId, keyPath) {
+    const tog = scopeToggle(masterId, keyPath);
+    if (!tog) return field;
+    field.classList.add('ed-master-linked');
+    const master = state.masters.find(function (m) { return m.id === masterId; });
+    if (master && isLocal(master, keyPath)) field.classList.add('is-overridden');
+    field.appendChild(tog);
+    return field;
+  }
 
   function textField(label, value, onChange, placeholder) {
     const wrap = document.createElement('div');
