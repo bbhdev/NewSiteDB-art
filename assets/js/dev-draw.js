@@ -555,6 +555,13 @@
     // just fills this with every object id (no separate allSelected flag).
     selectedIds:    [],
     activeToolId:   'select',  // neutral on first load — no accidental strokes
+    // Edit scope: 'all' = mutations cross every class (the default);
+    // 'one' = only the current class is affected. Session-local
+    // (not persisted) so a reload starts fresh in 'all' — safer
+    // than discovering yesterday's restricted mode mid-edit.
+    // v0.7.0 introduces the toggle + visual; action wiring lands
+    // in v0.7.1+.
+    mode: 'all',
     smoothing: true,
     chainPoints: null,         // active polyline points when lineChain is mid-chain
     bezierPoints: null,        // active bezier anchors when bezier is mid-draw
@@ -6219,6 +6226,32 @@
   if (cloneClassBtn) {
     cloneClassBtn.addEventListener('click', showCloneDialog);
   }
+
+  // Scope mode toggle (A / 1) — v0.7.0 scaffolding. Flips
+  // state.mode between 'all' and 'one' and re-paints the class-
+  // tab strip so the visual treatment matches. Action wiring is
+  // intentionally noop at this stage — the mode is observable but
+  // doesn't change behavior yet.
+  const scopeModeBtn = document.getElementById('scope-mode-btn');
+  const classTabsEl  = document.querySelector('.ed-class-tabs');
+  function applyScopeModeVisuals() {
+    if (classTabsEl) classTabsEl.classList.toggle('is-mode-all', state.mode === 'all');
+    if (scopeModeBtn) {
+      scopeModeBtn.textContent = state.mode === 'all' ? 'A' : '1';
+      scopeModeBtn.classList.toggle('is-mode-all', state.mode === 'all');
+      scopeModeBtn.title = state.mode === 'all'
+        ? 'Scope: ALL classes — edits apply across every class. Click to restrict to the current class only.'
+        : 'Scope: ONE class — edits stay in the current class. Click to apply across every class.';
+    }
+  }
+  if (scopeModeBtn) {
+    scopeModeBtn.addEventListener('click', function () {
+      state.mode = state.mode === 'all' ? 'one' : 'all';
+      applyScopeModeVisuals();
+    });
+  }
+  applyScopeModeVisuals();
+
   selectAllBtn.addEventListener('click', toggleSelectAll);
   updateSelectAllButton();
 
