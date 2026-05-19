@@ -162,7 +162,7 @@ $payload = json_encode([
               id="clone-class-btn"
               class="ed-class-clone"
               title="Clone groups from another class into this one — pick which groups to bring across."
-              aria-label="Clone groups from another class">⎘</button>
+              aria-label="Clone groups from another class">⧉</button>
     </div>
   </div>
 
