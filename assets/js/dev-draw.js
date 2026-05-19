@@ -3308,7 +3308,31 @@
    */
   function deleteGroup(id, alsoDeleteLines) {
     if (alsoDeleteLines) {
-      state.lines = state.lines.filter(function (l) { return l.groupId !== id; });
+      // Cascade site-wide via masterId — matches single-line delete
+      // semantics ("removing an object means removing it everywhere
+      // it appears"). The GROUP itself is still class-local (groups
+      // are per-class), so removing the group leaves same-named
+      // groups in other classes intact, just emptied of these
+      // particular objects.
+      const targetMasterIds = new Set();
+      const looseInstanceIds = new Set();
+      state.lines.forEach(function (l) {
+        if (l.groupId !== id) return;
+        if (l.masterId) targetMasterIds.add(l.masterId);
+        else            looseInstanceIds.add(l.id);
+      });
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        if (!bucket || !Array.isArray(bucket.lines)) return;
+        bucket.lines = bucket.lines.filter(function (l) {
+          if (l.masterId && targetMasterIds.has(l.masterId)) return false;
+          if (cid === state.classId && looseInstanceIds.has(l.id)) return false;
+          return true;
+        });
+      });
+      state.masters = state.masters.filter(function (m) {
+        return !targetMasterIds.has(m.id);
+      });
     }
     if (state.groups.length > 1) {
       state.groups = state.groups.filter(function (g) { return g.id !== id; });
@@ -5630,8 +5654,23 @@
         const line = state.lines.find(function (l) { return l.id === snap.id; });
         if (!line) return;
         translateLine(line, snap.origPoints, snap.origSegments, snap.origParams, snap.origOverrides, snap.origOffset, dx, dy);
+        // Update every DOM element bound to this line. Paths take the
+        // new `d`; <image> elements need x/y/width/height instead (no
+        // d attribute), so the bbox path AND the bitmap track the
+        // drag in lockstep. Without this branch, paths moved and the
+        // image stayed put until pointer-up triggered a full
+        // renderLines.
         linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
-          .forEach(function (el) { el.setAttribute('d', line.d); });
+          .forEach(function (el) {
+            if (el.tagName.toLowerCase() === 'image') {
+              el.setAttribute('x', line.params.x);
+              el.setAttribute('y', line.params.y);
+              el.setAttribute('width',  line.params.w);
+              el.setAttribute('height', line.params.h);
+            } else {
+              el.setAttribute('d', line.d);
+            }
+          });
       });
       state.dirty = true;
       renderHandles(); // accent dots / single-line handles follow their lines

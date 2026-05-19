@@ -249,11 +249,24 @@
                   :                                'xMidYMid meet';
         const img = document.createElementNS(SVG_NS, 'image');
         img.setAttributeNS(null, 'href', line.params.src);
+        // line.params.x/y are canonical (master coords). Per-class
+        // positionOffset comes through as a separate field — apply
+        // it via transform=translate, parallel to how the <path>
+        // branch below handles offset. Without this the image
+        // ignored its positionOffset and rendered at the canonical
+        // position even after a per-class drag.
+        const offX = (line.positionOffset && Number.isFinite(line.positionOffset.dx))
+                     ? line.positionOffset.dx : 0;
+        const offY = (line.positionOffset && Number.isFinite(line.positionOffset.dy))
+                     ? line.positionOffset.dy : 0;
         img.setAttribute('x', line.params.x);
         img.setAttribute('y', line.params.y);
         img.setAttribute('width',  line.params.w);
         img.setAttribute('height', line.params.h);
         img.setAttribute('preserveAspectRatio', fit);
+        if (offX !== 0 || offY !== 0) {
+          img.setAttribute('transform', 'translate(' + offX + ' ' + offY + ')');
+        }
         img.dataset.lineId  = line.id;
         img.dataset.groupId = line.groupId || '';
         layer.appendChild(img);
