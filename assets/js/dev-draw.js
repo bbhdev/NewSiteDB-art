@@ -2657,11 +2657,33 @@
     state.chainPoints  = null;
     state.bezierPoints = null;
     previewG.innerHTML = '';
+    // Map the current selection's instance IDs to masterIds before
+    // we flip the class — same object has a different instance id in
+    // each class, but the masterId is shared, so we can re-select the
+    // counterpart in the new class. Lets the user tweak an object
+    // across classes without losing their place.
+    const oldLines = (state.byClass[state.classId] && state.byClass[state.classId].lines) || [];
+    const selectedMasterIds = state.selectedIds
+      .map(function (id) {
+        const l = oldLines.find(function (x) { return x.id === id; });
+        return l ? l.masterId : null;
+      })
+      .filter(function (mid) { return mid != null; });
     state.classId = newClassId;
     try { localStorage.setItem('ed-last-class', newClassId); } catch (e) {}
-    // Selection refers to IDs in the previous class; clear it.
-    state.selectedIds = [];
-    state.activeGroupId = (state.groups[0] && state.groups[0].id) || null;
+    // Re-select counterparts in the new class. Any masters that don't
+    // have an instance here just drop out silently.
+    const newLines = (state.byClass[newClassId] && state.byClass[newClassId].lines) || [];
+    state.selectedIds = newLines
+      .filter(function (l) { return selectedMasterIds.indexOf(l.masterId) !== -1; })
+      .map(function (l) { return l.id; });
+    if (state.selectedIds.length) {
+      const first = newLines.find(function (l) { return l.id === state.selectedIds[0]; });
+      state.activeGroupId = (first && first.groupId)
+        || (state.groups[0] && state.groups[0].id) || null;
+    } else {
+      state.activeGroupId = (state.groups[0] && state.groups[0].id) || null;
+    }
     state.openGroupIds = {};
     if (state.activeGroupId) state.openGroupIds[state.activeGroupId] = true;
     applyPageConfig();
