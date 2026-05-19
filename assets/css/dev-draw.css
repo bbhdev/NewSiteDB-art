@@ -58,20 +58,25 @@ body.editor {
   border-left: 1px solid #444;
   margin-left: 0.2rem;
 }
-.ed-class-clone {
+/* Specificity bump (.ed-toolbar .ed-class-clone, not just
+   .ed-class-clone) so we beat the .ed-toolbar button height/
+   font-size baseline. font-size in rem (not em) is absolute, not
+   relative to the toolbar's 0.875rem button text. */
+.ed-toolbar .ed-class-clone {
   background: transparent;
   color: #888;
   border: 1px solid transparent;
   border-radius: 4px;
-  padding: 0.15rem 0.5rem;
+  padding: 0 0.5rem;
   margin-left: 0.4rem;
-  font-size: 4.8em;
+  height: auto;
+  font-size: 2rem;
   line-height: 1;
   cursor: pointer;
 }
-.ed-class-clone:hover { color: #fff; background: #2a2a2a; }
-.ed-class-clone:focus { outline: none; }
-.ed-class-clone:focus-visible {
+.ed-toolbar .ed-class-clone:hover { color: #fff; background: #2a2a2a; }
+.ed-toolbar .ed-class-clone:focus { outline: none; }
+.ed-toolbar .ed-class-clone:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
