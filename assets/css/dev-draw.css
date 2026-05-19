@@ -74,6 +74,16 @@ body.editor {
   color: #fff !important;
   border-color: var(--accent) !important;
 }
+/* Suppress the browser's default focus ring on state buttons —
+   they already show their state via .is-active. Keyboard users
+   still get :focus-visible. */
+.ed-class-tab:focus,
+.ed-tool:focus { outline: none; }
+.ed-class-tab:focus-visible,
+.ed-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .ed-version {
   color: #666;
   font-weight: 400;
