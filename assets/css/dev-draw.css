@@ -307,6 +307,28 @@ body.editor {
   color: #a8a8a8;
   font-size: 0.8em;
 }
+.ed-group-eye,
+.ed-group-delete {
+  background: transparent;
+  color: #888;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  margin-left: 0.15rem;
+  line-height: 1;
+  font: inherit;
+  cursor: pointer;
+}
+.ed-group-eye { font-size: 0.8em; }
+.ed-group-delete { font-size: 1.1em; }
+.ed-group-eye:hover { color: #fff; background: #2a2a2a; }
+.ed-group-eye.is-hidden { color: #6a6a6a; }
+.ed-group-delete:hover { color: #f88; background: #2c1818; }
+.ed-group.is-hidden > .ed-group-row .ed-group-name,
+.ed-group.is-hidden > .ed-group-row .ed-group-count {
+  opacity: 0.5;
+  font-style: italic;
+}
 .ed-line-list {
   list-style: none;
   padding: 0 0 0 1rem;

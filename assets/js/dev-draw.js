@@ -3167,8 +3167,9 @@
       if (isSelected(line.id)) p.classList.add('is-selected');
       // Hidden lines stay visible in the editor (so the user can find
       // them and re-enable) but render at low opacity so they read as
-      // "off". The runtime drops them entirely.
-      if (line.hidden) p.style.opacity = '0.18';
+      // "off". A hidden group also fades every line in it. The runtime
+      // drops both cases entirely.
+      if (line.hidden || (group && group.hidden)) p.style.opacity = '0.18';
       p.dataset.lineId = line.id;
       linesG.appendChild(p);
     });
@@ -3587,6 +3588,34 @@
       count.textContent = n + ' line' + (n === 1 ? '' : 's');
       row.appendChild(name);
       row.appendChild(count);
+      // Inline 👁 + ✕ controls — both stopPropagation so they don't
+      // also trigger the row's "open this group" click handler.
+      const eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'ed-group-eye' + (g.hidden ? ' is-hidden' : '');
+      eye.textContent = g.hidden ? '⊘' : '●';
+      eye.title = g.hidden ? 'Group is hidden — click to show' : 'Group is visible — click to hide';
+      eye.setAttribute('aria-label', eye.title);
+      eye.addEventListener('click', function (e) {
+        e.stopPropagation();
+        updateGroup(g.id, { hidden: !g.hidden });
+        snapshot();
+        renderGroupsList();
+        renderLines();
+      });
+      row.appendChild(eye);
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'ed-group-delete';
+      del.textContent = '×';
+      del.title = 'Delete group…';
+      del.setAttribute('aria-label', 'Delete group');
+      del.addEventListener('click', function (e) {
+        e.stopPropagation();
+        confirmAndDeleteGroup(g);
+      });
+      row.appendChild(del);
+      if (g.hidden) li.classList.add('is-hidden');
       row.addEventListener('click', function () {
         const wasOpen = !!state.openGroupIds[g.id];
         state.activeGroupId = g.id;
@@ -3832,6 +3861,15 @@
     wrap.className = 'ed-settings';
 
     wrap.appendChild(textField('Name', g.name, function (v) { updateGroup(g.id, { name: v }); }));
+    // Group visibility — per-class (groups themselves are per-class,
+    // so this is naturally local). Hidden groups fade in the editor
+    // and are skipped entirely on the live site, just like hidden
+    // lines. Toggleable from the sidebar group-row 👁 too.
+    wrap.appendChild(checkboxField('Visible', !g.hidden, function (v) {
+      updateGroup(g.id, { hidden: !v });
+      renderGroupsList();
+      renderLines();
+    }));
     wrap.appendChild(triggerField('Trigger', g.trigger || '', function (v) {
       updateGroup(g.id, { trigger: v.trim() === '' ? null : v.trim() });
     }));
@@ -3867,44 +3905,45 @@
 
     selectionPanel.appendChild(wrap);
 
-    // Delete is always available. Empty groups: a single confirm.
-    // Non-empty groups: a custom 3-button dialog so the choice
-    // (Cancel / Group only / Group + lines) is one prompt instead of
-    // two chained confirms.
+    // Delete is always available. The confirm dialog (empty vs.
+    // non-empty group) lives in confirmAndDeleteGroup so the sidebar
+    // group-row ✕ button can reuse the same flow.
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
     const del = document.createElement('button');
     del.className = 'ed-danger';
     del.textContent = 'Delete group';
-    del.addEventListener('click', async function () {
-      const lineCount = state.lines.filter(function (l) { return l.groupId === g.id; }).length;
-      if (lineCount === 0) {
-        const choice = await showChoiceDialog({
-          title: 'Delete group',
-          message: 'Delete empty group "' + g.name + '"?',
-          buttons: [
-            { label: 'Cancel', value: null },
-            { label: 'Delete', value: 'group', className: 'ed-danger' }
-          ]
-        });
-        if (choice === 'group') deleteGroup(g.id, false);
-        return;
-      }
+    del.addEventListener('click', function () { confirmAndDeleteGroup(g); });
+    actions.appendChild(del);
+    selectionPanel.appendChild(actions);
+  }
+
+  async function confirmAndDeleteGroup(g) {
+    const lineCount = state.lines.filter(function (l) { return l.groupId === g.id; }).length;
+    if (lineCount === 0) {
       const choice = await showChoiceDialog({
-        title:   'Delete group',
-        message: 'Delete group "' + g.name + '"? It contains ' +
-                 lineCount + ' line' + (lineCount === 1 ? '' : 's') + '.',
+        title: 'Delete group',
+        message: 'Delete empty group "' + g.name + '"?',
         buttons: [
-          { label: 'Cancel',         value: null },
-          { label: 'Group only',     value: 'group' },
-          { label: 'Group and lines', value: 'both', className: 'ed-danger' }
+          { label: 'Cancel', value: null },
+          { label: 'Delete', value: 'group', className: 'ed-danger' }
         ]
       });
       if (choice === 'group') deleteGroup(g.id, false);
-      else if (choice === 'both')  deleteGroup(g.id, true);
+      return;
+    }
+    const choice = await showChoiceDialog({
+      title:   'Delete group',
+      message: 'Delete group "' + g.name + '"? It contains ' +
+               lineCount + ' line' + (lineCount === 1 ? '' : 's') + '.',
+      buttons: [
+        { label: 'Cancel',         value: null },
+        { label: 'Group only',     value: 'group' },
+        { label: 'Group and lines', value: 'both', className: 'ed-danger' }
+      ]
     });
-    actions.appendChild(del);
-    selectionPanel.appendChild(actions);
+    if (choice === 'group') deleteGroup(g.id, false);
+    else if (choice === 'both')  deleteGroup(g.id, true);
   }
 
   function renderLinePanel(line) {

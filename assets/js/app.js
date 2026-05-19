@@ -232,17 +232,19 @@
       return paletteById[ref] ? paletteById[ref].value : ref;
     }
 
-    // Render JSON-defined lines. Hidden lines are skipped entirely on
-    // the live site — the editor's Visible toggle is the gate.
+    // Render JSON-defined lines. Hidden lines (instance or group)
+    // are skipped entirely on the live site — the editor's Visible
+    // toggles are the gate.
     lines.forEach(function (line) {
       if (line.hidden) return;
+      const group = groupById[line.groupId];
+      if (group && group.hidden) return;
       const p = document.createElementNS(SVG_NS, 'path');
       p.setAttribute('d', line.d);
       // Effective stroke / width: line value wins, then group default,
       // else fall back to the CSS rule on #lines-layer path.
       // Set via style (not the SVG attribute) so var(--…) resolves —
       // SVG presentation attributes don't evaluate CSS vars in most browsers.
-      const group = groupById[line.groupId];
       const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
       const stroke    = resolveStroke(strokeRef);
       const width  = (line.width != null) ? line.width
