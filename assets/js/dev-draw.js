@@ -2429,6 +2429,48 @@
    * anchor. The result feels like the hand-authored wavy seed lines —
    * smooth curves through every click.
    */
+  /**
+   * Return the auto-smoothed Bezier as a segments array — same
+   * Catmull-Rom-to-Bezier math as bezierThroughPoints but emitting
+   * the structured segment form instead of a `d` string. Used by
+   * the CP-handle renderer to surface bezier-kind curves' control
+   * points without storing them yet; on the user's first CP drag
+   * the line gets promoted to `kind: 'manual'` with these segments
+   * locked in.
+   */
+  function bezierSegmentsFromPoints(points, closed) {
+    if (!points.length) return [];
+    const segments = [{
+      cmd: 'M', controlPoints: [],
+      endpoint: { x: points[0].x, y: points[0].y }
+    }];
+    if (points.length === 1) return segments;
+    if (points.length === 2) {
+      segments.push({
+        cmd: 'L', controlPoints: [],
+        endpoint: { x: points[1].x, y: points[1].y }
+      });
+      if (closed) segments.push({ cmd: 'Z', controlPoints: [], endpoint: null });
+      return segments;
+    }
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i - 1] || points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2] || points[i + 1];
+      segments.push({
+        cmd: 'C',
+        controlPoints: [
+          { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 },
+          { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 }
+        ],
+        endpoint: { x: p2.x, y: p2.y }
+      });
+    }
+    if (closed) segments.push({ cmd: 'Z', controlPoints: [], endpoint: null });
+    return segments;
+  }
+
   function bezierThroughPoints(points) {
     if (!points.length) return '';
     if (points.length === 1) return 'M ' + fmt(points[0].x) + ' ' + fmt(points[0].y);
@@ -4428,34 +4470,47 @@
       handlesG.appendChild(c);
     });
 
-    // For manual lines (incl. SVG imports) — surface each cubic /
-    // quadratic segment's control points as smaller cyan-filled
-    // handles, with a dashed tangent line back to the anchor.
-    // Anchors stay the bigger white-fill handles handled above. The
-    // user can shape curves directly instead of re-importing.
+    // Surface each cubic / quadratic segment's control points as
+    // smaller cyan-filled handles + a dashed tangent line back to
+    // the anchor. Anchors stay the bigger white-fill handles
+    // handled above. Two kinds:
+    //   - kind: 'manual' — segments are stored; CP edits go
+    //     straight into line.segments[i].controlPoints[j].
+    //   - kind: 'bezier' — segments are auto-derived from points
+    //     each render. CP edits would have nowhere to go unless
+    //     we materialize: on first CP drag the current
+    //     auto-smoothed segments get locked in (line.segments =
+    //     transient) and line.kind flips to 'manual'. After that
+    //     it's a plain manual line.
     if (line.kind === 'manual' && Array.isArray(line.segments)) {
-      renderControlPointHandles(line, handleR);
+      renderControlPointHandles(line, line.segments, false, handleR);
+    } else if (line.kind === 'bezier' && Array.isArray(line.points) && line.points.length >= 2) {
+      const transient = bezierSegmentsFromPoints(line.points, line.closed);
+      renderControlPointHandles(line, transient, true, handleR);
     }
   }
 
-  function renderControlPointHandles(line, handleR) {
+  function renderControlPointHandles(line, segs, needsMaterialize, handleR) {
     let prevEndpoint = null;
-    line.segments.forEach(function (seg, segIdx) {
+    // Capture the materialize flag in a closure so each CP-handle
+    // drag sees the same value (and can flip it on first edit).
+    const ctx = { needsMaterialize: needsMaterialize, segs: segs };
+    segs.forEach(function (seg, segIdx) {
       if (seg.cmd === 'C' && Array.isArray(seg.controlPoints) && seg.controlPoints.length === 2) {
         // Cubic Bezier — cp1 extends out from the previous endpoint,
         // cp2 reaches back from this segment's endpoint.
-        if (prevEndpoint) renderCpHandle(line, segIdx, 0, seg.controlPoints[0], prevEndpoint, handleR);
-        if (seg.endpoint) renderCpHandle(line, segIdx, 1, seg.controlPoints[1], seg.endpoint, handleR);
+        if (prevEndpoint) renderCpHandle(line, ctx, segIdx, 0, seg.controlPoints[0], prevEndpoint, handleR);
+        if (seg.endpoint) renderCpHandle(line, ctx, segIdx, 1, seg.controlPoints[1], seg.endpoint, handleR);
       } else if (seg.cmd === 'Q' && Array.isArray(seg.controlPoints) && seg.controlPoints.length === 1) {
         // Quadratic Bezier — single control between prev and ep.
         // Anchor the tangent at the previous endpoint.
-        if (prevEndpoint) renderCpHandle(line, segIdx, 0, seg.controlPoints[0], prevEndpoint, handleR);
+        if (prevEndpoint) renderCpHandle(line, ctx, segIdx, 0, seg.controlPoints[0], prevEndpoint, handleR);
       }
       if (seg.endpoint) prevEndpoint = seg.endpoint;
     });
   }
 
-  function renderCpHandle(line, segIdx, cpIdx, cp, anchorPt, handleR) {
+  function renderCpHandle(line, ctx, segIdx, cpIdx, cp, anchorPt, handleR) {
     // Dashed tangent line from the anchor to the control point.
     const tan = document.createElementNS(SVG_NS, 'line');
     tan.setAttribute('class', 'ed-cp-tangent');
@@ -4481,6 +4536,27 @@
     c.addEventListener('pointerdown', function (e) {
       e.stopPropagation();
       e.preventDefault();
+      // For bezier-kind lines the segments aren't stored — they're
+      // recomputed each render. The first CP edit locks the current
+      // auto-smoothed segments in as the new authoritative shape
+      // and promotes the line to 'manual', so subsequent edits
+      // persist. After that, ctx.needsMaterialize stays false for
+      // this handle session and any sibling CP handles already on
+      // the canvas (they share the same ctx).
+      if (ctx.needsMaterialize) {
+        line.segments = ctx.segs.map(function (s) {
+          return {
+            cmd: s.cmd,
+            controlPoints: (s.controlPoints || []).map(function (cp) { return { x: cp.x, y: cp.y }; }),
+            endpoint: s.endpoint ? { x: s.endpoint.x, y: s.endpoint.y } : null
+          };
+        });
+        line.kind = 'manual';
+        // Repoint ctx.segs so subsequent pointermove writes land on
+        // the just-materialized array, not the throwaway transient.
+        ctx.segs = line.segments;
+        ctx.needsMaterialize = false;
+      }
       dragging = true;
       c.classList.add('is-dragging');
       c.setPointerCapture(e.pointerId);
@@ -4488,7 +4564,7 @@
     c.addEventListener('pointermove', function (e) {
       if (!dragging) return;
       const pos = clientToSvg(e.clientX, e.clientY);
-      line.segments[segIdx].controlPoints[cpIdx] = { x: pos.x, y: pos.y };
+      ctx.segs[segIdx].controlPoints[cpIdx] = { x: pos.x, y: pos.y };
       regenerateLineD(line);
       state.dirty = true;
       // Inline updates — keep the drag smooth without a full
