@@ -224,6 +224,7 @@ $payload = json_encode([
     <section class="ed-panel" id="canvas-panel">
       <header class="ed-panel-head">
         <h3>Canvas</h3>
+        <button type="button" id="clear-lines-btn" class="ed-mini ed-danger">Clear</button>
       </header>
       <div id="canvas-fields" class="ed-canvas-fields"></div>
     </section>
@@ -237,8 +238,7 @@ $payload = json_encode([
     </section>
 
     <div class="ed-sidebar-footer">
-      <button type="button" id="help-btn"        class="ed-mini">? Help</button>
-      <button type="button" id="clear-lines-btn" class="ed-mini ed-danger">Clear the canvas</button>
+      <button type="button" id="help-btn" class="ed-mini">? Help</button>
     </div>
   </aside>
 
