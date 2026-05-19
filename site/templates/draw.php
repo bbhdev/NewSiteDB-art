@@ -195,6 +195,7 @@ $payload = json_encode([
   <div class="ed-view" role="toolbar" aria-label="Save and settings">
     <button type="button" id="save-btn"     class="ed-save">Save</button>
     <button type="button" id="settings-btn" class="ed-settings" title="Settings — editor preferences and diagnostic toggles" aria-label="Settings">⚙</button>
+    <button type="button" id="help-btn" class="ed-help" title="Editor tips — tools, selection, gestures, shortcuts" aria-label="Help">ⓘ</button>
     <span id="save-status" class="ed-status" aria-live="polite"></span>
   </div>
 
@@ -237,9 +238,6 @@ $payload = json_encode([
       <ul id="palette-list" class="ed-palette-list"></ul>
     </section>
 
-    <div class="ed-sidebar-footer">
-      <button type="button" id="help-btn" class="ed-mini">? Help</button>
-    </div>
   </aside>
 
   <div class="ed-mode-banner" id="set-origin-banner" hidden>

@@ -216,7 +216,8 @@ body.editor {
 }
 .ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 .ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
-.ed-toolbar .ed-settings {
+.ed-toolbar .ed-settings,
+.ed-toolbar .ed-help {
   font-size: 1.6rem;
   line-height: 1;
   padding: 0 0.5rem;
