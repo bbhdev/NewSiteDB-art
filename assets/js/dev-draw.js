@@ -116,6 +116,32 @@
     if (!master || !master.scope) return 'canonical';
     return master.scope[keyPath] === 'local' ? 'local' : 'canonical';
   }
+  // Behavior blocks describe scroll-driven animation per instance.
+  // Each block: { id, range: { start, end }, kind, params }.
+  // range is a scroll-progress interval (0..1) within the line's
+  // trigger window. params holds the legacy behavior keys
+  // (translateX/Y, rotate, drawIn, …). Multiple blocks per line
+  // enable chained motions — v0.4.0 lays the data + minimal
+  // single-block UI; multi-block authoring lands in v0.4.1.
+  function cloneBehavior(b) {
+    return {
+      id: b.id || ('b-' + Math.random().toString(36).slice(2, 10)),
+      range: b.range
+        ? { start: Number(b.range.start) || 0, end: Number(b.range.end || 1) }
+        : { start: 0, end: 1 },
+      kind: b.kind || 'scroll-transform',
+      params: b.params ? Object.assign({}, b.params) : {}
+    };
+  }
+  function newBehaviorBlock() {
+    return {
+      id: 'b-' + Math.random().toString(36).slice(2, 10),
+      range: { start: 0, end: 1 },
+      kind: 'scroll-transform',
+      params: {}
+    };
+  }
+
   function isLocal(master, keyPath) {
     // `name` is structurally canonical — a master with a per-class
     // name isn't really one master. Hard-force false here so any
@@ -411,10 +437,12 @@
     const ov = (inst.overrides && typeof inst.overrides === 'object') ? inst.overrides : {};
     const cleanOverrides = {}; // what we'll keep on line.overrides
     Object.keys(ov).forEach(function (k) {
-      if (BEHAVIOR_KEYS.indexOf(k) !== -1) {
-        cleanOverrides[k] = ov[k];
-        return;
-      }
+      // Behavior keys (translateX/Y, rotate, drawIn, …) used to
+      // live in overrides; v0.4.0 moved them into line.behaviors[].
+      // Strip any leftover entries silently — disk migration handles
+      // canonical data; this is just defensive against in-memory
+      // crud.
+      if (BEHAVIOR_KEYS.indexOf(k) !== -1) return;
       if (k === 'params' && ov[k] && typeof ov[k] === 'object'
           && master && master.params && typeof master.params === 'object') {
         const opParams = {};
@@ -439,6 +467,12 @@
     line.masterId  = inst.masterId || null;
     line.hidden    = !(inst.visible === undefined ? true : inst.visible);
     line.overrides = cleanOverrides;
+    // Behaviors are per-instance, not in the scope contract (always
+    // per-class by definition). Pass through with a deep clone so
+    // mutations don't leak between resolveInstanceJS callers.
+    line.behaviors = Array.isArray(inst.behaviors)
+      ? inst.behaviors.map(cloneBehavior)
+      : [];
 
     // positionOffset — structural per-class translation.
     const offX = (inst.positionOffset && Number.isFinite(inst.positionOffset.dx))
@@ -1381,10 +1415,10 @@
         const src = (line.overrides && typeof line.overrides === 'object')
           ? line.overrides : {};
         Object.keys(src).forEach(function (k) {
-          if (BEHAVIOR_KEYS.indexOf(k) !== -1) {
-            cleanOverrides[k] = src[k];
-            return;
-          }
+          // Behavior keys live on line.behaviors[] now (v0.4.0).
+          // Drop any stray copies in overrides so they don't get
+          // re-saved to disk.
+          if (BEHAVIOR_KEYS.indexOf(k) !== -1) return;
           if (k === 'params' && src.params && typeof src.params === 'object') {
             const cleanParams = {};
             Object.keys(src.params).forEach(function (sk) {
@@ -1415,6 +1449,9 @@
           visible:   !line.hidden,
           groupId:   line.groupId || null,
           positionOffset: { dx: offDx, dy: offDy },
+          behaviors: Array.isArray(line.behaviors)
+            ? line.behaviors.map(cloneBehavior)
+            : [],
           overrides: cleanOverrides
         };
       });
@@ -2075,6 +2112,7 @@
           d: '',
           positionOffset: { dx: 0, dy: 0 },
           groupId: g.id,
+          behaviors: [],
           overrides: {},
           name: m.name
         };
@@ -2239,6 +2277,7 @@
         d: '',
         positionOffset: { dx: 0, dy: 0 },
         groupId: groupId,
+        behaviors: [],
         overrides: {},
         name: mergedName
       };
@@ -3512,6 +3551,7 @@
       // positionOffset; the master keeps the drawn position.
       positionOffset: { dx: 0, dy: 0 },
       groupId: state.activeGroupId || (state.groups[0] && state.groups[0].id) || null,
+      behaviors: [],
       overrides: {}
     };
     regenerateLineD(line);
@@ -3845,16 +3885,24 @@
     else scheduleSnapshot();
   }
 
-  function updateLineOverride(id, key, value) {
+  // Edit a single behavior key on the FIRST block of a line's
+  // behaviors[] array. Creates the block if the array is empty.
+  // v0.4.0 wires the existing per-line Behavior section to block
+  // 0; multi-block authoring (range / kind editing, add/remove)
+  // comes in v0.4.1.
+  function updateBehaviorParam(id, key, value, blockIdx) {
+    blockIdx = blockIdx || 0;
     const l = state.lines.find(function (l) { return l.id === id; });
     if (!l) return;
-    writeBehaviorOverride(l, key, value);
-    // In 'all' mode, behavior-key edits fan out: every sibling-class
-    // instance of the same master gets the same override. 'one' mode
-    // keeps the change local to this class (today's behavior).
+    writeBehaviorParam(l, key, value, blockIdx);
+    // 'all' mode fan-out: every sibling-class instance of this
+    // master gets the same edit, on the same block index. If the
+    // sibling has fewer blocks (shouldn't happen for v0.4.0 since
+    // migration mints parallel arrays, but defensive), we extend
+    // its behaviors[] up to blockIdx.
     if (modeIsAll() && l.masterId) {
       forSiblingsOf(l.masterId, function (sib) {
-        writeBehaviorOverride(sib, key, value);
+        writeBehaviorParam(sib, key, value, blockIdx);
       });
     }
     state.dirty = true;
@@ -3862,12 +3910,25 @@
     if (typeof value === 'boolean' || value === null) snapshot();
     else scheduleSnapshot();
   }
-  function writeBehaviorOverride(line, key, value) {
-    if (!line.overrides) line.overrides = {};
+  function writeBehaviorParam(line, key, value, blockIdx) {
+    if (!Array.isArray(line.behaviors)) line.behaviors = [];
+    while (line.behaviors.length <= blockIdx) {
+      line.behaviors.push(newBehaviorBlock());
+    }
+    const block = line.behaviors[blockIdx];
+    if (!block.params) block.params = {};
     if (value === '' || value === null || (typeof value === 'number' && isNaN(value))) {
-      delete line.overrides[key];
+      delete block.params[key];
     } else {
-      line.overrides[key] = value;
+      block.params[key] = value;
+    }
+    // Trim trailing fully-empty blocks so a cleared single edit
+    // doesn't leave a dangling empty block 0 with no params and
+    // a {0,1} range.
+    while (line.behaviors.length
+           && (!line.behaviors[line.behaviors.length - 1].params
+               || Object.keys(line.behaviors[line.behaviors.length - 1].params).length === 0)) {
+      line.behaviors.pop();
     }
   }
 
@@ -6003,24 +6064,30 @@
       }), line.masterId, 'linejoin'));
 
     wrap.appendChild(divider('Behavior'));
-    const ov = line.overrides || {};
-    wrap.appendChild(overrideNumberField('TranslateX', ov.translateX, group && group.defaults.translateX, function (v) { updateLineOverride(line.id, 'translateX', v); }));
-    wrap.appendChild(overrideNumberField('TranslateY', ov.translateY, group && group.defaults.translateY, function (v) { updateLineOverride(line.id, 'translateY', v); }));
-    wrap.appendChild(overrideNumberField('Rotate',     ov.rotate,     group && group.defaults.rotate,     function (v) { updateLineOverride(line.id, 'rotate', v); }));
+    // v0.4.0: behavior fields now address line.behaviors[0].params
+    // instead of line.overrides. Multi-block authoring lands in
+    // v0.4.1 — for now the panel treats the line as having one
+    // implicit block. The block is materialized on first write.
+    const block0 = (line.behaviors && line.behaviors[0]) || null;
+    const params0 = (block0 && block0.params) || {};
+    const gd = (group && group.defaults) || {};
+    wrap.appendChild(overrideNumberField('TranslateX', params0.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v); }));
+    wrap.appendChild(overrideNumberField('TranslateY', params0.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v); }));
+    wrap.appendChild(overrideNumberField('Rotate',     params0.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v); }));
     // Per-line rotation pivot — overrides the group default (or the
     // shape's natural center if the group also has none).
-    wrap.appendChild(overrideNumberField('Rotate origin X', ov.rotateOriginX, group && group.defaults.rotateOriginX, function (v) { updateLineOverride(line.id, 'rotateOriginX', v); }));
-    wrap.appendChild(overrideNumberField('Rotate origin Y', ov.rotateOriginY, group && group.defaults.rotateOriginY, function (v) { updateLineOverride(line.id, 'rotateOriginY', v); }));
+    wrap.appendChild(overrideNumberField('Rotate origin X', params0.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v); }));
+    wrap.appendChild(overrideNumberField('Rotate origin Y', params0.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v); }));
     wrap.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'line', id: line.id }); }));
 
-    wrap.appendChild(overrideCheckboxField('Draw-in', ov.drawIn, group && group.defaults.drawIn, function (v) { updateLineOverride(line.id, 'drawIn', v); }));
-    wrap.appendChild(overrideSelectField('Direction', ov.drawInDirection,
-      group && group.defaults.drawInDirection || 'forward',
+    wrap.appendChild(overrideCheckboxField('Draw-in', params0.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v); }));
+    wrap.appendChild(overrideSelectField('Direction', params0.drawInDirection,
+      gd.drawInDirection || 'forward',
       [
         { value: 'forward', label: 'Begin → end' },
         { value: 'reverse', label: 'End → begin' }
       ],
-      function (v) { updateLineOverride(line.id, 'drawInDirection', v); }));
+      function (v) { updateBehaviorParam(line.id, 'drawInDirection', v); }));
 
     selectionPanel.appendChild(wrap);
 
@@ -6604,8 +6671,8 @@
       if (settingOrigin.type === 'group') {
         updateGroupDefaults(settingOrigin.id, { rotateOriginX: x, rotateOriginY: y });
       } else if (settingOrigin.type === 'line') {
-        updateLineOverride(settingOrigin.id, 'rotateOriginX', x);
-        updateLineOverride(settingOrigin.id, 'rotateOriginY', y);
+        updateBehaviorParam(settingOrigin.id, 'rotateOriginX', x);
+        updateBehaviorParam(settingOrigin.id, 'rotateOriginY', y);
       }
       exitSetRotateOrigin();
       renderSelectionPanel(); // refresh the input fields with new values

@@ -352,7 +352,16 @@
       if (!group) return;
 
       const lineDef = lines.find(function (l) { return l.id === pathEl.dataset.lineId; }) || {};
-      const behaviors = Object.assign({}, group.defaults || {}, lineDef.overrides || {});
+      // v0.4.0: behavior keys live on lineDef.behaviors[0].params
+      // (single-block UI today; multi-block lands in v0.4.1).
+      // Group defaults provide fallbacks for any unset field. If
+      // behaviors[] is empty, we fall back to group defaults
+      // wholesale — an "uninherited" line carrying no overrides.
+      const block0params = (Array.isArray(lineDef.behaviors)
+                             && lineDef.behaviors[0]
+                             && lineDef.behaviors[0].params)
+        ? lineDef.behaviors[0].params : {};
+      const behaviors = Object.assign({}, group.defaults || {}, block0params);
 
       const triggerSel = group.trigger || 'body';
       const isPageWide = !group.trigger || group.trigger === 'body' || group.trigger === 'html';

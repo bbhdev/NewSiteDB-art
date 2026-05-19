@@ -287,6 +287,11 @@ function art_resolve_instance(array $instance, array $mastersById): array
     $line['hidden']         = !($instance['visible'] ?? true);
     $line['overrides']      = $ovArr;
     $line['positionOffset'] = ['dx' => $dx, 'dy' => $dy];
+    // Behaviors (v0.4.0): scroll-animation blocks, per-instance.
+    // Pass through unchanged — the runtime applies them.
+    $line['behaviors']      = isset($instance['behaviors']) && is_array($instance['behaviors'])
+        ? $instance['behaviors']
+        : [];
     if ($masterId)  $line['masterId'] = $masterId;
     return $line;
 }

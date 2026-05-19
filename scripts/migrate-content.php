@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 7;
+const CONTENT_SCHEMA_VERSION = 8;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -77,6 +77,15 @@ $SCHEMA_HISTORY = [
        . ' All visual overrides accumulated under the legacy model are stripped'
        . ' — they were test artifacts and the user authorized a clean slate.'
        . ' positionOffset stays as the structural per-class position channel.',
+    8 => 'Behaviors list per instance. Behavior keys (translateX/Y, rotate,'
+       . ' drawIn, drawInDirection, rotateOriginX/Y) move out of'
+       . ' instance.overrides into a new instance.behaviors[] array. Each'
+       . ' block carries { id, range:{start,end}, kind, params } where'
+       . ' range is a scroll-progress interval (0..1). v7 instances become'
+       . ' a single-block behaviors[] covering the full trigger window;'
+       . ' the moved keys are removed from overrides. Unlocks chained'
+       . ' motions per object — the UI / runtime can address blocks N>1'
+       . ' once authoring lands (v0.4.1).',
 ];
 
 /**
@@ -517,6 +526,65 @@ $MIGRATIONS = [
             }
         }
 
+        return true;
+    },
+
+    7 => function (string $pageRoot, bool $dryRun): bool {
+        // v7 → v8: behavior keys move from instance.overrides into
+        // a new instance.behaviors[] array with one block covering
+        // the full trigger window (range 0..1). overrides retains
+        // only visual local overrides; behaviors[] is the new home
+        // for scroll-driven transforms.
+        $BEHAVIOR_KEYS = ['translateX', 'translateY', 'rotate',
+                          'drawIn', 'drawInDirection',
+                          'rotateOriginX', 'rotateOriginY'];
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+        foreach ($useClasses as $cid) {
+            $instPath = $pageRoot . '/' . $cid . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            $changed = false;
+            foreach ($insts as &$inst) {
+                if (!is_array($inst)) continue;
+                if (array_key_exists('behaviors', $inst)) continue;
+                $ov = (isset($inst['overrides']) && is_array($inst['overrides']))
+                    ? $inst['overrides'] : [];
+                $params = [];
+                foreach ($BEHAVIOR_KEYS as $k) {
+                    if (array_key_exists($k, $ov)) {
+                        $params[$k] = $ov[$k];
+                        unset($ov[$k]);
+                    }
+                }
+                if (!empty($params)) {
+                    $bid = 'b-' . substr(md5(uniqid((string)mt_rand(), true)), 0, 8);
+                    $inst['behaviors'] = [[
+                        'id'     => $bid,
+                        'range'  => ['start' => 0, 'end' => 1],
+                        'kind'   => 'scroll-transform',
+                        'params' => (object) $params
+                    ]];
+                } else {
+                    $inst['behaviors'] = [];
+                }
+                $inst['overrides'] = (object) $ov;
+                $changed = true;
+            }
+            unset($inst);
+            if ($changed) {
+                if ($dryRun) {
+                    echo "    would convert behavior overrides → behaviors[] in $instPath\n";
+                } else {
+                    file_put_contents($instPath,
+                        json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                }
+            }
+        }
         return true;
     },
 ];
