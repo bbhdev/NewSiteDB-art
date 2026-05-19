@@ -1257,6 +1257,312 @@
     return segments;
   }
 
+  // ── SVG Import ──────────────────────────────────────────────────────
+  // Parse a dropped .svg, walk every renderable element, and turn each
+  // into a (master, instance) pair in the current class. Nested
+  // <g transform=…> compose through into the rendered geometry.
+  // Supported: <path>, <rect>, <circle>, <ellipse>, <polygon>,
+  // <polyline>, <line>. Colors referenced by fill / stroke get added
+  // to the palette automatically. Primitives keep their PRIMITIVES.*
+  // kind when the cumulative transform is pure translate / uniform
+  // scale (so the user can still drag handles in the editor);
+  // anything more (rotation, skew, non-uniform scale) falls back to
+  // `kind: 'manual'` with the matrix baked into segment points.
+
+  const SVG_NUM_RE  = /-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/g;
+  const SVG_IDENT_M = [1, 0, 0, 1, 0, 0];
+
+  function svgMultiply(M1, M2) {
+    return [
+      M1[0]*M2[0] + M1[2]*M2[1],
+      M1[1]*M2[0] + M1[3]*M2[1],
+      M1[0]*M2[2] + M1[2]*M2[3],
+      M1[1]*M2[2] + M1[3]*M2[3],
+      M1[0]*M2[4] + M1[2]*M2[5] + M1[4],
+      M1[1]*M2[4] + M1[3]*M2[5] + M1[5]
+    ];
+  }
+  function svgApply(M, x, y) {
+    return { x: M[0]*x + M[2]*y + M[4], y: M[1]*x + M[3]*y + M[5] };
+  }
+  function svgIsTranslateOrUniformScale(M) {
+    return Math.abs(M[1]) < 1e-9
+        && Math.abs(M[2]) < 1e-9
+        && Math.abs(M[0] - M[3]) < 1e-9;
+  }
+
+  function parseSvgTransform(attr) {
+    if (!attr) return SVG_IDENT_M.slice();
+    let M = SVG_IDENT_M.slice();
+    const re = /(matrix|translate|scale|rotate|skewX|skewY)\s*\(\s*([^)]*)\)/g;
+    let m;
+    while ((m = re.exec(attr)) !== null) {
+      const op = m[1];
+      const nums = (m[2].match(SVG_NUM_RE) || []).map(parseFloat);
+      let T = SVG_IDENT_M.slice();
+      if (op === 'matrix' && nums.length >= 6) {
+        T = nums.slice(0, 6);
+      } else if (op === 'translate') {
+        T = [1, 0, 0, 1, nums[0] || 0, nums[1] || 0];
+      } else if (op === 'scale') {
+        const sx = nums.length ? nums[0] : 1;
+        const sy = nums.length > 1 ? nums[1] : sx;
+        T = [sx, 0, 0, sy, 0, 0];
+      } else if (op === 'rotate') {
+        const a = (nums[0] || 0) * Math.PI / 180;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        if (nums.length >= 3) {
+          const cx = nums[1], cy = nums[2];
+          T = svgMultiply(svgMultiply([1,0,0,1,cx,cy], [ca,sa,-sa,ca,0,0]),
+                          [1,0,0,1,-cx,-cy]);
+        } else {
+          T = [ca, sa, -sa, ca, 0, 0];
+        }
+      } else if (op === 'skewX') {
+        T = [1, 0, Math.tan((nums[0] || 0) * Math.PI / 180), 1, 0, 0];
+      } else if (op === 'skewY') {
+        T = [1, Math.tan((nums[0] || 0) * Math.PI / 180), 0, 1, 0, 0];
+      }
+      M = svgMultiply(M, T);
+    }
+    return M;
+  }
+
+  function ensurePaletteColor(value) {
+    if (!value) return null;
+    const v = String(value).trim();
+    if (!v || v === 'none' || v === 'transparent') return null;
+    const lower = v.toLowerCase();
+    const existing = state.palette.find(function (c) {
+      return c.value && String(c.value).toLowerCase() === lower;
+    });
+    if (existing) return existing.id;
+    const id = uid('c');
+    state.palette.push({ id: id, name: v, value: v });
+    return id;
+  }
+
+  function readSvgShapeAttrs(el) {
+    const inlineStyle = el.getAttribute('style') || '';
+    const styleMap = {};
+    inlineStyle.split(';').forEach(function (p) {
+      const i = p.indexOf(':');
+      if (i > 0) styleMap[p.slice(0, i).trim()] = p.slice(i + 1).trim();
+    });
+    const get = function (name) {
+      return el.getAttribute(name) || styleMap[name] || null;
+    };
+    const sw = parseFloat(get('stroke-width'));
+    return {
+      fill:        get('fill'),
+      stroke:      get('stroke'),
+      strokeWidth: Number.isFinite(sw) ? sw : null
+    };
+  }
+
+  function svgTransformSegment(s, M) {
+    if (s.cmd === 'Z' || !s.endpoint) {
+      return { cmd: s.cmd, controlPoints: [], endpoint: null };
+    }
+    return {
+      cmd: s.cmd,
+      controlPoints: s.controlPoints.map(function (cp) { return svgApply(M, cp.x, cp.y); }),
+      endpoint: svgApply(M, s.endpoint.x, s.endpoint.y)
+    };
+  }
+
+  function convertSvgElement(el, M, inherited) {
+    const tag = (el.tagName || '').toLowerCase();
+    const attrs = readSvgShapeAttrs(el);
+    const fill   = attrs.fill   != null ? attrs.fill   : inherited.fill;
+    const stroke = attrs.stroke != null ? attrs.stroke : inherited.stroke;
+    const widthN = attrs.strokeWidth != null ? attrs.strokeWidth : inherited.strokeWidth;
+    const hasFill   = fill   && fill   !== 'none' && fill   !== 'transparent';
+    const hasStroke = stroke && stroke !== 'none' && stroke !== 'transparent';
+    // Use the fill color when present (the more visible role on a
+    // closed shape); otherwise fall back to stroke for outline-only
+    // shapes like <line>. Both get a palette entry regardless of
+    // which one drives the resolved line.stroke ref.
+    const colorValue = hasFill ? fill : (hasStroke ? stroke : null);
+    const colorId    = ensurePaletteColor(colorValue);
+    if (hasStroke && colorValue !== stroke) ensurePaletteColor(stroke);
+
+    const uniform = svgIsTranslateOrUniformScale(M);
+    const scale   = M[0]; // valid when uniform — same on both axes
+    let line = null;
+
+    if (tag === 'circle' && uniform) {
+      const cx = parseFloat(el.getAttribute('cx')) || 0;
+      const cy = parseFloat(el.getAttribute('cy')) || 0;
+      const r  = parseFloat(el.getAttribute('r'))  || 0;
+      const p = svgApply(M, cx, cy);
+      line = { kind: 'circle', params: { cx: p.x, cy: p.y, r: r * scale } };
+    } else if (tag === 'ellipse' && uniform) {
+      const cx = parseFloat(el.getAttribute('cx')) || 0;
+      const cy = parseFloat(el.getAttribute('cy')) || 0;
+      const rx = parseFloat(el.getAttribute('rx')) || 0;
+      const ry = parseFloat(el.getAttribute('ry')) || 0;
+      const p = svgApply(M, cx, cy);
+      line = { kind: 'ellipse', params: { cx: p.x, cy: p.y, rx: rx * scale, ry: ry * scale } };
+    } else if (tag === 'rect' && uniform) {
+      const x = parseFloat(el.getAttribute('x')) || 0;
+      const y = parseFloat(el.getAttribute('y')) || 0;
+      const w = parseFloat(el.getAttribute('width'))  || 0;
+      const h = parseFloat(el.getAttribute('height')) || 0;
+      const r = parseFloat(el.getAttribute('rx') || el.getAttribute('ry') || '0') || 0;
+      const tl = svgApply(M, x, y);
+      line = {
+        kind: 'rect',
+        params: { x: tl.x, y: tl.y, w: w * scale, h: h * scale, r: r * scale }
+      };
+    } else if (tag === 'path' || tag === 'circle' || tag === 'ellipse' || tag === 'rect') {
+      // Non-uniform-transform fallback for primitives + every <path>.
+      let d = el.getAttribute('d');
+      if (!d) {
+        if (tag === 'circle') {
+          d = circlePathD(parseFloat(el.getAttribute('cx')) || 0,
+                          parseFloat(el.getAttribute('cy')) || 0,
+                          parseFloat(el.getAttribute('r'))  || 0);
+        } else if (tag === 'ellipse') {
+          d = ellipsePathD(parseFloat(el.getAttribute('cx')) || 0,
+                           parseFloat(el.getAttribute('cy')) || 0,
+                           parseFloat(el.getAttribute('rx')) || 0,
+                           parseFloat(el.getAttribute('ry')) || 0);
+        } else if (tag === 'rect') {
+          d = rectPathD(parseFloat(el.getAttribute('x')) || 0,
+                        parseFloat(el.getAttribute('y')) || 0,
+                        parseFloat(el.getAttribute('width'))  || 0,
+                        parseFloat(el.getAttribute('height')) || 0,
+                        parseFloat(el.getAttribute('rx') || el.getAttribute('ry') || '0') || 0);
+        }
+      }
+      const segments = parseSegments(d).map(function (s) { return svgTransformSegment(s, M); });
+      if (!segments.length) return null;
+      const points = segments.filter(function (s) { return s.endpoint; })
+                              .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; });
+      line = {
+        kind: 'manual',
+        segments: segments,
+        points: points,
+        closed: segments.some(function (s) { return s.cmd === 'Z'; })
+      };
+    } else if (tag === 'polygon' || tag === 'polyline') {
+      const ptsStr = el.getAttribute('points') || '';
+      const nums = (ptsStr.match(SVG_NUM_RE) || []).map(parseFloat);
+      if (nums.length < 4) return null;
+      const segments = [];
+      const points = [];
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const p = svgApply(M, nums[i], nums[i + 1]);
+        segments.push({ cmd: i === 0 ? 'M' : 'L', controlPoints: [], endpoint: p });
+        points.push(p);
+      }
+      const closed = (tag === 'polygon');
+      if (closed) segments.push({ cmd: 'Z', controlPoints: [], endpoint: null });
+      line = { kind: 'manual', segments: segments, points: points, closed: closed };
+    } else if (tag === 'line') {
+      const p1 = svgApply(M, parseFloat(el.getAttribute('x1')) || 0,
+                              parseFloat(el.getAttribute('y1')) || 0);
+      const p2 = svgApply(M, parseFloat(el.getAttribute('x2')) || 0,
+                              parseFloat(el.getAttribute('y2')) || 0);
+      line = {
+        kind: 'manual',
+        segments: [
+          { cmd: 'M', controlPoints: [], endpoint: p1 },
+          { cmd: 'L', controlPoints: [], endpoint: p2 }
+        ],
+        points: [p1, p2],
+        closed: false
+      };
+    } else {
+      return null;
+    }
+
+    line.smoothed = false;
+    line.filled   = hasFill;
+    line.stroke   = colorId;
+    line.width    = widthN;
+    return line;
+  }
+
+  function walkSvg(node, parentM, inheritedAttrs, visit) {
+    const local = parseSvgTransform(node.getAttribute && node.getAttribute('transform'));
+    const M = svgMultiply(parentM, local);
+    const inherited = Object.assign({}, inheritedAttrs);
+    if (node.getAttribute) {
+      const a = readSvgShapeAttrs(node);
+      if (a.fill        != null) inherited.fill        = a.fill;
+      if (a.stroke      != null) inherited.stroke      = a.stroke;
+      if (a.strokeWidth != null) inherited.strokeWidth = a.strokeWidth;
+    }
+    const tag = (node.tagName || '').toLowerCase();
+    if (['path','rect','circle','ellipse','polygon','polyline','line'].indexOf(tag) !== -1) {
+      visit(node, M, inherited);
+      return;
+    }
+    Array.prototype.slice.call(node.children || []).forEach(function (child) {
+      walkSvg(child, M, inherited, visit);
+    });
+  }
+
+  function importSvgFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = function () { alert('Couldn\'t read this file.'); };
+    reader.onload  = function () {
+      const text = String(reader.result || '');
+      const doc  = new DOMParser().parseFromString(text, 'image/svg+xml');
+      const root = doc.documentElement;
+      if (!root || root.nodeName !== 'svg' || doc.getElementsByTagName('parsererror').length) {
+        alert('Not a valid SVG file.');
+        return;
+      }
+      const baseName = (file.name || 'import').replace(/\.svg$/i, '') || 'import';
+      const imported = [];
+      walkSvg(root, SVG_IDENT_M.slice(),
+        { fill: '#000000', stroke: null, strokeWidth: null },
+        function (el, M, inherited) {
+          const line = convertSvgElement(el, M, inherited);
+          if (line) imported.push(line);
+        });
+      if (!imported.length) {
+        alert('No drawable elements found in this SVG.');
+        return;
+      }
+      finalizeSvgImport(baseName, imported);
+    };
+    reader.readAsText(file);
+  }
+
+  function finalizeSvgImport(name, importedLines) {
+    const groupId = uid('g');
+    state.groups.push({
+      id: groupId,
+      name: name,
+      trigger: null,
+      defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
+    });
+    importedLines.forEach(function (raw) {
+      const line = Object.assign({
+        id: uid('l'),
+        d: '',
+        positionOffset: { dx: 0, dy: 0 },
+        groupId: groupId,
+        overrides: {}
+      }, raw);
+      computeLineD(line);
+      state.lines.push(line);
+      mintMasterForLine(line);
+    });
+    state.activeGroupId = groupId;
+    state.openGroupIds  = state.openGroupIds || {};
+    state.openGroupIds[groupId] = true;
+    state.selectedIds = [];
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
   function segmentsToD(segments) {
     return segments.map(function (s) {
       if (s.cmd === 'Z' || !s.endpoint) return 'Z';
@@ -4450,6 +4756,21 @@
 
   // Create-object wizard wiring.
   if (createObjectBtn) createObjectBtn.addEventListener('click', showCreateModal);
+
+  // SVG import — file picker + button wiring. The input is hidden;
+  // the button opens it. importSvgFile (defined above) does the
+  // parsing, master-mint, snapshot, and re-render.
+  const importSvgBtn   = document.getElementById('import-svg-btn');
+  const importSvgInput = document.getElementById('import-svg-input');
+  if (importSvgBtn && importSvgInput) {
+    importSvgBtn.addEventListener('click', function () { importSvgInput.click(); });
+    importSvgInput.addEventListener('change', function () {
+      const file = importSvgInput.files && importSvgInput.files[0];
+      if (file) importSvgFile(file);
+      // Clear value so the same file can be re-imported in a row.
+      importSvgInput.value = '';
+    });
+  }
   if (wizardSaveBtn)   wizardSaveBtn.addEventListener('click',   saveWizardObject);
   if (wizardCancelBtn) wizardCancelBtn.addEventListener('click', cancelWizard);
 

@@ -174,6 +174,9 @@ $payload = json_encode([
   <div class="ed-tools" role="toolbar" aria-label="Create">
     <button type="button" id="create-object-btn" class="ed-create-btn"
             title="Create a new object — opens a panel to pick the shape type and the classes it should appear in">+ Create object</button>
+    <button type="button" id="import-svg-btn" class="ed-create-btn"
+            title="Import an SVG file. Each top-level shape becomes a master + an instance in the current class, placed in a new group named after the file.">⇪ Import SVG</button>
+    <input type="file" id="import-svg-input" accept=".svg,image/svg+xml" hidden>
   </div>
 
   <div class="ed-tool-settings" id="tool-settings"></div>
