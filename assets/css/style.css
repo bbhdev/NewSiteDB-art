@@ -92,16 +92,25 @@ a { color: inherit; }
 /* ─── Round-rect button ──────────────────────────────────────────── */
 /* Ported from reference style.css L96–156. Renamed .button → .rr-button.
    On hover, an accent-colored circle scales up from the center and
-   inflates past the button bounds, filling the pill. */
+   inflates past the button bounds, filling the pill. The width,
+   height, and corner radius can each be overridden per instance via
+   the --rr-width / --rr-height / --rr-radius custom properties (set
+   from the snippet's `width` / `height` / `cornerRadius` params). */
 
 .rr-button {
+  /* Fallbacks act as the design default. Pass-through happens
+     naturally when the snippet doesn't set the custom prop. */
+  width:  var(--rr-width,  auto);
+  height: var(--rr-height, auto);
   padding: 0.5rem 1.5rem;
   font-style: italic;
   text-decoration: none;
   position: relative;
   overflow: hidden;
-  display: inline-block;
-  border-radius: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--rr-radius, 2rem);
   transition: color 0.3s ease-in-out;
   z-index: 1;
 }
@@ -111,7 +120,7 @@ a { color: inherit; }
   inset: 0;
   z-index: -2;
   border: 1px solid var(--text);
-  border-radius: 2rem;
+  border-radius: inherit;
 }
 .rr-button::after {
   content: "";
@@ -142,14 +151,16 @@ a { color: inherit; }
   .rr-button { padding-block: 0.75rem; }
 }
 
-/* ─── Circle button ──────────────────────────────────────────────── */
+/* ─── Scatter buttons (circle + ellipse) ─────────────────────────── */
 /* Ported + simplified from reference .project_link rules.
    Scroll-scatter and drag-with-inertia are added in app.js.
-   The wrapping .circle-button has pointer-events:none on its outer
-   shell so the layout container doesn't block; the inner .circle is
-   the actual interactive surface. */
+   The wrapping anchor has pointer-events:none on its outer shell so
+   the layout container doesn't block; the inner .shape is the actual
+   interactive surface. Two shape kinds: .c-button (circle, --rx=--ry)
+   and .e-button (ellipse, distinct --rx and --ry). Both share .scatter-btn
+   for layout + behavior wiring. */
 
-.circle-buttons {
+.c-buttons {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
   gap: 0 var(--space-5);
@@ -158,34 +169,36 @@ a { color: inherit; }
   z-index: 2;
 }
 @media (max-width: 1000px) {
-  .circle-buttons { grid-template-columns: 1fr; }
+  .c-buttons { grid-template-columns: 1fr; }
 }
 
-.circle-button {
+.scatter-btn {
   /* --scrub-x / --scrub-y are written by app.js as scroll progresses.
-     They translate the inner .circle and .text, leaving the anchor
-     itself free for Draggable to control. The two transforms compose
-     so scroll-drift and user-drag can run simultaneously. */
+     They translate the inner shape + text, leaving the anchor itself
+     free for Draggable to control. The two transforms compose so
+     scroll-drift and user-drag run simultaneously. */
   --scrub-x: 0px;
   --scrub-y: 0px;
+  --rx: 5rem;
+  --ry: 5rem;
   position: relative;
   display: block;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
   text-decoration: none;
   color: inherit;
   pointer-events: all;
   will-change: transform;
   cursor: grab;
 }
-.circle-button:active { cursor: grabbing; filter: brightness(95%); }
+.c-button { aspect-ratio: 1 / 1; border-radius: 50%; }
+.e-button { /* aspect set by inner shape; no anchor constraint */ }
+.scatter-btn:active { cursor: grabbing; filter: brightness(95%); }
 
-.circle-button .circle {
+.scatter-btn .shape {
   position: absolute;
   inset: 50% 0 0 50%;
-  width: 10rem;
-  height: 10rem;
-  margin: -5rem 0 0 -5rem;
+  width:  calc(var(--rx) * 2);
+  height: calc(var(--ry) * 2);
+  margin: calc(var(--ry) * -1) 0 0 calc(var(--rx) * -1);
   transform: translate(var(--scrub-x), var(--scrub-y));
   border: 1px solid var(--text);
   border-radius: 50%;
@@ -193,7 +206,7 @@ a { color: inherit; }
   background-size: cover;
   background-position: center;
 }
-.circle-button .circle::after {
+.scatter-btn .shape::after {
   content: "";
   display: block;
   background-color: var(--accent);
@@ -208,13 +221,13 @@ a { color: inherit; }
   transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
   z-index: 1;
 }
-.circle-button:hover { color: white; }
-.circle-button:hover .circle::after {
+.scatter-btn:hover { color: white; }
+.scatter-btn:hover .shape::after {
   transform: translate(-50%, -50%) scale(1);
   opacity: 1;
 }
 
-.circle-button .text {
+.scatter-btn .text {
   position: absolute;
   inset: 0;
   transform: translate(var(--scrub-x), var(--scrub-y));
@@ -226,11 +239,11 @@ a { color: inherit; }
   pointer-events: none;
   z-index: 2;
 }
-.circle-button .title { white-space: nowrap; }
-.circle-button .subtitle { font-style: italic; font-size: 0.875rem; }
+.scatter-btn .title { white-space: nowrap; }
+.scatter-btn .subtitle { font-style: italic; font-size: 0.875rem; }
 
 @media (max-width: 1000px) {
-  .circle-button {
+  .scatter-btn {
     width: 12rem; max-width: 100%;
     margin-inline: auto;
     transform: translate(0, 0) !important;

@@ -10,21 +10,22 @@
   initLineSystem();
 
   /**
-   * For each [data-circle-button], on desktop only:
+   * For each [data-scatter-btn] (.c-button and .e-button both carry
+   * it), on desktop only:
    *
    *   Scroll-scrub drift  →  drives --scrub-x / --scrub-y CSS vars on the
    *                          anchor; CSS uses them to translate the inner
-   *                          .circle + .text. This leaves the anchor's
-   *                          own transform free for Draggable.
+   *                          shape + text. This leaves the anchor's own
+   *                          transform free for Draggable.
    *
    *   Draggable           →  moves the anchor (translate via GSAP).
    *
-   *   Composition         →  the visible circle ends up at:
+   *   Composition         →  the visible shape ends up at:
    *                          anchor_layout_position
    *                            + draggable.translate
    *                            + scroll_scrub.translate
    *
-   *   First-drag handoff  →  the moment the user drags a circle, we tween
+   *   First-drag handoff  →  the moment the user drags a button, we tween
    *                          a "mult" factor from 1 → 0.5 over 0.4s so the
    *                          scroll drift continues at half amplitude.
    *                          Signals "you're now in charge" without
@@ -36,10 +37,10 @@
    * Pattern adapted from reference f.js L378–423.
    */
   function initCircleButtons() {
-    const buttons = document.querySelectorAll('[data-circle-button]');
+    const buttons = document.querySelectorAll('[data-scatter-btn]');
     if (!buttons.length) return;
 
-    const container = buttons[0].closest('.circle-buttons') || buttons[0].parentElement;
+    const container = buttons[0].closest('.c-buttons') || buttons[0].parentElement;
 
     buttons.forEach(function (btn) {
       const sx = parseFloat(btn.dataset.scatterX) || 75;

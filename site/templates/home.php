@@ -16,23 +16,25 @@
 <div style="height: 60vh"></div>
 
 <h2 id="projects">Projects</h2>
-<p>Scroll past these — the circles drift. Drag one and it throws with inertia.</p>
+<p>Scroll past these — the shapes drift. Drag one and it throws with inertia.</p>
 
-<div class="circle-buttons">
-  <?php snippet('circle-button', [
+<div class="c-buttons">
+  <?php snippet('c-button', [
     'href' => '#',
     'title' => 'Alpha',
     'subtitle' => 'sketch',
   ]) ?>
-  <?php snippet('circle-button', [
+  <?php snippet('c-button', [
     'href' => '#',
     'title' => 'Beta',
     'subtitle' => 'in progress',
   ]) ?>
-  <?php snippet('circle-button', [
+  <?php snippet('e-button', [
     'href' => '#',
     'title' => 'Gamma',
     'subtitle' => 'archive',
+    'radiusX' => '6rem',
+    'radiusY' => '4rem',
   ]) ?>
 </div>
 
