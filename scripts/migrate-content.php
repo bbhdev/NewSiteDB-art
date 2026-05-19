@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 5;
+const CONTENT_SCHEMA_VERSION = 6;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -63,6 +63,13 @@ $SCHEMA_HISTORY = [
        . ' `name` denormalized from its master (informational only — the'
        . ' resolver still reads name from master + overrides). Purpose: keep'
        . ' the JSON files self-describing when read by a human.',
+    6 => 'Adds positionOffset { dx, dy } to every instance. Position becomes'
+       . ' structurally per-class via offset from the master\'s canonical'
+       . ' coords — drag-translate writes to positionOffset, not to per-key'
+       . ' params overrides. Existing instance.overrides.params.cx/cy/x/y'
+       . ' are migrated by computing master-vs-instance delta. Whole-array'
+       . ' instance.overrides.points / segments are dropped (assumed to be'
+       . ' translations; user can rebuild edge cases with handle drags).',
 ];
 
 /**
@@ -324,6 +331,109 @@ $MIGRATIONS = [
         // field. Operates on site-wide data — re-running per-page is
         // idempotent (no-op after first page finishes).
         return ensureMasterAndInstanceNames(dirname($pageRoot), $dryRun);
+    },
+
+    5 => function (string $pageRoot, bool $dryRun): bool {
+        // v5 → v6: add positionOffset to every instance, strip
+        // position-related overrides (which are now expressed
+        // structurally as the offset). Whole-array shape overrides
+        // (points / segments) are dropped — assumed to be translations
+        // the user can rebuild with handle drags if any case isn't.
+        $contentDir = dirname($pageRoot);
+        $mastersPath = $contentDir . '/_shared/masters.json';
+        $mastersById = [];
+        if (is_file($mastersPath)) {
+            $masters = json_decode(file_get_contents($mastersPath), true) ?: [];
+            foreach ($masters as $m) {
+                if (is_array($m) && isset($m['id'])) $mastersById[$m['id']] = $m;
+            }
+        }
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+
+        $POSITION_KEYS = ['cx', 'cy', 'x', 'y'];
+        foreach ($useClasses as $cid) {
+            $instPath = $pageRoot . '/' . $cid . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            $changed = false;
+            foreach ($insts as &$inst) {
+                if (!is_array($inst)) continue;
+                if (isset($inst['positionOffset'])) continue; // already migrated
+                $mid = $inst['masterId'] ?? null;
+                $master = ($mid && isset($mastersById[$mid])) ? $mastersById[$mid] : null;
+                $ov = (isset($inst['overrides']) && is_array($inst['overrides']))
+                    ? $inst['overrides'] : [];
+                $offset = ['dx' => 0.0, 'dy' => 0.0];
+
+                // (a) position from params.cx/cy or params.x/y
+                if (isset($ov['params']) && is_array($ov['params']) && $master) {
+                    $mp = (isset($master['params']) && is_array($master['params']))
+                        ? $master['params'] : [];
+                    foreach (['cx' => 'dx', 'x' => 'dx'] as $key => $axis) {
+                        if (isset($ov['params'][$key], $mp[$key])
+                            && is_numeric($ov['params'][$key]) && is_numeric($mp[$key])) {
+                            $offset[$axis] = (float)$ov['params'][$key] - (float)$mp[$key];
+                            unset($ov['params'][$key]);
+                        }
+                    }
+                    foreach (['cy' => 'dy', 'y' => 'dy'] as $key => $axis) {
+                        if (isset($ov['params'][$key], $mp[$key])
+                            && is_numeric($ov['params'][$key]) && is_numeric($mp[$key])) {
+                            $offset[$axis] = (float)$ov['params'][$key] - (float)$mp[$key];
+                            unset($ov['params'][$key]);
+                        }
+                    }
+                    if (!$ov['params']) unset($ov['params']);
+                }
+
+                // (b) translation from first-point delta in a points override
+                if (isset($ov['points']) && is_array($ov['points']) && $master
+                    && isset($master['points']) && is_array($master['points'])
+                    && !empty($ov['points']) && !empty($master['points'])) {
+                    $o0 = $ov['points'][0];
+                    $m0 = $master['points'][0];
+                    if (is_array($o0) && is_array($m0)
+                        && isset($o0['x'], $o0['y'], $m0['x'], $m0['y'])) {
+                        $offset['dx'] = (float)$o0['x'] - (float)$m0['x'];
+                        $offset['dy'] = (float)$o0['y'] - (float)$m0['y'];
+                    }
+                    unset($ov['points']);
+                }
+                // (c) segments override — drop (assumed translation).
+                if (isset($ov['segments'])) unset($ov['segments']);
+
+                // Reorder so positionOffset sits right after groupId for
+                // legibility; preserves insertion order in PHP arrays.
+                $newInst = [];
+                $offsetInjected = false;
+                foreach ($inst as $k => $v) {
+                    if ($k === 'overrides') continue;
+                    $newInst[$k] = $v;
+                    if ($k === 'groupId') {
+                        $newInst['positionOffset'] = $offset;
+                        $offsetInjected = true;
+                    }
+                }
+                if (!$offsetInjected) $newInst['positionOffset'] = $offset;
+                $newInst['overrides'] = (object) $ov;
+                $inst = $newInst;
+                $changed = true;
+            }
+            unset($inst);
+            if ($changed && !$dryRun) {
+                file_put_contents($instPath,
+                    json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+            } elseif ($changed && $dryRun) {
+                echo "    would add positionOffset + strip position overrides in $instPath\n";
+            }
+        }
+
+        return true;
     },
 ];
 

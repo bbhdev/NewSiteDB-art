@@ -241,10 +241,19 @@ function art_resolve_instance(array $instance, array $mastersById): array
             }
         }
     }
-    $line['id']        = $instance['id'] ?? null;
-    $line['groupId']   = $instance['groupId'] ?? null;
-    $line['hidden']    = !($instance['visible'] ?? true);
-    $line['overrides'] = $ovArr;
+    // positionOffset is passed through as a separate field; the
+    // runtime composes it into the path's transform attribute (so the
+    // canonical line.params can drive the rotation pivot correctly).
+    $offset = $instance['positionOffset'] ?? null;
+    $dx = (is_array($offset) && isset($offset['dx']) && is_numeric($offset['dx']))
+        ? (float)$offset['dx'] : 0.0;
+    $dy = (is_array($offset) && isset($offset['dy']) && is_numeric($offset['dy']))
+        ? (float)$offset['dy'] : 0.0;
+    $line['id']             = $instance['id'] ?? null;
+    $line['groupId']        = $instance['groupId'] ?? null;
+    $line['hidden']         = !($instance['visible'] ?? true);
+    $line['overrides']      = $ovArr;
+    $line['positionOffset'] = ['dx' => $dx, 'dy' => $dy];
     if ($masterId)  $line['masterId'] = $masterId;
     return $line;
 }

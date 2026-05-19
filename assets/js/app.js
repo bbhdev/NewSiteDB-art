@@ -396,16 +396,23 @@
       const tx  = (typeof behaviors.translateX === 'number') ? behaviors.translateX : 0;
       const ty  = (typeof behaviors.translateY === 'number') ? behaviors.translateY : 0;
       const rot = (typeof behaviors.rotate     === 'number') ? behaviors.rotate     : 0;
+      // v6+: per-class positionOffset baked into the path's transform.
+      // line.d is canonical (master geometry) on the runtime side;
+      // positionOffset shifts the rendered position without per-class
+      // path data. Scroll-driven motion (px / py) layers on top of
+      // the static offset. The rotation pivot stays in canonical /
+      // pre-translate coords — the translate moves the pivot point
+      // visually so the shape rotates around its own (shifted) center.
+      const offX = (lineDef.positionOffset && Number.isFinite(lineDef.positionOffset.dx))
+                   ? lineDef.positionOffset.dx : 0;
+      const offY = (lineDef.positionOffset && Number.isFinite(lineDef.positionOffset.dy))
+                   ? lineDef.positionOffset.dy : 0;
       const hasMotion = (tx !== 0 || ty !== 0 || rot !== 0);
 
-      // Initial state: identity-equivalent transform. The path renders
-      // exactly at its authored `d` coordinates at scroll 0 — same as
-      // the editor. (Previously GSAP's CSS-based transform plus
-      // transform-box: fill-box was causing subpixel rendering
-      // differences between draw-time and runtime.)
+      // Initial state: static positionOffset only (no animation yet).
       pathEl.setAttribute(
         'transform',
-        'translate(0 0) rotate(0 ' + originX + ' ' + originY + ')'
+        'translate(' + offX + ' ' + offY + ') rotate(0 ' + originX + ' ' + originY + ')'
       );
 
       // Diagnostic mode (Grid toggle on): paths render at their authored
@@ -426,7 +433,7 @@
             const pr  = p * rot;
             pathEl.setAttribute(
               'transform',
-              'translate(' + px + ' ' + py + ') ' +
+              'translate(' + (offX + px) + ' ' + (offY + py) + ') ' +
               'rotate(' + pr + ' ' + originX + ' ' + originY + ')'
             );
           }
