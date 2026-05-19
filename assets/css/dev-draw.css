@@ -893,13 +893,30 @@ body.editor {
   margin: 0 0 0.8rem;
 }
 .ed-clone-source label { color: #c0c0c0; font-size: 0.9em; }
-.ed-clone-source select {
-  background: #111;
-  color: #f0f0f0;
+.ed-clone-source-buttons {
+  display: flex;
+  gap: 0.3rem;
+}
+.ed-clone-source-btn {
+  background: #1a1a1a;
+  color: #c0c0c0;
   border: 1px solid #444;
-  padding: 0.25rem 0.4rem;
   border-radius: 3px;
+  padding: 0.25rem 0.7rem;
   font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.ed-clone-source-btn:hover { background: #2a2a2a; color: #fff; }
+.ed-clone-source-btn.is-active {
+  background: #2a2a2a;
+  color: #fff;
+  border-color: var(--accent);
+}
+.ed-clone-tog-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 0.3rem;
 }
 .ed-clone-groups {
   display: grid;

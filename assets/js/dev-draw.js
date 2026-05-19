@@ -1650,44 +1650,93 @@
     finalizeSvgImport(all);
   }
 
-  // Drop the imported shapes into the currently-active group. The
-  // user controls grouping by creating an empty group beforehand if
-  // they want the imports isolated, or by leaving the existing
-  // active group selected to merge them into ongoing work. Multi-
-  // file import lands every file's shapes in the same active group.
+  // Drop the imported shapes into the currently-active group, and
+  // into a same-named counterpart in every other class — masters are
+  // site-wide so an imported object naturally belongs to every
+  // class's page. Each class gets its own instance row (own line id,
+  // own positionOffset starting at 0/0) pointing at the shared
+  // masterId. After import, every imported line in the CURRENT class
+  // is selected, ready for an immediate "Merge into one" if the
+  // drawing arrived as several files.
   function finalizeSvgImport(importedLines) {
-    let targetGroupId = state.activeGroupId;
-    if (!targetGroupId || !state.groups.find(function (g) { return g.id === targetGroupId; })) {
-      // Fallback: brand-new page with no group yet. Create one named
-      // "Imported" so the lines have somewhere to live.
-      const g = {
-        id: uid('g'),
-        name: 'Imported',
-        trigger: null,
-        defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
-      };
-      state.groups.push(g);
-      targetGroupId = g.id;
-    }
+    const activeGroup = state.groups.find(function (g) { return g.id === state.activeGroupId; });
+    const targetName  = activeGroup ? activeGroup.name : 'Imported';
+    // Make sure every class has a group with this name; create
+    // empties where missing so each class's instance has somewhere
+    // to land.
+    ensureGroupInAllClasses(targetName);
+
+    const currentClassLineIds = [];
     importedLines.forEach(function (raw) {
-      const line = Object.assign({
-        id: uid('l'),
-        d: '',
-        positionOffset: { dx: 0, dy: 0 },
-        groupId: targetGroupId,
-        overrides: {}
-      }, raw);
-      computeLineD(line);
-      state.lines.push(line);
-      mintMasterForLine(line);
+      // Mint the master once — same id used by every per-class instance.
+      const mid = 'm-' + Math.random().toString(36).slice(2, 10);
+      const m = { id: mid, scope: {} };
+      MASTER_VISUAL_KEYS.forEach(function (k) {
+        if (raw[k] !== undefined && raw[k] !== null) {
+          m[k] = (typeof raw[k] === 'object') ? JSON.parse(JSON.stringify(raw[k])) : raw[k];
+        }
+      });
+      if (!m.name) m.name = nextDefaultName();
+      state.masters.push(m);
+
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        if (!bucket) return;
+        const g = bucket.groups.find(function (g) { return g.name === targetName; })
+                  || bucket.groups[0];
+        if (!g) return;
+        const line = {
+          id: uid('l'),
+          masterId: mid,
+          d: '',
+          positionOffset: { dx: 0, dy: 0 },
+          groupId: g.id,
+          overrides: {},
+          name: m.name
+        };
+        MASTER_VISUAL_KEYS.forEach(function (k) {
+          if (k === 'name') return;
+          if (raw[k] !== undefined && raw[k] !== null) {
+            line[k] = (typeof raw[k] === 'object') ? JSON.parse(JSON.stringify(raw[k])) : raw[k];
+          }
+        });
+        computeLineD(line);
+        bucket.lines.push(line);
+        if (cid === state.classId) currentClassLineIds.push(line.id);
+      });
     });
-    state.activeGroupId = targetGroupId;
-    state.openGroupIds  = state.openGroupIds || {};
-    state.openGroupIds[targetGroupId] = true;
-    state.selectedIds = [];
+
+    // Select all just-imported lines in the current class so the user
+    // can hit "Merge into one" right away when the drawing arrived as
+    // several files.
+    state.selectedIds  = currentClassLineIds;
+    state.openGroupIds = state.openGroupIds || {};
+    const ag = state.groups.find(function (g) { return g.name === targetName; });
+    if (ag) {
+      state.activeGroupId = ag.id;
+      state.openGroupIds[ag.id] = true;
+    }
     state.dirty = true;
     snapshot();
     renderAll();
+  }
+
+  // Make sure every class has a group with the given name. Creates
+  // empty same-named groups where missing. Used by the SVG import
+  // flow and by addGroup so a new group fans out across classes.
+  function ensureGroupInAllClasses(name) {
+    if (!name) return;
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.groups)) return;
+      if (bucket.groups.find(function (g) { return g.name === name; })) return;
+      bucket.groups.push({
+        id: uid('g'),
+        name: name,
+        trigger: null,
+        defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
+      });
+    });
   }
 
   /**
@@ -3012,10 +3061,25 @@
   }
 
   function addGroup() {
-    const g = defaultGroup();
-    g.name = 'Group ' + (state.groups.length + 1);
-    state.groups.push(g);
-    state.activeGroupId = g.id;
+    // A new group is a site-wide concept (you almost always want it
+    // on every screen-class), so create a same-name group in every
+    // class. Each class gets its own id; rename / delete still acts
+    // per-class. activeGroupId follows the one in the current class.
+    const name = 'Group ' + (state.groups.length + 1);
+    let activeIdForCurrentClass = null;
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.groups)) return;
+      const g = {
+        id: uid('g'),
+        name: name,
+        trigger: null,
+        defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
+      };
+      bucket.groups.push(g);
+      if (cid === state.classId) activeIdForCurrentClass = g.id;
+    });
+    if (activeIdForCurrentClass) state.activeGroupId = activeIdForCurrentClass;
     clearSelection();
     state.dirty = true;
     snapshot();
@@ -3278,18 +3342,53 @@
     const body = document.createElement('div');
     body.className = 'ed-modal-body';
 
+    // Source class picker — radio-style buttons, one per other
+    // class. With only 2–3 classes in practice the dropdown was an
+    // extra click for nothing; buttons surface the choice in place.
+    let currentSourceId = others[0];
     const sourceRow = document.createElement('div');
     sourceRow.className = 'ed-clone-source';
     const sourceLabel = document.createElement('label'); sourceLabel.textContent = 'From:';
-    const sourceSelect = document.createElement('select');
-    others.forEach(function (cid) {
-      const opt = document.createElement('option');
-      opt.value = cid; opt.textContent = labelOf(cid);
-      sourceSelect.appendChild(opt);
-    });
     sourceRow.appendChild(sourceLabel);
-    sourceRow.appendChild(sourceSelect);
+    const sourceBtns = document.createElement('div');
+    sourceBtns.className = 'ed-clone-source-buttons';
+    others.forEach(function (cid, idx) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ed-clone-source-btn' + (idx === 0 ? ' is-active' : '');
+      b.textContent = labelOf(cid);
+      b.dataset.cid = cid;
+      b.addEventListener('click', function () {
+        currentSourceId = cid;
+        sourceBtns.querySelectorAll('.ed-clone-source-btn').forEach(function (x) {
+          x.classList.toggle('is-active', x === b);
+        });
+        renderGroupsList();
+      });
+      sourceBtns.appendChild(b);
+    });
+    sourceRow.appendChild(sourceBtns);
     body.appendChild(sourceRow);
+
+    // "Select all" / "Unselect all" toggle above the groups list.
+    // Defaults are all-checked, so the button starts as "Unselect all";
+    // flips its own label each click.
+    const togRow = document.createElement('div');
+    togRow.className = 'ed-clone-tog-row';
+    const togBtn = document.createElement('button');
+    togBtn.type = 'button';
+    togBtn.className = 'ed-mini';
+    togBtn.textContent = 'Unselect all';
+    togBtn.addEventListener('click', function () {
+      const checkboxes = groupsList.querySelectorAll('input[type="checkbox"]');
+      const anyChecked = Array.prototype.slice.call(checkboxes)
+        .some(function (cb) { return cb.checked; });
+      const newState = !anyChecked;
+      checkboxes.forEach(function (cb) { cb.checked = newState; });
+      togBtn.textContent = newState ? 'Unselect all' : 'Select all';
+    });
+    togRow.appendChild(togBtn);
+    body.appendChild(togRow);
 
     const groupsList = document.createElement('div');
     groupsList.className = 'ed-clone-groups';
@@ -3315,12 +3414,11 @@
     applyBtn.className = 'ed-primary';
     applyBtn.textContent = 'Clone selected';
     applyBtn.addEventListener('click', function () {
-      const sourceId = sourceSelect.value;
       const selected = Array.prototype.slice
         .call(groupsList.querySelectorAll('input[type="checkbox"]:checked'))
         .map(function (cb) { return cb.dataset.groupId; });
       cleanup();
-      if (selected.length) applyCloneCherryPick(sourceId, selected);
+      if (selected.length) applyCloneCherryPick(currentSourceId, selected);
     });
     btnRow.appendChild(applyBtn);
     modal.appendChild(btnRow);
@@ -3329,7 +3427,7 @@
     document.body.appendChild(overlay);
 
     function renderGroupsList() {
-      const sourceId = sourceSelect.value;
+      const sourceId = currentSourceId;
       const src = state.byClass[sourceId];
       groupsList.innerHTML = '';
       if (!src || !src.groups || !src.groups.length) {
@@ -3368,7 +3466,6 @@
       });
     }
     renderGroupsList();
-    sourceSelect.addEventListener('change', renderGroupsList);
 
     function cleanup() {
       overlay.remove();
@@ -4397,6 +4494,29 @@
                        'Cmd/Shift-click to add or remove from the selection.';
     selectionPanel.appendChild(hint);
 
+    // Bulk Color picker — applies to every selected object via the
+    // scope contract. Shows as "active" only when every selected
+    // line shares the same stroke ref; mixed selection shows the
+    // "inherit" slot active so the user has a clear neutral state.
+    const settings = document.createElement('div');
+    settings.className = 'ed-settings';
+    const allStrokes = state.selectedIds
+      .map(function (id) {
+        const l = state.lines.find(function (x) { return x.id === id; });
+        return l ? l.stroke : undefined;
+      });
+    const sharedStroke = allStrokes.every(function (s) { return s === allStrokes[0]; })
+      ? allStrokes[0] : null;
+    settings.appendChild(strokeField('Color', sharedStroke, function (v) {
+      state.selectedIds.forEach(function (id) { setVisualProp(id, 'stroke', v); });
+      scheduleSnapshot();
+      renderLines();
+      renderGroupsList();
+      // Re-render this panel so the swatch state catches up.
+      renderSelectionPanel();
+    }));
+    selectionPanel.appendChild(settings);
+
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
     // Merge — combines the selected lines into one new master +
@@ -4450,6 +4570,16 @@
     wrap.appendChild(divider('Appearance'));
     wrap.appendChild(strokeField('Color', g.defaults.stroke, function (v) {
       updateGroupDefaults(g.id, { stroke: v });
+      // Cascade: clear line.stroke on every line in this group so the
+      // new default actually paints. Group defaults are FALLBACKS in
+      // the resolve order — without this, lines that already have an
+      // explicit stroke would ignore the group change and the user
+      // would see no visual update. setVisualProp routes through
+      // master.scope, so the change propagates across classes.
+      state.lines
+        .filter(function (l) { return l.groupId === g.id; })
+        .forEach(function (l) { setVisualProp(l.id, 'stroke', null); });
+      renderLines();
     }));
     // "Line width" — distinguishes the stroke width from primitives'
     // shape width (rect's `w` param uses "Width" as its label).
@@ -5047,10 +5177,11 @@
   if (importSvgBtn && importSvgInput) {
     importSvgBtn.addEventListener('click', function () { importSvgInput.click(); });
     importSvgInput.addEventListener('change', function () {
-      const files = importSvgInput.files;
-      if (files && files.length) importSvgFiles(files);
-      // Clear value so the same file(s) can be re-imported in a row.
+      // Copy to a real array BEFORE clearing input.value — otherwise
+      // some browsers invalidate the FileList ref mid-import.
+      const files = Array.prototype.slice.call(importSvgInput.files || []);
       importSvgInput.value = '';
+      if (files.length) importSvgFiles(files);
     });
   }
   if (wizardSaveBtn)   wizardSaveBtn.addEventListener('click',   saveWizardObject);
