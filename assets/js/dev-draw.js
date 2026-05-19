@@ -2926,11 +2926,9 @@
       col.appendChild(b);
     }
 
-    const typesHead = document.createElement('h4');
-    typesHead.textContent = 'Type';
-    body.appendChild(typesHead);
-
-    // Side-by-side: Lines (left) and Primitives (right).
+    // Side-by-side: Lines (left) and Primitives (right). The
+    // column headings (h5) act as the section label — no
+    // standalone "Type" header needed.
     const typesGrid = document.createElement('div');
     typesGrid.className = 'ed-create-types-grid';
 
