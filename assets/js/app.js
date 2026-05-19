@@ -248,6 +248,7 @@
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
+      if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
       // Fill: `filled` is authoritative when set (true for primitives,
       // closed-loop freehand, and any explicit author choice); falls
       // back to `closed` for legacy data without `filled`.

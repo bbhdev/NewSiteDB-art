@@ -92,7 +92,7 @@
   const MASTER_VISUAL_KEYS = [
     'kind', 'points', 'params', 'segments',
     'smoothed', 'closed', 'filled',
-    'd', 'stroke', 'width', 'name'
+    'd', 'stroke', 'width', 'linejoin', 'name'
   ];
   // Position sub-keys live on positionOffset (not in scope). Owning
   // them per-class is structural — scope toggles don't apply.
@@ -2917,6 +2917,7 @@
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
+      if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
       // Fill rules:
       //   - `filled` is the source of truth when set explicitly
       //     (true for primitives, true for closed-loop freehand, etc.)
@@ -3787,6 +3788,21 @@
       scheduleSnapshot();
       renderLines();
     }));
+    // Stroke corner style. On a filled shape with a same-color stroke
+    // (the default for primitives), `round` produces the bulgy
+    // rounded-tip effect that scales with line width; `miter` keeps
+    // sharp geometric points; `bevel` flattens them.
+    wrap.appendChild(selectField('Corners', line.linejoin || 'round',
+      [
+        { value: 'round', label: 'Round' },
+        { value: 'miter', label: 'Miter' },
+        { value: 'bevel', label: 'Bevel' }
+      ],
+      function (v) {
+        setVisualProp(line.id, 'linejoin', v);
+        scheduleSnapshot();
+        renderLines();
+      }));
 
     wrap.appendChild(divider('Behavior'));
     const ov = line.overrides || {};

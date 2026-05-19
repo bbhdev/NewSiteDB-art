@@ -419,6 +419,12 @@ body.editor {
   fill: none;
   stroke: #e4e4e4;
   stroke-width: 1.5;
+  /* Match runtime defaults so editor visuals == live visuals. Round
+     joins on a filled shape with a same-color stroke produce the
+     bulgy "rounded extremities" effect at sharp tips. Per-line
+     `linejoin` (round / miter / bevel) can override. */
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
