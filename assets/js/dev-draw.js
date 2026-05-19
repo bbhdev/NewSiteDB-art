@@ -1812,7 +1812,7 @@
    * other classes too. Re-clone if you need the merge mirrored
    * elsewhere. One snapshot for the whole op.
    */
-  function mergeSelectedIntoOne() {
+  async function mergeSelectedIntoOne() {
     const ids = state.selectedIds.slice();
     if (ids.length < 2) return;
     const srcLines = ids
@@ -1834,28 +1834,51 @@
     const firstGroup = state.groups.find(function (g) { return g.id === first.groupId; });
     const targetGroupName = firstGroup ? firstGroup.name : null;
     const mergedName = first.name || nextDefaultName();
+    const masterIds = srcLines.map(function (l) { return l.masterId; }).filter(Boolean);
 
-    // Cascade delete the originals (site-wide via their masterIds).
-    // Drop the originals BEFORE minting the new master + per-class
-    // instances so naming / group fallback logic sees a clean state.
-    const targetMasterIds = new Set();
-    srcLines.forEach(function (l) { if (l.masterId) targetMasterIds.add(l.masterId); });
-    state.pageConfig.useClasses.forEach(function (cid) {
-      const bucket = state.byClass[cid];
-      if (!bucket || !Array.isArray(bucket.lines)) return;
-      bucket.lines = bucket.lines.filter(function (l) {
-        return !(l.masterId && targetMasterIds.has(l.masterId));
+    // Divergence check: do any OTHER classes hold a different
+    // version of the objects being merged? If yes, ask before
+    // overwriting their state; if no, silent fan-out is safe.
+    let scope = 'all';
+    const divergence = analyzeMergeDivergence(masterIds);
+    const divergedClasses = Object.keys(divergence).filter(function (cid) {
+      return divergence[cid].diverged > 0 || divergence[cid].missing > 0;
+    });
+    if (divergedClasses.length > 0) {
+      const labelOf = function (cid) {
+        const c = state.classes.find(function (x) { return x.id === cid; });
+        return c ? c.name : cid;
+      };
+      const escHtml = function (s) {
+        const d = document.createElement('div');
+        d.textContent = String(s);
+        return d.innerHTML;
+      };
+      const items = divergedClasses.map(function (cid) {
+        const d = divergence[cid];
+        const bits = [];
+        if (d.diverged) bits.push(d.diverged + ' with local changes');
+        if (d.missing)  bits.push(d.missing + ' not present');
+        return '<li><strong>' + escHtml(labelOf(cid)) + '</strong>: ' + bits.join(', ') + '</li>';
       });
-    });
-    state.masters = state.masters.filter(function (m) {
-      return !targetMasterIds.has(m.id);
-    });
+      const msg = '<p>Some classes hold a different version of the objects you\'re merging:</p>' +
+                  '<ul>' + items.join('') + '</ul>' +
+                  '<p>Apply the merge there too, overwriting their differences?</p>';
+      const choice = await showChoiceDialog({
+        title:   'Merge — divergence detected',
+        message: msg,
+        html:    true,
+        buttons: [
+          { label: 'Cancel',                value: null },
+          { label: 'Current class only',    value: 'current' },
+          { label: 'Apply everywhere',      value: 'all', className: 'ed-primary' }
+        ]
+      });
+      if (!choice) return;
+      scope = choice;
+    }
 
-    // Make sure every class has a target group to receive the merged
-    // line — same rule as the SVG import path.
-    if (targetGroupName) ensureGroupInAllClasses(targetGroupName);
-
-    // Mint the canonical merged master once.
+    // Helpers shared by both scopes.
     const cloneSegment = function (s) {
       return {
         cmd: s.cmd,
@@ -1869,36 +1892,10 @@
       .filter(function (s) { return s.endpoint; })
       .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; });
     const masterClosed = masterSegments.some(function (s) { return s.cmd === 'Z'; });
+    const targetMasterIds = new Set();
+    srcLines.forEach(function (l) { if (l.masterId) targetMasterIds.add(l.masterId); });
     const mid = 'm-' + Math.random().toString(36).slice(2, 10);
-    const masterRec = {
-      id: mid,
-      scope: {},
-      kind: 'manual',
-      segments: masterSegments,
-      points: masterPoints,
-      closed: masterClosed,
-      smoothed: false,
-      filled:   !!first.filled,
-      stroke:   first.stroke || null,
-      width:    first.width != null ? first.width : null,
-      linejoin: first.linejoin || null,
-      name: mergedName
-    };
-    computeLineD(masterRec);
-    state.masters.push(masterRec);
-
-    // Drop an instance into every class — same canonical merged
-    // object across the site, parallel to the SVG import flow.
-    let currentClassLineId = null;
-    state.pageConfig.useClasses.forEach(function (cid) {
-      const bucket = state.byClass[cid];
-      if (!bucket) return;
-      let groupId = null;
-      if (targetGroupName) {
-        const g = bucket.groups.find(function (g) { return g.name === targetGroupName; });
-        if (g) groupId = g.id;
-      }
-      if (!groupId && bucket.groups[0]) groupId = bucket.groups[0].id;
+    const buildInstance = function (groupId) {
       const line = {
         id: uid('l'),
         masterId: mid,
@@ -1918,14 +1915,106 @@
         name: mergedName
       };
       computeLineD(line);
-      bucket.lines.push(line);
-      if (cid === state.classId) currentClassLineId = line.id;
-    });
+      return line;
+    };
 
-    if (currentClassLineId) selectOnly(currentClassLineId);
+    if (scope === 'all') {
+      // Site-wide: drop originals + their masters, fan out merged
+      // instance into every class.
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        if (!bucket || !Array.isArray(bucket.lines)) return;
+        bucket.lines = bucket.lines.filter(function (l) {
+          return !(l.masterId && targetMasterIds.has(l.masterId));
+        });
+      });
+      state.masters = state.masters.filter(function (m) {
+        return !targetMasterIds.has(m.id);
+      });
+      if (targetGroupName) ensureGroupInAllClasses(targetGroupName);
+      const masterRec = {
+        id: mid, scope: {}, kind: 'manual',
+        segments: masterSegments, points: masterPoints, closed: masterClosed,
+        smoothed: false, filled: !!first.filled,
+        stroke: first.stroke || null,
+        width:  first.width != null ? first.width : null,
+        linejoin: first.linejoin || null,
+        name: mergedName
+      };
+      computeLineD(masterRec);
+      state.masters.push(masterRec);
+      let currentClassLineId = null;
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        if (!bucket) return;
+        let groupId = null;
+        if (targetGroupName) {
+          const g = bucket.groups.find(function (g) { return g.name === targetGroupName; });
+          if (g) groupId = g.id;
+        }
+        if (!groupId && bucket.groups[0]) groupId = bucket.groups[0].id;
+        const line = buildInstance(groupId);
+        bucket.lines.push(line);
+        if (cid === state.classId) currentClassLineId = line.id;
+      });
+      if (currentClassLineId) selectOnly(currentClassLineId);
+    } else {
+      // Current class only: drop originals from THIS class, keep the
+      // old masters (other classes still reference them), add the
+      // new merged master + one instance here. Other classes are
+      // untouched — their diverged state survives.
+      state.lines = state.lines.filter(function (l) {
+        return !(l.masterId && targetMasterIds.has(l.masterId));
+      });
+      const masterRec = {
+        id: mid, scope: {}, kind: 'manual',
+        segments: masterSegments, points: masterPoints, closed: masterClosed,
+        smoothed: false, filled: !!first.filled,
+        stroke: first.stroke || null,
+        width:  first.width != null ? first.width : null,
+        linejoin: first.linejoin || null,
+        name: mergedName
+      };
+      computeLineD(masterRec);
+      state.masters.push(masterRec);
+      let groupId = null;
+      if (targetGroupName) {
+        const g = state.groups.find(function (g) { return g.name === targetGroupName; });
+        if (g) groupId = g.id;
+      }
+      if (!groupId && state.groups[0]) groupId = state.groups[0].id;
+      const line = buildInstance(groupId);
+      state.lines.push(line);
+      selectOnly(line.id);
+    }
     state.dirty = true;
     snapshot();
     renderAll();
+  }
+
+  // Per-class summary of how OTHER classes hold the masters being
+  // merged. `diverged` = an instance exists with a non-zero
+  // positionOffset, any override key, or hidden=true. `missing` =
+  // no instance at all for that master in that class.
+  function analyzeMergeDivergence(masterIds) {
+    const result = {};
+    state.pageConfig.useClasses.forEach(function (cid) {
+      if (cid === state.classId) return;
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      let diverged = 0;
+      let missing  = 0;
+      masterIds.forEach(function (mid) {
+        const inst = bucket.lines.find(function (l) { return l.masterId === mid; });
+        if (!inst) { missing++; return; }
+        const offDx = (inst.positionOffset && inst.positionOffset.dx) || 0;
+        const offDy = (inst.positionOffset && inst.positionOffset.dy) || 0;
+        const hasOverrides = inst.overrides && Object.keys(inst.overrides).length > 0;
+        if (offDx !== 0 || offDy !== 0 || hasOverrides || inst.hidden) diverged++;
+      });
+      result[cid] = { diverged: diverged, missing: missing, total: masterIds.length };
+    });
+    return result;
   }
 
   function segmentsToD(segments) {
@@ -4634,18 +4723,17 @@
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
     // Merge — combines the selected lines into one new master +
-    // instance. Useful after importing a drawing exported as several
-    // SVG bits; lets the user reassemble them as one object.
+    // instance. Site-wide fan-out is silent when other classes hold
+    // identical state for these objects; when any class differs
+    // (positionOffset / overrides / hidden), a divergence dialog
+    // surfaces the choice (Cancel / Current class only / Apply
+    // everywhere) before anything is touched.
     const merge = document.createElement('button');
     merge.textContent = 'Merge into one';
     merge.title = 'Combine the selected objects into one new master. ' +
-                  'Stroke / width / fill inherit from the first selected.';
-    merge.addEventListener('click', function () {
-      if (!confirm('Merge ' + n + ' objects into one? The originals are ' +
-                   'replaced everywhere they appear (other classes too). ' +
-                   'Undo with Cmd+Z if it doesn\'t land right.')) return;
-      mergeSelectedIntoOne();
-    });
+                  'Stroke / width / fill inherit from the first selected. ' +
+                  'A dialog appears only if other classes hold local changes.';
+    merge.addEventListener('click', function () { mergeSelectedIntoOne(); });
     actions.appendChild(merge);
     const del = document.createElement('button');
     del.className = 'ed-danger';
