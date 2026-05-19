@@ -1647,7 +1647,67 @@
       alert('No drawable elements found in the selected file(s).');
       return;
     }
+    // When 2+ path-style shapes come in (no image kinds — those
+    // can't be merged into a path), ask whether to combine them
+    // into one object. Common case: a drawing exported as several
+    // path files. Yes here skips the entire "import-then-merge"
+    // dance and lands a single canonical master in every class
+    // with zero divergence to reconcile.
+    const pathRaws  = all.filter(function (r) { return r.kind !== 'image'; });
+    const imageRaws = all.filter(function (r) { return r.kind === 'image'; });
+    if (pathRaws.length >= 2) {
+      const choice = await showChoiceDialog({
+        title:   'SVG import',
+        message: 'You\'re importing ' + pathRaws.length + ' paths' +
+                 (imageRaws.length ? ' (+ ' + imageRaws.length + ' image' +
+                   (imageRaws.length === 1 ? '' : 's') + ')' : '') +
+                 '. Merge the paths into one object?',
+        buttons: [
+          { label: 'Cancel',     value: 'cancel' },
+          { label: 'No, keep separate', value: 'no' },
+          { label: 'Yes, merge', value: 'yes', className: 'ed-primary' }
+        ]
+      });
+      if (choice === 'cancel' || choice === null) return;
+      if (choice === 'yes') {
+        const mergedRaw = mergeRawsIntoOne(pathRaws);
+        finalizeSvgImport([mergedRaw].concat(imageRaws));
+        return;
+      }
+    }
     finalizeSvgImport(all);
+  }
+
+  // Combine N parsed-raw lines into a single manual raw whose
+  // segments are the concatenation of each input's visible d. Used
+  // by the import-time merge prompt to land one canonical object
+  // instead of N. Image-kind raws are excluded by the caller.
+  function mergeRawsIntoOne(raws) {
+    const combined = [];
+    raws.forEach(function (r) {
+      // Build a transient line so computeLineD gives us the visible
+      // d, then parseSegments to get rich segments back (so arcs
+      // survive). Doing it through computeLineD keeps every primitive
+      // kind on the same path.
+      const tmp = Object.assign({ d: '' }, r);
+      computeLineD(tmp);
+      const segs = parseSegments(tmp.d);
+      for (let i = 0; i < segs.length; i++) combined.push(segs[i]);
+    });
+    const first = raws[0] || {};
+    const points = combined.filter(function (s) { return s.endpoint; })
+                           .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; });
+    return {
+      kind: 'manual',
+      segments: combined,
+      points: points,
+      closed: combined.some(function (s) { return s.cmd === 'Z'; }),
+      smoothed: false,
+      filled:   !!first.filled,
+      stroke:   first.stroke || null,
+      width:    first.width != null ? first.width : null,
+      linejoin: first.linejoin || null
+    };
   }
 
   // Drop the imported shapes into the currently-active group, and
