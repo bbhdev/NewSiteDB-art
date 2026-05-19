@@ -2621,6 +2621,7 @@
     rect:    makePrimitiveTool('rect'),
     polygon: makePrimitiveTool('polygon'),
     star:    makePrimitiveTool('star'),
+    image:   makePrimitiveTool('image'),
 
     line: {
       label: 'Line',
