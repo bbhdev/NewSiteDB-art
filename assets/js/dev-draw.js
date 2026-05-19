@@ -2287,7 +2287,8 @@
     MASTER_VISUAL_KEYS.forEach(function (k) {
       if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
     });
-    if (!m.name) m.name = line.name || line.id;
+    if (!m.name) m.name = line.name || nextDefaultName();
+    line.name = m.name;
     state.masters.push(m);
     line.masterId = mid;
     state.wizard.draftId       = line.id;
@@ -2405,9 +2406,33 @@
     MASTER_VISUAL_KEYS.forEach(function (k) {
       if (line[k] !== undefined && line[k] !== null) m[k] = line[k];
     });
-    if (!m.name) m.name = line.name || line.id;
+    if (!m.name) m.name = line.name || nextDefaultName();
+    // Mirror onto the instance so the label + panel render the
+    // new name immediately (no Save→reload round-trip needed).
+    line.name = m.name;
     state.masters.push(m);
     line.masterId = mid;
+  }
+
+  /**
+   * Compute the next available "Object N" name site-wide. Masters
+   * are stored in content/_shared/masters.json, so the namespace is
+   * naturally site-wide; we count the highest existing N across all
+   * masters and add one. Manually renamed masters with non-matching
+   * names don't count, and don't gap the sequence either.
+   */
+  function nextDefaultName() {
+    const re = /^Object (\d+)$/;
+    let maxN = 0;
+    state.masters.forEach(function (m) {
+      if (!m || !m.name) return;
+      const match = m.name.match(re);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxN) maxN = n;
+      }
+    });
+    return 'Object ' + (maxN + 1);
   }
 
   function deleteLine(id) {
