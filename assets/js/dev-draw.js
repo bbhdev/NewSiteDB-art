@@ -341,7 +341,7 @@
       paramFields: [
         ['x', 'X'], ['y', 'Y'],
         ['w', 'Width'], ['h', 'Height'],
-        ['src', 'Image URL', 'text'],
+        ['src', 'Image URL', 'image-source'],
         ['fit', 'Fit', 'select', [
           { value: 'meet',  label: 'Fit (letterbox)' },
           { value: 'slice', label: 'Cover (crop)' },
@@ -4954,6 +4954,8 @@
         let field;
         if (type === 'text') {
           field = textField(label, line.params[key] || '', onChange);
+        } else if (type === 'image-source') {
+          field = imageSourceField(label, line.params[key] || '', onChange);
         } else if (type === 'select') {
           field = selectField(label, line.params[key] || (entry[3][0] && entry[3][0].value),
                               entry[3], onChange);
@@ -5209,6 +5211,38 @@
     picker.appendChild(clr);
 
     wrap.appendChild(lbl); wrap.appendChild(picker);
+    return wrap;
+  }
+
+  function imageSourceField(label, value, onChange) {
+    // Image URL input — datalist-backed text input. Suggestions are
+    // public URLs the server collected at editor render time: page-
+    // attached files + assets/images/. Picking from the dropdown is
+    // a click; pasting any URL (external CDN, etc.) still works
+    // because it's a plain text input, the datalist is suggestions
+    // not constraints.
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+    const datalistId = 'ed-image-sources';
+    if (!document.getElementById(datalistId)) {
+      const dl = document.createElement('datalist');
+      dl.id = datalistId;
+      const sources = Array.isArray(initial.imageSources) ? initial.imageSources : [];
+      sources.forEach(function (s) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        dl.appendChild(opt);
+      });
+      document.body.appendChild(dl);
+    }
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.setAttribute('list', datalistId);
+    inp.value = value || '';
+    inp.placeholder = 'pick from server, or paste any URL';
+    inp.addEventListener('input', function () { onChange(inp.value); });
+    wrap.appendChild(lbl); wrap.appendChild(inp);
     return wrap;
   }
 

@@ -94,6 +94,35 @@ if (file_exists($templatePath)) {
   $triggerSuggestions = array_values(array_unique($triggerSuggestions));
 }
 
+// Image source suggestions for the "Image URL" panel field — list
+// of public URLs the user is likely to want, so they can pick from
+// a datalist autocomplete instead of typing a path from memory.
+// Sources: files attached to the target page (Kirby's $page->images())
+// + anything in assets/images/. Free-form URL still works (external
+// CDN, full URL, whatever) — this just removes friction for the
+// common "image already on the server" case.
+$imageSources = [];
+$pageObj = $targetSlug ? page($targetSlug) : null;
+if ($pageObj) {
+  foreach ($pageObj->images() as $img) {
+    $imageSources[] = (string)$img->url();
+  }
+}
+$assetsImgDir = kirby()->root('assets') . '/images';
+if (is_dir($assetsImgDir)) {
+  $imgExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'];
+  foreach (scandir($assetsImgDir) as $f) {
+    if ($f === '.' || $f === '..') continue;
+    $full = $assetsImgDir . '/' . $f;
+    if (!is_file($full)) continue;
+    $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+    if (!in_array($ext, $imgExts, true)) continue;
+    $imageSources[] = '/assets/images/' . $f;
+  }
+}
+$imageSources = array_values(array_unique($imageSources));
+sort($imageSources);
+
 $v = option('version', 'dev');
 
 $payload = json_encode([
@@ -106,6 +135,7 @@ $payload = json_encode([
   'palette'            => $palette,
   'page'               => $pageCfg,
   'triggerSuggestions' => $triggerSuggestions,
+  'imageSources'       => $imageSources,
   'version'            => $v
 ], JSON_UNESCAPED_SLASHES);
 ?>
