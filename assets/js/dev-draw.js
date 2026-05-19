@@ -99,6 +99,181 @@
   // edited as a single field, so they don't need a link toggle yet.
   const PANEL_LINKABLE_KEYS = ['stroke', 'width', 'name', 'filled', 'smoothed', 'closed'];
 
+  // PRIMITIVES — geometric kinds the editor knows about. Declared
+  // up here (instead of next to the tool definitions further down)
+  // because computeLineD reads it, and computeLineD is called from
+  // resolveInstanceJS at init time. The path-builder helpers
+  // referenced inside (circlePathD, polygonPathD, …) are function
+  // declarations, so they're hoisted and safe to reference even
+  // though their source is later in the file.
+  const PRIMITIVES = {
+    circle: {
+      label: 'Circle',
+      paramsFromDrag: function (s, e) {
+        return { cx: s.x, cy: s.y, r: Math.max(1, Math.hypot(e.x - s.x, e.y - s.y)) };
+      },
+      generateD: function (p) { return circlePathD(p.cx, p.cy, p.r); },
+      handles: function (p) {
+        return [
+          { id: 'c', x: p.cx,         y: p.cy },
+          { id: 'r', x: p.cx + p.r,   y: p.cy }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        return Object.assign({}, p, { r: Math.max(1, Math.hypot(pos.x - p.cx, pos.y - p.cy)) });
+      },
+      paramFields: [['cx', 'Center X'], ['cy', 'Center Y'], ['r', 'Radius']],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    ellipse: {
+      label: 'Ellipse',
+      paramsFromDrag: function (s, e) {
+        return {
+          cx: s.x, cy: s.y,
+          rx: Math.max(1, Math.abs(e.x - s.x)),
+          ry: Math.max(1, Math.abs(e.y - s.y))
+        };
+      },
+      generateD: function (p) { return ellipsePathD(p.cx, p.cy, p.rx, p.ry); },
+      handles: function (p) {
+        return [
+          { id: 'c',  x: p.cx,         y: p.cy },
+          { id: 'rx', x: p.cx + p.rx,  y: p.cy },
+          { id: 'ry', x: p.cx,         y: p.cy + p.ry }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c')  return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        if (id === 'rx') return Object.assign({}, p, { rx: Math.max(1, Math.abs(pos.x - p.cx)) });
+        return Object.assign({}, p, { ry: Math.max(1, Math.abs(pos.y - p.cy)) });
+      },
+      paramFields: [['cx', 'Center X'], ['cy', 'Center Y'], ['rx', 'Radius X'], ['ry', 'Radius Y']],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    rect: {
+      label: 'Rectangle',
+      paramsFromDrag: function (s, e) {
+        return {
+          x: Math.min(s.x, e.x),
+          y: Math.min(s.y, e.y),
+          w: Math.max(1, Math.abs(e.x - s.x)),
+          h: Math.max(1, Math.abs(e.y - s.y)),
+          r: 0
+        };
+      },
+      generateD: function (p) { return rectPathD(p.x, p.y, p.w, p.h, p.r); },
+      handles: function (p) {
+        return [
+          { id: 'tl', x: p.x,       y: p.y },
+          { id: 'tr', x: p.x + p.w, y: p.y },
+          { id: 'br', x: p.x + p.w, y: p.y + p.h },
+          { id: 'bl', x: p.x,       y: p.y + p.h }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        // Compute new bounding box from the moved corner. The opposite
+        // corner stays fixed so the rect resizes naturally.
+        let x1 = p.x, y1 = p.y, x2 = p.x + p.w, y2 = p.y + p.h;
+        if      (id === 'tl') { x1 = pos.x; y1 = pos.y; }
+        else if (id === 'tr') { x2 = pos.x; y1 = pos.y; }
+        else if (id === 'br') { x2 = pos.x; y2 = pos.y; }
+        else if (id === 'bl') { x1 = pos.x; y2 = pos.y; }
+        const nx = Math.min(x1, x2), ny = Math.min(y1, y2);
+        return Object.assign({}, p, {
+          x: nx, y: ny,
+          w: Math.max(1, Math.abs(x2 - x1)),
+          h: Math.max(1, Math.abs(y2 - y1))
+        });
+      },
+      paramFields: [
+        ['x', 'X'], ['y', 'Y'],
+        ['w', 'Width'], ['h', 'Height'],
+        ['r', 'Corner radius']
+      ],
+      positionKeys: ['x', 'y'],
+      labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
+    },
+
+    polygon: {
+      label: 'Polygon',
+      paramsFromDrag: function (s, e) {
+        return {
+          cx: s.x, cy: s.y,
+          r: Math.max(1, Math.hypot(e.x - s.x, e.y - s.y)),
+          sides: 5,
+          angle: 0
+        };
+      },
+      generateD: function (p) { return polygonPathD(p.cx, p.cy, p.r, p.sides, p.angle); },
+      handles: function (p) {
+        // One handle for center, one at the first vertex (drives radius
+        // and rotation simultaneously).
+        const t = (p.angle - 90) * Math.PI / 180;
+        return [
+          { id: 'c', x: p.cx, y: p.cy },
+          { id: 'v', x: p.cx + p.r * Math.cos(t), y: p.cy + p.r * Math.sin(t) }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        const dx = pos.x - p.cx, dy = pos.y - p.cy;
+        const r = Math.max(1, Math.hypot(dx, dy));
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+        return Object.assign({}, p, { r: r, angle: angle });
+      },
+      paramFields: [
+        ['cx', 'Center X'], ['cy', 'Center Y'],
+        ['r', 'Radius'], ['sides', 'Sides'], ['angle', 'Angle']
+      ],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    },
+
+    star: {
+      label: 'Star',
+      paramsFromDrag: function (s, e) {
+        const r = Math.max(1, Math.hypot(e.x - s.x, e.y - s.y));
+        return { cx: s.x, cy: s.y, rOuter: r, rInner: r * 0.4, points: 5, angle: 0 };
+      },
+      generateD: function (p) {
+        return starPathD(p.cx, p.cy, p.rOuter, p.rInner, p.points, p.angle);
+      },
+      handles: function (p) {
+        const tO = (p.angle - 90) * Math.PI / 180;
+        const tI = (p.angle - 90 + 180 / p.points) * Math.PI / 180;
+        return [
+          { id: 'c', x: p.cx, y: p.cy },
+          { id: 'o', x: p.cx + p.rOuter * Math.cos(tO), y: p.cy + p.rOuter * Math.sin(tO) },
+          { id: 'i', x: p.cx + p.rInner * Math.cos(tI), y: p.cy + p.rInner * Math.sin(tI) }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
+        const dx = pos.x - p.cx, dy = pos.y - p.cy;
+        const r = Math.max(1, Math.hypot(dx, dy));
+        if (id === 'o') {
+          // Outer vertex drives outer radius + overall rotation.
+          const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+          return Object.assign({}, p, { rOuter: r, angle: angle });
+        }
+        // Inner vertex: only its radius changes.
+        return Object.assign({}, p, { rInner: r });
+      },
+      paramFields: [
+        ['cx', 'Center X'], ['cy', 'Center Y'],
+        ['rOuter', 'Outer radius'], ['rInner', 'Inner radius'],
+        ['points', 'Points'], ['angle', 'Angle']
+      ],
+      positionKeys: ['cx', 'cy'],
+      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
+    }
+  };
+
   /**
    * Compose a flat line record from an instance + the master library.
    * Returns the same shape Phase 3's editor manipulated, plus a
@@ -1465,173 +1640,8 @@
     return d + ' Z';
   }
 
-  const PRIMITIVES = {
-    circle: {
-      label: 'Circle',
-      paramsFromDrag: function (s, e) {
-        return { cx: s.x, cy: s.y, r: Math.max(1, Math.hypot(e.x - s.x, e.y - s.y)) };
-      },
-      generateD: function (p) { return circlePathD(p.cx, p.cy, p.r); },
-      handles: function (p) {
-        return [
-          { id: 'c', x: p.cx,         y: p.cy },
-          { id: 'r', x: p.cx + p.r,   y: p.cy }
-        ];
-      },
-      updateFromHandle: function (p, id, pos) {
-        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
-        return Object.assign({}, p, { r: Math.max(1, Math.hypot(pos.x - p.cx, pos.y - p.cy)) });
-      },
-      paramFields: [['cx', 'Center X'], ['cy', 'Center Y'], ['r', 'Radius']],
-      positionKeys: ['cx', 'cy'],
-      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
-    },
-
-    ellipse: {
-      label: 'Ellipse',
-      paramsFromDrag: function (s, e) {
-        return {
-          cx: s.x, cy: s.y,
-          rx: Math.max(1, Math.abs(e.x - s.x)),
-          ry: Math.max(1, Math.abs(e.y - s.y))
-        };
-      },
-      generateD: function (p) { return ellipsePathD(p.cx, p.cy, p.rx, p.ry); },
-      handles: function (p) {
-        return [
-          { id: 'c',  x: p.cx,         y: p.cy },
-          { id: 'rx', x: p.cx + p.rx,  y: p.cy },
-          { id: 'ry', x: p.cx,         y: p.cy + p.ry }
-        ];
-      },
-      updateFromHandle: function (p, id, pos) {
-        if (id === 'c')  return Object.assign({}, p, { cx: pos.x, cy: pos.y });
-        if (id === 'rx') return Object.assign({}, p, { rx: Math.max(1, Math.abs(pos.x - p.cx)) });
-        return Object.assign({}, p, { ry: Math.max(1, Math.abs(pos.y - p.cy)) });
-      },
-      paramFields: [['cx', 'Center X'], ['cy', 'Center Y'], ['rx', 'Radius X'], ['ry', 'Radius Y']],
-      positionKeys: ['cx', 'cy'],
-      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
-    },
-
-    rect: {
-      label: 'Rectangle',
-      paramsFromDrag: function (s, e) {
-        return {
-          x: Math.min(s.x, e.x),
-          y: Math.min(s.y, e.y),
-          w: Math.max(1, Math.abs(e.x - s.x)),
-          h: Math.max(1, Math.abs(e.y - s.y)),
-          r: 0
-        };
-      },
-      generateD: function (p) { return rectPathD(p.x, p.y, p.w, p.h, p.r); },
-      handles: function (p) {
-        return [
-          { id: 'tl', x: p.x,       y: p.y },
-          { id: 'tr', x: p.x + p.w, y: p.y },
-          { id: 'br', x: p.x + p.w, y: p.y + p.h },
-          { id: 'bl', x: p.x,       y: p.y + p.h }
-        ];
-      },
-      updateFromHandle: function (p, id, pos) {
-        // Compute new bounding box from the moved corner. The opposite
-        // corner stays fixed so the rect resizes naturally.
-        let x1 = p.x, y1 = p.y, x2 = p.x + p.w, y2 = p.y + p.h;
-        if      (id === 'tl') { x1 = pos.x; y1 = pos.y; }
-        else if (id === 'tr') { x2 = pos.x; y1 = pos.y; }
-        else if (id === 'br') { x2 = pos.x; y2 = pos.y; }
-        else if (id === 'bl') { x1 = pos.x; y2 = pos.y; }
-        const nx = Math.min(x1, x2), ny = Math.min(y1, y2);
-        return Object.assign({}, p, {
-          x: nx, y: ny,
-          w: Math.max(1, Math.abs(x2 - x1)),
-          h: Math.max(1, Math.abs(y2 - y1))
-        });
-      },
-      paramFields: [
-        ['x', 'X'], ['y', 'Y'],
-        ['w', 'Width'], ['h', 'Height'],
-        ['r', 'Corner radius']
-      ],
-      positionKeys: ['x', 'y'],
-      labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
-    },
-
-    polygon: {
-      label: 'Polygon',
-      paramsFromDrag: function (s, e) {
-        return {
-          cx: s.x, cy: s.y,
-          r: Math.max(1, Math.hypot(e.x - s.x, e.y - s.y)),
-          sides: 5,
-          angle: 0
-        };
-      },
-      generateD: function (p) { return polygonPathD(p.cx, p.cy, p.r, p.sides, p.angle); },
-      handles: function (p) {
-        // One handle for center, one at the first vertex (drives radius
-        // and rotation simultaneously).
-        const t = (p.angle - 90) * Math.PI / 180;
-        return [
-          { id: 'c', x: p.cx, y: p.cy },
-          { id: 'v', x: p.cx + p.r * Math.cos(t), y: p.cy + p.r * Math.sin(t) }
-        ];
-      },
-      updateFromHandle: function (p, id, pos) {
-        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
-        const dx = pos.x - p.cx, dy = pos.y - p.cy;
-        const r = Math.max(1, Math.hypot(dx, dy));
-        const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
-        return Object.assign({}, p, { r: r, angle: angle });
-      },
-      paramFields: [
-        ['cx', 'Center X'], ['cy', 'Center Y'],
-        ['r', 'Radius'], ['sides', 'Sides'], ['angle', 'Angle']
-      ],
-      positionKeys: ['cx', 'cy'],
-      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
-    },
-
-    star: {
-      label: 'Star',
-      paramsFromDrag: function (s, e) {
-        const r = Math.max(1, Math.hypot(e.x - s.x, e.y - s.y));
-        return { cx: s.x, cy: s.y, rOuter: r, rInner: r * 0.4, points: 5, angle: 0 };
-      },
-      generateD: function (p) {
-        return starPathD(p.cx, p.cy, p.rOuter, p.rInner, p.points, p.angle);
-      },
-      handles: function (p) {
-        const tO = (p.angle - 90) * Math.PI / 180;
-        const tI = (p.angle - 90 + 180 / p.points) * Math.PI / 180;
-        return [
-          { id: 'c', x: p.cx, y: p.cy },
-          { id: 'o', x: p.cx + p.rOuter * Math.cos(tO), y: p.cy + p.rOuter * Math.sin(tO) },
-          { id: 'i', x: p.cx + p.rInner * Math.cos(tI), y: p.cy + p.rInner * Math.sin(tI) }
-        ];
-      },
-      updateFromHandle: function (p, id, pos) {
-        if (id === 'c') return Object.assign({}, p, { cx: pos.x, cy: pos.y });
-        const dx = pos.x - p.cx, dy = pos.y - p.cy;
-        const r = Math.max(1, Math.hypot(dx, dy));
-        if (id === 'o') {
-          // Outer vertex drives outer radius + overall rotation.
-          const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
-          return Object.assign({}, p, { rOuter: r, angle: angle });
-        }
-        // Inner vertex: only its radius changes.
-        return Object.assign({}, p, { rInner: r });
-      },
-      paramFields: [
-        ['cx', 'Center X'], ['cy', 'Center Y'],
-        ['rOuter', 'Outer radius'], ['rInner', 'Inner radius'],
-        ['points', 'Points'], ['angle', 'Angle']
-      ],
-      positionKeys: ['cx', 'cy'],
-      labelPosition: function (p) { return { x: p.cx + 6, y: p.cy + 6 }; }
-    }
-  };
+  // (PRIMITIVES was here; hoisted above resolveInstanceJS in v0.3.3
+  // so the init-time resolution can read it without TDZ.)
 
   /**
    * One factory builds the click-drag tool for every primitive. The
