@@ -203,6 +203,24 @@ $payload = json_encode([
 
 <div class="ed-body">
   <aside class="ed-sidebar">
+    <!-- Working panels first: groups list + the contextual selection
+         panel are what the user touches most. -->
+    <section class="ed-panel">
+      <header class="ed-panel-head">
+        <h3>Groups</h3>
+        <button type="button" id="new-group-btn" class="ed-mini">+ New group</button>
+      </header>
+      <ul id="groups-list" class="ed-groups"></ul>
+    </section>
+
+    <section class="ed-panel" id="selection-panel">
+      <!-- Populated dynamically: group settings or line overrides -->
+    </section>
+
+    <!-- Setup panels last: canvas dims + palette are configured once
+         at the start of a page and rarely revisited, so they live at
+         the bottom of the sidebar out of the active-work line of
+         sight. -->
     <section class="ed-panel" id="canvas-panel">
       <header class="ed-panel-head">
         <h3>Canvas</h3>
@@ -216,18 +234,6 @@ $payload = json_encode([
         <button type="button" id="new-color-btn" class="ed-mini">+ Color</button>
       </header>
       <ul id="palette-list" class="ed-palette-list"></ul>
-    </section>
-
-    <section class="ed-panel">
-      <header class="ed-panel-head">
-        <h3>Groups</h3>
-        <button type="button" id="new-group-btn" class="ed-mini">+ New group</button>
-      </header>
-      <ul id="groups-list" class="ed-groups"></ul>
-    </section>
-
-    <section class="ed-panel" id="selection-panel">
-      <!-- Populated dynamically: group settings or line overrides -->
     </section>
 
     <div class="ed-sidebar-footer">
