@@ -741,8 +741,9 @@ body.editor {
   background: #181818;
   border: 1px solid #2a2a2a;
   border-radius: 4px;
+  cursor: pointer;
 }
-.ed-library-row:hover { background: #1d1d1d; }
+.ed-library-row:hover { background: #1d1d1d; border-color: #444; }
 .ed-library-preview {
   width: 48px;
   height: 48px;

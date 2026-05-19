@@ -3839,6 +3839,27 @@
     function buildRow(master) {
       const row = document.createElement('div');
       row.className = 'ed-library-row';
+      // Click the row → jump to an instance. Prefer the active
+      // class; otherwise the first class that has the master.
+      // Closes the modal, switches class if needed, selects the
+      // line. Delete button below stops propagation so it can't
+      // accidentally jump-then-delete.
+      row.addEventListener('click', function () {
+        const targetClassId = pickClassWithMaster(master.id);
+        if (!targetClassId) {
+          // Orphan master (no instances in any class) — leave the
+          // modal open; nothing to select. User can delete from
+          // here if they want.
+          return;
+        }
+        cleanup();
+        if (targetClassId !== state.classId) {
+          switchClass(targetClassId);
+        }
+        const bucket = state.byClass[targetClassId];
+        const inst = bucket && bucket.lines.find(function (l) { return l.masterId === master.id; });
+        if (inst) selectOnly(inst.id);
+      });
 
       // Preview — small SVG fitting the master's bbox into a fixed
       // square. Falls back to a "no preview" placeholder for
@@ -3897,7 +3918,8 @@
       del.className = 'ed-mini ed-danger';
       del.textContent = 'Delete';
       del.title = 'Delete this master and every instance in every class.';
-      del.addEventListener('click', function () {
+      del.addEventListener('click', function (e) {
+        e.stopPropagation();
         const total = Object.values(usage).reduce(function (s, n) { return s + n; }, 0);
         if (!confirm('Delete "' + (master.name || master.id) + '"? ' +
                      'This removes ' + total + ' instance' + (total === 1 ? '' : 's') +
@@ -4009,6 +4031,23 @@
         }).length;
       });
       return counts;
+    }
+
+    // Pick a class that has at least one instance of this master.
+    // Prefer the active class so a same-class click doesn't bounce
+    // the user away from where they were. Returns null if no class
+    // has an instance (pure orphan master).
+    function pickClassWithMaster(masterId) {
+      const order = [state.classId].concat(
+        state.pageConfig.useClasses.filter(function (c) { return c !== state.classId; })
+      );
+      for (let i = 0; i < order.length; i++) {
+        const bucket = state.byClass[order[i]];
+        if (bucket && bucket.lines.some(function (l) { return l.masterId === masterId; })) {
+          return order[i];
+        }
+      }
+      return null;
     }
 
     function cleanup() {
