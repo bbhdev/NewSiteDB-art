@@ -1250,6 +1250,28 @@
           segments.push({ cmd: 'Q', controlPoints: [cp], endpoint: ep });
           cur = ep;
         }
+      } else if (C === 'A') {
+        // SVG arc: rx ry x-axis-rot large-flag sweep-flag x y. We
+        // preserve the arc-specific args on the segment so segmentsToD
+        // can re-emit it intact; the editor's handle UI just sees the
+        // endpoint (arc curvature has no draggable control points
+        // here — that would be a separate authoring mode).
+        for (let i = 0; i + 6 < nums.length; i += 7) {
+          const ep = abs(rel, nums[i + 5], nums[i + 6]);
+          segments.push({
+            cmd: 'A',
+            controlPoints: [],
+            endpoint: ep,
+            arcArgs: {
+              rx:    nums[i],
+              ry:    nums[i + 1],
+              rot:   nums[i + 2],
+              large: nums[i + 3] ? 1 : 0,
+              sweep: nums[i + 4] ? 1 : 0
+            }
+          });
+          cur = ep;
+        }
       } else if (C === 'Z') {
         segments.push({ cmd: 'Z', controlPoints: [], endpoint: null });
       }
@@ -1364,11 +1386,28 @@
     if (s.cmd === 'Z' || !s.endpoint) {
       return { cmd: s.cmd, controlPoints: [], endpoint: null };
     }
-    return {
+    const out = {
       cmd: s.cmd,
       controlPoints: s.controlPoints.map(function (cp) { return svgApply(M, cp.x, cp.y); }),
       endpoint: svgApply(M, s.endpoint.x, s.endpoint.y)
     };
+    if (s.arcArgs) {
+      // For uniform scale + translate, scale rx/ry by the scale factor;
+      // rot/large/sweep stay as-is. Non-uniform / rotation transforms
+      // distort arcs and would need a flatten-to-bezier pass — skipped
+      // here, the arc just lands with original rx/ry which is wrong in
+      // that case but rare for import flows.
+      const scale = (Math.abs(M[1]) < 1e-9 && Math.abs(M[2]) < 1e-9
+                     && Math.abs(M[0] - M[3]) < 1e-9) ? M[0] : 1;
+      out.arcArgs = {
+        rx: s.arcArgs.rx * scale,
+        ry: s.arcArgs.ry * scale,
+        rot: s.arcArgs.rot,
+        large: s.arcArgs.large,
+        sweep: s.arcArgs.sweep
+      };
+    }
+    return out;
   }
 
   function convertSvgElement(el, M, inherited) {
@@ -1505,59 +1544,164 @@
     });
   }
 
-  function importSvgFile(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onerror = function () { alert('Couldn\'t read this file.'); };
-    reader.onload  = function () {
-      const text = String(reader.result || '');
-      const doc  = new DOMParser().parseFromString(text, 'image/svg+xml');
-      const root = doc.documentElement;
-      if (!root || root.nodeName !== 'svg' || doc.getElementsByTagName('parsererror').length) {
-        alert('Not a valid SVG file.');
-        return;
-      }
-      const baseName = (file.name || 'import').replace(/\.svg$/i, '') || 'import';
-      const imported = [];
-      walkSvg(root, SVG_IDENT_M.slice(),
-        { fill: '#000000', stroke: null, strokeWidth: null },
-        function (el, M, inherited) {
-          const line = convertSvgElement(el, M, inherited);
-          if (line) imported.push(line);
-        });
-      if (!imported.length) {
-        alert('No drawable elements found in this SVG.');
-        return;
-      }
-      finalizeSvgImport(baseName, imported);
-    };
-    reader.readAsText(file);
+  // Parse a single SVG file and return its lines (master-ready
+  // shape, no instance fields). Wrapped in a Promise so the
+  // multi-file caller can await each file in turn.
+  function parseSvgFileToLines(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file) { resolve([]); return; }
+      const reader = new FileReader();
+      reader.onerror = function () { reject(new Error('Couldn\'t read file.')); };
+      reader.onload  = function () {
+        const text = String(reader.result || '');
+        const doc  = new DOMParser().parseFromString(text, 'image/svg+xml');
+        const root = doc.documentElement;
+        if (!root || root.nodeName !== 'svg' || doc.getElementsByTagName('parsererror').length) {
+          reject(new Error('Not a valid SVG.'));
+          return;
+        }
+        const out = [];
+        walkSvg(root, SVG_IDENT_M.slice(),
+          { fill: '#000000', stroke: null, strokeWidth: null },
+          function (el, M, inherited) {
+            const line = convertSvgElement(el, M, inherited);
+            if (line) out.push(line);
+          });
+        resolve(out);
+      };
+      reader.readAsText(file);
+    });
   }
 
-  function finalizeSvgImport(name, importedLines) {
-    const groupId = uid('g');
-    state.groups.push({
-      id: groupId,
-      name: name,
-      trigger: null,
-      defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
-    });
+  async function importSvgFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    const all = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const f = fileList[i];
+      try {
+        const lines = await parseSvgFileToLines(f);
+        all.push.apply(all, lines);
+      } catch (err) {
+        alert('Skipped ' + f.name + ': ' + err.message);
+      }
+    }
+    if (!all.length) {
+      alert('No drawable elements found in the selected file(s).');
+      return;
+    }
+    finalizeSvgImport(all);
+  }
+
+  // Drop the imported shapes into the currently-active group. The
+  // user controls grouping by creating an empty group beforehand if
+  // they want the imports isolated, or by leaving the existing
+  // active group selected to merge them into ongoing work. Multi-
+  // file import lands every file's shapes in the same active group.
+  function finalizeSvgImport(importedLines) {
+    let targetGroupId = state.activeGroupId;
+    if (!targetGroupId || !state.groups.find(function (g) { return g.id === targetGroupId; })) {
+      // Fallback: brand-new page with no group yet. Create one named
+      // "Imported" so the lines have somewhere to live.
+      const g = {
+        id: uid('g'),
+        name: 'Imported',
+        trigger: null,
+        defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
+      };
+      state.groups.push(g);
+      targetGroupId = g.id;
+    }
     importedLines.forEach(function (raw) {
       const line = Object.assign({
         id: uid('l'),
         d: '',
         positionOffset: { dx: 0, dy: 0 },
-        groupId: groupId,
+        groupId: targetGroupId,
         overrides: {}
       }, raw);
       computeLineD(line);
       state.lines.push(line);
       mintMasterForLine(line);
     });
-    state.activeGroupId = groupId;
+    state.activeGroupId = targetGroupId;
     state.openGroupIds  = state.openGroupIds || {};
-    state.openGroupIds[groupId] = true;
+    state.openGroupIds[targetGroupId] = true;
     state.selectedIds = [];
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  /**
+   * Merge every currently-selected line into a single new master +
+   * one instance in the current class. The merged line is
+   * kind: 'manual' with the union of all selected lines' visible
+   * segments (parsed from each line.d, so primitives + arcs survive).
+   * Visual stroke / width / filled / linejoin inherit from the FIRST
+   * selected line — the user can reset any of those after.
+   *
+   * Site-wide effect: deleting the source lines cascades through
+   * their masters, which removes any instances of those masters in
+   * other classes too. Re-clone if you need the merge mirrored
+   * elsewhere. One snapshot for the whole op.
+   */
+  function mergeSelectedIntoOne() {
+    const ids = state.selectedIds.slice();
+    if (ids.length < 2) return;
+    const srcLines = ids
+      .map(function (id) { return state.lines.find(function (l) { return l.id === id; }); })
+      .filter(Boolean);
+    if (srcLines.length < 2) return;
+
+    const combinedSegments = [];
+    srcLines.forEach(function (l) {
+      const segs = parseSegments(l.d);
+      for (let i = 0; i < segs.length; i++) combinedSegments.push(segs[i]);
+    });
+    if (!combinedSegments.length) {
+      alert('Selected objects have no path data to merge.');
+      return;
+    }
+
+    const first = srcLines[0];
+    const merged = {
+      id: uid('l'),
+      kind: 'manual',
+      segments: combinedSegments,
+      points: combinedSegments
+        .filter(function (s) { return s.endpoint; })
+        .map(function (s) { return { x: s.endpoint.x, y: s.endpoint.y }; }),
+      closed: combinedSegments.some(function (s) { return s.cmd === 'Z'; }),
+      smoothed: false,
+      filled:   !!first.filled,
+      stroke:   first.stroke || null,
+      width:    first.width != null ? first.width : null,
+      linejoin: first.linejoin || null,
+      d: '',
+      positionOffset: { dx: 0, dy: 0 },
+      groupId: first.groupId || state.activeGroupId,
+      overrides: {}
+    };
+    computeLineD(merged);
+
+    // Cascade delete the originals (site-wide via their masterIds),
+    // then push the merged line + mint its master.
+    const targetMasterIds = new Set();
+    srcLines.forEach(function (l) { if (l.masterId) targetMasterIds.add(l.masterId); });
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      bucket.lines = bucket.lines.filter(function (l) {
+        return !(l.masterId && targetMasterIds.has(l.masterId));
+      });
+    });
+    state.masters = state.masters.filter(function (m) {
+      return !targetMasterIds.has(m.id);
+    });
+
+    state.lines.push(merged);
+    mintMasterForLine(merged);
+    selectOnly(merged.id);
     state.dirty = true;
     snapshot();
     renderAll();
@@ -1566,6 +1710,12 @@
   function segmentsToD(segments) {
     return segments.map(function (s) {
       if (s.cmd === 'Z' || !s.endpoint) return 'Z';
+      if (s.cmd === 'A' && s.arcArgs) {
+        const a = s.arcArgs;
+        return 'A ' + fmt(a.rx) + ' ' + fmt(a.ry) + ' ' + fmt(a.rot) + ' '
+                    + (a.large ? 1 : 0) + ' ' + (a.sweep ? 1 : 0) + ' '
+                    + fmt(s.endpoint.x) + ' ' + fmt(s.endpoint.y);
+      }
       const cps = s.controlPoints
         .map(function (cp) { return fmt(cp.x) + ' ' + fmt(cp.y); })
         .join(' ');
@@ -4146,6 +4296,20 @@
 
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
+    // Merge — combines the selected lines into one new master +
+    // instance. Useful after importing a drawing exported as several
+    // SVG bits; lets the user reassemble them as one object.
+    const merge = document.createElement('button');
+    merge.textContent = 'Merge into one';
+    merge.title = 'Combine the selected objects into one new master. ' +
+                  'Stroke / width / fill inherit from the first selected.';
+    merge.addEventListener('click', function () {
+      if (!confirm('Merge ' + n + ' objects into one? The originals are ' +
+                   'replaced everywhere they appear (other classes too). ' +
+                   'Undo with Cmd+Z if it doesn\'t land right.')) return;
+      mergeSelectedIntoOne();
+    });
+    actions.appendChild(merge);
     const del = document.createElement('button');
     del.className = 'ed-danger';
     del.textContent = 'Delete selected';
@@ -4765,9 +4929,9 @@
   if (importSvgBtn && importSvgInput) {
     importSvgBtn.addEventListener('click', function () { importSvgInput.click(); });
     importSvgInput.addEventListener('change', function () {
-      const file = importSvgInput.files && importSvgInput.files[0];
-      if (file) importSvgFile(file);
-      // Clear value so the same file can be re-imported in a row.
+      const files = importSvgInput.files;
+      if (files && files.length) importSvgFiles(files);
+      // Clear value so the same file(s) can be re-imported in a row.
       importSvgInput.value = '';
     });
   }
