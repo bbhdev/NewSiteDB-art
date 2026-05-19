@@ -5146,7 +5146,14 @@
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (state.selectedIds.length) { e.preventDefault(); deleteSelected(); }
+      if (state.selectedIds.length) { e.preventDefault(); deleteSelected(); return; }
+      // No lines selected → if a group is active (group panel showing),
+      // Backspace deletes the group (with the same confirm dialog as
+      // the panel + sidebar buttons). Same shortcut, parallel meaning.
+      if (state.activeGroupId) {
+        const g = state.groups.find(function (x) { return x.id === state.activeGroupId; });
+        if (g) { e.preventDefault(); confirmAndDeleteGroup(g); }
+      }
       return;
     }
     // (Drawing-tool shortcuts removed — tools are now reached only
