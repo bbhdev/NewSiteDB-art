@@ -319,10 +319,18 @@ body.editor {
   font: inherit;
   cursor: pointer;
 }
-.ed-group-eye { font-size: 0.8em; }
+.ed-group-eye {
+  /* Visible state stands out in the accent color so the user reads
+     it as a deliberate affordance (and doesn't mash it by mistake
+     thinking it's incidental punctuation). Hidden state goes dim to
+     read as "off". */
+  font-size: 0.8em;
+  color: var(--accent);
+}
 .ed-group-delete { font-size: 1.1em; }
-.ed-group-eye:hover { color: #fff; background: #2a2a2a; }
+.ed-group-eye:hover { background: #2a2a2a; filter: brightness(1.2); }
 .ed-group-eye.is-hidden { color: #6a6a6a; }
+.ed-group-eye.is-hidden:hover { color: #d8d8d8; filter: none; }
 .ed-group-delete:hover { color: #f88; background: #2c1818; }
 .ed-group.is-hidden > .ed-group-row .ed-group-name,
 .ed-group.is-hidden > .ed-group-row .ed-group-count {
