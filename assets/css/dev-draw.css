@@ -58,27 +58,13 @@ body.editor {
   border-left: 1px solid #444;
   margin-left: 0.2rem;
 }
-/* Specificity bump (.ed-toolbar .ed-class-clone, not just
-   .ed-class-clone) so we beat the .ed-toolbar button height/
-   font-size baseline. font-size in rem (not em) is absolute, not
-   relative to the toolbar's 0.875rem button text. */
+/* clone-class-btn picks up its base styling from .ed-icon-btn —
+   this rule just sets the offset from the class-tab strip. Also
+   overrides the .ed-toolbar button height: 2rem baseline so the
+   SVG renders at its natural size. */
 .ed-toolbar .ed-class-clone {
-  background: transparent;
-  color: #888;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  padding: 0 0.5rem;
   margin-left: 0.4rem;
   height: auto;
-  font-size: 1.6rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.ed-toolbar .ed-class-clone:hover { color: #fff; background: #2a2a2a; }
-.ed-toolbar .ed-class-clone:focus { outline: none; }
-.ed-toolbar .ed-class-clone:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 .ed-class-tab {
   background: transparent !important;
@@ -216,11 +202,36 @@ body.editor {
 }
 .ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 .ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
-.ed-toolbar .ed-settings,
-.ed-toolbar .ed-help {
-  font-size: 1.6rem;
-  line-height: 1;
-  padding: 0 0.5rem;
+/* Unified styling for the three icon buttons in the toolbar/tab
+   strip (clone, settings, help). Each one carries inline SVG of
+   consistent design (1.6 stroke, round joins) so size + visual
+   weight match across them — Unicode glyphs at the same font-size
+   render at different visual sizes per code-point so we don't rely
+   on them. */
+.ed-toolbar .ed-icon-btn,
+.ed-class-tabs .ed-icon-btn {
+  padding: 0 0.4rem;
+  background: transparent;
+  color: #d8d8d8;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ed-toolbar .ed-icon-btn svg,
+.ed-class-tabs .ed-icon-btn svg {
+  width:  1.25rem;
+  height: 1.25rem;
+  display: block;
+}
+.ed-toolbar .ed-icon-btn:hover,
+.ed-class-tabs .ed-icon-btn:hover { color: #fff; background: #2a2a2a; }
+.ed-toolbar .ed-icon-btn:focus,
+.ed-class-tabs .ed-icon-btn:focus { outline: none; }
+.ed-toolbar .ed-icon-btn:focus-visible,
+.ed-class-tabs .ed-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .ed-status { min-width: 8em; color: #9c9; font-size: 0.85em; padding-left: 0.4rem; }
 .ed-status.is-error { color: #f88; }
