@@ -158,6 +158,11 @@ $payload = json_encode([
                 aria-selected="<?= $isActive ? 'true' : 'false' ?>"
                 title="Edit the <?= esc($label) ?> class"><?= esc($label) ?></button>
       <?php endforeach; ?>
+      <button type="button"
+              id="clone-class-btn"
+              class="ed-class-clone"
+              title="Clone groups from another class into this one — pick which groups to bring across."
+              aria-label="Clone groups from another class">⎘</button>
     </div>
   </div>
 
@@ -198,8 +203,6 @@ $payload = json_encode([
     <section class="ed-panel" id="canvas-panel">
       <header class="ed-panel-head">
         <h3>Canvas</h3>
-        <button type="button" id="clone-class-btn" class="ed-mini"
-                title="Copy another class's lines + groups into this one as a starting point. The dims of this class are not changed.">Clone from…</button>
       </header>
       <div id="canvas-fields" class="ed-canvas-fields"></div>
     </section>

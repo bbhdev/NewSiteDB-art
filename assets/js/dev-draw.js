@@ -2724,47 +2724,208 @@
   }
 
   /**
-   * Prompt the user to pick a source class to clone from, then copy
-   * its lines + groups into the current class. Dims stay untouched
-   * (class-specific by design — copying them would defeat the point
-   * of having separate classes). Snapshots so the action is
-   * undoable.
+   * Cherry-pick clone dialog. User picks a source class + which of
+   * its groups to bring across; on apply, each picked group either
+   * REPLACES a same-name group in the current class (the group's
+   * lines are wholesale swapped) or ADDS as a new group when no
+   * name match exists. Class dims stay untouched. Snapshots so the
+   * action is undoable.
    */
-  function cloneClassFromPicker() {
+  function showCloneDialog() {
     const others = state.pageConfig.useClasses.filter(function (cid) {
       return cid !== state.classId && state.byClass[cid];
     });
     if (!others.length) {
-      alert('No other class to clone from on this page.');
+      alert('No other class on this page to clone from.');
       return;
     }
     const labelOf = function (cid) {
       const c = state.classes.find(function (x) { return x.id === cid; });
       return c ? c.name : cid;
     };
-    const buttons = others.map(function (cid) {
-      return { label: labelOf(cid) + ' (' + cid + ')', value: cid };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    const headH = document.createElement('h3');
+    headH.textContent = 'Clone groups into ' + labelOf(state.classId);
+    head.appendChild(headH);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'ed-modal-close'; closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', cleanup);
+    head.appendChild(closeBtn);
+    modal.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body';
+
+    const sourceRow = document.createElement('div');
+    sourceRow.className = 'ed-clone-source';
+    const sourceLabel = document.createElement('label'); sourceLabel.textContent = 'From:';
+    const sourceSelect = document.createElement('select');
+    others.forEach(function (cid) {
+      const opt = document.createElement('option');
+      opt.value = cid; opt.textContent = labelOf(cid);
+      sourceSelect.appendChild(opt);
     });
-    buttons.push({ label: 'Cancel', value: null, className: 'ed-mini' });
-    showChoiceDialog({
-      title:   'Clone into ' + labelOf(state.classId),
-      message: 'Replace this class\'s lines and groups with a copy from another class. The dims of this class are not changed.',
-      buttons: buttons
-    }).then(function (sourceId) {
-      if (!sourceId) return;
+    sourceRow.appendChild(sourceLabel);
+    sourceRow.appendChild(sourceSelect);
+    body.appendChild(sourceRow);
+
+    const groupsList = document.createElement('div');
+    groupsList.className = 'ed-clone-groups';
+    body.appendChild(groupsList);
+
+    const help = document.createElement('p');
+    help.style.color = '#888';
+    help.style.fontSize = '0.85em';
+    help.style.margin = '0';
+    help.textContent = 'Groups marked “replaces” will swap out the same-name group in ' +
+      labelOf(state.classId) + '. Other selected groups are added new.';
+    body.appendChild(help);
+
+    modal.appendChild(body);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'ed-modal-buttons';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cleanup);
+    btnRow.appendChild(cancelBtn);
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'ed-primary';
+    applyBtn.textContent = 'Clone selected';
+    applyBtn.addEventListener('click', function () {
+      const sourceId = sourceSelect.value;
+      const selected = Array.prototype.slice
+        .call(groupsList.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(function (cb) { return cb.dataset.groupId; });
+      cleanup();
+      if (selected.length) applyCloneCherryPick(sourceId, selected);
+    });
+    btnRow.appendChild(applyBtn);
+    modal.appendChild(btnRow);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function renderGroupsList() {
+      const sourceId = sourceSelect.value;
       const src = state.byClass[sourceId];
-      state.byClass[state.classId] = {
-        lines:  deepCopy(src.lines),
-        groups: deepCopy(src.groups)
-      };
-      state.selectedIds   = [];
-      state.activeGroupId = (state.groups[0] && state.groups[0].id) || null;
-      state.openGroupIds  = {};
-      if (state.activeGroupId) state.openGroupIds[state.activeGroupId] = true;
-      state.dirty = true;
-      snapshot();
-      renderAll();
+      groupsList.innerHTML = '';
+      if (!src || !src.groups || !src.groups.length) {
+        const empty = document.createElement('div');
+        empty.className = 'ed-clone-empty';
+        empty.textContent = 'No groups in this class.';
+        groupsList.appendChild(empty);
+        applyBtn.disabled = true;
+        return;
+      }
+      applyBtn.disabled = false;
+      const dstNames = (state.byClass[state.classId].groups || [])
+        .map(function (g) { return g.name; });
+      src.groups.forEach(function (g) {
+        const row = document.createElement('label');
+        row.className = 'ed-clone-group';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.groupId = g.id;
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = g.name || g.id;
+        const lineCount = src.lines.filter(function (l) { return l.groupId === g.id; }).length;
+        const meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = lineCount + (lineCount === 1 ? ' line' : ' lines');
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = dstNames.indexOf(g.name) !== -1 ? 'replaces' : '';
+        row.appendChild(cb);
+        row.appendChild(name);
+        row.appendChild(meta);
+        row.appendChild(badge);
+        groupsList.appendChild(row);
+      });
+    }
+    renderGroupsList();
+    sourceSelect.addEventListener('change', renderGroupsList);
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
     });
+  }
+
+  /**
+   * Merge: for each picked source group, drop the same-name group
+   * from the destination (if any) along with its lines, then push
+   * a deep-copy of the source group + its lines in. Group + line
+   * ids are freshly minted in the destination so they can't collide
+   * with surviving rows. masterId is preserved on each copied line
+   * — same canonical object, new instance row in this class.
+   * Lines from non-picked dest groups whose master is being brought
+   * in are also dropped, to avoid the same master appearing twice
+   * across groups in the destination.
+   */
+  function applyCloneCherryPick(sourceId, selectedGroupIds) {
+    const src = state.byClass[sourceId];
+    const dst = state.byClass[state.classId];
+    if (!src || !dst) return;
+
+    const pickedGroups = src.groups.filter(function (g) {
+      return selectedGroupIds.indexOf(g.id) !== -1;
+    });
+    const pickedGroupNames = pickedGroups.map(function (g) { return g.name; });
+    const pickedLines = src.lines.filter(function (l) {
+      return selectedGroupIds.indexOf(l.groupId) !== -1;
+    });
+    const pickedMasterIdSet = {};
+    pickedLines.forEach(function (l) {
+      if (l.masterId) pickedMasterIdSet[l.masterId] = true;
+    });
+
+    const survivingGroups = dst.groups.filter(function (g) {
+      return pickedGroupNames.indexOf(g.name) === -1;
+    });
+    const survivingGroupIds = survivingGroups.map(function (g) { return g.id; });
+    const survivingLines = dst.lines.filter(function (l) {
+      return survivingGroupIds.indexOf(l.groupId) !== -1
+          && !pickedMasterIdSet[l.masterId];
+    });
+
+    const groupIdMap = {};
+    pickedGroups.forEach(function (g) {
+      const copy = deepCopy(g);
+      groupIdMap[g.id] = uid('g');
+      copy.id = groupIdMap[g.id];
+      survivingGroups.push(copy);
+    });
+    pickedLines.forEach(function (l) {
+      const copy = deepCopy(l);
+      copy.id = uid('l');
+      if (groupIdMap[copy.groupId]) copy.groupId = groupIdMap[copy.groupId];
+      survivingLines.push(copy);
+    });
+
+    state.byClass[state.classId].groups = survivingGroups;
+    state.byClass[state.classId].lines = survivingLines;
+    state.selectedIds = [];
+    state.activeGroupId = (survivingGroups[0] && survivingGroups[0].id) || null;
+    state.openGroupIds = {};
+    if (state.activeGroupId) state.openGroupIds[state.activeGroupId] = true;
+    state.dirty = true;
+    snapshot();
+    renderAll();
   }
 
   function renderGrid() {
@@ -4295,7 +4456,7 @@
   // class-specific by design).
   const cloneClassBtn = document.getElementById('clone-class-btn');
   if (cloneClassBtn) {
-    cloneClassBtn.addEventListener('click', cloneClassFromPicker);
+    cloneClassBtn.addEventListener('click', showCloneDialog);
   }
   selectAllBtn.addEventListener('click', toggleSelectAll);
   updateSelectAllButton();
