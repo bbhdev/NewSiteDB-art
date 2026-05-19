@@ -265,6 +265,9 @@ function art_resolve_instance(array $instance, array $mastersById): array
                 }
                 continue;
             }
+            // `name` is structurally canonical — never apply a
+            // per-instance name override even if stale data has one.
+            if ($k === 'name') continue;
             // Other visual key — apply only when scope says local.
             if (($scope[$k] ?? null) === 'local') {
                 $line[$k] = $v;

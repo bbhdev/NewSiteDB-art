@@ -117,6 +117,12 @@
     return master.scope[keyPath] === 'local' ? 'local' : 'canonical';
   }
   function isLocal(master, keyPath) {
+    // `name` is structurally canonical — a master with a per-class
+    // name isn't really one master. Hard-force false here so any
+    // stale scope.name = 'local' (legacy data) or stray
+    // instance.overrides.name (defensive) can't take effect at
+    // resolve time.
+    if (keyPath === 'name') return false;
     return getScope(master, keyPath) === 'local';
   }
 
@@ -1064,6 +1070,11 @@
   function setMasterScope(masterId, keyPath, newScope) {
     const m = state.masters.find(function (x) { return x.id === masterId; });
     if (!m) return;
+    // `name` is structurally canonical (see isLocal). Refuse any
+    // attempt to flip its scope — UI shouldn't surface the toggle
+    // (scopeToggle returns null for 'name'), but a defensive
+    // refuse here protects against direct callers / future code.
+    if (keyPath === 'name') return;
     if (!m.scope || typeof m.scope !== 'object') m.scope = {};
     if (newScope === 'local') {
       m.scope[keyPath] = 'local';
@@ -5780,8 +5791,13 @@
    */
   function scopeToggle(masterId, keyPath) {
     if (!masterId) return null;
+    // Structural-canonical keys never get a scope toggle: making
+    // them local breaks the model. `name` is in this set because
+    // a master with a per-class name isn't really one master — if
+    // you want a different name, that's a different master.
     if (keyPath === 'kind' || keyPath === 'd'
-        || keyPath === 'points' || keyPath === 'segments') return null;
+        || keyPath === 'points' || keyPath === 'segments'
+        || keyPath === 'name') return null;
     const parts = keyPath.split('.');
     if (parts[0] === 'params' && POSITION_PARAM_SUBKEYS.indexOf(parts[1]) !== -1) {
       return null;
