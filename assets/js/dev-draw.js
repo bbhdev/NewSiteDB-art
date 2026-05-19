@@ -3494,13 +3494,18 @@
       .map(function (l) { return l.id; });
     if (state.selectedIds.length) {
       const first = newLines.find(function (l) { return l.id === state.selectedIds[0]; });
-      state.activeGroupId = (first && first.groupId)
-        || (state.groups[0] && state.groups[0].id) || null;
+      state.activeGroupId = (first && first.groupId) || null;
     } else {
-      state.activeGroupId = (state.groups[0] && state.groups[0].id) || null;
+      // No selection follows over → leave activeGroupId null so the
+      // selection panel stays neutral (matches the launch state from
+      // v0.5.7). User picks a group/object when they want to focus.
+      state.activeGroupId = null;
     }
-    state.openGroupIds = {};
-    if (state.activeGroupId) state.openGroupIds[state.activeGroupId] = true;
+    // openGroupIds is global (keyed by class-scoped group ids), so
+    // it naturally persists each class's expanded state across
+    // switches. Don't wipe + re-seed it — let the user's per-class
+    // memory carry forward. Standard sidebar UX: rows stay where
+    // the user left them.
     applyPageConfig();
     renderCanvasPanel();
     renderAll();
