@@ -897,20 +897,27 @@
     if (Array.isArray(snap.masters)) state.masters = deepCopy(snap.masters);
     state.palette = deepCopy(snap.palette);
     if (snap.pageConfig) state.pageConfig = deepCopy(snap.pageConfig);
-    // If the snapshot was taken while a different class was active,
-    // honor that — undo restores both content and viewing class.
-    if (snap.classId && state.byClass[snap.classId]) {
-      state.classId = snap.classId;
-      document.querySelectorAll('.ed-class-tab').forEach(function (b) {
-        const on = b.dataset.classId === state.classId;
-        b.classList.toggle('is-active', on);
-        b.setAttribute('aria-selected', on ? 'true' : 'false');
-      });
-    }
+    // Don't restore classId. Class is a view choice, not a design
+    // action — undoing a design action shouldn't yank the user to
+    // another class. The restored byClass already contains every
+    // class's content, so whichever class is currently visible
+    // shows its correct pre-action state.
     applyPageConfig();
     renderCanvasPanel();
-    state.selectedIds   = (snap.selectedIds || []).slice();
-    state.activeGroupId = snap.activeGroupId;
+    // Filter stale selection / active group references to ids that
+    // exist in the currently-viewed class. Otherwise an undo that
+    // walked us past a deletion or class switch could leave the
+    // selection panel pointing at IDs that no longer resolve here.
+    const currentLines  = (state.byClass[state.classId] && state.byClass[state.classId].lines)  || [];
+    const currentGroups = (state.byClass[state.classId] && state.byClass[state.classId].groups) || [];
+    const currentLineIds  = currentLines.map(function (l) { return l.id; });
+    const currentGroupIds = currentGroups.map(function (g) { return g.id; });
+    state.selectedIds   = (snap.selectedIds || []).filter(function (id) {
+      return currentLineIds.indexOf(id) !== -1;
+    });
+    state.activeGroupId = (snap.activeGroupId && currentGroupIds.indexOf(snap.activeGroupId) !== -1)
+      ? snap.activeGroupId
+      : (currentGroups[0] ? currentGroups[0].id : null);
     state.dirty = true;
     renderAll();
     updateUndoButtons();
@@ -2374,11 +2381,7 @@
   }
 
   function deleteLine(id) {
-    state.lines = state.lines.filter(function (l) { return l.id !== id; });
-    state.selectedIds = state.selectedIds.filter(function (x) { return x !== id; });
-    state.dirty = true;
-    snapshot();
-    renderAll();
+    deleteLinesByMasterIds([id], state.classId);
   }
 
   // Delete every currently selected object in one go (Backspace / Delete
@@ -2386,8 +2389,41 @@
   function deleteSelected() {
     if (!state.selectedIds.length) return;
     const ids = state.selectedIds.slice();
-    state.lines = state.lines.filter(function (l) { return ids.indexOf(l.id) < 0; });
+    deleteLinesByMasterIds(ids, state.classId);
     clearSelection();
+  }
+
+  /**
+   * Cascade-delete: for every line id passed in, find its master and
+   * remove the master AND every instance in every class that
+   * references it. Matches the user's "object = master" mental
+   * model — deleting an object anywhere makes it gone everywhere.
+   * Lines with no masterId (legacy / detached) are removed only from
+   * the active class.
+   */
+  function deleteLinesByMasterIds(lineIds, srcClassId) {
+    const srcLines = (state.byClass[srcClassId] && state.byClass[srcClassId].lines) || [];
+    const targetMasterIds = new Set();
+    const looseInstanceIds = new Set();
+    lineIds.forEach(function (lid) {
+      const ln = srcLines.find(function (l) { return l.id === lid; });
+      if (!ln) return;
+      if (ln.masterId) targetMasterIds.add(ln.masterId);
+      else             looseInstanceIds.add(ln.id);
+    });
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      bucket.lines = bucket.lines.filter(function (l) {
+        if (l.masterId && targetMasterIds.has(l.masterId)) return false;
+        if (cid === srcClassId && looseInstanceIds.has(l.id)) return false;
+        return true;
+      });
+    });
+    state.masters = state.masters.filter(function (m) {
+      return !targetMasterIds.has(m.id);
+    });
+    state.selectedIds = state.selectedIds.filter(function (x) { return lineIds.indexOf(x) < 0; });
     state.dirty = true;
     snapshot();
     renderAll();
