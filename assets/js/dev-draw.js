@@ -4324,6 +4324,94 @@
 
       handlesG.appendChild(c);
     });
+
+    // For manual lines (incl. SVG imports) — surface each cubic /
+    // quadratic segment's control points as smaller cyan-filled
+    // handles, with a dashed tangent line back to the anchor.
+    // Anchors stay the bigger white-fill handles handled above. The
+    // user can shape curves directly instead of re-importing.
+    if (line.kind === 'manual' && Array.isArray(line.segments)) {
+      renderControlPointHandles(line, handleR);
+    }
+  }
+
+  function renderControlPointHandles(line, handleR) {
+    let prevEndpoint = null;
+    line.segments.forEach(function (seg, segIdx) {
+      if (seg.cmd === 'C' && Array.isArray(seg.controlPoints) && seg.controlPoints.length === 2) {
+        // Cubic Bezier — cp1 extends out from the previous endpoint,
+        // cp2 reaches back from this segment's endpoint.
+        if (prevEndpoint) renderCpHandle(line, segIdx, 0, seg.controlPoints[0], prevEndpoint, handleR);
+        if (seg.endpoint) renderCpHandle(line, segIdx, 1, seg.controlPoints[1], seg.endpoint, handleR);
+      } else if (seg.cmd === 'Q' && Array.isArray(seg.controlPoints) && seg.controlPoints.length === 1) {
+        // Quadratic Bezier — single control between prev and ep.
+        // Anchor the tangent at the previous endpoint.
+        if (prevEndpoint) renderCpHandle(line, segIdx, 0, seg.controlPoints[0], prevEndpoint, handleR);
+      }
+      if (seg.endpoint) prevEndpoint = seg.endpoint;
+    });
+  }
+
+  function renderCpHandle(line, segIdx, cpIdx, cp, anchorPt, handleR) {
+    // Dashed tangent line from the anchor to the control point.
+    const tan = document.createElementNS(SVG_NS, 'line');
+    tan.setAttribute('class', 'ed-cp-tangent');
+    tan.setAttribute('x1', anchorPt.x);
+    tan.setAttribute('y1', anchorPt.y);
+    tan.setAttribute('x2', cp.x);
+    tan.setAttribute('y2', cp.y);
+    handlesG.appendChild(tan);
+
+    // The CP handle itself — smaller than anchor handles and
+    // inverted (cyan fill, white border) so it reads as a
+    // secondary control.
+    const c = document.createElementNS(SVG_NS, 'circle');
+    c.setAttribute('class', 'ed-handle ed-cp-handle');
+    c.setAttribute('cx', cp.x);
+    c.setAttribute('cy', cp.y);
+    c.setAttribute('r',  handleR * 0.75);
+    c.dataset.lineId = line.id;
+    c.dataset.segIdx = segIdx;
+    c.dataset.cpIdx  = cpIdx;
+
+    let dragging = false;
+    c.addEventListener('pointerdown', function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+      dragging = true;
+      c.classList.add('is-dragging');
+      c.setPointerCapture(e.pointerId);
+    });
+    c.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      const pos = clientToSvg(e.clientX, e.clientY);
+      line.segments[segIdx].controlPoints[cpIdx] = { x: pos.x, y: pos.y };
+      regenerateLineD(line);
+      state.dirty = true;
+      // Inline updates — keep the drag smooth without a full
+      // renderHandles (which would tear the pointer-capture target
+      // out from under us).
+      c.setAttribute('cx', pos.x);
+      c.setAttribute('cy', pos.y);
+      tan.setAttribute('x2', pos.x);
+      tan.setAttribute('y2', pos.y);
+      linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
+        .forEach(function (el) {
+          if (el.tagName.toLowerCase() === 'image') return;
+          el.setAttribute('d', line.d);
+        });
+      renderLabels();
+    });
+    c.addEventListener('pointerup', function (e) {
+      if (!dragging) return;
+      e.stopPropagation();
+      dragging = false;
+      c.classList.remove('is-dragging');
+      snapshot();
+      renderHandles();
+    });
+
+    handlesG.appendChild(c);
   }
 
   /**

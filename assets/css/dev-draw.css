@@ -528,6 +528,25 @@ body.editor {
 #draw-surface .ed-handle:hover { fill: #00d9ff; }
 #draw-surface .ed-handle.is-dragging { fill: #00d9ff; cursor: grabbing; }
 
+/* Bezier control-point handles — inverted fill (cyan body, white
+   border) + a thinner stroke so they read as secondary to the
+   white anchor handles. Same r ratio (0.75 ×) applied via the
+   element's r attr from JS. */
+#draw-surface .ed-cp-handle {
+  fill: #00d9ff;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+#draw-surface .ed-cp-handle:hover { fill: #5ce5ff; }
+#draw-surface .ed-cp-tangent {
+  stroke: #00d9ff;
+  stroke-opacity: 0.55;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
 /* Per-object selection indicator shown in "Select all" mode. One dot
    per line, sitting at the line's center, in accent color so the
    user sees clearly which lines are in the group selection without
