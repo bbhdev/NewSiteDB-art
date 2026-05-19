@@ -647,9 +647,22 @@
     return state.selectedIds.length
       ? state.selectedIds[state.selectedIds.length - 1] : null;
   }
+  // Hidden lines (or lines in a hidden group) are excluded from the
+  // "select all" count so the button reads "Deselect all" only when
+  // every VISIBLE object is in the selection. Picking hidden objects
+  // via Select-all was a footgun — destructive bulk actions
+  // (Delete, Merge) would then touch objects the user couldn't see.
+  function visibleLines() {
+    return state.lines.filter(function (l) {
+      if (l.hidden) return false;
+      const group = state.groups.find(function (g) { return g.id === l.groupId; });
+      if (group && group.hidden) return false;
+      return true;
+    });
+  }
   function allObjectsSelected() {
-    return state.lines.length > 0 &&
-           state.selectedIds.length === state.lines.length;
+    const eligible = visibleLines();
+    return eligible.length > 0 && state.selectedIds.length === eligible.length;
   }
 
   function arraysEqual(a, b) {
@@ -3423,9 +3436,21 @@
   }
 
   function moveLineToGroup(lineId, newGroupId) {
-    const line = state.lines.find(function (l) { return l.id === lineId; });
-    if (!line || line.groupId === newGroupId) return;
-    line.groupId = newGroupId;
+    moveLinesToGroup([lineId], newGroupId);
+  }
+
+  // Move N lines into a new group in one transaction. Used by the
+  // sidebar drag-and-drop: when the dragged line is part of the
+  // current multi-selection the whole selection follows.
+  function moveLinesToGroup(lineIds, newGroupId) {
+    let changed = false;
+    lineIds.forEach(function (id) {
+      const line = state.lines.find(function (l) { return l.id === id; });
+      if (!line || line.groupId === newGroupId) return;
+      line.groupId = newGroupId;
+      changed = true;
+    });
+    if (!changed) return;
     // Auto-open the destination group so the user sees the move land.
     state.openGroupIds[newGroupId] = true;
     state.activeGroupId = newGroupId;
@@ -4697,7 +4722,7 @@
   // doesn't need a separate code path for the all-selected case.
   function toggleSelectAll() {
     if (allObjectsSelected()) clearSelection();
-    else state.selectedIds = state.lines.map(function (l) { return l.id; });
+    else state.selectedIds = visibleLines().map(function (l) { return l.id; });
     updateSelectAllButton();
     renderGroupsList();
     renderLines();
@@ -5193,7 +5218,15 @@
         const lineId = e.dataTransfer && e.dataTransfer.getData('text/x-line-id');
         if (lineId) {
           e.preventDefault();
-          moveLineToGroup(lineId, g.id);
+          // If the dragged line is part of an active multi-selection,
+          // move every selected line in lockstep — otherwise the user
+          // has to drop each one individually, which is a footgun
+          // when "select N + drag to new group" reads as one action.
+          const inSel = state.selectedIds.indexOf(lineId) !== -1;
+          const ids = (inSel && state.selectedIds.length > 1)
+            ? state.selectedIds.slice()
+            : [lineId];
+          moveLinesToGroup(ids, g.id);
         }
       });
       li.appendChild(row);
