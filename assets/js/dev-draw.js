@@ -993,27 +993,19 @@
       return;
     }
 
-    // 'one' mode + canonical scope → refusal dialog. Per the
-    // agreed model, "one" mode never silently bypasses the scope
-    // contract; the user has to deliberately flip scope to local
-    // first. Cascade-style callers (group color cascade, bulk
-    // selection edits) opt out with opts.silent and skip writes
-    // when they'd be canonical in 'one' mode (no clobber, no
-    // dialog).
+    // 'one' mode + canonical scope → refuse cleanly. The user has
+    // to leave 'one' mode to edit a canonical key, or flip the
+    // key's scope to local via the 🔗 toggle first (in either
+    // mode). No "Flip & apply" shortcut here — the contract is
+    // "explicit decisions", not "hidden assists". Cascade-style
+    // callers opt out via opts.silent and skip silently.
     let asyncPath = false;
     if (state.mode === 'one' && master && !isLocal(master, keyPath)) {
       if (opts.silent) return;
       asyncPath = true;
-      const ok = await confirmScopeFlip(master, keyPath);
-      if (!ok) {
-        // User cancelled — re-render the panel so the field
-        // reverts from the user's typed/clicked value to the
-        // unchanged state value.
-        renderSelectionPanel();
-        return;
-      }
-      // confirmScopeFlip already ran setMasterScope(...'local').
-      // Fall through to the local-write branch below.
+      await explainRefusal(master, keyPath);
+      renderSelectionPanel(); // revert UI from any typed/clicked value
+      return;
     }
 
     if (!master || isLocal(master, keyPath)) {
@@ -1081,34 +1073,45 @@
   }
 
   /**
-   * Block + ask before writing a canonical visual prop in 'one'
-   * mode. Returns true (flipped, proceed with write) or false
-   * (cancel). On accept: setMasterScope flips the key to local;
-   * the caller writes the value as a normal local override.
+   * Explain why a canonical visual prop can't be edited in 'one'
+   * mode. Single OK button — no in-dialog flip shortcut. The user
+   * has two paths out: switch to 'all' mode (canonical edit
+   * affecting every class), or flip the key's scope to local via
+   * the 🔗 toggle on the field row first. Structurally canonical
+   * keys (e.g., 'name') have no 🔗 toggle, so the dialog only
+   * offers the 'all'-mode path for those.
    */
-  async function confirmScopeFlip(master, keyPath) {
+  async function explainRefusal(master, keyPath) {
     const niceName = humanizeKeyPath(keyPath);
     const escHtml = function (s) {
       const d = document.createElement('div');
       d.textContent = String(s);
       return d.innerHTML;
     };
-    const choice = await showChoiceDialog({
-      title:   'Scope conflict',
-      message: '<p><strong>' + escHtml(niceName) + '</strong> is canonical on this object — ' +
-               'editing it normally affects every class.</p>' +
-               '<p>You\'re in <strong>one-class</strong> mode. Flip ' +
-               '<strong>' + escHtml(niceName) + '</strong> to local so this class can hold its ' +
-               'own value, and apply the edit?</p>',
+    const lines = [
+      '<p><strong>' + escHtml(niceName) + '</strong> is canonical on this object — ' +
+      'it applies to every class together.</p>',
+      '<p>You\'re in <strong>one-class</strong> mode (the <strong>1</strong> button next ' +
+      'to the class tabs). One-class mode only writes to the current class — editing a ' +
+      'canonical key isn\'t allowed because that would diverge the master.</p>'
+    ];
+    if (keyPath === 'name') {
+      lines.push('<p>To rename this object, switch to <strong>all</strong> mode (the ' +
+        '<strong>A</strong> button).</p>');
+    } else {
+      lines.push('<p>Two ways forward:</p>' +
+        '<ul>' +
+        '<li>Switch to <strong>all</strong> mode (A button) to edit canonically across every class.</li>' +
+        '<li>Or flip <strong>' + escHtml(niceName) + '</strong> to local via the ' +
+        '<strong>🔗</strong> toggle next to the field — then come back here and edit.</li>' +
+        '</ul>');
+    }
+    await showChoiceDialog({
+      title:   'Edit disallowed in one-class mode',
+      message: lines.join(''),
       html:    true,
-      buttons: [
-        { label: 'Cancel',         value: null },
-        { label: 'Flip & apply',   value: 'flip', className: 'ed-primary' }
-      ]
+      buttons: [{ label: 'OK', value: null, className: 'ed-primary' }]
     });
-    if (choice !== 'flip') return false;
-    setMasterScope(master.id, keyPath, 'local');
-    return true;
   }
 
   // Pretty key paths for dialogs. "params.r" → "Radius (params.r)";
@@ -1137,6 +1140,50 @@
       'params.fit':       'Fit'
     };
     return NAMES[keyPath] || keyPath;
+  }
+
+  /**
+   * Visually lock a field row when the editor is in 'one' mode AND
+   * the keyPath is canonical on the master. Disables every
+   * editable control inside (input / select / non-toggle button)
+   * and routes clicks on the wrap to the explainRefusal dialog.
+   * The 🔗/✎ scope toggle stays clickable — that's the path the
+   * dialog points at, so it has to remain operable. Always-per-
+   * class keys (behavior, position sub-keys) bypass this since
+   * they never go through the scope contract.
+   */
+  function lockIfCanonicalInOneMode(field, masterId, keyPath) {
+    if (state.mode !== 'one' || !masterId) return field;
+    // Position sub-keys (params.cx/cy/x/y) always write per-class
+    // via positionOffset — they're outside the scope contract and
+    // must stay editable in 'one' mode.
+    const parts = keyPath.split('.');
+    if (parts[0] === 'params' && POSITION_PARAM_SUBKEYS.indexOf(parts[1]) !== -1) {
+      return field;
+    }
+    const master = state.masters.find(function (m) { return m.id === masterId; });
+    if (!master || isLocal(master, keyPath)) return field;
+    field.classList.add('is-refused');
+    field.querySelectorAll('input, select, textarea').forEach(function (el) {
+      el.disabled = true;
+      el.tabIndex = -1;
+    });
+    // Color picker uses <button class="swatch">, not <input>;
+    // disable those too. Leave .ed-link-toggle untouched so the
+    // scope flipper still works.
+    field.querySelectorAll('button:not(.ed-link-toggle)').forEach(function (el) {
+      el.disabled = true;
+      el.tabIndex = -1;
+    });
+    // Click anywhere on the row (except the scope toggle) → dialog.
+    // Capture phase so the field's own click handlers don't fire.
+    field.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('.ed-link-toggle')) return;
+      e.stopPropagation();
+      e.preventDefault();
+      explainRefusal(master, keyPath);
+    }, true);
+    return field;
   }
 
   /**
@@ -6053,12 +6100,16 @@
    */
   function withScope(field, masterId, keyPath) {
     const tog = scopeToggle(masterId, keyPath);
-    if (!tog) return field;
-    field.classList.add('ed-master-linked');
-    const master = state.masters.find(function (m) { return m.id === masterId; });
-    if (master && isLocal(master, keyPath)) field.classList.add('is-overridden');
-    field.appendChild(tog);
-    return field;
+    if (tog) {
+      field.classList.add('ed-master-linked');
+      const master = state.masters.find(function (m) { return m.id === masterId; });
+      if (master && isLocal(master, keyPath)) field.classList.add('is-overridden');
+      field.appendChild(tog);
+    }
+    // Even structurally-canonical fields (e.g. 'name', which has
+    // no scope toggle) need to be locked in 'one' mode. Apply the
+    // lock regardless of whether a toggle was attached.
+    return lockIfCanonicalInOneMode(field, masterId, keyPath);
   }
 
   function textField(label, value, onChange, placeholder) {
@@ -6464,6 +6515,9 @@
     scopeModeBtn.addEventListener('click', function () {
       state.mode = state.mode === 'all' ? 'one' : 'all';
       applyScopeModeVisuals();
+      // Re-render the selection panel so canonical-key fields
+      // pick up / drop the locked treatment as the mode flips.
+      renderSelectionPanel();
     });
   }
   applyScopeModeVisuals();

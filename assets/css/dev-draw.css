@@ -457,6 +457,24 @@ body.editor {
   border-left: 2px solid var(--accent);
 }
 .ed-field.is-overridden > label { color: var(--accent); }
+
+/* Refused fields — visible "you can't edit this in 'one' mode"
+   treatment. The whole row dims; inputs / selects / swatch
+   buttons disable; the cursor is not-allowed everywhere except
+   the scope toggle (which stays operable, since it's the path
+   the explanation dialog points at). */
+.ed-field.is-refused {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ed-field.is-refused input,
+.ed-field.is-refused select,
+.ed-field.is-refused textarea,
+.ed-field.is-refused button:not(.ed-link-toggle) {
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+.ed-field.is-refused > label { color: #6a6a6a; }
 .ed-field > label {
   color: #c0c0c0;
   font-size: 0.85em;
