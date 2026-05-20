@@ -247,6 +247,9 @@
     // v0.8.7: IntersectionObservers created for in-view-partial /
     // in-view-full activations.
     const ownObservers = [];
+    // v0.8.11: window scroll listeners for scroll-key activations
+    // (crossing-detection — see comments at the registration site).
+    const ownListeners = [];
     let currentClassId = null;
 
     function renderForClass(classId) {
@@ -257,6 +260,10 @@
       ownTickers.length = 0;
       ownObservers.forEach(function (o) { try { o.disconnect(); } catch (e) {} });
       ownObservers.length = 0;
+      ownListeners.forEach(function (L) {
+        try { L.target.removeEventListener(L.type, L.fn); } catch (e) {}
+      });
+      ownListeners.length = 0;
       layer.innerHTML = '';
       currentClassId = classId;
 
@@ -606,16 +613,34 @@
         if (when === 'scroll-key' && b.trigger.selector) {
           const el = document.querySelector(b.trigger.selector);
           if (!el) return;
-          const st = ScrollTrigger.create({
-            trigger: el,
-            start: 'top bottom',
-            onEnter: function () {
+          // v0.8.11: "Scroll past key" means scroll motion across
+          // the key, not load-time position. ScrollTrigger's
+          // initial-state evaluation fires onEnter synchronously
+          // when the key is already past `top bottom` at load
+          // (common — keys sit near the top of the page), which
+          // surfaced as a timed-run starting at page load even
+          // when the user hadn't scrolled.
+          //
+          // Instead, listen on window scroll and detect a true
+          // crossing of the key's top past the viewport bottom.
+          // prevTop is primed at creation, so the very first
+          // scroll event with a real downward crossing fires; a
+          // key that's already above viewport bottom at load
+          // sits with prevTop < vh and never triggers until the
+          // user scrolls back out and forward across it.
+          let prevTop = el.getBoundingClientRect().top;
+          const onScroll = function () {
+            const top = el.getBoundingClientRect().top;
+            const vh  = window.innerHeight;
+            if (prevTop > vh && top <= vh) {
               if (activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
               }
             }
-          });
-          ownTriggers.push(st);
+            prevTop = top;
+          };
+          window.addEventListener('scroll', onScroll, { passive: true });
+          ownListeners.push({ target: window, type: 'scroll', fn: onScroll });
           return;
         }
         if (when === 'in-view-partial' || when === 'in-view-full') {
