@@ -476,6 +476,29 @@ body.editor {
 }
 .ed-field.is-refused > label { color: #6a6a6a; }
 
+/* v0.8.19: inactive fields — fields whose value can't take effect
+   given the current combination of other settings (e.g. "Trigger
+   key" while Activate=Scroll range, "Seconds" while Progress=Scroll-
+   driven, "Pivot Δx" while rotate resolves to 0). Always rendered
+   so the user can see all axes and any previously-entered values
+   are preserved across mode switches, but visually dimmed and not
+   editable until the gating condition flips. */
+.ed-field.is-inactive,
+.ed-behavior-range.is-inactive {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ed-field.is-inactive input,
+.ed-field.is-inactive select,
+.ed-field.is-inactive textarea,
+.ed-field.is-inactive button:not(.ed-link-toggle),
+.ed-behavior-range.is-inactive input {
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+.ed-field.is-inactive > label,
+.ed-behavior-range.is-inactive .ed-field > label { color: #6a6a6a; }
+
 /* Behavior block cards (v0.4.1) — one per entry in
    line.behaviors[]. Header shows the block index + a remove ×;
    body holds the range start/end + the legacy behavior fields. */

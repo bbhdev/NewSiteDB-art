@@ -6732,49 +6732,56 @@
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
        null));
 
-    // Activation-specific fields
-    if (when === 'scroll-range') {
-      const r = trigger.range || { start: 0, end: 1 };
-      const rangeRow = document.createElement('div');
-      rangeRow.className = 'ed-behavior-range';
-      rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
-      }));
-      rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
-      }));
-      card.appendChild(rangeRow);
-    } else if (when === 'scroll-key') {
-      card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
-      }));
-      // v0.8.12: where in the viewport the key has to land for
-      // activation. 'bottom' preserves the v0.8.11 default with a
-      // small inset; 'top' / 'middle' let the user gate activation
-      // until the key has scrolled further up.
-      const va = trigger.viewportAt || 'middle';
-      card.appendChild(behaviorButtonGroup('Reaches', va, [
-        { value: 'top',    label: 'Top of viewport' },
-        { value: 'middle', label: 'Middle' },
-        { value: 'bottom', label: 'Bottom of viewport' },
-        { value: 'object', label: 'The object' }
-      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
-         null));
-      // v0.8.15: re-arm on every scroll-back crossing so the
-      // timed/loop/pingpong duration restarts each time the key
-      // re-enters the trigger zone.
-      const rep = trigger.repeat || 'once';
-      card.appendChild(behaviorButtonGroup('Repeat', rep, [
-        { value: 'once',  label: 'Once' },
-        { value: 'every', label: 'Every crossing' }
-      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); },
-         null));
-    }
-    // Delay is valid for all activations as an additional offset
-    // after the activation event (seconds).
-    card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
-      updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
+    // v0.8.19: render every trigger field on every render, so the
+    // user always sees all axes — fields that don't apply to the
+    // current "Activate when" are dimmed and disabled (.is-inactive)
+    // rather than removed. Side effect: values entered before a mode
+    // switch stay visible and are restored the moment the mode flips
+    // back, without a hidden-but-persisted ghost state.
+    const r = trigger.range || { start: 0, end: 1 };
+    const rangeRow = document.createElement('div');
+    rangeRow.className = 'ed-behavior-range';
+    rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
     }));
+    rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
+    }));
+    setInactive(rangeRow, when !== 'scroll-range');
+    card.appendChild(rangeRow);
+
+    card.appendChild(setInactive(triggerField('Trigger key', trigger.selector || '', function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
+    }), when !== 'scroll-key'));
+    // v0.8.12: where in the viewport the key has to land for
+    // activation. 'bottom' preserves the v0.8.11 default with a
+    // small inset; 'top' / 'middle' let the user gate activation
+    // until the key has scrolled further up.
+    const va = trigger.viewportAt || 'middle';
+    card.appendChild(setInactive(behaviorButtonGroup('Reaches', va, [
+      { value: 'top',    label: 'Top of viewport' },
+      { value: 'middle', label: 'Middle' },
+      { value: 'bottom', label: 'Bottom of viewport' },
+      { value: 'object', label: 'The object' }
+    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
+       null), when !== 'scroll-key'));
+    // v0.8.15: re-arm on every scroll-back crossing so the
+    // timed/loop/pingpong duration restarts each time the key
+    // re-enters the trigger zone.
+    const rep = trigger.repeat || 'once';
+    card.appendChild(setInactive(behaviorButtonGroup('Repeat', rep, [
+      { value: 'once',  label: 'Once' },
+      { value: 'every', label: 'Every crossing' }
+    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); },
+       null), when !== 'scroll-key'));
+
+    // Delay is an additional offset (seconds) after the activation
+    // event fires. Only meaningless when the block has no time
+    // concept at all — that's the scroll-range × scroll-driven
+    // combo, where progress is bound directly to scroll position.
+    card.appendChild(setInactive(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
+    }), when === 'scroll-range' && dmode === 'scroll'));
 
     // Progress (How) picker — 'scroll' is only valid when
     // when=scroll-range; greyed otherwise and click-explains.
@@ -6793,15 +6800,18 @@
       function (v) { updateBehaviorDuration(line.id, blockIdx, 'mode', v); },
       function (opt) { explainDurationDisabled(opt); }));
 
-    // Duration-specific fields
-    if (dmode !== 'scroll') {
-      card.appendChild(numberField('Seconds', duration.seconds || 1, function (v) {
-        updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
-      }));
-      card.appendChild(selectField('Easing', duration.easing || 'linear',
-        EASING_OPTIONS,
-        function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }));
-    }
+    // v0.8.19: always render Seconds + Easing, inactive when
+    // Progress = Scroll-driven (which is bound to scroll position
+    // and has no per-block time/easing). Lets the user see the
+    // values they had set under Timed/Loop/Ping-pong even after
+    // switching back to Scroll-driven.
+    card.appendChild(setInactive(numberField('Seconds', duration.seconds || 1, function (v) {
+      updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
+    }), dmode === 'scroll'));
+    card.appendChild(setInactive(selectField('Easing', duration.easing || 'linear',
+      EASING_OPTIONS,
+      function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }),
+      dmode === 'scroll'));
 
     // v0.8.17: open-ended translate mode. 'Fixed' = current
     // behavior (translateX/Y are final displacements weighted
@@ -6827,27 +6837,52 @@
     card.appendChild(overrideNumberField(xDrift ? 'TranslateX (×scroll)' : 'TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
     card.appendChild(overrideNumberField(yDrift ? 'TranslateY (×scroll)' : 'TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
     card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
+    // v0.8.19: pivot fields + set-origin button gate on the
+    // RESOLVED rotate (block override OR group default). If neither
+    // produces a non-zero rotation the pivot does nothing visible,
+    // so we dim those rows to point the user at Rotate first — but
+    // keep them rendered so a pre-entered pivot stays visible.
+    const resolvedRotate = (params.rotate != null) ? Number(params.rotate)
+                         : Number(gd.rotate || 0);
+    const noRotate = !Number.isFinite(resolvedRotate) || resolvedRotate === 0;
     // Per-line rotate-origin: DELTA from this object's natural
     // center, so the pivot travels with the line instead of
     // being pinned to a canvas coord. 0,0 = pivot at center.
-    card.appendChild(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
-    card.appendChild(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
+    card.appendChild(setInactive(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }), noRotate));
+    card.appendChild(setInactive(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }), noRotate));
     // Set-origin is per-block — the canvas-click handler reads
     // settingOrigin.blockIdx so the captured (x,y) lands in the
     // right block's params.
-    card.appendChild(setOriginButton(function () {
+    card.appendChild(setInactive(setOriginButton(function () {
       startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
-    }));
+    }), noRotate));
     card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v, blockIdx); }));
-    card.appendChild(overrideSelectField('Direction', params.drawInDirection,
+    // v0.8.19: Direction gates on resolved drawIn (override OR
+    // group default). drawIn=false → direction is a no-op.
+    const resolvedDrawIn = (params.drawIn != null) ? !!params.drawIn : !!gd.drawIn;
+    card.appendChild(setInactive(overrideSelectField('Direction', params.drawInDirection,
       gd.drawInDirection || 'forward',
       [
         { value: 'forward', label: 'Begin → end' },
         { value: 'reverse', label: 'End → begin' }
       ],
-      function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }));
+      function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }),
+      !resolvedDrawIn));
 
     return card;
+  }
+
+  // v0.8.19: gray + disable a field row whose value can't take
+  // effect under the current combination of other settings (e.g.
+  // "Trigger key" while Activate=Scroll range). Returns the same
+  // node so this can be wrapped around a card.appendChild(...)
+  // call without a temp var. CSS handles the visual + pointer-
+  // events; the underlying value stays in the model so the field
+  // is restored intact when the gating condition flips back.
+  function setInactive(node, inactive) {
+    if (inactive) node.classList.add('is-inactive');
+    else node.classList.remove('is-inactive');
+    return node;
   }
 
   function numberField(label, value, onChange) {
