@@ -5875,6 +5875,13 @@
     renderSelectionPanel();
   }
 
+  // Track which line id we last scrolled the panel-into-view for.
+  // Edit-driven re-renders (trigger flips, scope flips, etc.) hit
+  // renderSelectionPanel without selection change; skip the
+  // scroll then so the user's scroll position inside the panel
+  // is preserved.
+  let lastScrolledSelectionId = null;
+
   function renderSelectionPanel() {
     selectionPanel.innerHTML = '';
     const wasSingleSelect = state.selectedIds.length === 1;
@@ -5890,12 +5897,20 @@
       const g = state.groups.find(function (g) { return g.id === state.activeGroupId; });
       if (g) renderGroupPanel(g);
     }
-    // When a single object is selected, scroll the sidebar so the
-    // line panel is visible — saves the user from manually scrolling
-    // past the groups list to reach params.
-    if (wasSingleSelect && selectionPanel.scrollIntoView) {
+    // When a single object is FIRST selected, scroll the sidebar
+    // so the line panel is visible — saves the user from manually
+    // scrolling past the groups list to reach params. But don't
+    // scroll on every re-render: edits inside the panel (trigger
+    // type flips, scope flips, etc.) re-call renderSelectionPanel
+    // and used to snap back to the top of the panel, hiding
+    // wherever the user was working. Track the last-scrolled id;
+    // only fire scrollIntoView when the primary selection changes.
+    const primaryId = wasSingleSelect ? primarySelectedId() : null;
+    if (wasSingleSelect && selectionPanel.scrollIntoView
+        && primaryId !== lastScrolledSelectionId) {
       selectionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    lastScrolledSelectionId = primaryId;
   }
 
   function renderMultiSelectionPanel() {
