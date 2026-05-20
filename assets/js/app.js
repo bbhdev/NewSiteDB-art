@@ -398,7 +398,11 @@
     const dumpMode    = hasLS && localStorage.getItem('ed-show-runtime-dump') === '1';
     if (hasLS && localStorage.getItem('ed-show-labels') === '1') {
       renderRuntimeLabels(layer, lines, groups, groupById, paletteById);
-      // Page-area outline + reference markers (see v0.1.21).
+    }
+    // v0.8.16: page-area outline is now its own flag — useful on its
+    // own when authors place objects in the bleed area and want to
+    // see where the visible page sits, without the label clutter.
+    if (hasLS && localStorage.getItem('ed-show-page-area') === '1') {
       renderRuntimePageGuide(layer, page);
     }
     if (diagMode) {

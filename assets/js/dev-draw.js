@@ -651,6 +651,12 @@
     // reloads. When on, every named line gets a colored label rendered
     // next to it so the user can spot which is which in a busy canvas.
     showLabels: localStorage.getItem('ed-show-labels') === '1',
+    // v0.8.16: Page-area outline on the live site. The editor canvas
+    // already shows the page rect by default; this toggle controls
+    // whether the runtime draws the same dotted rect + corner coord
+    // markers, useful for verifying where authored coords land
+    // against the live viewport when objects live in the bleed area.
+    showPageArea: localStorage.getItem('ed-show-page-area') === '1',
     // Diagnostic coord grid — cyan, 50px step, coords every 100px.
     // Persisted in localStorage so refresh keeps the same view, and
     // the runtime in app.js reads the same flag so the grid renders
@@ -5035,6 +5041,16 @@
     }));
 
     body.appendChild(settingRow({
+      label: 'Page area outline',
+      help:  'Live site only. Overlays a dotted rect on the runtime canvas ' +
+             'at the authored page boundary, with (0,0)/(pageW,pageH) corner ' +
+             'markers. Useful when objects live in the bleed area and you ' +
+             'want to see where they sit relative to the visible page.',
+      value: state.showPageArea,
+      onChange: function (v) { if (v !== state.showPageArea) togglePageArea(); }
+    }));
+
+    body.appendChild(settingRow({
       label: 'Coordinate grid',
       help:  'Diagnostic grid: cyan lines at 50px step, coords every 100px. ' +
              'Renders on the live site too — useful for verifying where ' +
@@ -5293,6 +5309,14 @@
     state.showLabels = !state.showLabels;
     localStorage.setItem('ed-show-labels', state.showLabels ? '1' : '0');
     renderLabels();
+  }
+
+  // v0.8.16: Page-area outline on the runtime. Editor-side is a no-op
+  // (the editor canvas already shows the page rect) — the toggle's
+  // only effect is the localStorage flag that the live site reads.
+  function togglePageArea() {
+    state.showPageArea = !state.showPageArea;
+    localStorage.setItem('ed-show-page-area', state.showPageArea ? '1' : '0');
   }
 
   // "Select all" toggles between every object selected and nothing
