@@ -634,7 +634,7 @@
           // key that's already past the line at load sits with
           // prevTop ≤ threshold and never triggers until the
           // user scrolls back out and forward across it.
-          const viewportAt = b.trigger.viewportAt || 'bottom';
+          const viewportAt = b.trigger.viewportAt || 'middle';
           const lineOf = function (vh) {
             if (viewportAt === 'top')    return vh * 0.03;
             if (viewportAt === 'middle') return vh * 0.5;

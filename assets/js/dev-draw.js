@@ -4075,6 +4075,9 @@
       if (value === 'scroll-key' && !b.trigger.selector) {
         b.trigger.selector = '';
       }
+      if (value === 'scroll-key' && !b.trigger.viewportAt) {
+        b.trigger.viewportAt = 'middle';
+      }
       if (typeof b.trigger.delay !== 'number') b.trigger.delay = 0;
       // Auto-flip duration if the previous combination is now
       // invalid (only valid invalidation today: scroll duration
@@ -4085,7 +4088,7 @@
     } else if (key === 'selector') {
       b.trigger.selector = String(value || '');
     } else if (key === 'viewportAt') {
-      b.trigger.viewportAt = String(value || 'bottom');
+      b.trigger.viewportAt = String(value || 'middle');
     } else if (key === 'delay' || key === 'rangeStart' || key === 'rangeEnd') {
       let v = Number(value);
       if (!Number.isFinite(v)) v = 0;
@@ -6579,7 +6582,7 @@
       act = 'Triggers at page load';
     } else if (when === 'scroll-key') {
       const k  = trigger.selector ? '"' + trigger.selector + '"' : '(none set)';
-      const va = trigger.viewportAt || 'bottom';
+      const va = trigger.viewportAt || 'middle';
       const where = va === 'top'    ? 'the top of the viewport'
                   : va === 'middle' ? 'the middle of the viewport'
                                     : 'the bottom of the viewport';
@@ -6694,7 +6697,7 @@
     card.appendChild(behaviorButtonGroup('Activate when', when, [
       { value: 'scroll-range',     label: 'Scroll range' },
       { value: 'page-load',        label: 'Page load' },
-      { value: 'scroll-key',       label: 'Scroll past key' },
+      { value: 'scroll-key',       label: 'Scroll to key' },
       { value: 'in-view-partial',  label: 'In view (partial)' },
       { value: 'in-view-full',     label: 'In view (full)' }
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
@@ -6720,7 +6723,7 @@
       // activation. 'bottom' preserves the v0.8.11 default with a
       // small inset; 'top' / 'middle' let the user gate activation
       // until the key has scrolled further up.
-      const va = trigger.viewportAt || 'bottom';
+      const va = trigger.viewportAt || 'middle';
       card.appendChild(behaviorButtonGroup('Reaches', va, [
         { value: 'top',    label: 'Top of viewport' },
         { value: 'middle', label: 'Middle' },
