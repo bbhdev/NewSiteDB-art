@@ -31,6 +31,7 @@
         };
       }
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
+      if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -622,17 +623,28 @@
           // when the user hadn't scrolled.
           //
           // Instead, listen on window scroll and detect a true
-          // crossing of the key's top past the viewport bottom.
+          // downward crossing of a viewport line — top / middle
+          // / bottom per b.trigger.viewportAt (default 'bottom').
+          // Top and bottom carry a 3% inset so the user gets a
+          // little breathing room from the literal viewport edges
+          // (the literal edges feel jittery and over-eager).
+          //
           // prevTop is primed at creation, so the very first
           // scroll event with a real downward crossing fires; a
-          // key that's already above viewport bottom at load
-          // sits with prevTop < vh and never triggers until the
+          // key that's already past the line at load sits with
+          // prevTop ≤ threshold and never triggers until the
           // user scrolls back out and forward across it.
+          const viewportAt = b.trigger.viewportAt || 'bottom';
+          const lineOf = function (vh) {
+            if (viewportAt === 'top')    return vh * 0.03;
+            if (viewportAt === 'middle') return vh * 0.5;
+            return vh * 0.97;
+          };
           let prevTop = el.getBoundingClientRect().top;
           const onScroll = function () {
             const top = el.getBoundingClientRect().top;
-            const vh  = window.innerHeight;
-            if (prevTop > vh && top <= vh) {
+            const th  = lineOf(window.innerHeight);
+            if (prevTop > th && top <= th) {
               if (activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
               }

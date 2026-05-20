@@ -150,6 +150,7 @@
       const out = { when: b.trigger.when, delay: Number(b.trigger.delay) || 0 };
       if (b.trigger.range)    out.range    = { start: Number(b.trigger.range.start) || 0, end: Number(b.trigger.range.end) || 1 };
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
+      if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.
@@ -4051,8 +4052,9 @@
     scheduleSnapshot();
     // Changing trigger.when toggles which secondary inputs are
     // available; re-render so the right ones appear and the
-    // greyed-out duration options update.
-    if (key === 'when') {
+    // greyed-out duration options update. viewportAt also goes
+    // through re-render so its button-group active state flips.
+    if (key === 'when' || key === 'viewportAt') {
       renderSelectionPanel();
     } else {
       refreshBehaviorSummary(lineId, blockIdx);
@@ -4082,6 +4084,8 @@
       }
     } else if (key === 'selector') {
       b.trigger.selector = String(value || '');
+    } else if (key === 'viewportAt') {
+      b.trigger.viewportAt = String(value || 'bottom');
     } else if (key === 'delay' || key === 'rangeStart' || key === 'rangeEnd') {
       let v = Number(value);
       if (!Number.isFinite(v)) v = 0;
@@ -6574,8 +6578,12 @@
     } else if (when === 'page-load') {
       act = 'Triggers at page load';
     } else if (when === 'scroll-key') {
-      const k = trigger.selector ? '"' + trigger.selector + '"' : '(none set)';
-      act = 'Triggers when scroll passes key ' + k;
+      const k  = trigger.selector ? '"' + trigger.selector + '"' : '(none set)';
+      const va = trigger.viewportAt || 'bottom';
+      const where = va === 'top'    ? 'the top of the viewport'
+                  : va === 'middle' ? 'the middle of the viewport'
+                                    : 'the bottom of the viewport';
+      act = 'Triggers when scroll brings key ' + k + ' to ' + where;
     } else if (when === 'in-view-partial') {
       act = 'Triggers when the object enters the viewport';
     } else if (when === 'in-view-full') {
@@ -6708,6 +6716,17 @@
       card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
         updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
       }));
+      // v0.8.12: where in the viewport the key has to land for
+      // activation. 'bottom' preserves the v0.8.11 default with a
+      // small inset; 'top' / 'middle' let the user gate activation
+      // until the key has scrolled further up.
+      const va = trigger.viewportAt || 'bottom';
+      card.appendChild(behaviorButtonGroup('Reaches', va, [
+        { value: 'top',    label: 'Top of viewport' },
+        { value: 'middle', label: 'Middle' },
+        { value: 'bottom', label: 'Bottom of viewport' }
+      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
+         null));
     }
     // Delay is valid for all activations as an additional offset
     // after the activation event (seconds).
