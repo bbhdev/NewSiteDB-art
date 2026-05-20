@@ -1440,12 +1440,14 @@
           ? line.positionOffset.dy : 0;
         return {
           id:        line.id,
-          masterId:  mid,
           // Denormalized name for human readability of instances.json.
           // The resolver doesn't read it; kept fresh on every save.
+          // `id` and `name` lead so the file is easy to scan when
+          // grepping or eyeballing it directly.
           name:      (line.name != null && line.name !== '')
                        ? line.name
                        : (master && master.name ? master.name : line.id),
+          masterId:  mid,
           visible:   !line.hidden,
           groupId:   line.groupId || null,
           positionOffset: { dx: offDx, dy: offDy },
@@ -1455,15 +1457,41 @@
           overrides: cleanOverrides
         };
       });
-      byClass[cid] = { instances: instances, groups: groups };
+      byClass[cid] = {
+        instances: instances,
+        // Reorder groups so id / name lead too — matches the
+        // master + instance ordering. defaultGroup already has
+        // them in that order, but defensive in case some path
+        // built a group with a different shape.
+        groups: groups.map(reorderIdNameFirst)
+      };
     });
 
-    // Drop unreferenced masters.
+    // Drop unreferenced masters + emit each master with `id` and
+    // `name` at the front so JSON inspection lands on the human-
+    // readable identifier immediately. Other keys preserve their
+    // existing insertion order.
     const masters = Object.keys(masterMap)
       .filter(function (mid) { return usedMasterIds[mid]; })
-      .map(function (mid) { return masterMap[mid]; });
+      .map(function (mid) { return reorderIdNameFirst(masterMap[mid]); });
 
     return { masters: masters, byClass: byClass };
+  }
+
+  // Rebuild an object so { id, name } sit at the front. Subsequent
+  // keys are appended in the source's original order, minus id /
+  // name (we already wrote them). Used for save-side records that
+  // benefit from name-near-the-top when grepping the JSON files.
+  function reorderIdNameFirst(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    const out = {};
+    if ('id'   in obj) out.id   = obj.id;
+    if ('name' in obj) out.name = obj.name;
+    Object.keys(obj).forEach(function (k) {
+      if (k === 'id' || k === 'name') return;
+      out[k] = obj[k];
+    });
+    return out;
   }
 
   function snapshot() {
@@ -6690,7 +6718,7 @@
           page:    state.pageId,
           masters: decomposed.masters,
           byClass: decomposed.byClass,
-          palette: state.palette,
+          palette: state.palette.map(reorderIdNameFirst),
           pageCfg: state.pageConfig
         })
       });
