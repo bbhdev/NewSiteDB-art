@@ -483,25 +483,31 @@ body.editor {
   background: #232323;
   border: 1px solid #4a4a4a;
   border-radius: 5px;
-  padding: 0.45rem 0.55rem 0.55rem;
+  padding: 0;
   margin: 0.5rem 0;
   box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.35);
+  overflow: hidden;
 }
 .ed-behavior-head {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.4rem;
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  /* Two tones brighter than the card body so the title strip
+     stands clear of the field list below. */
+  background: #3a3a3a;
+  border-bottom: 1px solid #4a4a4a;
 }
 .ed-behavior-title {
-  color: #d8d8d8;
+  color: #fff;
   font-size: 0.85em;
   font-weight: 600;
   flex: 1 1 auto;
 }
 .ed-behavior-remove {
   background: transparent;
-  color: #888;
+  color: #d8d8d8;
   border: 1px solid transparent;
   border-radius: 3px;
   padding: 0 0.4rem;
@@ -514,11 +520,29 @@ body.editor {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.4rem;
-  margin-bottom: 0.4rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px dashed #2c2c2c;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px dashed #4a4a4a;
 }
 .ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
+.ed-behavior-block > .ed-field,
+.ed-behavior-block > .ed-actions {
+  margin: 0 0.55rem;
+}
+.ed-behavior-block > .ed-field:first-of-type { margin-top: 0.45rem; }
+.ed-behavior-block > .ed-field:last-of-type  { margin-bottom: 0.45rem; }
+
+/* Number-input stepper arrows — accent_color is the standard
+   property both Chromium and Firefox honor for native form
+   widgets (including the increment / decrement buttons on
+   <input type="number">). White stepper against #111 input
+   background was painful; this matches the editor's accent. */
+body.editor input[type="number"],
+body.editor input[type="range"],
+body.editor input[type="checkbox"],
+body.editor input[type="radio"] {
+  accent-color: var(--accent);
+}
 .ed-behavior-warning {
   margin: 0.3rem 0 0.5rem;
   padding: 0.4rem 0.5rem;
