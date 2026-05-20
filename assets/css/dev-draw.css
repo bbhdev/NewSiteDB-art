@@ -562,6 +562,16 @@ body.editor {
   font-size: 0.82em;
   line-height: 1.35;
 }
+/* v0.8.20: second summary line for drift behavior. Reads as a
+   continuation of the main red strip — same background hue, a
+   subtle inner divider, slightly dimmer text so the eye reads
+   it as a sub-fact rather than the headline. */
+.ed-behavior-summary-drift {
+  background: #4a2f2f;
+  color: #d4d4d4;
+  border-top: 1px dashed #6a4a4a;
+  font-size: 0.78em;
+}
 .ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
 .ed-behavior-block > .ed-field,
 .ed-behavior-block > .ed-actions {
@@ -650,6 +660,20 @@ body.editor input[type="range"] {
   border: 1px solid var(--accent);
   border-radius: 3px;
   font-size: 0.85em;
+}
+/* v0.8.20: per-line note shown when a line has ≥2 behavior blocks.
+   Informational (not a warning) — dimmer + cooler than the orange
+   overlap warning so the eye reads it as background context, not
+   an alert. */
+.ed-behavior-additive-note {
+  margin: 0.3rem 0 0.5rem;
+  padding: 0.4rem 0.5rem;
+  color: #b8b8b8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid #444;
+  border-radius: 3px;
+  font-size: 0.8em;
+  line-height: 1.35;
 }
 .ed-behavior-empty {
   margin: 0.3rem 0;

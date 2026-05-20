@@ -3988,6 +3988,14 @@
     }
     state.dirty = true;
     renderGroupsList();
+    // v0.8.20: drift summary line reads translateMode + translateX/Y.
+    // The translateMode picker triggers a full re-render itself, but
+    // the translateX/Y number fields don't (their onInput keeps focus
+    // mid-edit, by design). Refresh the per-block summary so the
+    // drift line text stays live as the user types.
+    if (key === 'translateX' || key === 'translateY' || key === 'translateMode') {
+      refreshBehaviorSummary(id, blockIdx);
+    }
     if (typeof value === 'boolean' || value === null) snapshot();
     else scheduleSnapshot();
   }
@@ -6364,12 +6372,23 @@
     wrap.appendChild(divider('Behavior'));
     // v0.4.1: behaviors[] authoring. Each block is a card with
     // its own range (start/end ∈ [0,1] within the trigger window)
-    // and the legacy behavior params. Multiple blocks chain
-    // along the scroll — runtime picks the LAST block whose
-    // range contains the current progress (overlap = later wins,
-    // and we warn the user about overlap at the top of the
-    // section).
+    // and the legacy behavior params.
+    // v0.8.20: corrected the comment / UX. The runtime ADDS every
+    // block's contribution every frame (app.js computeAt) — it does
+    // NOT pick a single block. A block contributes whenever its
+    // progress > 0; that's automatic for scroll-driven blocks
+    // outside their range, but timed runs clamp at 1 and keep
+    // contributing forever once they've completed. The additive
+    // note below makes this visible for multi-block lines.
     const blocks = Array.isArray(line.behaviors) ? line.behaviors : [];
+    if (blocks.length >= 2) {
+      const addNote = document.createElement('p');
+      addNote.className = 'ed-behavior-additive-note';
+      addNote.textContent = 'Multi-block: every block\'s translate / rotate is summed each frame. ' +
+        'Scroll-driven blocks stop contributing outside their range, but timed/loop/ping-pong blocks ' +
+        'whose progress has reached 1 keep contributing until the block\'s trigger ends.';
+      wrap.appendChild(addNote);
+    }
     const overlaps = findBehaviorOverlaps(blocks);
     if (overlaps.length) {
       const warn = document.createElement('p');
@@ -6638,6 +6657,38 @@
     return act + ', ' + prog + '.';
   }
 
+  // v0.8.20: drift behavior is independent of trigger × duration and
+  // not captured by behaviorSummaryText. When translateMode != fixed
+  // the drift axis ignores progress: each scroll-px adds (multiplier
+  // × delta) to that axis's accumulator. The other axis still acts
+  // as a fixed `bp × translate`. We surface this as a second summary
+  // line under the main one, only on blocks that have drift on.
+  // isLastBlock controls the "frozen / continues" tail because drift
+  // freezes the moment block i+1 activates (app.js tickDrift).
+  function behaviorDriftLineText(block, isLastBlock) {
+    const params = (block && block.params) || {};
+    const tmode = params.translateMode;
+    if (!tmode || tmode === 'fixed') return null;
+    const tx = Number(params.translateX) || 0;
+    const ty = Number(params.translateY) || 0;
+    function axisText(axis, mult) {
+      if (mult === 0) {
+        return axis + ' drift on but multiplier is 0 — no ' + axis +
+               ' motion (set Translate' + axis + ' to drive it)';
+      }
+      return axis + ' drifts ' + mult + ' px per scroll-px';
+    }
+    let parts;
+    if (tmode === 'driftX')         parts = [axisText('X', tx)];
+    else if (tmode === 'driftY')    parts = [axisText('Y', ty)];
+    else if (tmode === 'driftBoth') parts = [axisText('X', tx), axisText('Y', ty)];
+    else return 'Drift mode: ' + tmode;
+    const tail = isLastBlock
+      ? ' Continues while the block is active.'
+      : ' Freezes when the next block activates.';
+    return parts.join('; ') + '.' + tail;
+  }
+
   // v0.8.10: refresh just the summary node for one block without
   // re-rendering the panel. Used by trigger/duration field
   // updates that don't change the picker layout (range, delay,
@@ -6648,13 +6699,20 @@
     if (!l || !Array.isArray(l.behaviors)) return;
     const block = l.behaviors[blockIdx];
     if (!block) return;
+    const isLast = blockIdx === l.behaviors.length - 1;
+    const driftText = behaviorDriftLineText(block, isLast);
     const nodes = document.querySelectorAll('.ed-behavior-summary');
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
-      if (n.dataset.lineId === String(lineId)
-        && n.dataset.blockIdx === String(blockIdx)) {
+      if (n.dataset.lineId !== String(lineId)) continue;
+      if (n.dataset.blockIdx !== String(blockIdx)) continue;
+      if (n.dataset.kind === 'drift') {
+        // v0.8.20: drift node may not exist (it's only rendered when
+        // translateMode != fixed). If it does and drift just turned
+        // off, blank it; the next full re-render will drop the node.
+        n.textContent = driftText || '';
+      } else {
         n.textContent = behaviorSummaryText(block);
-        return;
       }
     }
   }
@@ -6721,6 +6779,22 @@
     summary.dataset.blockIdx = String(blockIdx);
     summary.textContent = behaviorSummaryText(block);
     card.appendChild(summary);
+
+    // v0.8.20: drift line (only rendered when translateMode != fixed).
+    // Its own dataset stamps so refreshBehaviorSummary can rewrite it
+    // in place on translate*/translateMode edits without re-rendering
+    // the panel.
+    const isLastBlock = blockIdx === line.behaviors.length - 1;
+    const driftText = behaviorDriftLineText(block, isLastBlock);
+    if (driftText) {
+      const driftLine = document.createElement('div');
+      driftLine.className = 'ed-behavior-summary ed-behavior-summary-drift';
+      driftLine.dataset.lineId   = String(line.id);
+      driftLine.dataset.blockIdx = String(blockIdx);
+      driftLine.dataset.kind     = 'drift';
+      driftLine.textContent = driftText;
+      card.appendChild(driftLine);
+    }
 
     // When (activation) picker
     card.appendChild(behaviorButtonGroup('Activate when', when, [
