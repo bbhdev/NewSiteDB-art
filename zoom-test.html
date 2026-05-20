@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Zoom counter-scale test</title>
+<style>
+  :root {
+    --zoom-scale: 1;
+  }
+
+  html, body { margin: 0; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    color: #1a1a1a;
+    background: #f5efe2;
+    padding: 4rem 2rem 6rem;
+    max-width: 760px;
+    margin: 0 auto;
+    line-height: 1.55;
+  }
+  h1 { font-size: 56px; margin: 0 0 1.5rem;   letter-spacing: -0.02em; }
+  h2 { font-size: 30px; margin: 2.5rem 0 1rem; letter-spacing: -0.01em; }
+  p  { font-size: 17px; margin: 0 0 1.1rem; }
+  .accent { background: rgba(255, 0, 255, 0.08); padding: 0 2px; }
+
+  /* The decoration layer. Sized + offset exactly like the real
+     #lines-layer rule in style.css, but with each value
+     multiplied by --zoom-scale so the layer's physical size
+     tracks browser zoom (which is what text already does). */
+  #test-layer {
+    position: fixed;
+    left:   calc(-50vw * var(--zoom-scale, 1));
+    top:    calc(-50vh * var(--zoom-scale, 1));
+    width:  calc(200vw * var(--zoom-scale, 1));
+    height: calc(200vh * var(--zoom-scale, 1));
+    max-width: none;
+    max-height: none;
+    pointer-events: none;
+    z-index: 0;
+  }
+  #test-layer * {
+    fill: none;
+    stroke: #d8127a;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+  #test-layer .dot { fill: #d8127a; stroke: none; }
+  #test-layer .frame { stroke-dasharray: 6 4; }
+
+  /* HUD */
+  #hud {
+    position: fixed;
+    top: 12px; right: 12px;
+    background: rgba(15,15,15,0.86);
+    color: #fff;
+    font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    padding: 10px 12px;
+    border-radius: 6px;
+    z-index: 100;
+    min-width: 180px;
+  }
+  #hud b { color: #ff6cd2; font-weight: 600; }
+  #hud .row { display: flex; justify-content: space-between; gap: 1em; }
+  #hud button {
+    display: block;
+    margin-top: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    background: #ff6cd2;
+    border: 0;
+    color: #1a1a1a;
+    font: inherit;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #hud button.off { background: #555; color: #ddd; }
+  #hud button + button { margin-top: 6px; }
+  #hud .hint { color: #888; margin-top: 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+  <h1 id="title">Calibrated <span class="accent">decoration</span></h1>
+  <h2 id="sub">A line should sit just under each heading.</h2>
+
+  <p>Browser zoom (Ctrl/Cmd + / -) scales text physically, but a fixed-viewport
+     SVG layer sized in <code>vw</code> / <code>vh</code> stays the same physical
+     size on screen. So decoration that fits the text at 100% drifts at any other
+     zoom.</p>
+
+  <p>This page calibrates a few shapes against the real text rects at page load,
+     then locks those <span class="accent" id="mark1">viewBox coords</span> in
+     place. From there you can zoom the page and toggle the counter-scale fix
+     on/off to see what the runtime change would look like.</p>
+
+  <h2 id="sub2">Watch the magenta marks</h2>
+
+  <p>The marks under each heading and around <span class="accent" id="mark2">this
+     phrase</span> are positioned via viewBox coordinates that don't change. With
+     the fix <b>ON</b>, the SVG layer scales with zoom and they should track the
+     text. With it <b>OFF</b>, they should drift.</p>
+
+  <svg id="test-layer" viewBox="0 0 200 200" preserveAspectRatio="none"></svg>
+
+  <div id="hud">
+    <div class="row"><span>browser zoom</span><b><span id="z">100</span>%</b></div>
+    <div class="row"><span>devicePixelRatio</span><span id="d">1.00</span></div>
+    <div class="row"><span>--zoom-scale</span><span id="s">1.00</span></div>
+    <button id="toggle">Fix: ON</button>
+    <button id="recalib">Recalibrate at current zoom</button>
+    <div class="hint">Calibration shapes are authored in viewBox<br>units once, then never re-measured.</div>
+  </div>
+
+<script>
+(function () {
+  const layer    = document.getElementById('test-layer');
+  const hudZ     = document.getElementById('z');
+  const hudD     = document.getElementById('d');
+  const hudS     = document.getElementById('s');
+  const toggleEl = document.getElementById('toggle');
+  const recalibEl= document.getElementById('recalib');
+
+  // Baseline DPR captured at first paint; everything else is
+  // a ratio to this. If the user already loaded the page zoomed
+  // (or moved to a different-DPR monitor), the baseline shifts
+  // with them — alignment recalibrates from whatever "now" is.
+  const initialDPR = window.devicePixelRatio || 1;
+  let baselineDPR = initialDPR;
+  let fixOn = true;
+
+  function currentZoom() {
+    return (window.devicePixelRatio || 1) / baselineDPR;
+  }
+
+  // Map a CSS-pixel point to viewBox coordinates. With
+  // preserveAspectRatio="none" the mapping is straight linear
+  // across width/height — no aspect-ratio bookkeeping needed.
+  function cssToVB(cssX, cssY) {
+    const vb   = layer.viewBox.baseVal;
+    const rect = layer.getBoundingClientRect();
+    return {
+      x: vb.x + (cssX - rect.left) / rect.width  * vb.width,
+      y: vb.y + (cssY - rect.top)  / rect.height * vb.height
+    };
+  }
+
+  // Helpers to create SVG primitives.
+  const SVG = 'http://www.w3.org/2000/svg';
+  function svgEl(name, attrs, cls) {
+    const el = document.createElementNS(SVG, name);
+    if (cls) el.setAttribute('class', cls);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  // Calibrate: read the live position of each calibration
+  // target, compute viewBox coords, place decoration.
+  function calibrate() {
+    layer.innerHTML = '';
+
+    // Underline under each heading, plus a bracket around an
+    // inline phrase, plus a dot at the start of mark1.
+    function underline(id, padCss) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const a = cssToVB(r.left,  r.bottom + (padCss || 4));
+      const b = cssToVB(r.right, r.bottom + (padCss || 4));
+      layer.appendChild(svgEl('line',
+        { x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
+    }
+    function frame(id, padCss) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const p = padCss || 3;
+      const tl = cssToVB(r.left  - p, r.top    - p);
+      const br = cssToVB(r.right + p, r.bottom + p);
+      layer.appendChild(svgEl('rect', {
+        x: tl.x, y: tl.y,
+        width:  br.x - tl.x,
+        height: br.y - tl.y
+      }, 'frame'));
+    }
+    function dot(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const c = cssToVB(r.left - 12, (r.top + r.bottom) / 2);
+      layer.appendChild(svgEl('circle',
+        { cx: c.x, cy: c.y, r: 0.4 }, 'dot'));
+    }
+
+    underline('title', 6);
+    underline('sub',   4);
+    underline('sub2',  4);
+    frame('mark2', 3);
+    dot('mark1');
+  }
+
+  function applyZoom() {
+    const z = currentZoom();
+    const scale = fixOn ? z : 1;
+    document.documentElement.style.setProperty('--zoom-scale', scale);
+    hudZ.textContent = Math.round(z * 100);
+    hudD.textContent = (window.devicePixelRatio || 1).toFixed(2);
+    hudS.textContent = scale.toFixed(2);
+  }
+
+  // Initial paint: set --zoom-scale before measuring so the
+  // layer's getBoundingClientRect reflects the post-fix size,
+  // then calibrate against that.
+  applyZoom();
+  // Defer one frame so the browser has laid out text + the
+  // (now-scaled) SVG layer before we measure.
+  requestAnimationFrame(function () {
+    calibrate();
+  });
+
+  window.addEventListener('resize', applyZoom);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', applyZoom);
+  }
+
+  toggleEl.addEventListener('click', function () {
+    fixOn = !fixOn;
+    toggleEl.textContent = 'Fix: ' + (fixOn ? 'ON' : 'OFF');
+    toggleEl.classList.toggle('off', !fixOn);
+    applyZoom();
+  });
+
+  recalibEl.addEventListener('click', function () {
+    // Treat the current DPR as the new "100%" baseline. The
+    // layer immediately resizes to --zoom-scale=1, and the
+    // shapes get re-authored against text positions at that
+    // new baseline. From here you can zoom further and watch
+    // the fix follow (or, with fix off, drift away).
+    baselineDPR = window.devicePixelRatio || 1;
+    applyZoom();
+    requestAnimationFrame(calibrate);
+  });
+})();
+</script>
+</body>
+</html>
