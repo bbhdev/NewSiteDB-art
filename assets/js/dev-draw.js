@@ -5465,13 +5465,25 @@
 
   function renderRotateOriginMarker(line) {
     const group = state.groups.find(function (g) { return g.id === line.groupId; });
-    const ov  = line.overrides || {};
+    // Per-line rotateOrigin (v0.4.6+): delta from natural center,
+    // stored on behaviors[0].params. Group-default rotateOrigin
+    // stays as an absolute canvas coord — it's group-wide and
+    // doesn't track any single object's center.
+    const block0 = (line.behaviors && line.behaviors[0]) || null;
+    const params0 = (block0 && block0.params) || {};
     const gd  = (group && group.defaults) || {};
-    // Effective pivot = line override or group default. Either coord
-    // missing → no custom pivot, no marker.
-    const ox = Number.isFinite(ov.rotateOriginX) ? ov.rotateOriginX : gd.rotateOriginX;
-    const oy = Number.isFinite(ov.rotateOriginY) ? ov.rotateOriginY : gd.rotateOriginY;
-    if (!Number.isFinite(ox) || !Number.isFinite(oy)) return;
+    let ox, oy;
+    if (Number.isFinite(params0.rotateOriginX) && Number.isFinite(params0.rotateOriginY)) {
+      const c = centerOf(line);
+      if (!c) return;
+      ox = c.x + params0.rotateOriginX;
+      oy = c.y + params0.rotateOriginY;
+    } else if (Number.isFinite(gd.rotateOriginX) && Number.isFinite(gd.rotateOriginY)) {
+      ox = gd.rotateOriginX;
+      oy = gd.rotateOriginY;
+    } else {
+      return; // no custom pivot
+    }
     const size = 12 / state.zoom;
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'ed-rotate-origin');
@@ -6326,8 +6338,11 @@
     card.appendChild(overrideNumberField('TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
     card.appendChild(overrideNumberField('TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
     card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
-    card.appendChild(overrideNumberField('Rotate origin X', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
-    card.appendChild(overrideNumberField('Rotate origin Y', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
+    // Per-line rotate-origin: DELTA from this object's natural
+    // center, so the pivot travels with the line instead of
+    // being pinned to a canvas coord. 0,0 = pivot at center.
+    card.appendChild(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
+    card.appendChild(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
     // Set-origin is per-block — the canvas-click handler reads
     // settingOrigin.blockIdx so the captured (x,y) lands in the
     // right block's params.
@@ -6825,11 +6840,23 @@
       const x = Math.round(pt.x * 10) / 10;
       const y = Math.round(pt.y * 10) / 10;
       if (settingOrigin.type === 'group') {
+        // Group defaults still use the click coords directly — a
+        // group's pivot is shared by every line in it and has no
+        // single "natural center" to subtract from.
         updateGroupDefaults(settingOrigin.id, { rotateOriginX: x, rotateOriginY: y });
       } else if (settingOrigin.type === 'line') {
+        // Per-line rotateOrigin is now a DELTA from the line's
+        // own natural center (v0.4.6). (0,0) = pivot at center;
+        // (50, 0) = 50 to the right of center. So the pivot
+        // travels with the object instead of being pinned to
+        // an absolute canvas spot.
         const blockIdx = (settingOrigin.blockIdx != null) ? settingOrigin.blockIdx : 0;
-        updateBehaviorParam(settingOrigin.id, 'rotateOriginX', x, blockIdx);
-        updateBehaviorParam(settingOrigin.id, 'rotateOriginY', y, blockIdx);
+        const line = state.lines.find(function (l) { return l.id === settingOrigin.id; });
+        const c = line ? centerOf(line) : null;
+        const dx = c ? Math.round((x - c.x) * 10) / 10 : x;
+        const dy = c ? Math.round((y - c.y) * 10) / 10 : y;
+        updateBehaviorParam(settingOrigin.id, 'rotateOriginX', dx, blockIdx);
+        updateBehaviorParam(settingOrigin.id, 'rotateOriginY', dy, blockIdx);
       }
       exitSetRotateOrigin();
       renderSelectionPanel(); // refresh the input fields with new values

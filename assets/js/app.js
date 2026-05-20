@@ -421,29 +421,49 @@
       // route that didn't take effect for custom origins.
       //
       // Priority:
-      //   1. Explicit rotateOriginX/Y from the behavior — lets the
-      //      user place the pivot anywhere on the page.
-      //   2. Primitive's geometric center (cx/cy or rect-center).
-      //   3. Fallback to path's bbox center via getBBox().
-      let originX = 0, originY = 0;
-      if (Number.isFinite(behaviors.rotateOriginX) &&
-          Number.isFinite(behaviors.rotateOriginY)) {
-        originX = behaviors.rotateOriginX;
-        originY = behaviors.rotateOriginY;
-      } else if (lineDef.params) {
+      //   1. Per-line rotateOriginX/Y on behaviors[0].params —
+      //      treated as a DELTA from the line's natural center
+      //      (v0.4.6+). So (0,0) = pivot at center; (50, 0) puts
+      //      the pivot 50 to the right of center, traveling with
+      //      the object instead of being pinned to a canvas spot.
+      //   2. Group default rotateOriginX/Y — absolute canvas
+      //      coord. Groups don't have a single natural center
+      //      to subtract from; the group-level pivot is a shared
+      //      anchor.
+      //   3. Otherwise the line's natural center (primitive
+      //      params, falling back to bbox).
+      let centerX = 0, centerY = 0;
+      if (lineDef.params) {
         const pa = lineDef.params;
         if ('cx' in pa && 'cy' in pa) {
-          originX = pa.cx; originY = pa.cy;
+          centerX = pa.cx; centerY = pa.cy;
         } else if ('x' in pa && 'y' in pa && 'w' in pa && 'h' in pa) {
-          originX = pa.x + pa.w / 2;
-          originY = pa.y + pa.h / 2;
+          centerX = pa.x + pa.w / 2;
+          centerY = pa.y + pa.h / 2;
+        } else {
+          try {
+            const b = pathEl.getBBox();
+            centerX = b.x + b.width  / 2;
+            centerY = b.y + b.height / 2;
+          } catch (e) { /* bbox unavailable */ }
         }
       } else {
         try {
           const b = pathEl.getBBox();
-          originX = b.x + b.width  / 2;
-          originY = b.y + b.height / 2;
-        } catch (e) { /* bbox unavailable for malformed paths */ }
+          centerX = b.x + b.width  / 2;
+          centerY = b.y + b.height / 2;
+        } catch (e) { /* bbox unavailable */ }
+      }
+      let originX = centerX, originY = centerY;
+      const linePivotX = block0params.rotateOriginX;
+      const linePivotY = block0params.rotateOriginY;
+      if (Number.isFinite(linePivotX) && Number.isFinite(linePivotY)) {
+        originX = centerX + linePivotX;
+        originY = centerY + linePivotY;
+      } else if (Number.isFinite(group.defaults.rotateOriginX) &&
+                 Number.isFinite(group.defaults.rotateOriginY)) {
+        originX = group.defaults.rotateOriginX;
+        originY = group.defaults.rotateOriginY;
       }
 
       // v0.4.1: multi-block composition. Walk lineDef.behaviors[];
