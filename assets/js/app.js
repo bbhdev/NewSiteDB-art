@@ -475,15 +475,44 @@
       const hasMotion = blocks.some(function (b) {
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
       });
-      // Pick the active block at a given progress; last-matching
-      // wins (overlap semantics).
-      const blockAt = function (p) {
-        let active = null;
+      // Chained composition: each block's params describe the
+      // line's END state at block-progress 1, and we lerp from
+      // the previous block's end state across the current block.
+      // So a sequence (translateY -200 → translateX +200) ends
+      // block 1 at (0,-200) and block 2 starts from (0,-200) and
+      // ends at (200,0). No teleport between blocks. In a gap
+      // (no block contains p) the line holds the last-completed
+      // block's end state. Identity = (0,0,0) before any block.
+      const computeAt = function (p) {
+        let prev = { tx: 0, ty: 0, rot: 0 };
+        let active = -1;
         for (let i = 0; i < blocks.length; i++) {
           const r = blocks[i].range;
-          if (p >= r.start && p <= r.end) active = blocks[i];
+          if (p >= r.end) {
+            // p has passed this block — it contributed fully;
+            // advance prev so the next block (if any) lerps from
+            // this block's end.
+            prev = { tx: blocks[i].tx, ty: blocks[i].ty, rot: blocks[i].rot };
+          } else if (p >= r.start) {
+            // p is inside this block — lerp from prev to this
+            // block's end across block-progress.
+            active = i;
+            break;
+          } else {
+            // p hasn't reached this block yet — earlier blocks
+            // have already finalized their contribution into prev.
+            break;
+          }
         }
-        return active;
+        if (active < 0) return prev;
+        const b = blocks[active];
+        const span = b.range.end - b.range.start;
+        const bp = span > 0 ? (p - b.range.start) / span : 1;
+        return {
+          tx:  prev.tx  + bp * (b.tx  - prev.tx),
+          ty:  prev.ty  + bp * (b.ty  - prev.ty),
+          rot: prev.rot + bp * (b.rot - prev.rot)
+        };
       };
       // v6+: per-class positionOffset baked into the path's transform.
       // line.d is canonical (master geometry) on the runtime side;
@@ -515,20 +544,11 @@
           end:     stConfig.end,
           scrub:   stConfig.scrub,
           onUpdate: function (self) {
-            const p = self.progress;
-            const b = blockAt(p);
-            let px = 0, py = 0, pr = 0;
-            if (b) {
-              const span = b.range.end - b.range.start;
-              const bp = span > 0 ? (p - b.range.start) / span : 1;
-              px = bp * b.tx;
-              py = bp * b.ty;
-              pr = bp * b.rot;
-            }
+            const t = computeAt(self.progress);
             pathEl.setAttribute(
               'transform',
-              'translate(' + (offX + px) + ' ' + (offY + py) + ') ' +
-              'rotate(' + pr + ' ' + originX + ' ' + originY + ')'
+              'translate(' + (offX + t.tx) + ' ' + (offY + t.ty) + ') ' +
+              'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')'
             );
           }
         }));

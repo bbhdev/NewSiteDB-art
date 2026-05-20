@@ -6327,12 +6327,12 @@
     card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
     card.appendChild(overrideNumberField('Rotate origin X', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
     card.appendChild(overrideNumberField('Rotate origin Y', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
-    // Set-origin click only renders on block 0 — the canvas-click
-    // handler writes back through updateBehaviorParam to block 0
-    // by default. Per-block set-origin is a follow-up.
-    if (blockIdx === 0) {
-      card.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'line', id: line.id }); }));
-    }
+    // Set-origin is per-block — the canvas-click handler reads
+    // settingOrigin.blockIdx so the captured (x,y) lands in the
+    // right block's params.
+    card.appendChild(setOriginButton(function () {
+      startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
+    }));
     card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v, blockIdx); }));
     card.appendChild(overrideSelectField('Direction', params.drawInDirection,
       gd.drawInDirection || 'forward',
@@ -6826,8 +6826,9 @@
       if (settingOrigin.type === 'group') {
         updateGroupDefaults(settingOrigin.id, { rotateOriginX: x, rotateOriginY: y });
       } else if (settingOrigin.type === 'line') {
-        updateBehaviorParam(settingOrigin.id, 'rotateOriginX', x);
-        updateBehaviorParam(settingOrigin.id, 'rotateOriginY', y);
+        const blockIdx = (settingOrigin.blockIdx != null) ? settingOrigin.blockIdx : 0;
+        updateBehaviorParam(settingOrigin.id, 'rotateOriginX', x, blockIdx);
+        updateBehaviorParam(settingOrigin.id, 'rotateOriginY', y, blockIdx);
       }
       exitSetRotateOrigin();
       renderSelectionPanel(); // refresh the input fields with new values
