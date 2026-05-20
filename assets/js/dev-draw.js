@@ -3982,15 +3982,63 @@
     v = Math.max(0, Math.min(1, v));
     b.range[which] = v;
   }
+
+  // Update the trigger (type / delay / duration) on a behavior
+  // block. Default trigger = { type: 'scroll' }; switching to
+  // 'time' seeds delay=0 + duration=1 if missing. 'all' mode
+  // fans out to siblings.
+  function updateBehaviorTrigger(lineId, blockIdx, key, value) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l) return;
+    writeBehaviorTrigger(l, blockIdx, key, value);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        writeBehaviorTrigger(sib, blockIdx, key, value);
+      });
+    }
+    state.dirty = true;
+    scheduleSnapshot();
+    // 'type' flip toggles which fields show (scroll range ↔ time
+    // delay/duration) — re-render the panel so the right inputs
+    // appear.
+    if (key === 'type') renderSelectionPanel();
+  }
+  function writeBehaviorTrigger(line, blockIdx, key, value) {
+    if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
+    const b = line.behaviors[blockIdx];
+    if (!b.trigger || typeof b.trigger !== 'object') b.trigger = { type: 'scroll' };
+    if (key === 'type') {
+      b.trigger.type = value;
+      if (value === 'time') {
+        if (typeof b.trigger.delay    !== 'number') b.trigger.delay    = 0;
+        if (typeof b.trigger.duration !== 'number') b.trigger.duration = 1;
+      }
+    } else {
+      let v = Number(value);
+      if (!Number.isFinite(v)) v = 0;
+      if (key === 'duration' && v <= 0) v = 0.01; // avoid div-by-zero at runtime
+      b.trigger[key] = v;
+    }
+  }
   // Detect overlapping ranges among a behaviors[] array. Open
   // overlap only — blocks touching at a single point (a.end ===
   // b.start) don't count.
+  // Overlap detection — only meaningful between scroll-driven
+  // blocks (they share the same scroll timeline). Time-driven
+  // blocks have their own delay/duration timelines and can't
+  // meaningfully "overlap" with a scroll range. Mixed-type pairs
+  // are skipped.
   function findBehaviorOverlaps(blocks) {
     const out = [];
     if (!Array.isArray(blocks)) return out;
+    const isScroll = function (b) {
+      return !b.trigger || b.trigger.type === 'scroll';
+    };
     for (let i = 0; i < blocks.length; i++) {
+      if (!isScroll(blocks[i])) continue;
       const a = blocks[i].range || { start: 0, end: 1 };
       for (let j = i + 1; j < blocks.length; j++) {
+        if (!isScroll(blocks[j])) continue;
         const b = blocks[j].range || { start: 0, end: 1 };
         if (a.start < b.end && b.start < a.end) out.push({ a: i, b: j });
       }
@@ -6154,10 +6202,10 @@
     if (overlaps.length) {
       const warn = document.createElement('p');
       warn.className = 'ed-behavior-warning';
-      warn.textContent = '⚠ Overlapping blocks: ' +
+      warn.textContent = 'Overlapping blocks: ' +
         overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
-        '. With chained motion the first block runs through its full range; ' +
-        'later overlapping blocks don\'t contribute until the first ends.';
+        '. Overlapping ranges contribute simultaneously — their deltas sum during the overlap. ' +
+        'Sometimes intentional (parallel motion); otherwise space the ranges out.';
       wrap.appendChild(warn);
     }
     if (!blocks.length) {
@@ -6323,17 +6371,41 @@
     head.appendChild(rm);
     card.appendChild(head);
 
-    // Range editing. 0 = window start, 1 = window end. Outside
-    // the range the block contributes nothing.
-    const rangeRow = document.createElement('div');
-    rangeRow.className = 'ed-behavior-range';
-    rangeRow.appendChild(rangeNumberField('Start', range.start, function (v) {
-      updateBehaviorRange(line.id, blockIdx, 'start', v);
-    }));
-    rangeRow.appendChild(rangeNumberField('End', range.end, function (v) {
-      updateBehaviorRange(line.id, blockIdx, 'end', v);
-    }));
-    card.appendChild(rangeRow);
+    // Trigger picker — scroll-driven (default) or time-driven.
+    // Time mode swaps range start/end for delay + duration.
+    const trigger = block && block.trigger ? block.trigger : { type: 'scroll' };
+    const triggerType = trigger.type || 'scroll';
+    card.appendChild(selectField('Trigger', triggerType, [
+      { value: 'scroll', label: 'Scroll' },
+      { value: 'time',   label: 'Time' }
+    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'type', v); }));
+
+    if (triggerType === 'time') {
+      // Time-driven: delay (s before start) + duration (s to
+      // complete). Block-progress = 0 before delay, lerps to 1
+      // across duration, stays 1 after.
+      const timeRow = document.createElement('div');
+      timeRow.className = 'ed-behavior-range';
+      timeRow.appendChild(numberField('Delay (s)',    trigger.delay    || 0, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
+      }));
+      timeRow.appendChild(numberField('Duration (s)', trigger.duration || 1, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'duration', v);
+      }));
+      card.appendChild(timeRow);
+    } else {
+      // Scroll range. 0 = window start, 1 = window end. Outside
+      // the range the block contributes nothing.
+      const rangeRow = document.createElement('div');
+      rangeRow.className = 'ed-behavior-range';
+      rangeRow.appendChild(rangeNumberField('Start', range.start, function (v) {
+        updateBehaviorRange(line.id, blockIdx, 'start', v);
+      }));
+      rangeRow.appendChild(rangeNumberField('End', range.end, function (v) {
+        updateBehaviorRange(line.id, blockIdx, 'end', v);
+      }));
+      card.appendChild(rangeRow);
+    }
 
     card.appendChild(overrideNumberField('TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
     card.appendChild(overrideNumberField('TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));

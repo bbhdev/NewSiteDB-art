@@ -193,12 +193,18 @@
     // cross) can tear them down cleanly without touching unrelated
     // triggers elsewhere in the page.
     const ownTriggers = [];
+    // gsap.ticker callbacks registered for time-driven behavior
+    // blocks (v0.8.1). Tracked alongside ownTriggers so a class-
+    // boundary re-render can detach them.
+    const ownTickers = [];
     let currentClassId = null;
 
     function renderForClass(classId) {
       // Tear down previous render.
       ownTriggers.forEach(function (t) { try { t.kill(); } catch (e) {} });
       ownTriggers.length = 0;
+      ownTickers.forEach(function (fn) { try { gsap.ticker.remove(fn); } catch (e) {} });
+      ownTickers.length = 0;
       layer.innerHTML = '';
       currentClassId = classId;
 
@@ -495,51 +501,50 @@
       const hasMotion = blocks.some(function (b) {
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
       });
-      // Chained composition with DELTA semantics: each block's
-      // params describe what the block ADDS to the line's current
-      // transform. As the cursor sweeps through a block, the
-      // block's full delta is lerped in on top of whatever
-      // previous blocks accumulated. Past blocks contribute their
-      // full delta to the running total ("prev"); the active
-      // block contributes blockProgress × block.params.
-      //
-      // So a sequence (translateY +200 → translateX +200) ends
-      // block 1 at (0,200) and ends block 2 at (200,200): a
-      // straight horizontal slide from the down-position. With
-      // end-state semantics the line would have lerped ty back to
-      // 0 across block 2 (visible oblique up-right).
-      //
-      // In a gap (no block contains p) the line holds the running
-      // total of completed blocks. Identity (0,0,0) before any.
-      const computeAt = function (p) {
-        let prev = { tx: 0, ty: 0, rot: 0 };
-        let active = -1;
-        for (let i = 0; i < blocks.length; i++) {
-          const r = blocks[i].range;
-          if (p >= r.end) {
-            // block i fully done — fold its delta into prev.
-            prev = {
-              tx:  prev.tx  + blocks[i].tx,
-              ty:  prev.ty  + blocks[i].ty,
-              rot: prev.rot + blocks[i].rot
-            };
-          } else if (p >= r.start) {
-            active = i;
-            break;
-          } else {
-            break;
-          }
+      // v0.8.1: additive composition with mixed triggers. Each
+      // block has an independent progress source — scroll-driven
+      // (block.range within the scroll trigger window) or time-
+      // driven (block.trigger = { type: 'time', delay, duration }).
+      // At any moment, total transform = Σ (block.progress ×
+      // block.params) across all blocks. Two consequences:
+      //   - Chained scroll blocks behave identically to v0.4.5 —
+      //     a completed block stays at progress 1 (delta fully
+      //     applied); active block contributes proportionally;
+      //     future block contributes 0. So sequential scroll
+      //     blocks chain naturally without dedicated chaining
+      //     logic.
+      //   - Overlapping blocks contribute simultaneously now
+      //     (used to be first-wins). The editor's overlap
+      //     warning is reframed: overlap = simultaneous, summed,
+      //     which is sometimes intentional (parallel motion).
+      const blockProg = function (b, scrollP, elapsed) {
+        const tr = b.trigger || { type: 'scroll' };
+        if (tr.type === 'time') {
+          const t = elapsed - (tr.delay || 0);
+          if (t <= 0) return 0;
+          const dur = (tr.duration > 0) ? tr.duration : 1;
+          return Math.min(1, t / dur);
         }
-        if (active < 0) return prev;
-        const b = blocks[active];
-        const span = b.range.end - b.range.start;
-        const bp = span > 0 ? (p - b.range.start) / span : 1;
-        return {
-          tx:  prev.tx  + bp * b.tx,
-          ty:  prev.ty  + bp * b.ty,
-          rot: prev.rot + bp * b.rot
-        };
+        const r = b.range || { start: 0, end: 1 };
+        if (scrollP <= r.start) return 0;
+        if (scrollP >= r.end)   return 1;
+        const span = r.end - r.start;
+        return span > 0 ? (scrollP - r.start) / span : 1;
       };
+      const computeAt = function (scrollP, elapsed) {
+        let tx = 0, ty = 0, rot = 0;
+        for (let i = 0; i < blocks.length; i++) {
+          const bp = blockProg(blocks[i], scrollP, elapsed);
+          tx  += bp * blocks[i].tx;
+          ty  += bp * blocks[i].ty;
+          rot += bp * blocks[i].rot;
+        }
+        return { tx: tx, ty: ty, rot: rot };
+      };
+      const hasTime = blocks.some(function (b) {
+        return b.trigger && b.trigger.type === 'time';
+      });
+      const lineStartedAt = performance.now() / 1000;
       // v6+: per-class positionOffset baked into the path's transform.
       // line.d is canonical (master geometry) on the runtime side;
       // positionOffset shifts the rendered position without per-class
@@ -564,20 +569,36 @@
       // setup so per-element triggers can't apply a mid-viewport progress
       // at scrollY=0.
       if (hasMotion && !diagMode) {
-        ownTriggers.push(ScrollTrigger.create({
+        const writeAt = function (scrollP, elapsed) {
+          const t = computeAt(scrollP, elapsed);
+          pathEl.setAttribute(
+            'transform',
+            'translate(' + (offX + t.tx) + ' ' + (offY + t.ty) + ') ' +
+            'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')'
+          );
+        };
+        const st = ScrollTrigger.create({
           trigger: stConfig.trigger,
           start:   stConfig.start,
           end:     stConfig.end,
           scrub:   stConfig.scrub,
           onUpdate: function (self) {
-            const t = computeAt(self.progress);
-            pathEl.setAttribute(
-              'transform',
-              'translate(' + (offX + t.tx) + ' ' + (offY + t.ty) + ') ' +
-              'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')'
-            );
+            const elapsed = hasTime ? (performance.now() / 1000 - lineStartedAt) : 0;
+            writeAt(self.progress, elapsed);
           }
-        }));
+        });
+        ownTriggers.push(st);
+        // Time-driven blocks need per-frame updates independent of
+        // scroll — the user might not scroll while a time block is
+        // animating. gsap.ticker runs at 60fps; we just re-read
+        // ScrollTrigger's cached progress + the elapsed wall-clock.
+        if (hasTime) {
+          const tick = function () {
+            writeAt(st ? st.progress : 0, performance.now() / 1000 - lineStartedAt);
+          };
+          gsap.ticker.add(tick);
+          ownTickers.push(tick);
+        }
       }
 
       // Draw-in: stroke-dash reveal across the same scroll range.
