@@ -107,12 +107,15 @@
   <svg id="test-layer" viewBox="0 0 200 200" preserveAspectRatio="none"></svg>
 
   <div id="hud">
-    <div class="row"><span>browser zoom</span><b><span id="z">100</span>%</b></div>
     <div class="row"><span>devicePixelRatio</span><span id="d">1.00</span></div>
+    <div class="row"><span>outer/inner</span><span id="oi">1.00</span></div>
+    <div class="row"><span>visualViewport.scale</span><span id="vv">1.00</span></div>
+    <hr style="border:0;border-top:1px solid #333;margin:6px 0">
+    <div class="row"><span>detected zoom</span><b><span id="z">100</span>%</b></div>
     <div class="row"><span>--zoom-scale</span><span id="s">1.00</span></div>
     <button id="toggle">Fix: ON</button>
     <button id="recalib">Recalibrate at current zoom</button>
-    <div class="hint">Calibration shapes are authored in viewBox<br>units once, then never re-measured.</div>
+    <div class="hint">If devicePixelRatio doesn't change when you<br>zoom, your browser uses outer/inner instead.</div>
   </div>
 
 <script>
@@ -120,20 +123,39 @@
   const layer    = document.getElementById('test-layer');
   const hudZ     = document.getElementById('z');
   const hudD     = document.getElementById('d');
+  const hudOI    = document.getElementById('oi');
+  const hudVV    = document.getElementById('vv');
   const hudS     = document.getElementById('s');
   const toggleEl = document.getElementById('toggle');
   const recalibEl= document.getElementById('recalib');
 
-  // Baseline DPR captured at first paint; everything else is
-  // a ratio to this. If the user already loaded the page zoomed
-  // (or moved to a different-DPR monitor), the baseline shifts
-  // with them — alignment recalibrates from whatever "now" is.
-  const initialDPR = window.devicePixelRatio || 1;
-  let baselineDPR = initialDPR;
+  // Capture baselines for every signal we can think of. The
+  // "current zoom" is whichever ratio has actually moved away
+  // from 1 — different browsers update different signals on
+  // Ctrl/Cmd +/- and we just take whichever is talking. Captured
+  // at first paint; rebaselined by Recalibrate.
+  let baseDPR = window.devicePixelRatio || 1;
+  let baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
   let fixOn = true;
 
   function currentZoom() {
-    return (window.devicePixelRatio || 1) / baselineDPR;
+    const dprZ = (window.devicePixelRatio || 1) / baseDPR;
+    const oiZ  = (window.outerWidth / Math.max(1, window.innerWidth)) / baseOI;
+    const vvZ  = (window.visualViewport && window.visualViewport.scale) || 1;
+    // Pick whichever has moved furthest (in log space) from 1.
+    // Zoom-in and zoom-out are symmetric in log space, so this
+    // works for both directions.
+    const candidates = [
+      { v: dprZ, label: 'dpr' },
+      { v: oiZ,  label: 'oi'  },
+      { v: vvZ,  label: 'vv'  }
+    ];
+    let best = 1, bestDist = 0;
+    candidates.forEach(function (c) {
+      const d = Math.abs(Math.log(c.v || 1));
+      if (d > bestDist) { bestDist = d; best = c.v; }
+    });
+    return best;
   }
 
   // Map a CSS-pixel point to viewBox coordinates. With
@@ -206,9 +228,11 @@
     const z = currentZoom();
     const scale = fixOn ? z : 1;
     document.documentElement.style.setProperty('--zoom-scale', scale);
-    hudZ.textContent = Math.round(z * 100);
-    hudD.textContent = (window.devicePixelRatio || 1).toFixed(2);
-    hudS.textContent = scale.toFixed(2);
+    hudZ.textContent  = Math.round(z * 100);
+    hudD.textContent  = (window.devicePixelRatio || 1).toFixed(2);
+    hudOI.textContent = (window.outerWidth / Math.max(1, window.innerWidth)).toFixed(3);
+    hudVV.textContent = ((window.visualViewport && window.visualViewport.scale) || 1).toFixed(3);
+    hudS.textContent  = scale.toFixed(2);
   }
 
   // Initial paint: set --zoom-scale before measuring so the
@@ -234,12 +258,13 @@
   });
 
   recalibEl.addEventListener('click', function () {
-    // Treat the current DPR as the new "100%" baseline. The
+    // Treat the current state as the new "100%" baseline. The
     // layer immediately resizes to --zoom-scale=1, and the
     // shapes get re-authored against text positions at that
     // new baseline. From here you can zoom further and watch
     // the fix follow (or, with fix off, drift away).
-    baselineDPR = window.devicePixelRatio || 1;
+    baseDPR = window.devicePixelRatio || 1;
+    baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
     applyZoom();
     requestAnimationFrame(calibrate);
   });
