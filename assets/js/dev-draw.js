@@ -6528,6 +6528,68 @@
     });
   }
 
+  // Plain-English summary of an activation × progress combo, shown
+  // in the .ed-behavior-summary strip at the top of each block. The
+  // sentence is deterministic in (trigger, duration, params); each
+  // re-render rebuilds it so the user always sees the live combo.
+  function formatScrollPct(v) {
+    const pct = Math.round((Number(v) || 0) * 1000) / 10;
+    return pct.toFixed(1).replace(/\.0$/, '') + '%';
+  }
+  function formatSeconds(v) {
+    const n = Number(v);
+    if (!isFinite(n) || n <= 0) return '0 s';
+    return n + ' s';
+  }
+  function behaviorSummaryText(block) {
+    const trigger  = (block && block.trigger)  ? block.trigger  : { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 };
+    const duration = (block && block.duration) ? block.duration : { mode: 'scroll' };
+    const when  = trigger.when  || 'scroll-range';
+    const dmode = duration.mode || 'scroll';
+    const delay = Number(trigger.delay) || 0;
+    const secs  = formatSeconds(duration.seconds || 1);
+    const ease  = (duration.easing && duration.easing !== 'linear')
+      ? ' (eased: ' + duration.easing + ')' : '';
+
+    // Scroll-range + scroll-driven progress: activation and
+    // progress collapse into a single statement.
+    if (when === 'scroll-range' && dmode === 'scroll') {
+      const r = trigger.range || { start: 0, end: 1 };
+      return 'Tracks scroll across ' + formatScrollPct(r.start) + '–' + formatScrollPct(r.end)
+           + '; progress follows scroll position within that range.';
+    }
+
+    let act;
+    if (when === 'scroll-range') {
+      const r = trigger.range || { start: 0, end: 1 };
+      act = 'Triggers the first time scroll enters ' + formatScrollPct(r.start) + '–' + formatScrollPct(r.end);
+    } else if (when === 'page-load') {
+      act = 'Triggers at page load';
+    } else if (when === 'scroll-key') {
+      const k = trigger.selector ? '"' + trigger.selector + '"' : '(none set)';
+      act = 'Triggers when scroll passes key ' + k;
+    } else if (when === 'in-view-partial') {
+      act = 'Triggers when the object enters the viewport';
+    } else if (when === 'in-view-full') {
+      act = 'Triggers when the object is fully in the viewport';
+    } else {
+      act = 'Triggers (' + when + ')';
+    }
+    if (delay > 0) act += ', waits ' + formatSeconds(delay);
+
+    let prog;
+    if (dmode === 'time') {
+      prog = 'then runs once over ' + secs + ease;
+    } else if (dmode === 'loop') {
+      prog = 'then loops every ' + secs + ease;
+    } else if (dmode === 'pingpong') {
+      prog = 'then ping-pongs every ' + secs + ease;
+    } else {
+      prog = 'progress mode: ' + dmode;
+    }
+    return act + ', ' + prog + '.';
+  }
+
   function rangeNumberField(label, value, onChange) {
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';
@@ -6577,6 +6639,14 @@
     const when = trigger.when || 'scroll-range';
     const dmode = duration.mode || 'scroll';
 
+    // v0.8.8: fluid post-summary strip — the orthogonal pickers
+    // make the legal combos easy to confuse, so a plain-English
+    // sentence makes the live combo readable at a glance.
+    const summary = document.createElement('div');
+    summary.className = 'ed-behavior-summary';
+    summary.textContent = behaviorSummaryText(block);
+    card.appendChild(summary);
+
     // When (activation) picker
     card.appendChild(behaviorButtonGroup('Activate when', when, [
       { value: 'scroll-range',     label: 'Scroll range' },
@@ -6610,20 +6680,20 @@
       updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
     }));
 
-    // Duration (How) picker — 'scroll' is only valid when
+    // Progress (How) picker — 'scroll' is only valid when
     // when=scroll-range; greyed otherwise and click-explains.
     const durationOpts = [
       { value: 'scroll',   label: 'Scroll-driven',
         disabledIf: when !== 'scroll-range',
-        disabledReason: 'Scroll-driven duration only works when ' +
+        disabledReason: 'Scroll-driven progress only works when ' +
           'activation is "Scroll range" — the range defines both ' +
-          'when the block starts AND how its progress advances. ' +
-          'Pick a different activation OR a different duration mode.' },
-      { value: 'time',     label: 'Run once (seconds)' },
+          'when the block activates AND how its progress advances. ' +
+          'Pick a different activation OR a different progress mode.' },
+      { value: 'time',     label: 'Timed run (seconds)' },
       { value: 'loop',     label: 'Loop forever' },
       { value: 'pingpong', label: 'Ping-pong forever' }
     ];
-    card.appendChild(behaviorButtonGroup('Duration', dmode, durationOpts,
+    card.appendChild(behaviorButtonGroup('Progress', dmode, durationOpts,
       function (v) { updateBehaviorDuration(line.id, blockIdx, 'mode', v); },
       function (opt) { explainDurationDisabled(opt); }));
 

@@ -524,6 +524,19 @@ body.editor {
   padding: 0.45rem 0.55rem;
   border-bottom: 1px dashed #4a4a4a;
 }
+/* v0.8.8: post-summary strip — describes the live (activation ×
+   progress) combo in plain English. Background a touch brighter
+   than the card body so it reads as an info panel; height is
+   fluid so wrapping sentences don't push the layout. */
+.ed-behavior-summary {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  background: #2e2e2e;
+  border-bottom: 1px solid #4a4a4a;
+  color: #e6e6e6;
+  font-size: 0.82em;
+  line-height: 1.35;
+}
 .ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
 .ed-behavior-block > .ed-field,
 .ed-behavior-block > .ed-actions {
