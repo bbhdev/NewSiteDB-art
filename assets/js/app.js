@@ -475,32 +475,38 @@
       const hasMotion = blocks.some(function (b) {
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
       });
-      // Chained composition: each block's params describe the
-      // line's END state at block-progress 1, and we lerp from
-      // the previous block's end state across the current block.
-      // So a sequence (translateY -200 → translateX +200) ends
-      // block 1 at (0,-200) and block 2 starts from (0,-200) and
-      // ends at (200,0). No teleport between blocks. In a gap
-      // (no block contains p) the line holds the last-completed
-      // block's end state. Identity = (0,0,0) before any block.
+      // Chained composition with DELTA semantics: each block's
+      // params describe what the block ADDS to the line's current
+      // transform. As the cursor sweeps through a block, the
+      // block's full delta is lerped in on top of whatever
+      // previous blocks accumulated. Past blocks contribute their
+      // full delta to the running total ("prev"); the active
+      // block contributes blockProgress × block.params.
+      //
+      // So a sequence (translateY +200 → translateX +200) ends
+      // block 1 at (0,200) and ends block 2 at (200,200): a
+      // straight horizontal slide from the down-position. With
+      // end-state semantics the line would have lerped ty back to
+      // 0 across block 2 (visible oblique up-right).
+      //
+      // In a gap (no block contains p) the line holds the running
+      // total of completed blocks. Identity (0,0,0) before any.
       const computeAt = function (p) {
         let prev = { tx: 0, ty: 0, rot: 0 };
         let active = -1;
         for (let i = 0; i < blocks.length; i++) {
           const r = blocks[i].range;
           if (p >= r.end) {
-            // p has passed this block — it contributed fully;
-            // advance prev so the next block (if any) lerps from
-            // this block's end.
-            prev = { tx: blocks[i].tx, ty: blocks[i].ty, rot: blocks[i].rot };
+            // block i fully done — fold its delta into prev.
+            prev = {
+              tx:  prev.tx  + blocks[i].tx,
+              ty:  prev.ty  + blocks[i].ty,
+              rot: prev.rot + blocks[i].rot
+            };
           } else if (p >= r.start) {
-            // p is inside this block — lerp from prev to this
-            // block's end across block-progress.
             active = i;
             break;
           } else {
-            // p hasn't reached this block yet — earlier blocks
-            // have already finalized their contribution into prev.
             break;
           }
         }
@@ -509,9 +515,9 @@
         const span = b.range.end - b.range.start;
         const bp = span > 0 ? (p - b.range.start) / span : 1;
         return {
-          tx:  prev.tx  + bp * (b.tx  - prev.tx),
-          ty:  prev.ty  + bp * (b.ty  - prev.ty),
-          rot: prev.rot + bp * (b.rot - prev.rot)
+          tx:  prev.tx  + bp * b.tx,
+          ty:  prev.ty  + bp * b.ty,
+          rot: prev.rot + bp * b.rot
         };
       };
       // v6+: per-class positionOffset baked into the path's transform.
