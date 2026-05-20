@@ -151,6 +151,7 @@
       if (b.trigger.range)    out.range    = { start: Number(b.trigger.range.start) || 0, end: Number(b.trigger.range.end) || 1 };
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
+      if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.
@@ -4054,7 +4055,7 @@
     // available; re-render so the right ones appear and the
     // greyed-out duration options update. viewportAt also goes
     // through re-render so its button-group active state flips.
-    if (key === 'when' || key === 'viewportAt') {
+    if (key === 'when' || key === 'viewportAt' || key === 'repeat') {
       renderSelectionPanel();
     } else {
       refreshBehaviorSummary(lineId, blockIdx);
@@ -4089,6 +4090,8 @@
       b.trigger.selector = String(value || '');
     } else if (key === 'viewportAt') {
       b.trigger.viewportAt = String(value || 'middle');
+    } else if (key === 'repeat') {
+      b.trigger.repeat = String(value || 'once');
     } else if (key === 'delay' || key === 'rangeStart' || key === 'rangeEnd') {
       let v = Number(value);
       if (!Number.isFinite(v)) v = 0;
@@ -6587,7 +6590,8 @@
                   : va === 'middle' ? 'the middle of the viewport'
                   : va === 'object' ? 'the animated object'
                                     : 'the bottom of the viewport';
-      act = 'Triggers when scroll brings key ' + k + ' to ' + where;
+      const verb = (trigger.repeat === 'every') ? 'Triggers each time ' : 'Triggers when ';
+      act = verb + 'scroll brings key ' + k + ' to ' + where;
     } else if (when === 'in-view-partial') {
       act = 'Triggers when the object enters the viewport';
     } else if (when === 'in-view-full') {
@@ -6731,6 +6735,15 @@
         { value: 'bottom', label: 'Bottom of viewport' },
         { value: 'object', label: 'The object' }
       ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
+         null));
+      // v0.8.15: re-arm on every scroll-back crossing so the
+      // timed/loop/pingpong duration restarts each time the key
+      // re-enters the trigger zone.
+      const rep = trigger.repeat || 'once';
+      card.appendChild(behaviorButtonGroup('Repeat', rep, [
+        { value: 'once',  label: 'Once' },
+        { value: 'every', label: 'Every crossing' }
+      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); },
          null));
     }
     // Delay is valid for all activations as an additional offset

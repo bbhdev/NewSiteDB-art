@@ -32,6 +32,7 @@
       }
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
+      if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -614,52 +615,50 @@
         if (when === 'scroll-key' && b.trigger.selector) {
           const el = document.querySelector(b.trigger.selector);
           if (!el) return;
-          // v0.8.11: "Scroll past key" means scroll motion across
-          // the key, not load-time position. ScrollTrigger's
-          // initial-state evaluation fires onEnter synchronously
-          // when the key is already past `top bottom` at load
-          // (common — keys sit near the top of the page), which
-          // surfaced as a timed-run starting at page load even
-          // when the user hadn't scrolled.
+          // v0.8.11: "Scroll to key" — fire when the key enters a
+          //   chosen trigger zone in viewport coords.
+          // v0.8.14: 'object' tier — zone is the animated object's
+          //   own rect (#lines-layer is fixed, so its viewport rect
+          //   is a stable reference each scroll). The rect is read
+          //   live, so a block chained after earlier transforms
+          //   sees the current rendered position, not the natural
+          //   one.
+          // v0.8.15: bidirectional enter/leave + repeat tiers.
+          //   The zone has an interior; an outside→inside
+          //   transition activates. With repeat='every', each
+          //   such transition re-activates (timed runs replay,
+          //   loop/pingpong phases reset). Initial state is
+          //   evaluated at creation so a key already inside the
+          //   zone at load doesn't fire — the user has to scroll
+          //   out and back in.
           //
-          // Instead, listen on window scroll and detect a true
-          // downward crossing of a threshold line — top / middle
-          // / bottom of the viewport per b.trigger.viewportAt
-          // (default 'middle'), or the animated object's own
-          // bottom edge ('object'). Top/bottom carry a 3% inset
-          // for breathing room from the literal viewport edges
-          // (which felt jittery and over-eager).
-          //
-          // 'object' threshold is dynamic — pathEl is fixed-
-          // positioned in #lines-layer, so its viewport rect is
-          // a stable reference each scroll event (the key moves
-          // with scroll, the object doesn't). Crossing fires
-          // the moment the key's top first touches the bottom
-          // edge of the object from below.
-          //
-          // prevTop is primed at creation, so the very first
-          // scroll event with a real downward crossing fires; a
-          // key that's already past the line at load sits with
-          // prevTop ≤ threshold and never triggers until the
-          // user scrolls back out and forward across it.
+          // For viewport-line tiers the zone is "key.top ≤ line";
+          // for 'object' the zone is true vertical overlap of the
+          // key and object rects (top OR bottom of the key
+          // touching the object's rect from either side).
           const viewportAt = b.trigger.viewportAt || 'middle';
-          const lineOf = function () {
+          const repeat     = b.trigger.repeat     || 'once';
+          const insideZone = function () {
+            const keyR = el.getBoundingClientRect();
+            if (viewportAt === 'object') {
+              const objR = pathEl.getBoundingClientRect();
+              return keyR.top <= objR.bottom && keyR.bottom >= objR.top;
+            }
             const vh = window.innerHeight;
-            if (viewportAt === 'top')    return vh * 0.03;
-            if (viewportAt === 'middle') return vh * 0.5;
-            if (viewportAt === 'object') return pathEl.getBoundingClientRect().bottom;
-            return vh * 0.97;
+            const th = viewportAt === 'top'    ? vh * 0.03
+                     : viewportAt === 'middle' ? vh * 0.5
+                     :                           vh * 0.97;
+            return keyR.top <= th;
           };
-          let prevTop = el.getBoundingClientRect().top;
+          let wasInside = insideZone();
           const onScroll = function () {
-            const top = el.getBoundingClientRect().top;
-            const th  = lineOf();
-            if (prevTop > th && top <= th) {
-              if (activationState[i] == null) {
+            const nowInside = insideZone();
+            if (!wasInside && nowInside) {
+              if (repeat === 'every' || activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
               }
             }
-            prevTop = top;
+            wasInside = nowInside;
           };
           window.addEventListener('scroll', onScroll, { passive: true });
           ownListeners.push({ target: window, type: 'scroll', fn: onScroll });
