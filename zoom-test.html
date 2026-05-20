@@ -23,17 +23,16 @@
   p  { font-size: 17px; margin: 0 0 1.1rem; }
   .accent { background: rgba(255, 0, 255, 0.08); padding: 0 2px; }
 
-  /* The decoration layer. Width/height scale with --zoom-scale
-     so the layer grows physically with browser zoom (matching
-     text growth). Offsets must recenter the scaled box on the
-     viewport: the layer overflows by (200vw × scale - 100vw)
-     total, so each side gets half of that as negative offset.
-     Simplifies to 50vw - 100vw × scale (= -50vw at scale=1,
-     matching the real #lines-layer today). */
+  /* Multiply every vw/vh dimension by --zoom-scale. With
+     scale = currentZoom, this evaluates to a constant CSS-px
+     box at every zoom (because vw shrinks in CSS px as zoom
+     grows, scale cancels that out). Constant CSS-px box →
+     constant viewBox→CSS mapping → marks stay at the same CSS
+     coords, which is exactly how text behaves under zoom. */
   #test-layer {
     position: fixed;
-    left:   calc(50vw - 100vw * var(--zoom-scale, 1));
-    top:    calc(50vh - 100vh * var(--zoom-scale, 1));
+    left:   calc(-50vw * var(--zoom-scale, 1));
+    top:    calc(-50vh * var(--zoom-scale, 1));
     width:  calc(200vw * var(--zoom-scale, 1));
     height: calc(200vh * var(--zoom-scale, 1));
     max-width: none;
