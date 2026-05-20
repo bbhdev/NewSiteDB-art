@@ -564,12 +564,21 @@
         // cloneBehaviorTrigger / cloneBehaviorDuration.
         const trigger  = normalizeTrigger(b);
         const duration = normalizeDuration(b);
+        // v0.8.17: translateMode = fixed (default) | driftX |
+        // driftY | driftBoth. In a drift axis, tx/ty is a
+        // per-scroll-px multiplier instead of a target
+        // displacement — accumulated drift is added on top of
+        // the fixed contribution from the other axis.
+        const tmode = p.translateMode || gd.translateMode || 'fixed';
         return {
           trigger:  trigger,
           duration: duration,
           tx:       num('translateX'),
           ty:       num('translateY'),
           rot:      num('rotate'),
+          translateMode: tmode,
+          driftX:   (tmode === 'driftX' || tmode === 'driftBoth'),
+          driftY:   (tmode === 'driftY' || tmode === 'driftBoth'),
           drawIn:   typeof p.drawIn === 'boolean' ? p.drawIn : !!gd.drawIn,
           drawInDirection: p.drawInDirection || gd.drawInDirection || 'forward'
         };
@@ -589,6 +598,17 @@
       const hasMotion = blocks.some(function (b) {
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
       });
+      // v0.8.17: drift accumulators — one entry per block. Holds
+      // the running translate contribution from per-scroll-px
+      // motion, plus the activation timestamp this drift was
+      // last bound to (so repeat='every' re-activations zero it).
+      const blockDrift = blocks.map(function () {
+        return { x: 0, y: 0, lastAct: null };
+      });
+      // Tracks window.scrollY across ticks so we can convert
+      // scroll motion to drift deltas. Captured at line setup
+      // time; updated inside tickDrift on every writeAt call.
+      let prevScrollY = (typeof window !== 'undefined') ? window.scrollY : 0;
       // Activation state per block. null = not yet activated;
       // otherwise the wall-clock seconds at activation. For
       // 'scroll-range' activation the block becomes active the
@@ -739,21 +759,73 @@
         }
         return blockEases[idx](raw);
       };
+      // v0.8.17: drift accumulator support.
+      //   isBlockActive(i): trigger has fired (post-delay) for
+      //     non-scroll modes; for scroll mode, scrollP has reached
+      //     range.start. Used both to gate drift accumulation and
+      //     to detect freeze (block i+1 has activated).
+      //   tickDrift: scroll-delta integrator. Runs each writeAt
+      //     call; no-op when scrollY hasn't changed since the
+      //     last call (the gsap.ticker hits writeAt every frame
+      //     but only scroll motion contributes to drift).
+      function isBlockActive(i, scrollP, nowSec) {
+        if (i < 0 || i >= blocks.length) return false;
+        const b = blocks[i];
+        const mode = b.duration && b.duration.mode;
+        if (mode === 'scroll') {
+          const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
+          return scrollP >= r.start;
+        }
+        const act = activationState[i];
+        if (act == null) return false;
+        const delay = (b.trigger && b.trigger.delay) || 0;
+        return nowSec >= act + delay;
+      }
+      function tickDrift(scrollP, nowSec) {
+        const sy = window.scrollY;
+        const delta = sy - prevScrollY;
+        prevScrollY = sy;
+        if (delta === 0) return;
+        for (let i = 0; i < blocks.length; i++) {
+          const b = blocks[i];
+          if (!b.driftX && !b.driftY) continue;
+          if (!isBlockActive(i, scrollP, nowSec)) continue;
+          // Freeze when the immediately next block has activated.
+          if (i + 1 < blocks.length && isBlockActive(i + 1, scrollP, nowSec)) continue;
+          // Zero the accumulator on each re-activation so
+          // repeat='every' triggers actually replay drift.
+          if (blockDrift[i].lastAct !== activationState[i]) {
+            blockDrift[i].x = 0;
+            blockDrift[i].y = 0;
+            blockDrift[i].lastAct = activationState[i];
+          }
+          if (b.driftX) blockDrift[i].x += b.tx * delta;
+          if (b.driftY) blockDrift[i].y += b.ty * delta;
+        }
+      }
       const computeAt = function (scrollP, nowSec) {
+        tickDrift(scrollP, nowSec);
         let tx = 0, ty = 0, rot = 0;
         for (let i = 0; i < blocks.length; i++) {
-          const bp = blockProg(blocks[i], i, scrollP, nowSec);
-          tx  += bp * blocks[i].tx;
-          ty  += bp * blocks[i].ty;
-          rot += bp * blocks[i].rot;
+          const b  = blocks[i];
+          const bp = blockProg(b, i, scrollP, nowSec);
+          tx  += b.driftX ? blockDrift[i].x : bp * b.tx;
+          ty  += b.driftY ? blockDrift[i].y : bp * b.ty;
+          rot += bp * b.rot;
         }
         return { tx: tx, ty: ty, rot: rot };
       };
       // hasTime: any block whose progress is wall-clock-driven —
       // needs a gsap.ticker so the runtime keeps painting even
       // when the user doesn't scroll.
+      // v0.8.17: ticker is also needed for drift blocks so the
+      // accumulator updates on scroll motion outside the
+      // ScrollTrigger's range (non-page-wide groups). tickDrift
+      // itself no-ops when scrollY is unchanged, so the
+      // continuous tick is cheap.
       const hasTime = blocks.some(function (b) {
-        return b.duration && b.duration.mode !== 'scroll';
+        return (b.duration && b.duration.mode !== 'scroll')
+            || b.driftX || b.driftY;
       });
       // v6+: per-class positionOffset baked into the path's transform.
       // line.d is canonical (master geometry) on the runtime side;

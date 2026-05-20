@@ -6803,8 +6803,29 @@
         function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }));
     }
 
-    card.appendChild(overrideNumberField('TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
-    card.appendChild(overrideNumberField('TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
+    // v0.8.17: open-ended translate mode. 'Fixed' = current
+    // behavior (translateX/Y are final displacements weighted
+    // by block progress). 'Drift X / Y / Both' = that axis's
+    // value is read as a per-scroll-px multiplier; the rendered
+    // translate accumulates with scroll motion and freezes the
+    // moment block idx+1 activates. Useful for "move object in
+    // from off-canvas indefinitely, then hand off to the next
+    // block" — saves authoring a precise translate value when
+    // the exact distance doesn't matter, only the direction.
+    const tmode = (params.translateMode || gd.translateMode || 'fixed');
+    card.appendChild(behaviorButtonGroup('Translate mode', tmode, [
+      { value: 'fixed',     label: 'Fixed' },
+      { value: 'driftX',    label: 'Drift X' },
+      { value: 'driftY',    label: 'Drift Y' },
+      { value: 'driftBoth', label: 'Drift both' }
+    ], function (v) {
+      updateBehaviorParam(line.id, 'translateMode', v === 'fixed' ? null : v, blockIdx);
+      renderSelectionPanel();
+    }, null));
+    const xDrift = (tmode === 'driftX' || tmode === 'driftBoth');
+    const yDrift = (tmode === 'driftY' || tmode === 'driftBoth');
+    card.appendChild(overrideNumberField(xDrift ? 'TranslateX (×scroll)' : 'TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
+    card.appendChild(overrideNumberField(yDrift ? 'TranslateY (×scroll)' : 'TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
     card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
     // Per-line rotate-origin: DELTA from this object's natural
     // center, so the pivot travels with the line instead of
