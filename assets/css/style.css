@@ -52,8 +52,24 @@ body {
 
 #lines-layer {
   position: fixed;
-  left: -50vw; top: -50vh;
-  width: 200vw; height: 200vh;
+  /* v0.8.18: every vw/vh dimension is multiplied by --zoom-scale
+     so the layer's CSS-px box stays constant across browser
+     zoom levels. vw shrinks in CSS px as zoom grows, --zoom-scale
+     (= current zoom factor, set by app.js) cancels that out. A
+     constant CSS box means a constant viewBox→CSS mapping, which
+     matches how text behaves: HTML text positions don't change
+     in CSS coords with zoom, only in physical px. Default = 1
+     so the rule is a no-op until app.js writes the variable.
+
+     transform: translateX compensates for .layout's horizontal
+     slide under zoom — centered-column layouts (max-width +
+     margin-inline:auto) shift toward the viewport edges in CSS
+     coords as the viewport CSS width shrinks. Default = 0px. */
+  left:   calc(-50vw * var(--zoom-scale, 1));
+  top:    calc(-50vh * var(--zoom-scale, 1));
+  width:  calc(200vw * var(--zoom-scale, 1));
+  height: calc(200vh * var(--zoom-scale, 1));
+  transform: translateX(var(--layout-shift-x, 0px));
   /* Opt out of the global `svg { max-width: 100% }` rule — otherwise
      this SVG gets clamped to viewport width and the off-page area on
      the right gets hidden, which shifts every drawn line leftward and

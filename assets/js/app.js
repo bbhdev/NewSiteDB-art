@@ -6,8 +6,79 @@
   if (window.Draggable)      gsap.registerPlugin(Draggable);
   if (window.InertiaPlugin)  gsap.registerPlugin(InertiaPlugin);
 
+  initZoomCompensation();
   initCircleButtons();
   initLineSystem();
+
+  /**
+   * v0.8.18: Browser-zoom compensation for #lines-layer.
+   *
+   * Browser zoom (Ctrl/Cmd +/-) scales text physically but leaves
+   * a vw/vh-sized SVG layer the same physical size on screen, so
+   * decoration calibrated at 100% drifts visibly at any other
+   * zoom. We write two CSS custom properties on :root that the
+   * #lines-layer rule consumes:
+   *
+   *   --zoom-scale     current zoom factor; the rule multiplies
+   *                    every vw/vh by it so the layer's CSS-px
+   *                    box stays constant across zoom levels.
+   *                    Constant CSS box → constant viewBox→CSS
+   *                    mapping → marks land on the same CSS
+   *                    coords as text does at any zoom.
+   *
+   *   --layout-shift-x horizontal offset of `.layout` (the
+   *                    centered-column container) relative to
+   *                    its CSS-x position at calibration. The
+   *                    vw*scale dance keeps the layer fixed to
+   *                    the viewport, but a max-width column
+   *                    slides as the viewport CSS shrinks under
+   *                    zoom; we apply the delta as a transform:
+   *                    translateX so the layer follows.
+   *
+   * Zoom is detected from three signals (devicePixelRatio ratio,
+   * outerWidth/innerWidth ratio, visualViewport.scale); we pick
+   * whichever has moved furthest from 1 in log space, since
+   * different browsers update different signals on Ctrl/Cmd +/-.
+   *
+   * No-op for pages without a `.layout` element — vertical
+   * alignment still works, only the horizontal compensation goes
+   * to 0.
+   */
+  function initZoomCompensation() {
+    const baseDPR = window.devicePixelRatio || 1;
+    const baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
+
+    function getLayoutLeft() {
+      const el = document.querySelector('.layout');
+      return el ? el.getBoundingClientRect().left : 0;
+    }
+    const baseLayoutLeft = getLayoutLeft();
+
+    function currentZoom() {
+      const dprZ = (window.devicePixelRatio || 1) / baseDPR;
+      const oiZ  = (window.outerWidth / Math.max(1, window.innerWidth)) / baseOI;
+      const vvZ  = (window.visualViewport && window.visualViewport.scale) || 1;
+      let best = 1, bestDist = 0;
+      [dprZ, oiZ, vvZ].forEach(function (v) {
+        const d = Math.abs(Math.log(v || 1));
+        if (d > bestDist) { bestDist = d; best = v; }
+      });
+      return best;
+    }
+
+    function apply() {
+      const z = currentZoom();
+      const shiftX = getLayoutLeft() - baseLayoutLeft;
+      document.documentElement.style.setProperty('--zoom-scale', z);
+      document.documentElement.style.setProperty('--layout-shift-x', shiftX.toFixed(2) + 'px');
+    }
+
+    apply();
+    window.addEventListener('resize', apply);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', apply);
+    }
+  }
 
   /**
    * Read a behavior block's trigger field, healing legacy shapes to
