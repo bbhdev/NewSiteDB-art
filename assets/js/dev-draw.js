@@ -124,20 +124,35 @@
   // enable chained motions — v0.4.0 lays the data + minimal
   // single-block UI; multi-block authoring lands in v0.4.1.
   function cloneBehavior(b) {
-    return {
+    const out = {
       id: b.id || ('b-' + Math.random().toString(36).slice(2, 10)),
+      // `kind` describes WHAT the block does (transform now; sticky
+      // / draw-in later). It's orthogonal to `trigger` (which
+      // describes WHEN). v0.8.1 conflated the two by defaulting to
+      // 'scroll-transform' — confusing in JSON because the value
+      // contradicted trigger.type='time' edits. Now: 'transform'
+      // for any translate/rotate-driven block, regardless of
+      // trigger.
+      kind: b.kind || 'transform',
       range: b.range
         ? { start: Number(b.range.start) || 0, end: Number(b.range.end || 1) }
         : { start: 0, end: 1 },
-      kind: b.kind || 'scroll-transform',
       params: b.params ? Object.assign({}, b.params) : {}
     };
+    // Preserve trigger across clones. v0.8.1 cloneBehavior dropped
+    // this entirely, so a time-mode switch wrote to memory but
+    // decomposeForSave / resolveInstanceJS / save round-trip all
+    // stripped it. Time triggers couldn't persist. Real bug fix.
+    if (b.trigger && typeof b.trigger === 'object') {
+      out.trigger = Object.assign({}, b.trigger);
+    }
+    return out;
   }
   function newBehaviorBlock() {
     return {
       id: 'b-' + Math.random().toString(36).slice(2, 10),
+      kind: 'transform',
       range: { start: 0, end: 1 },
-      kind: 'scroll-transform',
       params: {}
     };
   }

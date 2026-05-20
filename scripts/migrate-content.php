@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 8;
+const CONTENT_SCHEMA_VERSION = 9;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -86,6 +86,12 @@ $SCHEMA_HISTORY = [
        . ' the moved keys are removed from overrides. Unlocks chained'
        . ' motions per object — the UI / runtime can address blocks N>1'
        . ' once authoring lands (v0.4.1).',
+    9 => 'Behavior block kind renamed scroll-transform → transform. kind'
+       . ' describes WHAT the block does (transform now; sticky / draw-in'
+       . ' later); trigger.type describes WHEN (scroll vs time, added'
+       . ' v0.8.1). The original "scroll-transform" name implied'
+       . ' scroll-driven and contradicted any block the user switched to'
+       . ' a time trigger.',
 ];
 
 /**
@@ -579,6 +585,45 @@ $MIGRATIONS = [
             if ($changed) {
                 if ($dryRun) {
                     echo "    would convert behavior overrides → behaviors[] in $instPath\n";
+                } else {
+                    file_put_contents($instPath,
+                        json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                }
+            }
+        }
+        return true;
+    },
+
+    8 => function (string $pageRoot, bool $dryRun): bool {
+        // v8 → v9: behavior block kind 'scroll-transform' →
+        // 'transform'. Decouples kind (what the block does) from
+        // trigger (when it runs).
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+        foreach ($useClasses as $cid) {
+            $instPath = $pageRoot . '/' . $cid . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            $changed = false;
+            foreach ($insts as &$inst) {
+                if (!is_array($inst)) continue;
+                if (!isset($inst['behaviors']) || !is_array($inst['behaviors'])) continue;
+                foreach ($inst['behaviors'] as &$b) {
+                    if (is_array($b) && isset($b['kind']) && $b['kind'] === 'scroll-transform') {
+                        $b['kind'] = 'transform';
+                        $changed = true;
+                    }
+                }
+                unset($b);
+            }
+            unset($inst);
+            if ($changed) {
+                if ($dryRun) {
+                    echo "    would rename behavior kind 'scroll-transform' → 'transform' in $instPath\n";
                 } else {
                     file_put_contents($instPath,
                         json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
