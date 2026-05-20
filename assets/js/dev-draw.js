@@ -4052,7 +4052,11 @@
     // Changing trigger.when toggles which secondary inputs are
     // available; re-render so the right ones appear and the
     // greyed-out duration options update.
-    if (key === 'when') renderSelectionPanel();
+    if (key === 'when') {
+      renderSelectionPanel();
+    } else {
+      refreshBehaviorSummary(lineId, blockIdx);
+    }
   }
   function writeBehaviorTrigger(line, blockIdx, key, value) {
     if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
@@ -4102,7 +4106,11 @@
     }
     state.dirty = true;
     scheduleSnapshot();
-    if (key === 'mode') renderSelectionPanel();
+    if (key === 'mode') {
+      renderSelectionPanel();
+    } else {
+      refreshBehaviorSummary(lineId, blockIdx);
+    }
   }
   function writeBehaviorDuration(line, blockIdx, key, value) {
     if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
@@ -6590,6 +6598,27 @@
     return act + ', ' + prog + '.';
   }
 
+  // v0.8.10: refresh just the summary node for one block without
+  // re-rendering the panel. Used by trigger/duration field
+  // updates that don't change the picker layout (range, delay,
+  // seconds, easing, selector) — a full re-render would yank
+  // input focus mid-edit.
+  function refreshBehaviorSummary(lineId, blockIdx) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l || !Array.isArray(l.behaviors)) return;
+    const block = l.behaviors[blockIdx];
+    if (!block) return;
+    const nodes = document.querySelectorAll('.ed-behavior-summary');
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (n.dataset.lineId === String(lineId)
+        && n.dataset.blockIdx === String(blockIdx)) {
+        n.textContent = behaviorSummaryText(block);
+        return;
+      }
+    }
+  }
+
   function rangeNumberField(label, value, onChange) {
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';
@@ -6642,8 +6671,14 @@
     // v0.8.8: fluid post-summary strip — the orthogonal pickers
     // make the legal combos easy to confuse, so a plain-English
     // sentence makes the live combo readable at a glance.
+    // v0.8.10: dataset stamps let refreshBehaviorSummary find this
+    // node and update its text in place when a non-mode field
+    // changes (range, delay, seconds, easing, selector) without
+    // re-rendering the panel and stealing input focus.
     const summary = document.createElement('div');
     summary.className = 'ed-behavior-summary';
+    summary.dataset.lineId  = String(line.id);
+    summary.dataset.blockIdx = String(blockIdx);
     summary.textContent = behaviorSummaryText(block);
     card.appendChild(summary);
 
