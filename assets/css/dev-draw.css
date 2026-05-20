@@ -527,11 +527,13 @@ body.editor {
 /* v0.8.8: post-summary strip — describes the live (activation ×
    progress) combo in plain English. Background a touch brighter
    than the card body so it reads as an info panel; height is
-   fluid so wrapping sentences don't push the layout. */
+   fluid so wrapping sentences don't push the layout.
+   v0.8.9: brighter + warm red tint to draw the eye to the
+   sentence (the combo it describes is easy to misread). */
 .ed-behavior-summary {
   margin: 0;
   padding: 0.45rem 0.6rem;
-  background: #2e2e2e;
+  background: #573737;
   border-bottom: 1px solid #4a4a4a;
   color: #e6e6e6;
   font-size: 0.82em;
