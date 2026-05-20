@@ -532,6 +532,54 @@ body.editor {
 .ed-behavior-block > .ed-field:first-of-type { margin-top: 0.45rem; }
 .ed-behavior-block > .ed-field:last-of-type  { margin-bottom: 0.45rem; }
 
+/* Button-group field — v0.8.7 trigger.when + duration.mode pickers.
+   Sits inside an .ed-field so the label aligns with the rest of
+   the form; the buttons themselves wrap into a flex row. */
+.ed-behavior-group { grid-template-columns: 1fr; gap: 0.25rem; }
+.ed-behavior-group > label {
+  /* Override the .ed-field default (left column) — labels above
+     button rows read better than alongside them since each row
+     can wrap to multiple lines. */
+  text-align: left;
+  font-size: 0.78em;
+  color: #c0c0c0;
+}
+.ed-behavior-group-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.ed-behavior-group-btn {
+  background: #2a2a2a;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.82em;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.ed-behavior-group-btn:hover { background: #353535; border-color: #777; }
+.ed-behavior-group-btn.is-active {
+  background: var(--accent, #FF5500);
+  color: #000;
+  border-color: var(--accent, #FF5500);
+}
+.ed-behavior-group-btn.is-disabled {
+  /* Greyed but still clickable — clicking pops an explainer
+     dialog (handled by onPickDisabled in dev-draw.js). Cursor
+     stays a pointer to invite the click. */
+  background: #1c1c1c;
+  color: #666;
+  border-color: #333;
+  border-style: dashed;
+}
+.ed-behavior-group-btn.is-disabled:hover {
+  background: #222;
+  color: #777;
+  border-color: #444;
+}
+
 /* Number-input steppers: hide the native ▲▼ buttons. They
    render as bright white against the dark inputs and there's no
    reliable cross-browser way to recolor them (accent-color

@@ -10,6 +10,53 @@
   initLineSystem();
 
   /**
+   * Read a behavior block's trigger field, healing legacy shapes to
+   * the v0.8.7 schema. Mirrors editor's cloneBehaviorTrigger so a
+   * page rendered before the CLI migration ran still animates.
+   *
+   *   v0.8.7+:  trigger = { when, range?, selector?, delay }
+   *   v0.8.1:   trigger = { type:'time', delay, duration }  →  page-load
+   *   v0.8.0-:  no trigger; block.range carries scroll-range → scroll-range
+   */
+  function normalizeTrigger(b) {
+    if (b.trigger && typeof b.trigger === 'object' && b.trigger.when) {
+      const out = {
+        when:  b.trigger.when,
+        delay: Number(b.trigger.delay) || 0
+      };
+      if (b.trigger.range) {
+        out.range = {
+          start: Number(b.trigger.range.start) || 0,
+          end:   Number(b.trigger.range.end)   || 1
+        };
+      }
+      if (b.trigger.selector) out.selector = String(b.trigger.selector);
+      return out;
+    }
+    if (b.trigger && b.trigger.type === 'time') {
+      return { when: 'page-load', delay: Number(b.trigger.delay) || 0 };
+    }
+    const r = (b.range && typeof b.range === 'object')
+      ? { start: Number(b.range.start) || 0, end: Number(b.range.end) || 1 }
+      : { start: 0, end: 1 };
+    return { when: 'scroll-range', range: r, delay: 0 };
+  }
+
+  function normalizeDuration(b) {
+    if (b.duration && typeof b.duration === 'object' && b.duration.mode) {
+      const out = { mode: b.duration.mode };
+      if (typeof b.duration.seconds === 'number') out.seconds = b.duration.seconds;
+      if (b.duration.easing) out.easing = String(b.duration.easing);
+      return out;
+    }
+    if (b.trigger && b.trigger.type === 'time') {
+      const s = Number(b.trigger.duration);
+      return { mode: 'time', seconds: (s > 0 ? s : 1) };
+    }
+    return { mode: 'scroll' };
+  }
+
+  /**
    * For each [data-scatter-btn] (.c-button and .e-button both carry
    * it), on desktop only:
    *
@@ -197,6 +244,9 @@
     // blocks (v0.8.1). Tracked alongside ownTriggers so a class-
     // boundary re-render can detach them.
     const ownTickers = [];
+    // v0.8.7: IntersectionObservers created for in-view-partial /
+    // in-view-full activations.
+    const ownObservers = [];
     let currentClassId = null;
 
     function renderForClass(classId) {
@@ -205,6 +255,8 @@
       ownTriggers.length = 0;
       ownTickers.forEach(function (fn) { try { gsap.ticker.remove(fn); } catch (e) {} });
       ownTickers.length = 0;
+      ownObservers.forEach(function (o) { try { o.disconnect(); } catch (e) {} });
+      ownObservers.length = 0;
       layer.innerHTML = '';
       currentClassId = classId;
 
@@ -473,15 +525,20 @@
       }
 
       // v0.4.1: multi-block composition. Walk lineDef.behaviors[];
-      // each block carries its own range + params. At a given
-      // scroll progress p, the LAST block whose range contains p
-      // wins (later blocks paint over earlier ones — same
-      // semantics the editor's overlap warning advises against).
+      // each block carries its own trigger + duration + params.
       // Empty behaviors[] falls back to one synthetic block from
       // group defaults so legacy / unmigrated data still animates.
+      //
+      // v0.8.7: trigger / duration split into orthogonal axes.
+      //   trigger.when  ∈ scroll-range | page-load | scroll-key |
+      //                   in-view-partial | in-view-full
+      //   duration.mode ∈ scroll | time | loop | pingpong
+      // Activation timestamp per block (activationState[i]) is the
+      // moment the block crossed its trigger; time-based durations
+      // measure elapsed from there + trigger.delay.
       const rawBlocks = (Array.isArray(lineDef.behaviors) && lineDef.behaviors.length)
         ? lineDef.behaviors
-        : [{ id: '__default', range: { start: 0, end: 1 }, kind: 'scroll-transform', params: {} }];
+        : [{ id: '__default', trigger: { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 }, duration: { mode: 'scroll' }, kind: 'transform', params: {} }];
       const gd = group.defaults || {};
       const blocks = rawBlocks.map(function (b) {
         const p = b.params || {};
@@ -489,69 +546,165 @@
           return (typeof p[k] === 'number') ? p[k]
                : (typeof gd[k] === 'number') ? gd[k] : 0;
         };
+        // Heal legacy shapes here so the runtime never has to
+        // branch on two versions. Same logic as editor's
+        // cloneBehaviorTrigger / cloneBehaviorDuration.
+        const trigger  = normalizeTrigger(b);
+        const duration = normalizeDuration(b);
         return {
-          // v0.8.6: must preserve `trigger` here. The blockProg
-          // helper below reads trigger.type to decide scroll vs
-          // time; without this, every block looked scroll-driven
-          // regardless of its saved trigger, and hasTime stayed
-          // false so the gsap.ticker that drives time-block
-          // progress never registered.
-          trigger: b.trigger || { type: 'scroll' },
-          range:  b.range || { start: 0, end: 1 },
-          tx:     num('translateX'),
-          ty:     num('translateY'),
-          rot:    num('rotate'),
-          drawIn: typeof p.drawIn === 'boolean' ? p.drawIn : !!gd.drawIn,
+          trigger:  trigger,
+          duration: duration,
+          tx:       num('translateX'),
+          ty:       num('translateY'),
+          rot:      num('rotate'),
+          drawIn:   typeof p.drawIn === 'boolean' ? p.drawIn : !!gd.drawIn,
           drawInDirection: p.drawInDirection || gd.drawInDirection || 'forward'
         };
+      });
+      // Per-block easing fn (evaluated once; identity when GSAP
+      // can't resolve it).
+      const blockEases = blocks.map(function (b) {
+        const name = b.duration && b.duration.easing;
+        if (!name || name === 'linear') return function (t) { return t; };
+        try {
+          const fn = (gsap.parseEase && gsap.parseEase(name)) || null;
+          return fn || function (t) { return t; };
+        } catch (e) {
+          return function (t) { return t; };
+        }
       });
       const hasMotion = blocks.some(function (b) {
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
       });
-      // v0.8.1: additive composition with mixed triggers. Each
-      // block has an independent progress source — scroll-driven
-      // (block.range within the scroll trigger window) or time-
-      // driven (block.trigger = { type: 'time', delay, duration }).
-      // At any moment, total transform = Σ (block.progress ×
-      // block.params) across all blocks. Two consequences:
-      //   - Chained scroll blocks behave identically to v0.4.5 —
-      //     a completed block stays at progress 1 (delta fully
-      //     applied); active block contributes proportionally;
-      //     future block contributes 0. So sequential scroll
-      //     blocks chain naturally without dedicated chaining
-      //     logic.
-      //   - Overlapping blocks contribute simultaneously now
-      //     (used to be first-wins). The editor's overlap
-      //     warning is reframed: overlap = simultaneous, summed,
-      //     which is sometimes intentional (parallel motion).
-      const blockProg = function (b, scrollP, elapsed) {
-        const tr = b.trigger || { type: 'scroll' };
-        if (tr.type === 'time') {
-          const t = elapsed - (tr.delay || 0);
-          if (t <= 0) return 0;
-          const dur = (tr.duration > 0) ? tr.duration : 1;
-          return Math.min(1, t / dur);
+      // Activation state per block. null = not yet activated;
+      // otherwise the wall-clock seconds at activation. For
+      // 'scroll-range' activation the block becomes active the
+      // first time scrollP enters its range; this is needed by
+      // time / loop / pingpong duration modes (so seconds count
+      // from when the user actually reached the trigger, not
+      // page load).
+      const activationState = blocks.map(function () { return null; });
+
+      // For each non-scroll duration block, schedule its
+      // activation per the `when` axis. scroll-range activations
+      // are picked up inside the per-frame writeAt; the other
+      // four are wired here.
+      const lineStartedAt = performance.now() / 1000;
+      blocks.forEach(function (b, i) {
+        const when = b.trigger.when;
+        // 'scroll-range' for non-scroll durations: activated by
+        // scroll progress, handled in writeAt below. For 'scroll'
+        // duration no activation timestamp is needed.
+        if (when === 'scroll-range') return;
+        if (when === 'page-load') {
+          // Active immediately at page load. trigger.delay is
+          // baked into blockProg's elapsed math (no need to
+          // postpone activation itself).
+          activationState[i] = lineStartedAt;
+          return;
         }
-        const r = b.range || { start: 0, end: 1 };
-        if (scrollP <= r.start) return 0;
-        if (scrollP >= r.end)   return 1;
-        const span = r.end - r.start;
-        return span > 0 ? (scrollP - r.start) / span : 1;
+        if (when === 'scroll-key' && b.trigger.selector) {
+          const el = document.querySelector(b.trigger.selector);
+          if (!el) return;
+          const st = ScrollTrigger.create({
+            trigger: el,
+            start: 'top bottom',
+            onEnter: function () {
+              if (activationState[i] == null) {
+                activationState[i] = performance.now() / 1000;
+              }
+            }
+          });
+          ownTriggers.push(st);
+          return;
+        }
+        if (when === 'in-view-partial' || when === 'in-view-full') {
+          // Watch the rendered element itself. IntersectionObserver
+          // threshold: 0 for partial (any pixel intersects), 1 for
+          // fully visible.
+          const threshold = (when === 'in-view-full') ? 0.999 : 0.001;
+          const obs = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting && activationState[i] == null) {
+                activationState[i] = performance.now() / 1000;
+              }
+            });
+          }, { threshold: threshold });
+          obs.observe(pathEl);
+          ownObservers.push(obs);
+          return;
+        }
+      });
+
+      // Per-block progress at a moment (scrollP + wall clock).
+      // scroll-range + scroll duration: progress = scrollP within
+      //   range. All non-scroll durations: progress = function of
+      //   elapsed wall-clock since activation, gated by delay.
+      const blockProg = function (b, idx, scrollP, nowSec) {
+        const mode = b.duration && b.duration.mode || 'scroll';
+        const when = b.trigger.when;
+
+        // Scroll-driven progress (the only mode that reads
+        // scrollP directly).
+        if (mode === 'scroll') {
+          const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
+          let p;
+          if (scrollP <= r.start) p = 0;
+          else if (scrollP >= r.end) p = 1;
+          else {
+            const span = r.end - r.start;
+            p = span > 0 ? (scrollP - r.start) / span : 1;
+          }
+          return blockEases[idx](p);
+        }
+
+        // Time-based modes need an activation timestamp. For
+        // 'scroll-range' activation we lazy-activate the first
+        // time scrollP enters the range.
+        if (activationState[idx] == null) {
+          if (when === 'scroll-range') {
+            const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
+            if (scrollP >= r.start) activationState[idx] = nowSec;
+            else return 0;
+          } else {
+            return 0;
+          }
+        }
+
+        const delay = (b.trigger && b.trigger.delay) || 0;
+        const t = nowSec - activationState[idx] - delay;
+        if (t <= 0) return 0;
+        const dur = (b.duration && b.duration.seconds > 0) ? b.duration.seconds : 1;
+        let raw;
+        if (mode === 'time') {
+          raw = Math.min(1, t / dur);
+        } else if (mode === 'loop') {
+          raw = (t / dur) % 1;
+        } else if (mode === 'pingpong') {
+          // Triangle wave 0→1→0 over 2 × dur.
+          const phase = (t / dur) % 2;
+          raw = phase < 1 ? phase : 2 - phase;
+        } else {
+          raw = 0;
+        }
+        return blockEases[idx](raw);
       };
-      const computeAt = function (scrollP, elapsed) {
+      const computeAt = function (scrollP, nowSec) {
         let tx = 0, ty = 0, rot = 0;
         for (let i = 0; i < blocks.length; i++) {
-          const bp = blockProg(blocks[i], scrollP, elapsed);
+          const bp = blockProg(blocks[i], i, scrollP, nowSec);
           tx  += bp * blocks[i].tx;
           ty  += bp * blocks[i].ty;
           rot += bp * blocks[i].rot;
         }
         return { tx: tx, ty: ty, rot: rot };
       };
+      // hasTime: any block whose progress is wall-clock-driven —
+      // needs a gsap.ticker so the runtime keeps painting even
+      // when the user doesn't scroll.
       const hasTime = blocks.some(function (b) {
-        return b.trigger && b.trigger.type === 'time';
+        return b.duration && b.duration.mode !== 'scroll';
       });
-      const lineStartedAt = performance.now() / 1000;
       // v6+: per-class positionOffset baked into the path's transform.
       // line.d is canonical (master geometry) on the runtime side;
       // positionOffset shifts the rendered position without per-class
@@ -576,8 +729,8 @@
       // setup so per-element triggers can't apply a mid-viewport progress
       // at scrollY=0.
       if (hasMotion && !diagMode) {
-        const writeAt = function (scrollP, elapsed) {
-          const t = computeAt(scrollP, elapsed);
+        const writeAt = function (scrollP, nowSec) {
+          const t = computeAt(scrollP, nowSec);
           pathEl.setAttribute(
             'transform',
             'translate(' + (offX + t.tx) + ' ' + (offY + t.ty) + ') ' +
@@ -590,18 +743,18 @@
           end:     stConfig.end,
           scrub:   stConfig.scrub,
           onUpdate: function (self) {
-            const elapsed = hasTime ? (performance.now() / 1000 - lineStartedAt) : 0;
-            writeAt(self.progress, elapsed);
+            writeAt(self.progress, performance.now() / 1000);
           }
         });
         ownTriggers.push(st);
-        // Time-driven blocks need per-frame updates independent of
-        // scroll — the user might not scroll while a time block is
-        // animating. gsap.ticker runs at 60fps; we just re-read
-        // ScrollTrigger's cached progress + the elapsed wall-clock.
+        // Time-driven blocks (any duration.mode !== 'scroll')
+        // need per-frame updates independent of scroll — the user
+        // might not scroll while a time / loop / pingpong block is
+        // animating. gsap.ticker runs at 60fps; we re-read
+        // ScrollTrigger's cached progress + the current wall-clock.
         if (hasTime) {
           const tick = function () {
-            writeAt(st ? st.progress : 0, performance.now() / 1000 - lineStartedAt);
+            writeAt(st ? st.progress : 0, performance.now() / 1000);
           };
           gsap.ticker.add(tick);
           ownTickers.push(tick);

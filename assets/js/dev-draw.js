@@ -124,37 +124,66 @@
   // enable chained motions — v0.4.0 lays the data + minimal
   // single-block UI; multi-block authoring lands in v0.4.1.
   function cloneBehavior(b) {
+    // v0.8.7: trigger and duration split into orthogonal axes.
+    //   trigger: { when, range?, selector?, delay }
+    //     when ∈ { scroll-range, page-load, scroll-key,
+    //              in-view-partial, in-view-full }
+    //   duration: { mode, seconds?, easing? }
+    //     mode ∈ { scroll, time, loop, pingpong }
+    //
+    // Old shapes are healed in-place: legacy block.range / legacy
+    // trigger.type fall back to the new shape via cloneBehaviorTrigger
+    // / cloneBehaviorDuration so a save without the CLI migration
+    // still produces clean data.
     const out = {
-      id: b.id || ('b-' + Math.random().toString(36).slice(2, 10)),
-      // `kind` describes WHAT the block does (transform now; sticky
-      // / draw-in later). It's orthogonal to `trigger` (which
-      // describes WHEN). v0.8.1 conflated the two by defaulting to
-      // 'scroll-transform' — confusing in JSON because the value
-      // contradicted trigger.type='time' edits. Now: 'transform'
-      // for any translate/rotate-driven block, regardless of
-      // trigger. Auto-heal the legacy value too so a save without
-      // a CLI migration still ends up clean.
+      id:   b.id || ('b-' + Math.random().toString(36).slice(2, 10)),
       kind: (b.kind === 'scroll-transform' || !b.kind) ? 'transform' : b.kind,
-      range: b.range
-        ? { start: Number(b.range.start) || 0, end: Number(b.range.end || 1) }
-        : { start: 0, end: 1 },
-      params: b.params ? Object.assign({}, b.params) : {}
+      trigger:  cloneBehaviorTrigger(b),
+      duration: cloneBehaviorDuration(b),
+      params:   b.params ? Object.assign({}, b.params) : {}
     };
-    // Preserve trigger across clones. v0.8.1 cloneBehavior dropped
-    // this entirely, so a time-mode switch wrote to memory but
-    // decomposeForSave / resolveInstanceJS / save round-trip all
-    // stripped it. Time triggers couldn't persist. Real bug fix.
-    if (b.trigger && typeof b.trigger === 'object') {
-      out.trigger = Object.assign({}, b.trigger);
-    }
     return out;
+  }
+  function cloneBehaviorTrigger(b) {
+    // If b.trigger already has the new shape ({ when }), clone it.
+    if (b.trigger && typeof b.trigger === 'object' && b.trigger.when) {
+      const out = { when: b.trigger.when, delay: Number(b.trigger.delay) || 0 };
+      if (b.trigger.range)    out.range    = { start: Number(b.trigger.range.start) || 0, end: Number(b.trigger.range.end) || 1 };
+      if (b.trigger.selector) out.selector = String(b.trigger.selector);
+      return out;
+    }
+    // Legacy: old trigger.type 'time' → page-load + carry delay.
+    if (b.trigger && typeof b.trigger === 'object' && b.trigger.type === 'time') {
+      return { when: 'page-load', delay: Number(b.trigger.delay) || 0 };
+    }
+    // Default / legacy 'scroll': scroll-range, range from b.range.
+    const r = (b.range && typeof b.range === 'object')
+      ? { start: Number(b.range.start) || 0, end: Number(b.range.end) || 1 }
+      : { start: 0, end: 1 };
+    return { when: 'scroll-range', range: r, delay: 0 };
+  }
+  function cloneBehaviorDuration(b) {
+    if (b.duration && typeof b.duration === 'object' && b.duration.mode) {
+      const out = { mode: b.duration.mode };
+      if (typeof b.duration.seconds === 'number') out.seconds = b.duration.seconds;
+      if (b.duration.easing)                       out.easing  = String(b.duration.easing);
+      return out;
+    }
+    // Legacy: trigger.type 'time' carried duration seconds.
+    if (b.trigger && typeof b.trigger === 'object' && b.trigger.type === 'time') {
+      const s = Number(b.trigger.duration);
+      return { mode: 'time', seconds: Number.isFinite(s) && s > 0 ? s : 1 };
+    }
+    // Default / legacy 'scroll': scroll-driven duration.
+    return { mode: 'scroll' };
   }
   function newBehaviorBlock() {
     return {
-      id: 'b-' + Math.random().toString(36).slice(2, 10),
-      kind: 'transform',
-      range: { start: 0, end: 1 },
-      params: {}
+      id:       'b-' + Math.random().toString(36).slice(2, 10),
+      kind:     'transform',
+      trigger:  { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 },
+      duration: { mode: 'scroll' },
+      params:   {}
     };
   }
 
@@ -4005,32 +4034,10 @@
     snapshot();
     renderSelectionPanel();
   }
-  function updateBehaviorRange(lineId, blockIdx, which, value) {
-    const l = state.lines.find(function (l) { return l.id === lineId; });
-    if (!l) return;
-    writeBehaviorRange(l, blockIdx, which, value);
-    if (modeIsAll() && l.masterId) {
-      forSiblingsOf(l.masterId, function (sib) {
-        writeBehaviorRange(sib, blockIdx, which, value);
-      });
-    }
-    state.dirty = true;
-    scheduleSnapshot();
-  }
-  function writeBehaviorRange(line, blockIdx, which, value) {
-    if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
-    const b = line.behaviors[blockIdx];
-    if (!b.range) b.range = { start: 0, end: 1 };
-    let v = Number(value);
-    if (!Number.isFinite(v)) v = 0;
-    v = Math.max(0, Math.min(1, v));
-    b.range[which] = v;
-  }
+  // Behavior block field writers. v0.8.7 split — trigger.when /
+  // trigger.range / trigger.selector / trigger.delay vs
+  // duration.mode / duration.seconds / duration.easing.
 
-  // Update the trigger (type / delay / duration) on a behavior
-  // block. Default trigger = { type: 'scroll' }; switching to
-  // 'time' seeds delay=0 + duration=1 if missing. 'all' mode
-  // fans out to siblings.
   function updateBehaviorTrigger(lineId, blockIdx, key, value) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
     if (!l) return;
@@ -4042,48 +4049,112 @@
     }
     state.dirty = true;
     scheduleSnapshot();
-    // 'type' flip toggles which fields show (scroll range ↔ time
-    // delay/duration) — re-render the panel so the right inputs
-    // appear.
-    if (key === 'type') renderSelectionPanel();
+    // Changing trigger.when toggles which secondary inputs are
+    // available; re-render so the right ones appear and the
+    // greyed-out duration options update.
+    if (key === 'when') renderSelectionPanel();
   }
   function writeBehaviorTrigger(line, blockIdx, key, value) {
     if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
     const b = line.behaviors[blockIdx];
-    if (!b.trigger || typeof b.trigger !== 'object') b.trigger = { type: 'scroll' };
-    if (key === 'type') {
-      b.trigger.type = value;
-      if (value === 'time') {
-        if (typeof b.trigger.delay    !== 'number') b.trigger.delay    = 0;
-        if (typeof b.trigger.duration !== 'number') b.trigger.duration = 1;
+    if (!b.trigger || typeof b.trigger !== 'object') {
+      b.trigger = { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 };
+    }
+    if (key === 'when') {
+      b.trigger.when = value;
+      // Seed missing fields per activation type.
+      if (value === 'scroll-range' && !b.trigger.range) {
+        b.trigger.range = { start: 0, end: 1 };
       }
-    } else {
+      if (value === 'scroll-key' && !b.trigger.selector) {
+        b.trigger.selector = '';
+      }
+      if (typeof b.trigger.delay !== 'number') b.trigger.delay = 0;
+      // Auto-flip duration if the previous combination is now
+      // invalid (only valid invalidation today: scroll duration
+      // requires scroll-range activation).
+      if (b.duration && b.duration.mode === 'scroll' && value !== 'scroll-range') {
+        b.duration = { mode: 'time', seconds: 1 };
+      }
+    } else if (key === 'selector') {
+      b.trigger.selector = String(value || '');
+    } else if (key === 'delay' || key === 'rangeStart' || key === 'rangeEnd') {
       let v = Number(value);
       if (!Number.isFinite(v)) v = 0;
-      if (key === 'duration' && v <= 0) v = 0.01; // avoid div-by-zero at runtime
-      b.trigger[key] = v;
+      if (key === 'delay') {
+        b.trigger.delay = Math.max(0, v);
+      } else {
+        if (!b.trigger.range) b.trigger.range = { start: 0, end: 1 };
+        v = Math.max(0, Math.min(1, v));
+        b.trigger.range[key === 'rangeStart' ? 'start' : 'end'] = v;
+      }
+    }
+  }
+
+  function updateBehaviorDuration(lineId, blockIdx, key, value) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l) return;
+    writeBehaviorDuration(l, blockIdx, key, value);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        writeBehaviorDuration(sib, blockIdx, key, value);
+      });
+    }
+    state.dirty = true;
+    scheduleSnapshot();
+    if (key === 'mode') renderSelectionPanel();
+  }
+  function writeBehaviorDuration(line, blockIdx, key, value) {
+    if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
+    const b = line.behaviors[blockIdx];
+    if (!b.duration || typeof b.duration !== 'object') {
+      b.duration = { mode: 'scroll' };
+    }
+    if (key === 'mode') {
+      b.duration.mode = value;
+      if (value !== 'scroll' && typeof b.duration.seconds !== 'number') {
+        b.duration.seconds = 1;
+      }
+      if (value === 'scroll') {
+        delete b.duration.seconds;
+      }
+    } else if (key === 'seconds') {
+      let v = Number(value);
+      if (!Number.isFinite(v) || v <= 0) v = 0.01;
+      b.duration.seconds = v;
+    } else if (key === 'easing') {
+      if (!value || value === 'linear' || value === 'none') {
+        delete b.duration.easing;
+      } else {
+        b.duration.easing = String(value);
+      }
     }
   }
   // Detect overlapping ranges among a behaviors[] array. Open
   // overlap only — blocks touching at a single point (a.end ===
   // b.start) don't count.
   // Overlap detection — only meaningful between scroll-driven
-  // blocks (they share the same scroll timeline). Time-driven
-  // blocks have their own delay/duration timelines and can't
-  // meaningfully "overlap" with a scroll range. Mixed-type pairs
-  // are skipped.
+  // blocks (trigger.when=scroll-range + duration.mode=scroll, the
+  // only combination that shares a scroll timeline). Any other
+  // activation/duration combo has its own timeline and can't
+  // meaningfully "overlap" with a scroll range.
   function findBehaviorOverlaps(blocks) {
     const out = [];
     if (!Array.isArray(blocks)) return out;
-    const isScroll = function (b) {
-      return !b.trigger || b.trigger.type === 'scroll';
+    const isScrollDriven = function (b) {
+      const when = b.trigger && b.trigger.when;
+      const mode = b.duration && b.duration.mode;
+      return when === 'scroll-range' && mode === 'scroll';
+    };
+    const rangeOf = function (b) {
+      return (b.trigger && b.trigger.range) || { start: 0, end: 1 };
     };
     for (let i = 0; i < blocks.length; i++) {
-      if (!isScroll(blocks[i])) continue;
-      const a = blocks[i].range || { start: 0, end: 1 };
+      if (!isScrollDriven(blocks[i])) continue;
+      const a = rangeOf(blocks[i]);
       for (let j = i + 1; j < blocks.length; j++) {
-        if (!isScroll(blocks[j])) continue;
-        const b = blocks[j].range || { start: 0, end: 1 };
+        if (!isScrollDriven(blocks[j])) continue;
+        const b = rangeOf(blocks[j]);
         if (a.start < b.end && b.start < a.end) out.push({ a: i, b: j });
       }
     }
@@ -6389,6 +6460,74 @@
   // Numeric range field — same shape as numberField but clamped
   // to 0..1 with a small step. Used for behavior-block range
   // editing (start / end ∈ [0,1] within the line's scroll window).
+  // GSAP easings curated for behavior duration. Linear is the
+  // default (no easing); the rest are the common GSAP eases
+  // most authoring tools expose.
+  const EASING_OPTIONS = [
+    { value: 'linear',        label: 'Linear (no easing)' },
+    { value: 'power1.in',     label: 'Ease in (mild)' },
+    { value: 'power1.out',    label: 'Ease out (mild)' },
+    { value: 'power1.inOut',  label: 'Ease in-out (mild)' },
+    { value: 'power2.in',     label: 'Ease in' },
+    { value: 'power2.out',    label: 'Ease out' },
+    { value: 'power2.inOut',  label: 'Ease in-out' },
+    { value: 'power4.in',     label: 'Strong in' },
+    { value: 'power4.out',    label: 'Strong out' },
+    { value: 'power4.inOut',  label: 'Strong in-out' },
+    { value: 'back.in',       label: 'Back in (overshoot start)' },
+    { value: 'back.out',      label: 'Back out (overshoot end)' },
+    { value: 'back.inOut',    label: 'Back in-out' },
+    { value: 'elastic.in',    label: 'Elastic in' },
+    { value: 'elastic.out',   label: 'Elastic out' },
+    { value: 'bounce.in',     label: 'Bounce in' },
+    { value: 'bounce.out',    label: 'Bounce out' },
+    { value: 'circ.inOut',    label: 'Circular in-out' },
+    { value: 'expo.inOut',    label: 'Exponential in-out' },
+    { value: 'sine.inOut',    label: 'Sine in-out' }
+  ];
+
+  // Button-group picker. Each option is a button; an option with
+  // .disabledIf=true gets the .is-disabled class and clicking it
+  // opens an explainer dialog (callbacks: onPick(value) for valid,
+  // onPickDisabled(opt) for disabled). The active option has the
+  // accent border treatment.
+  function behaviorButtonGroup(label, currentValue, options, onPick, onPickDisabled) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field ed-behavior-group';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+    const row = document.createElement('div');
+    row.className = 'ed-behavior-group-row';
+    options.forEach(function (opt) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ed-behavior-group-btn'
+        + (opt.value === currentValue ? ' is-active' : '')
+        + (opt.disabledIf ? ' is-disabled' : '');
+      btn.textContent = opt.label;
+      btn.title = opt.disabledIf ? opt.disabledReason || 'Not valid with the current activation.' : '';
+      btn.addEventListener('click', function () {
+        if (opt.disabledIf) {
+          if (onPickDisabled) onPickDisabled(opt);
+        } else {
+          onPick(opt.value);
+        }
+      });
+      row.appendChild(btn);
+    });
+    wrap.appendChild(lbl);
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  // Explainer dialog for greyed-out duration options.
+  function explainDurationDisabled(opt) {
+    showChoiceDialog({
+      title:   'Not available with this activation',
+      message: opt.disabledReason || 'Not valid with the current activation.',
+      buttons: [{ label: 'OK', value: null, className: 'ed-primary' }]
+    });
+  }
+
   function rangeNumberField(label, value, onChange) {
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';
@@ -6430,40 +6569,72 @@
     head.appendChild(rm);
     card.appendChild(head);
 
-    // Trigger picker — scroll-driven (default) or time-driven.
-    // Time mode swaps range start/end for delay + duration.
-    const trigger = block && block.trigger ? block.trigger : { type: 'scroll' };
-    const triggerType = trigger.type || 'scroll';
-    card.appendChild(selectField('Trigger', triggerType, [
-      { value: 'scroll', label: 'Scroll' },
-      { value: 'time',   label: 'Time' }
-    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'type', v); }));
+    // v0.8.7: trigger (When) and duration (How) on independent
+    // axes. Each is a button group; invalid combos are greyed and
+    // click-on-greyed pops an explainer dialog.
+    const trigger  = (block && block.trigger)  ? block.trigger  : { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 };
+    const duration = (block && block.duration) ? block.duration : { mode: 'scroll' };
+    const when = trigger.when || 'scroll-range';
+    const dmode = duration.mode || 'scroll';
 
-    if (triggerType === 'time') {
-      // Time-driven: delay (s before start) + duration (s to
-      // complete). Block-progress = 0 before delay, lerps to 1
-      // across duration, stays 1 after.
-      const timeRow = document.createElement('div');
-      timeRow.className = 'ed-behavior-range';
-      timeRow.appendChild(numberField('Delay (s)',    trigger.delay    || 0, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
-      }));
-      timeRow.appendChild(numberField('Duration (s)', trigger.duration || 1, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'duration', v);
-      }));
-      card.appendChild(timeRow);
-    } else {
-      // Scroll range. 0 = window start, 1 = window end. Outside
-      // the range the block contributes nothing.
+    // When (activation) picker
+    card.appendChild(behaviorButtonGroup('Activate when', when, [
+      { value: 'scroll-range',     label: 'Scroll range' },
+      { value: 'page-load',        label: 'Page load' },
+      { value: 'scroll-key',       label: 'Scroll past key' },
+      { value: 'in-view-partial',  label: 'In view (partial)' },
+      { value: 'in-view-full',     label: 'In view (full)' }
+    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
+       null));
+
+    // Activation-specific fields
+    if (when === 'scroll-range') {
+      const r = trigger.range || { start: 0, end: 1 };
       const rangeRow = document.createElement('div');
       rangeRow.className = 'ed-behavior-range';
-      rangeRow.appendChild(rangeNumberField('Start', range.start, function (v) {
-        updateBehaviorRange(line.id, blockIdx, 'start', v);
+      rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
       }));
-      rangeRow.appendChild(rangeNumberField('End', range.end, function (v) {
-        updateBehaviorRange(line.id, blockIdx, 'end', v);
+      rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
       }));
       card.appendChild(rangeRow);
+    } else if (when === 'scroll-key') {
+      card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
+      }));
+    }
+    // Delay is valid for all activations as an additional offset
+    // after the activation event (seconds).
+    card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
+    }));
+
+    // Duration (How) picker — 'scroll' is only valid when
+    // when=scroll-range; greyed otherwise and click-explains.
+    const durationOpts = [
+      { value: 'scroll',   label: 'Scroll-driven',
+        disabledIf: when !== 'scroll-range',
+        disabledReason: 'Scroll-driven duration only works when ' +
+          'activation is "Scroll range" — the range defines both ' +
+          'when the block starts AND how its progress advances. ' +
+          'Pick a different activation OR a different duration mode.' },
+      { value: 'time',     label: 'Run once (seconds)' },
+      { value: 'loop',     label: 'Loop forever' },
+      { value: 'pingpong', label: 'Ping-pong forever' }
+    ];
+    card.appendChild(behaviorButtonGroup('Duration', dmode, durationOpts,
+      function (v) { updateBehaviorDuration(line.id, blockIdx, 'mode', v); },
+      function (opt) { explainDurationDisabled(opt); }));
+
+    // Duration-specific fields
+    if (dmode !== 'scroll') {
+      card.appendChild(numberField('Seconds', duration.seconds || 1, function (v) {
+        updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
+      }));
+      card.appendChild(selectField('Easing', duration.easing || 'linear',
+        EASING_OPTIONS,
+        function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }));
     }
 
     card.appendChild(overrideNumberField('TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));

@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 9;
+const CONTENT_SCHEMA_VERSION = 10;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -92,6 +92,16 @@ $SCHEMA_HISTORY = [
        . ' v0.8.1). The original "scroll-transform" name implied'
        . ' scroll-driven and contradicted any block the user switched to'
        . ' a time trigger.',
+    10 => 'Behavior block trigger + duration become independent. trigger.'
+       . 'when ∈ {scroll-range, page-load, scroll-key, in-view-partial,'
+       . ' in-view-full} + optional delay. duration.mode ∈ {scroll,'
+       . ' time, loop, pingpong} + seconds + easing. Old trigger.type='
+       . '\'scroll\' migrates to trigger.when=scroll-range +'
+       . ' duration.mode=scroll; old trigger.type=\'time\' migrates to'
+       . ' trigger.when=page-load + duration.mode=time + carry delay /'
+       . ' duration → trigger.delay / duration.seconds. block.range'
+       . ' moves into trigger.range (scroll-range only); top-level'
+       . ' block.range removed.',
 ];
 
 /**
@@ -585,6 +595,80 @@ $MIGRATIONS = [
             if ($changed) {
                 if ($dryRun) {
                     echo "    would convert behavior overrides → behaviors[] in $instPath\n";
+                } else {
+                    file_put_contents($instPath,
+                        json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                }
+            }
+        }
+        return true;
+    },
+
+    9 => function (string $pageRoot, bool $dryRun): bool {
+        // v9 → v10: split trigger and duration into orthogonal
+        // axes. trigger.when handles activation; duration.mode
+        // handles what progress does after activation.
+        //
+        //   old { trigger:{type:'scroll'}, range:{...} }
+        //   →   { trigger:{when:'scroll-range', range, delay:0},
+        //         duration:{mode:'scroll'} }
+        //
+        //   old { trigger:{type:'time', delay, duration} }
+        //   →   { trigger:{when:'page-load', delay:<old delay>},
+        //         duration:{mode:'time', seconds:<old duration>} }
+        //
+        //   missing trigger: treated as scroll-range, range from
+        //   block.range. block.range top-level removed in either
+        //   case (moves into trigger.range for scroll-range; gone
+        //   for time).
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+        foreach ($useClasses as $cid) {
+            $instPath = $pageRoot . '/' . $cid . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $insts = json_decode(file_get_contents($instPath), true);
+            if (!is_array($insts)) continue;
+            $changed = false;
+            foreach ($insts as &$inst) {
+                if (!is_array($inst)) continue;
+                if (!isset($inst['behaviors']) || !is_array($inst['behaviors'])) continue;
+                foreach ($inst['behaviors'] as &$b) {
+                    if (!is_array($b)) continue;
+                    // Already migrated? Skip.
+                    if (isset($b['trigger']) && is_array($b['trigger'])
+                        && isset($b['trigger']['when'])) continue;
+                    $oldTrigger = isset($b['trigger']) && is_array($b['trigger']) ? $b['trigger'] : null;
+                    $oldRange   = (isset($b['range']) && is_array($b['range']))
+                        ? $b['range'] : ['start' => 0, 'end' => 1];
+                    if ($oldTrigger && ($oldTrigger['type'] ?? null) === 'time') {
+                        $b['trigger']  = [
+                            'when'  => 'page-load',
+                            'delay' => isset($oldTrigger['delay']) ? (float)$oldTrigger['delay'] : 0
+                        ];
+                        $b['duration'] = [
+                            'mode'    => 'time',
+                            'seconds' => isset($oldTrigger['duration']) ? (float)$oldTrigger['duration'] : 1
+                        ];
+                    } else {
+                        $b['trigger']  = [
+                            'when'  => 'scroll-range',
+                            'range' => $oldRange,
+                            'delay' => 0
+                        ];
+                        $b['duration'] = ['mode' => 'scroll'];
+                    }
+                    unset($b['range']);
+                    $changed = true;
+                }
+                unset($b);
+            }
+            unset($inst);
+            if ($changed) {
+                if ($dryRun) {
+                    echo "    would split trigger / duration in $instPath\n";
                 } else {
                     file_put_contents($instPath,
                         json_encode($insts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
