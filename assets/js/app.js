@@ -490,6 +490,13 @@
                : (typeof gd[k] === 'number') ? gd[k] : 0;
         };
         return {
+          // v0.8.6: must preserve `trigger` here. The blockProg
+          // helper below reads trigger.type to decide scroll vs
+          // time; without this, every block looked scroll-driven
+          // regardless of its saved trigger, and hasTime stayed
+          // false so the gsap.ticker that drives time-block
+          // progress never registered.
+          trigger: b.trigger || { type: 'scroll' },
           range:  b.range || { start: 0, end: 1 },
           tx:     num('translateX'),
           ty:     num('translateY'),
