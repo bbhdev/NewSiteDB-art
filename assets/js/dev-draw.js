@@ -127,7 +127,7 @@
     // v0.8.7: trigger and duration split into orthogonal axes.
     //   trigger: { when, range?, selector?, delay }
     //     when ∈ { scroll-range, page-load, scroll-key,
-    //              in-view-partial, in-view-full }
+    //              in-view-partial, in-view-full, after-previous }
     //   duration: { mode, seconds?, easing? }
     //     mode ∈ { scroll, time, loop, pingpong }
     //
@@ -6639,6 +6639,9 @@
       act = 'Triggers when the object enters the viewport';
     } else if (when === 'in-view-full') {
       act = 'Triggers when the object is fully in the viewport';
+    } else if (when === 'after-previous') {
+      // v0.8.22
+      act = 'Triggers when the previous timed block ends';
     } else {
       act = 'Triggers (' + when + ')';
     }
@@ -6810,14 +6813,37 @@
     }
 
     // When (activation) picker
+    // v0.8.22: "After previous ends" trigger — fires when the most
+    // recent preceding TIMED block finishes (activation + delay +
+    // seconds). Scroll-driven / loop / ping-pong blocks are skipped
+    // when walking back, because they don't have a discrete end. The
+    // option is disabled when no prior timed block exists (blockIdx
+    // 0, or all preceding blocks are continuous), with an explainer
+    // dialog on click so the user knows why.
+    const prevTimedIdx = (function () {
+      if (!Array.isArray(line.behaviors)) return -1;
+      for (let j = blockIdx - 1; j >= 0; j--) {
+        const pb = line.behaviors[j];
+        const pm = pb && pb.duration && pb.duration.mode;
+        if (pm === 'time') return j;
+      }
+      return -1;
+    })();
+    const afterPrevDisabled = prevTimedIdx < 0;
     card.appendChild(behaviorButtonGroup('Activate when', when, [
       { value: 'scroll-range',     label: 'Scroll range' },
       { value: 'page-load',        label: 'Page load' },
       { value: 'scroll-key',       label: 'Scroll to key' },
       { value: 'in-view-partial',  label: 'In view (partial)' },
-      { value: 'in-view-full',     label: 'In view (full)' }
+      { value: 'in-view-full',     label: 'In view (full)' },
+      { value: 'after-previous',   label: 'After previous ends',
+        disabledIf: afterPrevDisabled,
+        disabledReason: 'No previous timed block to chain after. ' +
+          'Add a block above this one with Progress = "Timed run (seconds)" ' +
+          '— scroll-driven / loop / ping-pong blocks are skipped because ' +
+          'they have no discrete end.' }
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
-       null));
+       function (opt) { explainDurationDisabled(opt); }));
 
     // v0.8.19: render every trigger field on every render, so the
     // user always sees all axes — fields that don't apply to the

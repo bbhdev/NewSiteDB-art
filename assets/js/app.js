@@ -615,7 +615,8 @@
       //
       // v0.8.7: trigger / duration split into orthogonal axes.
       //   trigger.when  ∈ scroll-range | page-load | scroll-key |
-      //                   in-view-partial | in-view-full
+      //                   in-view-partial | in-view-full |
+      //                   after-previous
       //   duration.mode ∈ scroll | time | loop | pingpong
       // Activation timestamp per block (activationState[i]) is the
       // moment the block crossed its trigger; time-based durations
@@ -802,11 +803,35 @@
         // Time-based modes need an activation timestamp. For
         // 'scroll-range' activation we lazy-activate the first
         // time scrollP enters the range.
+        // v0.8.22: 'after-previous' is similarly lazy — walk back
+        // to the nearest preceding TIMED block, check whether it
+        // has reached its end (activation + delay + seconds), and
+        // activate this block at that exact instant so the chain
+        // is gapless. Continuous blocks (scroll-driven / loop /
+        // ping-pong) are skipped during the walk because they have
+        // no discrete end (the editor's picker disables this option
+        // when no prior timed block exists, so prevIdx<0 is the
+        // tampered-data path only).
         if (activationState[idx] == null) {
           if (when === 'scroll-range') {
             const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
             if (scrollP >= r.start) activationState[idx] = nowSec;
             else return 0;
+          } else if (when === 'after-previous') {
+            let prevIdx = -1;
+            for (let j = idx - 1; j >= 0; j--) {
+              const pm = blocks[j].duration && blocks[j].duration.mode;
+              if (pm === 'time') { prevIdx = j; break; }
+            }
+            if (prevIdx < 0) return 0;
+            if (activationState[prevIdx] == null) return 0;
+            const pb       = blocks[prevIdx];
+            const pDelay   = (pb.trigger && pb.trigger.delay) || 0;
+            const pSeconds = (pb.duration && pb.duration.seconds > 0)
+                             ? pb.duration.seconds : 1;
+            const pEnd     = activationState[prevIdx] + pDelay + pSeconds;
+            if (nowSec < pEnd) return 0;
+            activationState[idx] = pEnd;
           } else {
             return 0;
           }
