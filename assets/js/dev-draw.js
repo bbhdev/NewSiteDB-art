@@ -132,8 +132,9 @@
       // 'scroll-transform' — confusing in JSON because the value
       // contradicted trigger.type='time' edits. Now: 'transform'
       // for any translate/rotate-driven block, regardless of
-      // trigger.
-      kind: b.kind || 'transform',
+      // trigger. Auto-heal the legacy value too so a save without
+      // a CLI migration still ends up clean.
+      kind: (b.kind === 'scroll-transform' || !b.kind) ? 'transform' : b.kind,
       range: b.range
         ? { start: Number(b.range.start) || 0, end: Number(b.range.end || 1) }
         : { start: 0, end: 1 },
