@@ -28,7 +28,16 @@
      box at every zoom (because vw shrinks in CSS px as zoom
      grows, scale cancels that out). Constant CSS-px box →
      constant viewBox→CSS mapping → marks stay at the same CSS
-     coords, which is exactly how text behaves under zoom. */
+     coords, which is exactly how text behaves under zoom
+     VERTICALLY.
+
+     Horizontally: a centered-column layout (max-width + margin
+     auto) slides toward the viewport edges in CSS as zoom
+     grows, because viewport CSS width shrinks while column
+     width stays fixed. The vw*scale dance can't see that
+     because it only knows about the viewport. So we also
+     apply a CSS translateX that tracks the content
+     container's horizontal offset (--body-shift-x). */
   #test-layer {
     position: fixed;
     left:   calc(-50vw * var(--zoom-scale, 1));
@@ -39,6 +48,7 @@
     max-height: none;
     pointer-events: none;
     z-index: 0;
+    transform: translateX(var(--body-shift-x, 0px));
   }
   #test-layer * {
     fill: none;
@@ -112,6 +122,7 @@
     <hr style="border:0;border-top:1px solid #333;margin:6px 0">
     <div class="row"><span>detected zoom</span><b><span id="z">100</span>%</b></div>
     <div class="row"><span>--zoom-scale</span><span id="s">1.00</span></div>
+    <div class="row"><span>body shift x</span><span id="bx">0.0 px</span></div>
     <button id="toggle">Fix: ON</button>
     <button id="recalib">Recalibrate at current zoom</button>
     <div class="hint">If devicePixelRatio doesn't change when you<br>zoom, your browser uses outer/inner instead.</div>
@@ -125,6 +136,7 @@
   const hudOI    = document.getElementById('oi');
   const hudVV    = document.getElementById('vv');
   const hudS     = document.getElementById('s');
+  const hudBX    = document.getElementById('bx');
   const toggleEl = document.getElementById('toggle');
   const recalibEl= document.getElementById('recalib');
 
@@ -135,6 +147,11 @@
   // at first paint; rebaselined by Recalibrate.
   let baseDPR = window.devicePixelRatio || 1;
   let baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
+  // Body's CSS-x at calibration time. Centered-column layouts
+  // shift horizontally under zoom (margins shrink as viewport
+  // CSS shrinks), and the SVG layer needs to translateX to
+  // match — otherwise text drifts horizontally past the marks.
+  let baseBodyLeft = document.body.getBoundingClientRect().left;
   let fixOn = true;
 
   function currentZoom() {
@@ -227,11 +244,18 @@
     const z = currentZoom();
     const scale = fixOn ? z : 1;
     document.documentElement.style.setProperty('--zoom-scale', scale);
+    // Horizontal compensation: how far has the body slid since
+    // calibration? With fix off, force shift = 0 so the
+    // "no-fix" comparison is honest.
+    const bodyLeft = document.body.getBoundingClientRect().left;
+    const shiftX = fixOn ? (bodyLeft - baseBodyLeft) : 0;
+    document.documentElement.style.setProperty('--body-shift-x', shiftX.toFixed(2) + 'px');
     hudZ.textContent  = Math.round(z * 100);
     hudD.textContent  = (window.devicePixelRatio || 1).toFixed(2);
     hudOI.textContent = (window.outerWidth / Math.max(1, window.innerWidth)).toFixed(3);
     hudVV.textContent = ((window.visualViewport && window.visualViewport.scale) || 1).toFixed(3);
     hudS.textContent  = scale.toFixed(2);
+    if (hudBX) hudBX.textContent = shiftX.toFixed(1) + ' px';
   }
 
   // Initial paint: set --zoom-scale before measuring so the
@@ -264,6 +288,7 @@
     // the fix follow (or, with fix off, drift away).
     baseDPR = window.devicePixelRatio || 1;
     baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
+    baseBodyLeft = document.body.getBoundingClientRect().left;
     applyZoom();
     requestAnimationFrame(calibrate);
   });
