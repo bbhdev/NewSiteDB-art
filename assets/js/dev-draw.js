@@ -6676,7 +6676,20 @@
         return axis + ' drift on but multiplier is 0 — no ' + axis +
                ' motion (set Translate' + axis + ' to drive it)';
       }
-      return axis + ' drifts ' + mult + ' px per scroll-px';
+      // v0.8.21: spell out SVG direction (X+ = right, Y+ = down) and
+      // tell the user how to flip it. The screenshot bug that drove
+      // this — translateY=+1 on an off-page object — looked like a
+      // valid "drift in" setting but pushed the object further away
+      // because Y+ is down in SVG. Sign-aware so the hint flips for
+      // already-negative values too.
+      const abs    = Math.abs(mult);
+      const dirNow = (mult > 0) ? (axis === 'X' ? 'right' : 'down')
+                                : (axis === 'X' ? 'left'  : 'up');
+      const dirAlt = (mult > 0) ? (axis === 'X' ? 'left'  : 'up')
+                                : (axis === 'X' ? 'right' : 'down');
+      const altSign = (mult > 0) ? 'negative' : 'positive';
+      return axis + ' drifts ' + abs + ' px per scroll-px ' + dirNow +
+             ' (use a ' + altSign + ' multiplier to drift ' + dirAlt + ')';
     }
     let parts;
     if (tmode === 'driftX')         parts = [axisText('X', tx)];
