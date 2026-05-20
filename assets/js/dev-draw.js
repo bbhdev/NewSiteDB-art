@@ -3922,14 +3922,80 @@
     } else {
       block.params[key] = value;
     }
-    // Trim trailing fully-empty blocks so a cleared single edit
-    // doesn't leave a dangling empty block 0 with no params and
-    // a {0,1} range.
-    while (line.behaviors.length
-           && (!line.behaviors[line.behaviors.length - 1].params
-               || Object.keys(line.behaviors[line.behaviors.length - 1].params).length === 0)) {
-      line.behaviors.pop();
+    // v0.4.1: don't auto-trim blocks anymore. With multi-block
+    // authoring the user explicitly removes blocks via the ✕
+    // button; auto-trimming empty trailing blocks would silently
+    // delete user-added blocks that haven't been filled in yet.
+  }
+
+  // ── Behavior block lifecycle (v0.4.1) ───────────────────────────
+  // Add / remove / range-edit. Each goes through scope-mode fan-out
+  // for siblings of the same master in 'all' mode.
+  function addBehaviorBlock(lineId) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l) return;
+    pushNewBlock(l);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) { pushNewBlock(sib); });
     }
+    state.dirty = true;
+    snapshot();
+    renderSelectionPanel();
+  }
+  function pushNewBlock(line) {
+    if (!Array.isArray(line.behaviors)) line.behaviors = [];
+    line.behaviors.push(newBehaviorBlock());
+  }
+  function removeBehaviorBlock(lineId, blockIdx) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l || !Array.isArray(l.behaviors) || blockIdx >= l.behaviors.length) return;
+    l.behaviors.splice(blockIdx, 1);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        if (Array.isArray(sib.behaviors) && blockIdx < sib.behaviors.length) {
+          sib.behaviors.splice(blockIdx, 1);
+        }
+      });
+    }
+    state.dirty = true;
+    snapshot();
+    renderSelectionPanel();
+  }
+  function updateBehaviorRange(lineId, blockIdx, which, value) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l) return;
+    writeBehaviorRange(l, blockIdx, which, value);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        writeBehaviorRange(sib, blockIdx, which, value);
+      });
+    }
+    state.dirty = true;
+    scheduleSnapshot();
+  }
+  function writeBehaviorRange(line, blockIdx, which, value) {
+    if (!Array.isArray(line.behaviors) || blockIdx >= line.behaviors.length) return;
+    const b = line.behaviors[blockIdx];
+    if (!b.range) b.range = { start: 0, end: 1 };
+    let v = Number(value);
+    if (!Number.isFinite(v)) v = 0;
+    v = Math.max(0, Math.min(1, v));
+    b.range[which] = v;
+  }
+  // Detect overlapping ranges among a behaviors[] array. Open
+  // overlap only — blocks touching at a single point (a.end ===
+  // b.start) don't count.
+  function findBehaviorOverlaps(blocks) {
+    const out = [];
+    if (!Array.isArray(blocks)) return out;
+    for (let i = 0; i < blocks.length; i++) {
+      const a = blocks[i].range || { start: 0, end: 1 };
+      for (let j = i + 1; j < blocks.length; j++) {
+        const b = blocks[j].range || { start: 0, end: 1 };
+        if (a.start < b.end && b.start < a.end) out.push({ a: i, b: j });
+      }
+    }
+    return out;
   }
 
   // ── Rendering ─────────────────────────────────────────────────────
@@ -6064,30 +6130,40 @@
       }), line.masterId, 'linejoin'));
 
     wrap.appendChild(divider('Behavior'));
-    // v0.4.0: behavior fields now address line.behaviors[0].params
-    // instead of line.overrides. Multi-block authoring lands in
-    // v0.4.1 — for now the panel treats the line as having one
-    // implicit block. The block is materialized on first write.
-    const block0 = (line.behaviors && line.behaviors[0]) || null;
-    const params0 = (block0 && block0.params) || {};
-    const gd = (group && group.defaults) || {};
-    wrap.appendChild(overrideNumberField('TranslateX', params0.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v); }));
-    wrap.appendChild(overrideNumberField('TranslateY', params0.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v); }));
-    wrap.appendChild(overrideNumberField('Rotate',     params0.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v); }));
-    // Per-line rotation pivot — overrides the group default (or the
-    // shape's natural center if the group also has none).
-    wrap.appendChild(overrideNumberField('Rotate origin X', params0.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v); }));
-    wrap.appendChild(overrideNumberField('Rotate origin Y', params0.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v); }));
-    wrap.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'line', id: line.id }); }));
-
-    wrap.appendChild(overrideCheckboxField('Draw-in', params0.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v); }));
-    wrap.appendChild(overrideSelectField('Direction', params0.drawInDirection,
-      gd.drawInDirection || 'forward',
-      [
-        { value: 'forward', label: 'Begin → end' },
-        { value: 'reverse', label: 'End → begin' }
-      ],
-      function (v) { updateBehaviorParam(line.id, 'drawInDirection', v); }));
+    // v0.4.1: behaviors[] authoring. Each block is a card with
+    // its own range (start/end ∈ [0,1] within the trigger window)
+    // and the legacy behavior params. Multiple blocks chain
+    // along the scroll — runtime picks the LAST block whose
+    // range contains the current progress (overlap = later wins,
+    // and we warn the user about overlap at the top of the
+    // section).
+    const blocks = Array.isArray(line.behaviors) ? line.behaviors : [];
+    const overlaps = findBehaviorOverlaps(blocks);
+    if (overlaps.length) {
+      const warn = document.createElement('p');
+      warn.className = 'ed-behavior-warning';
+      warn.textContent = '⚠ Overlapping blocks: ' +
+        overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
+        '. Where ranges overlap, the later block wins.';
+      wrap.appendChild(warn);
+    }
+    if (!blocks.length) {
+      const ph = document.createElement('p');
+      ph.className = 'ed-behavior-empty';
+      ph.textContent = 'No behavior blocks yet. Add one to drive scroll animation.';
+      wrap.appendChild(ph);
+    } else {
+      blocks.forEach(function (block, idx) {
+        wrap.appendChild(renderBehaviorBlock(line, idx, group));
+      });
+    }
+    const addBlockBtn = document.createElement('button');
+    addBlockBtn.type = 'button';
+    addBlockBtn.className = 'ed-mini ed-behavior-add';
+    addBlockBtn.textContent = '+ Add block';
+    addBlockBtn.title = 'Append a new behavior block (range 0–1; edit to chain).';
+    addBlockBtn.addEventListener('click', function () { addBehaviorBlock(line.id); });
+    wrap.appendChild(addBlockBtn);
 
     selectionPanel.appendChild(wrap);
 
@@ -6190,6 +6266,85 @@
     wrap.appendChild(lbl); wrap.appendChild(inp);
     return wrap;
   }
+  // Numeric range field — same shape as numberField but clamped
+  // to 0..1 with a small step. Used for behavior-block range
+  // editing (start / end ∈ [0,1] within the line's scroll window).
+  function rangeNumberField(label, value, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.min  = '0';
+    inp.max  = '1';
+    inp.step = '0.05';
+    inp.value = (value !== undefined && value !== null) ? value : 0;
+    inp.addEventListener('input', function () { onChange(parseFloat(inp.value)); });
+    wrap.appendChild(lbl); wrap.appendChild(inp);
+    return wrap;
+  }
+
+  // Render one behavior-block card inside the line panel. Each card
+  // owns its block's range + params; ✕ removes the block.
+  function renderBehaviorBlock(line, blockIdx, group) {
+    const block = line.behaviors[blockIdx];
+    const params = (block && block.params) || {};
+    const range = (block && block.range) || { start: 0, end: 1 };
+    const gd = (group && group.defaults) || {};
+
+    const card = document.createElement('div');
+    card.className = 'ed-behavior-block';
+
+    const head = document.createElement('div');
+    head.className = 'ed-behavior-head';
+    const title = document.createElement('span');
+    title.className = 'ed-behavior-title';
+    title.textContent = 'Block ' + (blockIdx + 1);
+    head.appendChild(title);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'ed-behavior-remove';
+    rm.textContent = '×';
+    rm.title = 'Remove this block';
+    rm.addEventListener('click', function () { removeBehaviorBlock(line.id, blockIdx); });
+    head.appendChild(rm);
+    card.appendChild(head);
+
+    // Range editing. 0 = window start, 1 = window end. Outside
+    // the range the block contributes nothing.
+    const rangeRow = document.createElement('div');
+    rangeRow.className = 'ed-behavior-range';
+    rangeRow.appendChild(rangeNumberField('Start', range.start, function (v) {
+      updateBehaviorRange(line.id, blockIdx, 'start', v);
+    }));
+    rangeRow.appendChild(rangeNumberField('End', range.end, function (v) {
+      updateBehaviorRange(line.id, blockIdx, 'end', v);
+    }));
+    card.appendChild(rangeRow);
+
+    card.appendChild(overrideNumberField('TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
+    card.appendChild(overrideNumberField('TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
+    card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
+    card.appendChild(overrideNumberField('Rotate origin X', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
+    card.appendChild(overrideNumberField('Rotate origin Y', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
+    // Set-origin click only renders on block 0 — the canvas-click
+    // handler writes back through updateBehaviorParam to block 0
+    // by default. Per-block set-origin is a follow-up.
+    if (blockIdx === 0) {
+      card.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'line', id: line.id }); }));
+    }
+    card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v, blockIdx); }));
+    card.appendChild(overrideSelectField('Direction', params.drawInDirection,
+      gd.drawInDirection || 'forward',
+      [
+        { value: 'forward', label: 'Begin → end' },
+        { value: 'reverse', label: 'End → begin' }
+      ],
+      function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }));
+
+    return card;
+  }
+
   function numberField(label, value, onChange) {
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';

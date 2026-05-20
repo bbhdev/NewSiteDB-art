@@ -446,9 +446,45 @@
         } catch (e) { /* bbox unavailable for malformed paths */ }
       }
 
-      const tx  = (typeof behaviors.translateX === 'number') ? behaviors.translateX : 0;
-      const ty  = (typeof behaviors.translateY === 'number') ? behaviors.translateY : 0;
-      const rot = (typeof behaviors.rotate     === 'number') ? behaviors.rotate     : 0;
+      // v0.4.1: multi-block composition. Walk lineDef.behaviors[];
+      // each block carries its own range + params. At a given
+      // scroll progress p, the LAST block whose range contains p
+      // wins (later blocks paint over earlier ones — same
+      // semantics the editor's overlap warning advises against).
+      // Empty behaviors[] falls back to one synthetic block from
+      // group defaults so legacy / unmigrated data still animates.
+      const rawBlocks = (Array.isArray(lineDef.behaviors) && lineDef.behaviors.length)
+        ? lineDef.behaviors
+        : [{ id: '__default', range: { start: 0, end: 1 }, kind: 'scroll-transform', params: {} }];
+      const gd = group.defaults || {};
+      const blocks = rawBlocks.map(function (b) {
+        const p = b.params || {};
+        const num = function (k) {
+          return (typeof p[k] === 'number') ? p[k]
+               : (typeof gd[k] === 'number') ? gd[k] : 0;
+        };
+        return {
+          range:  b.range || { start: 0, end: 1 },
+          tx:     num('translateX'),
+          ty:     num('translateY'),
+          rot:    num('rotate'),
+          drawIn: typeof p.drawIn === 'boolean' ? p.drawIn : !!gd.drawIn,
+          drawInDirection: p.drawInDirection || gd.drawInDirection || 'forward'
+        };
+      });
+      const hasMotion = blocks.some(function (b) {
+        return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
+      });
+      // Pick the active block at a given progress; last-matching
+      // wins (overlap semantics).
+      const blockAt = function (p) {
+        let active = null;
+        for (let i = 0; i < blocks.length; i++) {
+          const r = blocks[i].range;
+          if (p >= r.start && p <= r.end) active = blocks[i];
+        }
+        return active;
+      };
       // v6+: per-class positionOffset baked into the path's transform.
       // line.d is canonical (master geometry) on the runtime side;
       // positionOffset shifts the rendered position without per-class
@@ -460,7 +496,6 @@
                    ? lineDef.positionOffset.dx : 0;
       const offY = (lineDef.positionOffset && Number.isFinite(lineDef.positionOffset.dy))
                    ? lineDef.positionOffset.dy : 0;
-      const hasMotion = (tx !== 0 || ty !== 0 || rot !== 0);
 
       // Initial state: static positionOffset only (no animation yet).
       pathEl.setAttribute(
@@ -480,10 +515,16 @@
           end:     stConfig.end,
           scrub:   stConfig.scrub,
           onUpdate: function (self) {
-            const p   = self.progress;
-            const px  = p * tx;
-            const py  = p * ty;
-            const pr  = p * rot;
+            const p = self.progress;
+            const b = blockAt(p);
+            let px = 0, py = 0, pr = 0;
+            if (b) {
+              const span = b.range.end - b.range.start;
+              const bp = span > 0 ? (p - b.range.start) / span : 1;
+              px = bp * b.tx;
+              py = bp * b.ty;
+              pr = bp * b.rot;
+            }
             pathEl.setAttribute(
               'transform',
               'translate(' + (offX + px) + ' ' + (offY + py) + ') ' +

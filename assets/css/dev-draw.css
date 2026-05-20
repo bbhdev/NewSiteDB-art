@@ -475,6 +475,67 @@ body.editor {
   pointer-events: none;
 }
 .ed-field.is-refused > label { color: #6a6a6a; }
+
+/* Behavior block cards (v0.4.1) — one per entry in
+   line.behaviors[]. Header shows the block index + a remove ×;
+   body holds the range start/end + the legacy behavior fields. */
+.ed-behavior-block {
+  background: #1a1a1a;
+  border: 1px solid #2c2c2c;
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem 0.5rem;
+  margin: 0.4rem 0;
+}
+.ed-behavior-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.ed-behavior-title {
+  color: #d8d8d8;
+  font-size: 0.85em;
+  font-weight: 600;
+  flex: 1 1 auto;
+}
+.ed-behavior-remove {
+  background: transparent;
+  color: #888;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 0.4rem;
+  font-size: 1em;
+  line-height: 1;
+  cursor: pointer;
+}
+.ed-behavior-remove:hover { color: #f88; background: #2c1818; }
+.ed-behavior-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px dashed #2c2c2c;
+}
+.ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
+.ed-behavior-warning {
+  margin: 0.3rem 0 0.5rem;
+  padding: 0.4rem 0.5rem;
+  color: var(--accent);
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.ed-behavior-empty {
+  margin: 0.3rem 0;
+  color: #888;
+  font-style: italic;
+  font-size: 0.9em;
+}
+.ed-behavior-add {
+  margin-top: 0.4rem;
+}
 .ed-field > label {
   color: #c0c0c0;
   font-size: 0.85em;
