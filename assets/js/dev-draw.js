@@ -6585,6 +6585,7 @@
       const va = trigger.viewportAt || 'middle';
       const where = va === 'top'    ? 'the top of the viewport'
                   : va === 'middle' ? 'the middle of the viewport'
+                  : va === 'object' ? 'the animated object'
                                     : 'the bottom of the viewport';
       act = 'Triggers when scroll brings key ' + k + ' to ' + where;
     } else if (when === 'in-view-partial') {
@@ -6727,7 +6728,8 @@
       card.appendChild(behaviorButtonGroup('Reaches', va, [
         { value: 'top',    label: 'Top of viewport' },
         { value: 'middle', label: 'Middle' },
-        { value: 'bottom', label: 'Bottom of viewport' }
+        { value: 'bottom', label: 'Bottom of viewport' },
+        { value: 'object', label: 'The object' }
       ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
          null));
     }

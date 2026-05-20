@@ -623,11 +623,19 @@
           // when the user hadn't scrolled.
           //
           // Instead, listen on window scroll and detect a true
-          // downward crossing of a viewport line — top / middle
-          // / bottom per b.trigger.viewportAt (default 'bottom').
-          // Top and bottom carry a 3% inset so the user gets a
-          // little breathing room from the literal viewport edges
-          // (the literal edges feel jittery and over-eager).
+          // downward crossing of a threshold line — top / middle
+          // / bottom of the viewport per b.trigger.viewportAt
+          // (default 'middle'), or the animated object's own
+          // bottom edge ('object'). Top/bottom carry a 3% inset
+          // for breathing room from the literal viewport edges
+          // (which felt jittery and over-eager).
+          //
+          // 'object' threshold is dynamic — pathEl is fixed-
+          // positioned in #lines-layer, so its viewport rect is
+          // a stable reference each scroll event (the key moves
+          // with scroll, the object doesn't). Crossing fires
+          // the moment the key's top first touches the bottom
+          // edge of the object from below.
           //
           // prevTop is primed at creation, so the very first
           // scroll event with a real downward crossing fires; a
@@ -635,15 +643,17 @@
           // prevTop ≤ threshold and never triggers until the
           // user scrolls back out and forward across it.
           const viewportAt = b.trigger.viewportAt || 'middle';
-          const lineOf = function (vh) {
+          const lineOf = function () {
+            const vh = window.innerHeight;
             if (viewportAt === 'top')    return vh * 0.03;
             if (viewportAt === 'middle') return vh * 0.5;
+            if (viewportAt === 'object') return pathEl.getBoundingClientRect().bottom;
             return vh * 0.97;
           };
           let prevTop = el.getBoundingClientRect().top;
           const onScroll = function () {
             const top = el.getBoundingClientRect().top;
-            const th  = lineOf(window.innerHeight);
+            const th  = lineOf();
             if (prevTop > th && top <= th) {
               if (activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
