@@ -6144,7 +6144,8 @@
       warn.className = 'ed-behavior-warning';
       warn.textContent = '⚠ Overlapping blocks: ' +
         overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
-        '. Where ranges overlap, the later block wins.';
+        '. With chained motion the first block runs through its full range; ' +
+        'later overlapping blocks don\'t contribute until the first ends.';
       wrap.appendChild(warn);
     }
     if (!blocks.length) {
