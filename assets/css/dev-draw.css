@@ -748,12 +748,15 @@ body.editor input[type="range"] {
   cursor: pointer;
   font: inherit;
 }
+/* v0.8.35: filled red across all delete affordances — direct
+   action visual weight, see .ed-mini.ed-danger below. */
 .ed-actions button.ed-danger {
-  background: transparent;
-  border-color: #855;
-  color: #f88;
+  background: #7a2828;
+  border-color: #a04040;
+  color: #fff;
 }
-.ed-actions button:hover { filter: brightness(1.2); }
+.ed-actions button.ed-danger:hover { background: #5c1c1c; border-color: #7a2828; }
+.ed-actions button:not(.ed-danger):hover { filter: brightness(1.2); }
 
 .ed-sidebar-footer {
   margin: auto 0.75rem 0.75rem;
@@ -761,12 +764,16 @@ body.editor input[type="range"] {
   gap: 0.5rem;
   justify-content: space-between;
 }
+/* v0.8.35: filled red — delete is a direct action, the visual
+   weight should match the other action buttons in the same row,
+   not blend in as a tertiary outline. Hover darkens to
+   distinguish hover-press from rest. */
 .ed-mini.ed-danger {
-  background: transparent;
-  border-color: #855;
-  color: #f88;
+  background: #7a2828;
+  border-color: #a04040;
+  color: #fff;
 }
-.ed-mini.ed-danger:hover { background: #2c1818; color: #fff; }
+.ed-mini.ed-danger:hover { background: #5c1c1c; border-color: #7a2828; }
 
 /* ── canvas SVG ──────────────────────────────────────────────────── */
 #draw-surface {
@@ -1375,11 +1382,11 @@ body.editor input[type="range"] {
 }
 .ed-modal-buttons button:hover { background: #4a4a4a; }
 .ed-modal-buttons button.ed-danger {
-  border-color: #855;
-  color: #f88;
-  background: transparent;
+  background: #7a2828;
+  border-color: #a04040;
+  color: #fff;
 }
-.ed-modal-buttons button.ed-danger:hover { background: #2c1818; color: #fff; }
+.ed-modal-buttons button.ed-danger:hover { background: #5c1c1c; border-color: #7a2828; color: #fff; }
 
 .ed-clone-source {
   display: flex;
@@ -1455,6 +1462,25 @@ body.editor input[type="range"] {
 }
 .ed-modal-buttons button.ed-primary:hover { filter: brightness(1.1); }
 
+/* v0.8.35: promote .ed-primary out of the .ed-modal-buttons-only
+   scope so any button (snapshots dialog, future toolbars, dialog
+   bodies) gets the same accent-filled primary-action look without
+   needing to live in a modal-buttons row. The above .ed-modal-
+   buttons rule still wins for buttons inside modal footers thanks
+   to its higher specificity, so existing layouts are unchanged. */
+button.ed-primary {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.35rem 0.85rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.ed-primary:hover:not(:disabled) { filter: brightness(1.1); }
+button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .ed-settings-body { padding: 0.75rem 0.9rem; }
 .ed-setting-row {
   display: flex;
@@ -1512,17 +1538,23 @@ body.editor input[type="range"] {
    Top button in the Master library header opens this dialog; styled
    so the save row reads as a clear primary action and the rows
    below look like a navigable list of restore options. */
+/* v0.8.35: filled action button — same visual weight as the
+   Library / Import / Save toolbar buttons since this is a
+   direct action, not a state toggle. Hover lightens; reads
+   as a sibling of the action buttons elsewhere on the page. */
 .ed-library-snapshots-btn {
   margin-left: 0.5rem;
-  background: transparent;
+  background: #3a3a3a;
   color: #e4e4e4;
   border: 1px solid #555;
   border-radius: 4px;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.85em;
+  padding: 0.35rem 0.85rem;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
   cursor: pointer;
 }
-.ed-library-snapshots-btn:hover { background: #3a3a3a; border-color: var(--accent); color: var(--accent); }
+.ed-library-snapshots-btn:hover { background: #4a4a4a; }
 .ed-snapshots-modal { min-width: min(560px, 92vw); max-width: 760px; }
 .ed-snapshots-body  { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.8rem; }
 .ed-snapshots-save  { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
