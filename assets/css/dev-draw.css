@@ -446,11 +446,23 @@ body.editor {
   border-radius: 8px;
   padding: 0 0.4em;
   line-height: 1.4;
+  min-width: 1.4em;
+  text-align: center;
+}
+.ed-line-bcount.is-zero {
+  color: #5a5a5a;
+  background: transparent;
+  border-color: transparent;
 }
 .ed-line-row.is-selected .ed-line-bcount {
   background: #353535;
   border-color: #555;
   color: #e4e4e4;
+}
+.ed-line-row.is-selected .ed-line-bcount.is-zero {
+  color: #888;
+  background: transparent;
+  border-color: transparent;
 }
 
 /* ── settings panel ──────────────────────────────────────────────── */

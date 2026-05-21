@@ -7167,13 +7167,18 @@
           const rightWrap = document.createElement('span');
           rightWrap.className = 'ed-line-row-right';
           rightWrap.appendChild(overrideTag);
-          if (bCount > 0) {
-            const bBadge = document.createElement('span');
-            bBadge.className = 'ed-line-bcount';
-            bBadge.textContent = bCount;
-            bBadge.title = bCount + ' behavior block' + (bCount === 1 ? '' : 's');
-            rightWrap.appendChild(bBadge);
-          }
+          // v0.8.52: always render the behavior badge — "-" for zero
+          // counts, the number otherwise. Consistent column position
+          // across the list, so the eye reads the row's metadata at
+          // a fixed location instead of jumping when a count appears
+          // or disappears.
+          const bBadge = document.createElement('span');
+          bBadge.className = 'ed-line-bcount' + (bCount === 0 ? ' is-zero' : '');
+          bBadge.textContent = bCount > 0 ? bCount : '-';
+          bBadge.title = bCount > 0
+            ? bCount + ' behavior block' + (bCount === 1 ? '' : 's')
+            : 'No behavior blocks';
+          rightWrap.appendChild(bBadge);
           lr.appendChild(idSpan);
           lr.appendChild(rightWrap);
           lr.addEventListener('click', function (e) {
