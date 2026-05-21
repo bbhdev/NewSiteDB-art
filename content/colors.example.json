@@ -1,4 +1,0 @@
-[
-  { "id": "text",   "name": "Text",   "value": "var(--text)" },
-  { "id": "accent", "name": "Accent", "value": "var(--accent)" }
-]

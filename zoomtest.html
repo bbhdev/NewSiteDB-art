@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Zoom counter-scale test</title>
+<style>
+  :root {
+    --zoom-scale: 1;
+  }
+
+  html, body { margin: 0; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    color: #1a1a1a;
+    background: #f5efe2;
+    padding: 4rem 2rem 6rem;
+    max-width: 760px;
+    margin: 0 auto;
+    line-height: 1.55;
+  }
+  h1 { font-size: 56px; margin: 0 0 1.5rem;   letter-spacing: -0.02em; }
+  h2 { font-size: 30px; margin: 2.5rem 0 1rem; letter-spacing: -0.01em; }
+  p  { font-size: 17px; margin: 0 0 1.1rem; }
+  .accent { background: rgba(255, 0, 255, 0.08); padding: 0 2px; }
+
+  /* Multiply every vw/vh dimension by --zoom-scale. With
+     scale = currentZoom, this evaluates to a constant CSS-px
+     box at every zoom (because vw shrinks in CSS px as zoom
+     grows, scale cancels that out). Constant CSS-px box →
+     constant viewBox→CSS mapping → marks stay at the same CSS
+     coords, which is exactly how text behaves under zoom
+     VERTICALLY.
+
+     Horizontally: a centered-column layout (max-width + margin
+     auto) slides toward the viewport edges in CSS as zoom
+     grows, because viewport CSS width shrinks while column
+     width stays fixed. The vw*scale dance can't see that
+     because it only knows about the viewport. So we also
+     apply a CSS translateX that tracks the content
+     container's horizontal offset (--body-shift-x). */
+  #test-layer {
+    position: fixed;
+    left:   calc(-50vw * var(--zoom-scale, 1));
+    top:    calc(-50vh * var(--zoom-scale, 1));
+    width:  calc(200vw * var(--zoom-scale, 1));
+    height: calc(200vh * var(--zoom-scale, 1));
+    max-width: none;
+    max-height: none;
+    pointer-events: none;
+    z-index: 0;
+    transform: translateX(var(--body-shift-x, 0px));
+  }
+  #test-layer * {
+    fill: none;
+    stroke: #d8127a;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+  #test-layer .dot { fill: #d8127a; stroke: none; }
+  #test-layer .frame { stroke-dasharray: 6 4; }
+
+  /* HUD */
+  #hud {
+    position: fixed;
+    top: 12px; right: 12px;
+    background: rgba(15,15,15,0.86);
+    color: #fff;
+    font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    padding: 10px 12px;
+    border-radius: 6px;
+    z-index: 100;
+    min-width: 180px;
+  }
+  #hud b { color: #ff6cd2; font-weight: 600; }
+  #hud .row { display: flex; justify-content: space-between; gap: 1em; }
+  #hud button {
+    display: block;
+    margin-top: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    background: #ff6cd2;
+    border: 0;
+    color: #1a1a1a;
+    font: inherit;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #hud button.off { background: #555; color: #ddd; }
+  #hud button + button { margin-top: 6px; }
+  #hud .hint { color: #888; margin-top: 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+  <h1 id="title">Calibrated <span class="accent">decoration</span></h1>
+  <h2 id="sub">A line should sit just under each heading.</h2>
+
+  <p>Browser zoom (Ctrl/Cmd + / -) scales text physically, but a fixed-viewport
+     SVG layer sized in <code>vw</code> / <code>vh</code> stays the same physical
+     size on screen. So decoration that fits the text at 100% drifts at any other
+     zoom.</p>
+
+  <p>This page calibrates a few shapes against the real text rects at page load,
+     then locks those <span class="accent" id="mark1">viewBox coords</span> in
+     place. From there you can zoom the page and toggle the counter-scale fix
+     on/off to see what the runtime change would look like.</p>
+
+  <h2 id="sub2">Watch the magenta marks</h2>
+
+  <p>The marks under each heading and around <span class="accent" id="mark2">this
+     phrase</span> are positioned via viewBox coordinates that don't change. With
+     the fix <b>ON</b>, the SVG layer scales with zoom and they should track the
+     text. With it <b>OFF</b>, they should drift.</p>
+
+  <svg id="test-layer" viewBox="0 0 200 200" preserveAspectRatio="none"></svg>
+
+  <div id="hud">
+    <div class="row"><span>devicePixelRatio</span><span id="d">1.00</span></div>
+    <div class="row"><span>outer/inner</span><span id="oi">1.00</span></div>
+    <div class="row"><span>visualViewport.scale</span><span id="vv">1.00</span></div>
+    <hr style="border:0;border-top:1px solid #333;margin:6px 0">
+    <div class="row"><span>detected zoom</span><b><span id="z">100</span>%</b></div>
+    <div class="row"><span>--zoom-scale</span><span id="s">1.00</span></div>
+    <div class="row"><span>body shift x</span><span id="bx">0.0 px</span></div>
+    <button id="toggle">Fix: ON</button>
+    <button id="recalib">Recalibrate at current zoom</button>
+    <div class="hint">If devicePixelRatio doesn't change when you<br>zoom, your browser uses outer/inner instead.</div>
+  </div>
+
+<script>
+(function () {
+  const layer    = document.getElementById('test-layer');
+  const hudZ     = document.getElementById('z');
+  const hudD     = document.getElementById('d');
+  const hudOI    = document.getElementById('oi');
+  const hudVV    = document.getElementById('vv');
+  const hudS     = document.getElementById('s');
+  const hudBX    = document.getElementById('bx');
+  const toggleEl = document.getElementById('toggle');
+  const recalibEl= document.getElementById('recalib');
+
+  // Capture baselines for every signal we can think of. The
+  // "current zoom" is whichever ratio has actually moved away
+  // from 1 — different browsers update different signals on
+  // Ctrl/Cmd +/- and we just take whichever is talking. Captured
+  // at first paint; rebaselined by Recalibrate.
+  let baseDPR = window.devicePixelRatio || 1;
+  let baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
+  // Body's CSS-x at calibration time. Centered-column layouts
+  // shift horizontally under zoom (margins shrink as viewport
+  // CSS shrinks), and the SVG layer needs to translateX to
+  // match — otherwise text drifts horizontally past the marks.
+  let baseBodyLeft = document.body.getBoundingClientRect().left;
+  let fixOn = true;
+
+  function currentZoom() {
+    const dprZ = (window.devicePixelRatio || 1) / baseDPR;
+    const oiZ  = (window.outerWidth / Math.max(1, window.innerWidth)) / baseOI;
+    const vvZ  = (window.visualViewport && window.visualViewport.scale) || 1;
+    // Pick whichever has moved furthest (in log space) from 1.
+    // Zoom-in and zoom-out are symmetric in log space, so this
+    // works for both directions.
+    const candidates = [
+      { v: dprZ, label: 'dpr' },
+      { v: oiZ,  label: 'oi'  },
+      { v: vvZ,  label: 'vv'  }
+    ];
+    let best = 1, bestDist = 0;
+    candidates.forEach(function (c) {
+      const d = Math.abs(Math.log(c.v || 1));
+      if (d > bestDist) { bestDist = d; best = c.v; }
+    });
+    return best;
+  }
+
+  // Map a CSS-pixel point to viewBox coordinates. With
+  // preserveAspectRatio="none" the mapping is straight linear
+  // across width/height — no aspect-ratio bookkeeping needed.
+  function cssToVB(cssX, cssY) {
+    const vb   = layer.viewBox.baseVal;
+    const rect = layer.getBoundingClientRect();
+    return {
+      x: vb.x + (cssX - rect.left) / rect.width  * vb.width,
+      y: vb.y + (cssY - rect.top)  / rect.height * vb.height
+    };
+  }
+
+  // Helpers to create SVG primitives.
+  const SVG = 'http://www.w3.org/2000/svg';
+  function svgEl(name, attrs, cls) {
+    const el = document.createElementNS(SVG, name);
+    if (cls) el.setAttribute('class', cls);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  // Calibrate: read the live position of each calibration
+  // target, compute viewBox coords, place decoration.
+  function calibrate() {
+    layer.innerHTML = '';
+
+    // Underline under each heading, plus a bracket around an
+    // inline phrase, plus a dot at the start of mark1.
+    function underline(id, padCss) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const a = cssToVB(r.left,  r.bottom + (padCss || 4));
+      const b = cssToVB(r.right, r.bottom + (padCss || 4));
+      layer.appendChild(svgEl('line',
+        { x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
+    }
+    function frame(id, padCss) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const p = padCss || 3;
+      const tl = cssToVB(r.left  - p, r.top    - p);
+      const br = cssToVB(r.right + p, r.bottom + p);
+      layer.appendChild(svgEl('rect', {
+        x: tl.x, y: tl.y,
+        width:  br.x - tl.x,
+        height: br.y - tl.y
+      }, 'frame'));
+    }
+    function dot(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const c = cssToVB(r.left - 12, (r.top + r.bottom) / 2);
+      layer.appendChild(svgEl('circle',
+        { cx: c.x, cy: c.y, r: 0.4 }, 'dot'));
+    }
+
+    underline('title', 6);
+    underline('sub',   4);
+    underline('sub2',  4);
+    frame('mark2', 3);
+    dot('mark1');
+  }
+
+  function applyZoom() {
+    const z = currentZoom();
+    const scale = fixOn ? z : 1;
+    document.documentElement.style.setProperty('--zoom-scale', scale);
+    // Horizontal compensation: how far has the body slid since
+    // calibration? With fix off, force shift = 0 so the
+    // "no-fix" comparison is honest.
+    const bodyLeft = document.body.getBoundingClientRect().left;
+    const shiftX = fixOn ? (bodyLeft - baseBodyLeft) : 0;
+    document.documentElement.style.setProperty('--body-shift-x', shiftX.toFixed(2) + 'px');
+    hudZ.textContent  = Math.round(z * 100);
+    hudD.textContent  = (window.devicePixelRatio || 1).toFixed(2);
+    hudOI.textContent = (window.outerWidth / Math.max(1, window.innerWidth)).toFixed(3);
+    hudVV.textContent = ((window.visualViewport && window.visualViewport.scale) || 1).toFixed(3);
+    hudS.textContent  = scale.toFixed(2);
+    if (hudBX) hudBX.textContent = shiftX.toFixed(1) + ' px';
+  }
+
+  // Initial paint: set --zoom-scale before measuring so the
+  // layer's getBoundingClientRect reflects the post-fix size,
+  // then calibrate against that.
+  applyZoom();
+  // Defer one frame so the browser has laid out text + the
+  // (now-scaled) SVG layer before we measure.
+  requestAnimationFrame(function () {
+    calibrate();
+  });
+
+  window.addEventListener('resize', applyZoom);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', applyZoom);
+  }
+
+  toggleEl.addEventListener('click', function () {
+    fixOn = !fixOn;
+    toggleEl.textContent = 'Fix: ' + (fixOn ? 'ON' : 'OFF');
+    toggleEl.classList.toggle('off', !fixOn);
+    applyZoom();
+  });
+
+  recalibEl.addEventListener('click', function () {
+    // Treat the current state as the new "100%" baseline. The
+    // layer immediately resizes to --zoom-scale=1, and the
+    // shapes get re-authored against text positions at that
+    // new baseline. From here you can zoom further and watch
+    // the fix follow (or, with fix off, drift away).
+    baseDPR = window.devicePixelRatio || 1;
+    baseOI  = window.outerWidth / Math.max(1, window.innerWidth);
+    baseBodyLeft = document.body.getBoundingClientRect().left;
+    applyZoom();
+    requestAnimationFrame(calibrate);
+  });
+})();
+</script>
+</body>
+</html>
