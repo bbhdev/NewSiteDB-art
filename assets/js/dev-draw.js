@@ -7160,15 +7160,48 @@
           lr.appendChild(overrideTag);
           lr.addEventListener('click', function (e) {
             e.stopPropagation();
-            // Cmd/Shift toggles the row in/out of the selection; plain
-            // click replaces with just this line. Matches the canvas
-            // modifier-click behavior so both selection surfaces stay
-            // in sync.
-            const isMulti = (e.metaKey || e.ctrlKey || e.shiftKey);
-            if (isMulti) {
+            // v0.8.48: Mac-standard sidebar multi-select.
+            //   Cmd/Ctrl-click  → toggle this row in/out of selection
+            //                     (anchor moves to this row).
+            //   Shift-click     → select range from anchor to this
+            //                     row, REPLACING selection — but only
+            //                     within the same group as the anchor.
+            //                     Cross-group shift-click falls back
+            //                     to plain click (Finder convention).
+            //   Plain click     → replace selection with just this row
+            //                     (anchor moves to this row).
+            // Cmd takes precedence over Shift when both held.
+            const isCmd   = e.metaKey || e.ctrlKey;
+            const isShift = e.shiftKey && !isCmd;
+            let isMulti = false;
+            const canRange = isShift
+                          && sidebarAnchorLineId
+                          && sidebarAnchorGroupId === g.id;
+            if (canRange) {
+              const groupLines = state.lines.filter(function (l) {
+                return l.groupId === g.id;
+              });
+              const ai = groupLines.findIndex(function (l) { return l.id === sidebarAnchorLineId; });
+              const ci = groupLines.findIndex(function (l) { return l.id === line.id; });
+              if (ai !== -1 && ci !== -1) {
+                const lo = Math.min(ai, ci), hi = Math.max(ai, ci);
+                state.selectedIds = groupLines.slice(lo, hi + 1).map(function (l) { return l.id; });
+                isMulti = true;
+                // Anchor stays put — Mac convention; further shift-
+                // clicks extend from the same origin until a plain
+                // or Cmd click resets it.
+              }
+            } else if (isCmd) {
               toggleInSelection(line.id);
+              sidebarAnchorLineId  = line.id;
+              sidebarAnchorGroupId = g.id;
+              isMulti = true;
             } else {
+              // Plain click — or shift-click without a usable anchor
+              // (no prior anchor, or anchor was in a different group).
               selectOnly(line.id);
+              sidebarAnchorLineId  = line.id;
+              sidebarAnchorGroupId = g.id;
             }
             state.activeGroupId  = g.id;
             state.openGroupIds[g.id] = true;
@@ -8941,6 +8974,13 @@
   // under one click, the first click picks the topmost, subsequent
   // clicks at the same spot rotate through the rest.
   let clickCycle = null; // { x, y, ids: [...], idx: <int> }
+  // v0.8.48: anchor for Mac-style shift-click range select in the
+  // sidebar's per-group line lists. Updated on plain/cmd clicks of
+  // a line row; consumed by shift-click to compute a range within
+  // the same group. Cross-group shift-click falls back to plain
+  // click (Mac convention — Finder doesn't range across folders).
+  let sidebarAnchorLineId  = null;
+  let sidebarAnchorGroupId = null;
   // Move-selection mode: pressing inside any selected object's hit
   // area (but not on a handle) starts translating every selected
   // object in lockstep. Single- and multi-select share this code path
