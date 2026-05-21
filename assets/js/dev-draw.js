@@ -9053,12 +9053,48 @@
     // visually-topmost path, so if a non-selected object overlapped
     // the selected one at the click point, the drag silently
     // refused to start. elementsFromPoint walks the whole stack.
+    // v0.8.50: when the cursor isn't over any currently-selected
+    // line but IS over an unselected one, implicitly click-to-
+    // select the topmost line (Illustrator / Figma convention),
+    // then arm the drag — turns drag-on-a-line into one gesture
+    // that selects + moves instead of requiring a separate click
+    // first. If the cursor is over genuine empty canvas (no lines
+    // anywhere in the stack), behavior is unchanged: drag doesn't
+    // arm, pointerup falls through to the regular selection cycle.
     const linesAtPoint = (document.elementsFromPoint(e.clientX, e.clientY) || [])
       .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
       .map(function (el) { return el.dataset.lineId; });
     const pressedSelected = linesAtPoint.some(function (id) { return isSelected(id); });
     const modifier = e.metaKey || e.ctrlKey || e.shiftKey;
-    if (pressedSelected && !modifier) {
+    let armMove = false;
+    if (!modifier) {
+      if (pressedSelected) {
+        armMove = true;
+      } else if (linesAtPoint.length) {
+        // Implicit click → select the topmost line at the cursor.
+        // Mirror the sidebar-click side-effects so the editor's
+        // state is consistent: open + activate the target's group,
+        // update the sidebar anchor, reset click-cycle so a
+        // subsequent same-spot click cycles to the next stacked
+        // line as usual.
+        const topId = linesAtPoint[0];
+        selectOnly(topId);
+        const sel = state.lines.find(function (l) { return l.id === topId; });
+        if (sel && sel.groupId) {
+          state.openGroupIds[sel.groupId] = true;
+          state.activeGroupId = sel.groupId;
+          sidebarAnchorLineId  = sel.id;
+          sidebarAnchorGroupId = sel.groupId;
+        }
+        clickCycle = null;
+        updateSelectAllButton();
+        renderGroupsList();
+        renderLines();
+        renderSelectionPanel({ suppressScroll: true });
+        armMove = true;
+      }
+    }
+    if (armMove) {
       moveSel = {
         startPt: eventPt(e),
         origLines: state.selectedIds.map(function (id) {
