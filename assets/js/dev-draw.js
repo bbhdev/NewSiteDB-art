@@ -9048,9 +9048,15 @@
     // selected object in lockstep. The drawing tool's pointerDown is
     // skipped entirely. Modifier-press defers to pointerup so it can
     // be interpreted as a toggle-click instead of a move.
-    const lineHit = e.target && e.target.closest
-      ? e.target.closest('[data-line-id]') : null;
-    const pressedSelected = lineHit && isSelected(lineHit.dataset.lineId);
+    // v0.8.49: check EVERY line under the cursor, not just the
+    // topmost — `e.target.closest('[data-line-id]')` returns the
+    // visually-topmost path, so if a non-selected object overlapped
+    // the selected one at the click point, the drag silently
+    // refused to start. elementsFromPoint walks the whole stack.
+    const linesAtPoint = (document.elementsFromPoint(e.clientX, e.clientY) || [])
+      .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
+      .map(function (el) { return el.dataset.lineId; });
+    const pressedSelected = linesAtPoint.some(function (id) { return isSelected(id); });
     const modifier = e.metaKey || e.ctrlKey || e.shiftKey;
     if (pressedSelected && !modifier) {
       moveSel = {
