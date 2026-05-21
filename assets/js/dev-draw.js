@@ -3456,7 +3456,7 @@
     const importBtn = document.createElement('button');
     importBtn.type = 'button';
     importBtn.className = 'ed-create-type ed-create-import-btn';
-    importBtn.innerHTML = '<strong><span class="ed-arrow-icon">⇪</span> Import SVG file…</strong>'
+    importBtn.innerHTML = '<strong><span class="ed-arrow-icon">⇧</span> Import SVG file…</strong>'
                        + '<span>One or more SVG files. Each top-level shape '
                        + 'becomes a master + an instance in the current class, '
                        + 'dropped into the currently-active group.</span>';
