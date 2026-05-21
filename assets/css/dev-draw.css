@@ -1150,6 +1150,18 @@ body.editor input[type="range"] {
      from the shared .ed-create-type rules. */
   max-width: 26rem;
 }
+
+/* v0.8.37: unicode arrow glyphs (⇪ / ⇩) inside action buttons.
+   Bumped relative to the surrounding label so the directional
+   intent reads at a glance — at 1em they sit thin and ambiguous
+   alongside the text. Used on Import SVG (.ed-create-import-btn)
+   and Snapshots (.ed-library-snapshots-btn). */
+.ed-arrow-icon {
+  font-size: 1.25em;
+  line-height: 0.9;
+  margin-right: 0.1em;
+  vertical-align: -0.05em;
+}
 .ed-create-types-col {
   display: flex;
   flex-direction: column;

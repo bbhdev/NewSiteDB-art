@@ -3456,7 +3456,7 @@
     const importBtn = document.createElement('button');
     importBtn.type = 'button';
     importBtn.className = 'ed-create-type ed-create-import-btn';
-    importBtn.innerHTML = '<strong>⇪ Import SVG file…</strong>'
+    importBtn.innerHTML = '<strong><span class="ed-arrow-icon">⇪</span> Import SVG file…</strong>'
                        + '<span>One or more SVG files. Each top-level shape '
                        + 'becomes a master + an instance in the current class, '
                        + 'dropped into the currently-active group.</span>';
@@ -5008,10 +5008,11 @@
     const snapBtn = document.createElement('button');
     snapBtn.type = 'button';
     snapBtn.className = 'ed-library-snapshots-btn';
-    // Unicode "downwards arrow into rectangular slot" — reads as
-    // save-to-storage in most fonts; we caption it too so the icon
-    // alone doesn't have to carry the meaning.
-    snapBtn.innerHTML = '↧ Snapshots';
+    // v0.8.37: U+21E9 DOWNWARDS WHITE ARROW — same outline / double-
+    // line style as the import button's ⇪, paired direction so the
+    // two "data in / data out" buttons read as a set. The arrow gets
+    // a touch larger than the surrounding label via .ed-arrow-icon.
+    snapBtn.innerHTML = '<span class="ed-arrow-icon">⇩</span> Snapshots';
     snapBtn.title = 'Save / load named copies of every content file';
     snapBtn.addEventListener('click', function () { showSnapshotsDialog(); });
     head.appendChild(snapBtn);
