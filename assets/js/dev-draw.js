@@ -6768,11 +6768,44 @@
   }
 
   function clearAllLines() {
-    if (!state.lines.length) return;
-    const n = state.lines.length;
-    if (!confirm('Delete all ' + n + ' line' + (n === 1 ? '' : 's') +
-                 ' from this page?\n\nThis can be undone (Cmd+Z).')) return;
-    state.lines = [];
+    // v0.8.42: in ALL mode, count across every class so the
+    // confirm message reflects the actual scope of the wipe, and
+    // clear every class's lines + every master so the disk save
+    // produces a truly empty slate. (Old behavior cleared only
+    // the current class's lines, leaving sibling classes intact
+    // and masters orphaned — both surface back into the on-disk
+    // files at save time. The user reported deleting "everything"
+    // and seeing instance files still populated because of this.)
+    const isAll = modeIsAll();
+    let totalLines = 0;
+    if (isAll) {
+      Object.keys(state.byClass).forEach(function (cid) {
+        const lines = state.byClass[cid] && state.byClass[cid].lines;
+        if (Array.isArray(lines)) totalLines += lines.length;
+      });
+    } else {
+      totalLines = state.lines.length;
+    }
+    if (!totalLines) return;
+    const scopeLabel = isAll ? ' across every class' : ' from this class';
+    const masterNote = isAll && state.masters && state.masters.length
+      ? '\n\nMasters (' + state.masters.length + ') will also be removed since '
+        + 'all instances are going away.'
+      : '';
+    if (!confirm('Delete all ' + totalLines + ' line' + (totalLines === 1 ? '' : 's')
+                 + scopeLabel + '?\n\nThis can be undone (Cmd+Z).' + masterNote)) return;
+    if (isAll) {
+      Object.keys(state.byClass).forEach(function (cid) {
+        if (state.byClass[cid]) state.byClass[cid].lines = [];
+      });
+      // Masters are orphans now — clear them so the master library
+      // and the next save reflect the empty state. Groups stay:
+      // they're the user's organizational structure, not part of
+      // "objects to delete".
+      state.masters = [];
+    } else {
+      state.lines = [];
+    }
     clearSelection();
     state.dirty = true;
     snapshot();
