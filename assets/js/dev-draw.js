@@ -7156,8 +7156,26 @@
           const overrideTag = document.createElement('span');
           overrideTag.style.color = '#888';
           overrideTag.textContent = (line.overrides && Object.keys(line.overrides).length) ? '*' : '';
+          // v0.8.51: small behavior-count badge on the row's right
+          // side, alongside the `*` override marker. Hidden when 0
+          // so lines without behaviors don't clutter the list; non-
+          // zero counts read at a glance during selection / drag.
+          // The per-line panel still shows "N behaviors" (including
+          // 0) — this is the compact list-view version of the same
+          // stat.
+          const bCount = Array.isArray(line.behaviors) ? line.behaviors.length : 0;
+          const rightWrap = document.createElement('span');
+          rightWrap.className = 'ed-line-row-right';
+          rightWrap.appendChild(overrideTag);
+          if (bCount > 0) {
+            const bBadge = document.createElement('span');
+            bBadge.className = 'ed-line-bcount';
+            bBadge.textContent = bCount;
+            bBadge.title = bCount + ' behavior block' + (bCount === 1 ? '' : 's');
+            rightWrap.appendChild(bBadge);
+          }
           lr.appendChild(idSpan);
-          lr.appendChild(overrideTag);
+          lr.appendChild(rightWrap);
           lr.addEventListener('click', function (e) {
             e.stopPropagation();
             // v0.8.48: Mac-standard sidebar multi-select.

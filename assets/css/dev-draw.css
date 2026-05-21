@@ -433,6 +433,25 @@ body.editor {
 .ed-line-row.is-selected { background: #444; color: #fff; }
 .ed-line-id { font-family: ui-monospace, monospace; font-size: 0.85em; color: #a8a8a8; }
 .ed-line-name { color: #e4e4e4; }
+/* v0.8.51: right-side badges on each line row — wraps the existing
+   `*` override marker and the new behavior-count chip so they sit
+   together on the right without confusing flex space-between. */
+.ed-line-row-right { display: inline-flex; gap: 0.35em; align-items: center; }
+.ed-line-bcount {
+  color: #b0b0b0;
+  font-size: 0.78em;
+  font-family: ui-monospace, monospace;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 0 0.4em;
+  line-height: 1.4;
+}
+.ed-line-row.is-selected .ed-line-bcount {
+  background: #353535;
+  border-color: #555;
+  color: #e4e4e4;
+}
 
 /* ── settings panel ──────────────────────────────────────────────── */
 .ed-settings { display: grid; gap: 0.5rem; }
