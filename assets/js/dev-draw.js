@@ -8529,4 +8529,84 @@
   snapshot();
   renderAll();
   centerOnPage();
+
+  // v0.8.33 DIAGNOSTIC: init banner so we can tell from the console
+  // alone whether the new build is loaded. Also wires two globals
+  // that dump line / master state so the user can inspect the data
+  // mid-bug without us having to ship more rounds of console.log.
+  console.log('[editor v0.8.33 loaded] state.classId=' + state.classId
+    + ' mode=' + state.mode);
+
+  function _dumpLineFor(line, cid) {
+    if (!line) return null;
+    return {
+      class:        cid,
+      id:           line.id,
+      name:         line.name,
+      masterId:     line.masterId,
+      groupId:      line.groupId,
+      stroke:       line.stroke,
+      width:        line.width,
+      behaviorsLen: Array.isArray(line.behaviors) ? line.behaviors.length : -1,
+      behaviorIds:  Array.isArray(line.behaviors)
+        ? line.behaviors.map(function (b) { return b.id; }) : null,
+      paramKeys:    line.params    ? Object.keys(line.params)    : null,
+      overrideKeys: line.overrides ? Object.keys(line.overrides) : null,
+      hidden:       !!line.hidden
+    };
+  }
+  // Search across every class for lines matching `q` (by name or id
+  // substring). Also returns the master record if any of the matches
+  // share a masterId. Use in the browser console:
+  //   _dumpLine('blob 1')          → finds by name OR id
+  //   _dumpLine('m-abc1234')       → finds by masterId
+  window._dumpLine = function (q) {
+    if (!q) { console.log('usage: _dumpLine(nameOrId)'); return; }
+    const matches = [];
+    const masterIdsSeen = {};
+    Object.keys(state.byClass).forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      bucket.lines.forEach(function (line) {
+        const hit = (line.id && line.id.indexOf(q) !== -1)
+                 || (line.name && line.name.toLowerCase().indexOf(String(q).toLowerCase()) !== -1)
+                 || (line.masterId && line.masterId.indexOf(q) !== -1);
+        if (!hit) return;
+        matches.push(_dumpLineFor(line, cid));
+        if (line.masterId) masterIdsSeen[line.masterId] = true;
+      });
+    });
+    const masters = Object.keys(masterIdsSeen).map(function (mid) {
+      const m = state.masters.find(function (x) { return x.id === mid; });
+      if (!m) return { id: mid, missing: true };
+      return {
+        id: m.id, name: m.name, kind: m.kind, stroke: m.stroke,
+        width: m.width, paramKeys: m.params ? Object.keys(m.params) : null,
+        scopeKeys: m.scope ? Object.keys(m.scope) : null
+      };
+    });
+    const out = { matches: matches, masters: masters };
+    console.log('[_dumpLine]', JSON.stringify(out, null, 2));
+    return out;
+  };
+  // Dumps the complete behavior-block list for every line across
+  // every class. Use after a suspect drag to compare blob 1's
+  // behavior IDs in WIDE vs MEDIUM vs NARROW.
+  window._dumpAllBlocks = function () {
+    const out = {};
+    Object.keys(state.byClass).forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      out[cid] = bucket.lines.map(function (line) {
+        return {
+          id: line.id, name: line.name, masterId: line.masterId,
+          groupId: line.groupId,
+          behaviorIds: Array.isArray(line.behaviors)
+            ? line.behaviors.map(function (b) { return b.id; }) : null
+        };
+      });
+    });
+    console.log('[_dumpAllBlocks]', JSON.stringify(out, null, 2));
+    return out;
+  };
 })();
