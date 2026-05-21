@@ -8108,6 +8108,20 @@
     if (tmode === 'driftX')         parts = [axisText('X', tx)];
     else if (tmode === 'driftY')    parts = [axisText('Y', ty)];
     else if (tmode === 'driftBoth') parts = [axisText('X', tx), axisText('Y', ty)];
+    else if (tmode === 'pathFollow') {
+      // v0.8.54: pathFollow isn't drift — it's a path-driven
+      // translate that replaces tx/ty. Produce a short summary
+      // line here so the same red strip explains both modes.
+      const guideId = params.pathRef;
+      const guide = guideId
+        ? state.lines.find(function (l) { return l.id === guideId; })
+        : null;
+      const guideLbl = guide ? (guide.name || guide.id) : '(no guide picked)';
+      const tan = params.pathAlignToTangent ? ', aligned to tangent' : '';
+      const end = ({ stop: 'stops at end', loop: 'snaps to start at end',
+                     pingpong: 'reverses at end' })[params.pathEndMode || 'stop'];
+      return 'Follows path of ' + guideLbl + tan + '; ' + end + '.';
+    }
     else return 'Drift mode: ' + tmode;
     const tail = isLastBlock
       ? ' Continues while the block is active.'
@@ -8471,6 +8485,21 @@
           + 'SVG line to use as a path guide.' }
     ], function (v) {
       updateBehaviorParam(line.id, 'translateMode', v === 'fixed' ? null : v, blockIdx);
+      // v0.8.54: seed pathRef with the first available guide when
+      // the user flips into pathFollow. Without this, the editor's
+      // dropdown shows the first option pre-selected visually but
+      // params.pathRef is still null/undefined — the runtime then
+      // can't resolve a guide and the follower never moves. Only
+      // seeds when pathRef isn't already set, so reverting to
+      // pathFollow after switching away preserves the prior choice.
+      if (v === 'pathFollow' && guideOpts.length) {
+        const l2 = state.lines.find(function (l) { return l.id === line.id; });
+        const cur = l2 && Array.isArray(l2.behaviors) && l2.behaviors[blockIdx]
+                       && l2.behaviors[blockIdx].params;
+        if (cur && !cur.pathRef) {
+          updateBehaviorParam(line.id, 'pathRef', guideOpts[0].value, blockIdx);
+        }
+      }
       renderSelectionPanel();
     }, function (opt) {
       if (opt && opt.disabledReason) alert(opt.disabledReason);

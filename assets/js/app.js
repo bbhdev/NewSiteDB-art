@@ -1094,8 +1094,14 @@
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i];
           if (!b.pathFollow) continue;
+          // v0.8.54: use isBlockActive instead of `bp <= 0` so the
+          // pathFollow kicks in the moment the block's trigger fires —
+          // at bp = 0 the follower should be parked AT the path's
+          // starting point, not still at its natural position.
+          // Pre-trigger lines (bp = 0 but trigger not yet fired) are
+          // correctly skipped by isBlockActive.
+          if (!isBlockActive(i, scrollP, nowSec)) continue;
           const bp = bps[i];
-          if (bp <= 0) continue;
           const guide = b.pathRef
             ? document.querySelector('[data-line-id="' + b.pathRef + '"]')
             : null;
