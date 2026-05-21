@@ -1015,7 +1015,7 @@
         <h4>Workflow</h4>\
         <p>Click an existing line on the canvas to select it. Drag its body to move; drag handles to reshape. Click the same spot again to cycle to a line beneath.</p>\
         <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
-        <p>Drag a line row onto another row to reorder it; drop position (above / below the target) drives the canvas Z-order — earlier in the list = drawn first = behind. Drop on a group row instead to send the line to the end of that group. Behavior blocks in the per-line panel reorder the same way — grab the block\'s title strip and drop onto another block.</p>\
+        <p>Drag a line row onto another row to reorder it; drop position (above / below the target) drives the canvas Z-order — earlier in the list = drawn first = behind. Drop on a group row instead to send the line to the end of that group. Group rows reorder the same way — drag a group above/below another to restack every line inside it; lines stay in the order they had within the group. Behavior blocks in the per-line panel reorder by grabbing their title strip and dropping onto another block.</p>\
         <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>\
         <h4>Behaviors</h4>\
         <p>Every line carries an ordered list of behavior blocks. Each block has two independent axes — <strong>Activate when</strong> (the trigger that turns the block on) and <strong>Progress</strong> (how the block\'s 0→1 advances once active) — plus per-block translate / rotate deltas that get weighted by progress. The side panel summary describes the active combination on the selected block; the table below catalogs every option.</p>\
@@ -3842,6 +3842,10 @@
     // Auto-open the destination group so the user sees the move land.
     state.openGroupIds[newGroupId] = true;
     state.activeGroupId = newGroupId;
+    // v0.8.29: re-flatten state.lines by group order so the
+    // moved line lands at the end of the destination group's
+    // run in state.lines, matching where the sidebar shows it.
+    rebuildLinesInGroupOrder();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -3896,6 +3900,54 @@
       state.openGroupIds[anchorGroupId] = true;
       state.activeGroupId = anchorGroupId;
     }
+    // v0.8.29: a within-group splice can leave state.lines
+    // interspersed across groups if it wasn't already flattened —
+    // re-sort by group order so the sidebar's visual order keeps
+    // matching canvas Z (renderLines + decomposeForSave both walk
+    // state.lines top-to-bottom).
+    rebuildLinesInGroupOrder();
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  // v0.8.29: stable-sort state.lines by (group position in
+  // state.groups, pre-existing relative position within group).
+  // The result is the same flat array, but flattened so all of
+  // group N's lines come before all of group N+1's. Lines whose
+  // groupId doesn't match any group (orphans) sort to the end so
+  // they're still visible on canvas; the user can re-home them.
+  function rebuildLinesInGroupOrder() {
+    const groupIdx = {};
+    state.groups.forEach(function (g, i) { groupIdx[g.id] = i; });
+    const withPos = state.lines.map(function (l, i) { return { l: l, i: i }; });
+    withPos.sort(function (a, b) {
+      const ag = (groupIdx[a.l.groupId] != null) ? groupIdx[a.l.groupId] : Infinity;
+      const bg = (groupIdx[b.l.groupId] != null) ? groupIdx[b.l.groupId] : Infinity;
+      if (ag !== bg) return ag - bg;
+      return a.i - b.i;
+    });
+    state.lines = withPos.map(function (x) { return x.l; });
+  }
+
+  // v0.8.29: drag-to-reorder for groups themselves. State.groups
+  // order drives sidebar order top-to-bottom, and after the
+  // rebuild above it also drives canvas Z (earlier group = drawn
+  // first = behind). Same toIdx contract as moveBehaviorBlock —
+  // pre-move insertion index, so fromIdx → toIdx reads as "place
+  // this group at slot toIdx". 'all' mode is sidestepped: each
+  // class can have its own visual stacking, and the on-disk
+  // group records are per-class anyway.
+  function moveGroup(fromIdx, toIdx) {
+    if (!Array.isArray(state.groups)) return;
+    if (fromIdx < 0 || fromIdx >= state.groups.length) return;
+    if (toIdx < 0) toIdx = 0;
+    if (toIdx > state.groups.length) toIdx = state.groups.length;
+    if (fromIdx === toIdx || fromIdx === toIdx - 1) return;
+    const moved = state.groups.splice(fromIdx, 1)[0];
+    const insertAt = (toIdx > fromIdx) ? toIdx - 1 : toIdx;
+    state.groups.splice(insertAt, 0, moved);
+    rebuildLinesInGroupOrder();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -5936,7 +5988,7 @@
 
   function renderGroupsList() {
     groupsListEl.innerHTML = '';
-    state.groups.forEach(function (g) {
+    state.groups.forEach(function (g, gIdx) {
       const isOpen = !!state.openGroupIds[g.id];
       const li = document.createElement('li');
       li.className = 'ed-group'
@@ -5945,6 +5997,20 @@
 
       const row = document.createElement('div');
       row.className = 'ed-group-row';
+      // v0.8.29: group row is itself draggable for Z-reorder. The
+      // dragstart uses a distinct dataTransfer type from the line
+      // and behavior-block drags so the dropover/drop handlers
+      // below can route by intent.
+      row.draggable = true;
+      row.addEventListener('dragstart', function (e) {
+        if (!e.dataTransfer) return;
+        e.dataTransfer.setData('text/x-group-id', g.id);
+        e.dataTransfer.effectAllowed = 'move';
+        row.classList.add('ed-group-dragging');
+      });
+      row.addEventListener('dragend', function () {
+        row.classList.remove('ed-group-dragging');
+      });
 
       // Group index pill (G1, G2, …) sitting where the disclosure
       // triangle used to be. Matched by the "Gx" prefix on canvas
@@ -6008,26 +6074,74 @@
         renderLines();
         renderSelectionPanel();
       });
-      // Make group rows valid drop targets for lines dragged from the
-      // sidebar — dropping a line here re-homes it into this group.
+      // Group row accepts two drag types:
+      //   - text/x-line-id  → re-home the dragged line(s) into this
+      //     group (existing).
+      //   - text/x-group-id → reorder this group above or below the
+      //     hovered one (v0.8.29). Above/below is decided by mouse
+      //     Y vs row midpoint, same as the line and behavior-block
+      //     drop targets.
       row.addEventListener('dragenter', function (e) {
-        if (e.dataTransfer && Array.from(e.dataTransfer.types).indexOf('text/x-line-id') !== -1) {
+        if (!e.dataTransfer) return;
+        const types = Array.from(e.dataTransfer.types);
+        if (types.indexOf('text/x-line-id') !== -1) {
           e.preventDefault();
           row.classList.add('ed-drop-target');
+        } else if (types.indexOf('text/x-group-id') !== -1) {
+          e.preventDefault();
         }
       });
       row.addEventListener('dragover', function (e) {
-        if (e.dataTransfer && Array.from(e.dataTransfer.types).indexOf('text/x-line-id') !== -1) {
+        if (!e.dataTransfer) return;
+        const types = Array.from(e.dataTransfer.types);
+        if (types.indexOf('text/x-line-id') !== -1) {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
+        } else if (types.indexOf('text/x-group-id') !== -1) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          // Hide the source's own ghost target — dropping a group
+          // onto itself is a no-op so don't tease the user with an
+          // indicator. The group-id payload identifies the source.
+          const srcId = e.dataTransfer.getData('text/x-group-id');
+          if (srcId === g.id) return;
+          const rect = row.getBoundingClientRect();
+          const isAbove = e.clientY < rect.top + rect.height / 2;
+          row.classList.toggle('ed-drop-above', isAbove);
+          row.classList.toggle('ed-drop-below', !isAbove);
         }
       });
-      row.addEventListener('dragleave', function () {
-        row.classList.remove('ed-drop-target');
+      row.addEventListener('dragleave', function (e) {
+        // Only clear when leaving the row itself (not when entering
+        // a nested span like the count badge).
+        if (!row.contains(e.relatedTarget)) {
+          row.classList.remove('ed-drop-target');
+          row.classList.remove('ed-drop-above');
+          row.classList.remove('ed-drop-below');
+        }
       });
       row.addEventListener('drop', function (e) {
         row.classList.remove('ed-drop-target');
-        const lineId = e.dataTransfer && e.dataTransfer.getData('text/x-line-id');
+        row.classList.remove('ed-drop-above');
+        row.classList.remove('ed-drop-below');
+        if (!e.dataTransfer) return;
+        const types = Array.from(e.dataTransfer.types);
+        // Group reorder takes precedence: a group payload trumps
+        // any stray line payload that might also be present.
+        if (types.indexOf('text/x-group-id') !== -1) {
+          const srcId = e.dataTransfer.getData('text/x-group-id');
+          if (!srcId || srcId === g.id) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const fromIdx = state.groups.findIndex(function (x) { return x.id === srcId; });
+          if (fromIdx === -1) return;
+          const rect = row.getBoundingClientRect();
+          const isAbove = e.clientY < rect.top + rect.height / 2;
+          const toIdx = isAbove ? gIdx : gIdx + 1;
+          moveGroup(fromIdx, toIdx);
+          return;
+        }
+        const lineId = e.dataTransfer.getData('text/x-line-id');
         if (lineId) {
           e.preventDefault();
           // If the dragged line is part of an active multi-selection,

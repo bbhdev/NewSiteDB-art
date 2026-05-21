@@ -598,6 +598,17 @@ body.editor {
 .ed-line-row.ed-drop-above { box-shadow: inset 0 2px 0 0 var(--accent); }
 .ed-line-row.ed-drop-below { box-shadow: inset 0 -2px 0 0 var(--accent); }
 
+/* v0.8.29: group rows reorder by drag too — same idiom as blocks
+   and lines, with the accent-edge inset shadow for above/below
+   feedback. The existing .ed-drop-target style (background tint +
+   outline) is the "drop a line into this group" hint and stays
+   distinct from the reorder bars. */
+.ed-group-row { cursor: grab; }
+.ed-group-row:active { cursor: grabbing; }
+.ed-group-row.ed-group-dragging { opacity: 0.45; }
+.ed-group-row.ed-drop-above { box-shadow: inset 0 3px 0 0 var(--accent); }
+.ed-group-row.ed-drop-below { box-shadow: inset 0 -3px 0 0 var(--accent); }
+
 /* Button-group field — v0.8.7 trigger.when + duration.mode pickers.
    Sits inside an .ed-field so the label aligns with the rest of
    the form; the buttons themselves wrap into a flex row. */
