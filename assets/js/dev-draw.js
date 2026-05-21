@@ -104,6 +104,15 @@
                          'drawIn', 'drawInDirection',
                          'rotateOriginX', 'rotateOriginY'];
 
+  // v0.8.46: shared issue log populated during the load pass
+  // (resolveInstanceJS pushes here; decomposeForSave reads it too).
+  // Declared above state-init because resolveInstanceJS runs in the
+  // initial-byClass mapping before `state` exists. After state init
+  // the editor reads this on render and surfaces a banner if non-
+  // empty so silent corruption like the v0.8.45 skeleton-master
+  // case can't ride along undetected.
+  const loadIssues = { missingMasters: [], skeletonLines: [] };
+
   // v0.8.40: hand-drawn outline arrows for the Import (up) and
   // Snapshots (down) buttons. Inline SVG so they render
   // identically regardless of font / weight / parent context —
@@ -499,6 +508,19 @@
   function resolveInstanceJS(inst, mby) {
     if (!inst) return {};
     const master = inst.masterId ? mby[inst.masterId] : null;
+    // v0.8.46: warn when a master lookup fails. Previously this path
+    // silently produced an empty `line = {}` (no kind, no params, no
+    // path data) — a render-time no-op AND a save-time time bomb,
+    // because decomposeForSave would later mint a skeleton master
+    // from the empty line, baking the corruption into disk. The
+    // warn surfaces the issue at the moment it happens; the
+    // missing-master count gets summed in state._loadIssues for a
+    // post-load banner so the editor flags broken data on startup.
+    if (inst.masterId && !master) {
+      console.warn('[load] line "' + inst.id + '" references missing master '
+        + inst.masterId + ' — rendering will fail until the master is restored or the line is removed.');
+      loadIssues.missingMasters.push({ lineId: inst.id, masterId: inst.masterId });
+    }
     const line = master ? Object.assign({}, master) : {};
     delete line.id;     // master.id != instance.id
     delete line.scope;  // master-level metadata, not a line prop
@@ -1518,12 +1540,37 @@
       masterMap[m.id] = copy;
     });
 
-    // Pass 1: mint masters for any lines that don't have one yet.
-    // Fresh masters get empty scope (all keys canonical) + a
-    // snapshot of the line's current visual values.
+    // v0.8.46: skeleton-line guard. A "skeleton" line has no `kind`,
+    // typically because its master got deleted and resolveInstanceJS
+    // built it from an empty fallback `{}`. Previously decomposeFor-
+    // Save happily minted a master from such a line — the master was
+    // empty, dropping kind/params/d to disk and silently corrupting
+    // the dataset. Now we identify skeleton lines up front, refuse
+    // to mint masters from them, and drop them from Pass 2 so they
+    // never reach the saved instances files. Caller (save()) sees
+    // the count via the returned `droppedLines` array and surfaces
+    // a confirm dialog so the user knows their save just trimmed
+    // broken records.
+    const skeletonLines = new Set();
+    const droppedLines = [];
     useClasses.forEach(function (cid) {
       const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
       lines.forEach(function (line) {
+        if (line.kind == null) {
+          skeletonLines.add(line);
+          droppedLines.push({ cid: cid, id: line.id, masterId: line.masterId || null });
+        }
+      });
+    });
+
+    // Pass 1: mint masters for any lines that don't have one yet.
+    // Fresh masters get empty scope (all keys canonical) + a
+    // snapshot of the line's current visual values. Skeleton lines
+    // are excluded — they'd mint empty masters.
+    useClasses.forEach(function (cid) {
+      const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+      lines.forEach(function (line) {
+        if (skeletonLines.has(line)) return;
         if (line.masterId && masterMap[line.masterId]) return;
         const mid = line.masterId || ('m-' + Math.random().toString(36).slice(2, 10));
         line.masterId = mid;
@@ -1544,7 +1591,11 @@
     useClasses.forEach(function (cid) {
       const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
       const groups = (state.byClass[cid] && state.byClass[cid].groups) || [];
-      const instances = lines.map(function (line) {
+      // v0.8.46: drop skeleton lines from the save — they have no
+      // master content and would only persist the corruption further.
+      const instances = lines.filter(function (line) {
+        return !skeletonLines.has(line);
+      }).map(function (line) {
         const mid = line.masterId;
         usedMasterIds[mid] = true;
         const master = masterMap[mid];
@@ -1612,7 +1663,7 @@
       .filter(function (mid) { return usedMasterIds[mid]; })
       .map(function (mid) { return reorderIdNameFirst(masterMap[mid]); });
 
-    return { masters: masters, byClass: byClass };
+    return { masters: masters, byClass: byClass, droppedLines: droppedLines };
   }
 
   // Rebuild an object so { id, name } sit at the front. Subsequent
@@ -8655,6 +8706,31 @@
       // current values (e.g., after renaming or restyling in canonical
       // class).
       const decomposed = decomposeForSave();
+      // v0.8.46: skeleton-line guard — if decomposeForSave had to
+      // drop lines with no master content, confirm before writing
+      // so the user can't silently lose data. The dropped lines
+      // wouldn't have rendered anyway, but acknowledging the drop
+      // is what stops the silent-corruption pattern that produced
+      // them in the first place.
+      if (decomposed.droppedLines && decomposed.droppedLines.length) {
+        const summary = decomposed.droppedLines.slice(0, 8).map(function (d) {
+          return '  • ' + d.id + ' (' + d.cid + ')'
+            + (d.masterId ? ' → missing master ' + d.masterId : '');
+        }).join('\n');
+        const more = decomposed.droppedLines.length > 8
+          ? '\n  …and ' + (decomposed.droppedLines.length - 8) + ' more'
+          : '';
+        const ok = confirm(decomposed.droppedLines.length
+          + ' line(s) reference missing master data and will be DROPPED from '
+          + 'this save:\n\n' + summary + more
+          + '\n\nProceed? (Cancel to investigate first — these lines wouldn\'t '
+          + 'render anyway, but dropping them is permanent.)');
+        if (!ok) {
+          saveStatus.textContent = 'Save canceled.';
+          saveBtn.disabled = false;
+          return;
+        }
+      }
       state.masters = decomposed.masters;
 
       const res = await fetch('/dev/draw/save', {
@@ -9256,8 +9332,35 @@
   // alone whether the new build is loaded. Also wires two globals
   // that dump line / master state so the user can inspect the data
   // mid-bug without us having to ship more rounds of console.log.
-  console.log('[editor v0.8.33 loaded] state.classId=' + state.classId
-    + ' mode=' + state.mode);
+  // v0.8.46: also surface load-issue counts and (if any) mount a
+  // sticky banner at the top of the sidebar pointing at Find orphans.
+  console.log('[editor v0.8.46 loaded] state.classId=' + state.classId
+    + ' mode=' + state.mode
+    + ' loadIssues.missingMasters=' + loadIssues.missingMasters.length);
+  if (loadIssues.missingMasters.length) {
+    const banner = document.createElement('div');
+    banner.className = 'ed-load-banner';
+    const msg = document.createElement('span');
+    msg.innerHTML = '<strong>' + loadIssues.missingMasters.length
+      + ' instance' + (loadIssues.missingMasters.length === 1 ? '' : 's')
+      + '</strong> reference missing master records — they will not render.';
+    banner.appendChild(msg);
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'ed-mini';
+    openBtn.textContent = 'Open Find orphans';
+    openBtn.addEventListener('click', function () { showOrphansDialog(); });
+    banner.appendChild(openBtn);
+    const dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'ed-load-banner-dismiss';
+    dismissBtn.textContent = '×';
+    dismissBtn.title = 'Dismiss (the issue stays until you fix it)';
+    dismissBtn.addEventListener('click', function () { banner.remove(); });
+    banner.appendChild(dismissBtn);
+    const sidebar = document.querySelector('.ed-sidebar');
+    if (sidebar) sidebar.insertBefore(banner, sidebar.firstChild);
+  }
 
   function _dumpLineFor(line, cid) {
     if (!line) return null;
