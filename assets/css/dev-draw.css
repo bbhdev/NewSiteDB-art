@@ -1123,6 +1123,33 @@ body.editor input[type="range"] {
   grid-template-columns: 1fr 1fr;
   gap: 0.8rem;
 }
+/* v0.8.36: Import-SVG section, sits above the type grid in the
+   Create object modal. Uses the same h5 column-heading look as
+   "Lines" / "Primitives" and the same .ed-create-type button so
+   the three "give me a new object" pathways read as siblings.
+   Left-aligned, width auto so the button doesn't span the modal
+   — Import is a single action, not a list of choices to scan. */
+.ed-create-import {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.8rem;
+  align-items: flex-start;
+}
+.ed-create-import h5 {
+  margin: 0 0 0.15rem;
+  font-size: 0.75em;
+  color: #a8a8a8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+.ed-create-import-btn {
+  /* Compact: takes only the space its content needs, not the
+     full column width like the type tiles. Hover behavior comes
+     from the shared .ed-create-type rules. */
+  max-width: 26rem;
+}
 .ed-create-types-col {
   display: flex;
   flex-direction: column;

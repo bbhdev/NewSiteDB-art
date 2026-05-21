@@ -3441,6 +3441,39 @@
 
     let pickedType = null;
     let startBtn   = null;
+
+    // v0.8.36: SVG import affordance, the third "give me a new
+    // object" pathway alongside Lines and Primitives. Doesn't
+    // belong on the toolbar (logically secondary to Create object
+    // and Library) so it lives here, in the Create object modal,
+    // left-aligned at the top so the eye lands on it first when
+    // the user just wants to drop a pre-made SVG in.
+    const importSection = document.createElement('div');
+    importSection.className = 'ed-create-import';
+    const importHead = document.createElement('h5');
+    importHead.textContent = 'Import existing';
+    importSection.appendChild(importHead);
+    const importBtn = document.createElement('button');
+    importBtn.type = 'button';
+    importBtn.className = 'ed-create-type ed-create-import-btn';
+    importBtn.innerHTML = '<strong>⇪ Import SVG file…</strong>'
+                       + '<span>One or more SVG files. Each top-level shape '
+                       + 'becomes a master + an instance in the current class, '
+                       + 'dropped into the currently-active group.</span>';
+    importBtn.addEventListener('click', function () {
+      const inp = document.getElementById('import-svg-input');
+      if (!inp) return;
+      // Close the modal first — the file picker runs out-of-band
+      // and the user has no further choices to make in this modal
+      // once Import is the intent. The destinations checkboxes
+      // below only apply to the Lines/Primitives drawing flow;
+      // import drops into the active class only (existing behavior).
+      cleanup();
+      inp.click();
+    });
+    importSection.appendChild(importBtn);
+    body.appendChild(importSection);
+
     function makeTypeButton(t, col) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -3449,7 +3482,7 @@
       b.innerHTML = '<strong>' + t.label + '</strong><span>' + t.hint + '</span>';
       b.addEventListener('click', function () {
         pickedType = t.id;
-        body.querySelectorAll('.ed-create-type').forEach(function (n) {
+        body.querySelectorAll('.ed-create-type:not(.ed-create-import-btn)').forEach(function (n) {
           n.classList.toggle('is-active', n === b);
         });
         if (startBtn) startBtn.disabled = false;
@@ -8190,13 +8223,14 @@
   const libraryBtn = document.getElementById('library-btn');
   if (libraryBtn) libraryBtn.addEventListener('click', showLibraryDialog);
 
-  // SVG import — file picker + button wiring. The input is hidden;
-  // the button opens it. importSvgFile (defined above) does the
-  // parsing, master-mint, snapshot, and re-render.
-  const importSvgBtn   = document.getElementById('import-svg-btn');
+  // SVG import — file picker wiring. The input is hidden at page
+  // scope so the change handler stays bound for the lifetime of
+  // the editor; v0.8.36 moved the trigger button into the Create
+  // object modal (showCreateModal) so the toolbar isn't crowded
+  // with two "new object" actions. The button there does
+  // importSvgInput.click() to pop the file picker.
   const importSvgInput = document.getElementById('import-svg-input');
-  if (importSvgBtn && importSvgInput) {
-    importSvgBtn.addEventListener('click', function () { importSvgInput.click(); });
+  if (importSvgInput) {
     importSvgInput.addEventListener('change', function () {
       // Copy to a real array BEFORE clearing input.value — otherwise
       // some browsers invalidate the FileList ref mid-import.

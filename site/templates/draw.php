@@ -208,9 +208,13 @@ $payload = json_encode([
 
   <div class="ed-tools" role="toolbar" aria-label="Create">
     <button type="button" id="create-object-btn" class="ed-create-btn"
-            title="Create a new object — opens a panel to pick the shape type and the classes it should appear in">+ Create object</button>
-    <button type="button" id="import-svg-btn" class="ed-create-btn"
-            title="Import one or more SVG files. Each top-level shape becomes a master + an instance in the current class, dropped into the currently-active group. Create an empty group first if you want them isolated.">⇪ Import SVG</button>
+            title="Create a new object — opens a panel to pick the shape type or import an SVG file, and choose which classes it should appear in">+ Create object</button>
+    <!-- v0.8.36: the SVG import affordance moved INTO the Create
+         object modal so the toolbar isn't crowded with two
+         logically-similar "give me a new object" actions. The
+         file input stays at page scope so the change handler bound
+         in dev-draw.js still works — the modal's new Import button
+         just triggers .click() on it. -->
     <input type="file" id="import-svg-input" accept=".svg,image/svg+xml" multiple hidden>
     <button type="button" id="library-btn" class="ed-create-btn"
             title="Browse every master across the site — see usage chips per class, scope summary, and delete the canonical object across all classes.">▦ Library</button>
