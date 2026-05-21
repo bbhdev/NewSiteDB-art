@@ -1015,7 +1015,7 @@
         <h4>Workflow</h4>\
         <p>Click an existing line on the canvas to select it. Drag its body to move; drag handles to reshape. Click the same spot again to cycle to a line beneath.</p>\
         <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
-        <p>Drag a line row onto another group in the sidebar to move it between groups.</p>\
+        <p>Drag a line row onto another row to reorder it; drop position (above / below the target) drives the canvas Z-order — earlier in the list = drawn first = behind. Drop on a group row instead to send the line to the end of that group. Behavior blocks in the per-line panel reorder the same way — grab the block\'s title strip and drop onto another block.</p>\
         <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>\
         <h4>Behaviors</h4>\
         <p>Every line carries an ordered list of behavior blocks. Each block has two independent axes — <strong>Activate when</strong> (the trigger that turns the block on) and <strong>Progress</strong> (how the block\'s 0→1 advances once active) — plus per-block translate / rotate deltas that get weighted by progress. The side panel summary describes the active combination on the selected block; the table below catalogs every option.</p>\
@@ -3846,6 +3846,60 @@
     snapshot();
     renderAll();
   }
+  // v0.8.28: drag-to-reorder for lines. `where` ∈ {'before','after'}
+  // places the dragged ids next to anchorLineId in state.lines —
+  // which is the same array that drives canvas Z-stacking (later
+  // append = on top), so reordering the sidebar reorders the canvas
+  // in lockstep. If the anchor lives in a different group, the
+  // dragged lines also re-home into that group, collapsing
+  // "drag-to-group" and "drag-to-reorder" into one gesture.
+  function moveLinesAdjacentTo(draggedIds, anchorLineId, where, anchorGroupId) {
+    if (!draggedIds || !draggedIds.length || !anchorLineId) return;
+    // De-dupe + drop the anchor (dropping on yourself is a no-op).
+    const ids = [];
+    draggedIds.forEach(function (id) {
+      if (id && id !== anchorLineId && ids.indexOf(id) === -1) ids.push(id);
+    });
+    if (!ids.length) return;
+    // Preserve visual order: when the user multi-selects A, C, B
+    // (click order) and drags, we want A,B,C — the order they read
+    // in state.lines today — to land at the drop point. Sort the
+    // dragged ids by their pre-move state.lines position.
+    const draggedLines = ids
+      .map(function (id) {
+        const pos = state.lines.findIndex(function (l) { return l.id === id; });
+        const obj = state.lines[pos];
+        return obj ? { obj: obj, pos: pos } : null;
+      })
+      .filter(Boolean)
+      .sort(function (a, b) { return a.pos - b.pos; })
+      .map(function (x) { return x.obj; });
+    if (!draggedLines.length) return;
+    // Snip them out, re-home if needed, then splice in at the
+    // anchor's NEW position (which may have shifted if the anchor
+    // was after a removed line).
+    const movedIds = {};
+    draggedLines.forEach(function (l) { movedIds[l.id] = true; });
+    state.lines = state.lines.filter(function (l) { return !movedIds[l.id]; });
+    const anchorIdx = state.lines.findIndex(function (l) { return l.id === anchorLineId; });
+    if (anchorIdx === -1) return;
+    const insertAt = (where === 'before') ? anchorIdx : anchorIdx + 1;
+    let groupChanged = false;
+    draggedLines.forEach(function (l) {
+      if (anchorGroupId && l.groupId !== anchorGroupId) {
+        l.groupId = anchorGroupId;
+        groupChanged = true;
+      }
+    });
+    state.lines.splice.apply(state.lines, [insertAt, 0].concat(draggedLines));
+    if (groupChanged && anchorGroupId) {
+      state.openGroupIds[anchorGroupId] = true;
+      state.activeGroupId = anchorGroupId;
+    }
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
 
   function addGroup() {
     // 'all' mode: a new group fans out across every class with the
@@ -4091,6 +4145,64 @@
     state.dirty = true;
     snapshot();
     renderSelectionPanel();
+  }
+  // v0.8.28: reorder behavior blocks via drag handle. toIdx is the
+  // insertion index in the PRE-move array — i.e. blockIdx values
+  // the user sees in the panel, not post-splice positions, so
+  // fromIdx → toIdx reads as "place this block at slot toIdx".
+  // Same all-mode fan-out as add/remove.
+  function moveBehaviorBlock(lineId, fromIdx, toIdx) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l || !Array.isArray(l.behaviors)) return;
+    if (fromIdx < 0 || fromIdx >= l.behaviors.length) return;
+    if (toIdx < 0) toIdx = 0;
+    if (toIdx > l.behaviors.length) toIdx = l.behaviors.length;
+    // No-op: dropping a block right where it already sits (either
+    // its own slot, or the slot just after it, which means "before
+    // the next block" — same final position).
+    if (fromIdx === toIdx || fromIdx === toIdx - 1) return;
+    spliceAndRemapBehavior(l, fromIdx, toIdx);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        if (Array.isArray(sib.behaviors) && fromIdx < sib.behaviors.length) {
+          const sibTo = Math.min(toIdx, sib.behaviors.length);
+          spliceAndRemapBehavior(sib, fromIdx, sibTo);
+        }
+      });
+    }
+    state.dirty = true;
+    snapshot();
+    renderSelectionPanel();
+  }
+  function spliceAndRemapBehavior(line, fromIdx, toIdx) {
+    // Snapshot pre-move id order so we can rebuild oldIdx → newIdx
+    // lookups for any cross-block index reference (today: loopTo's
+    // duration.target). Block.id is stable across the reorder, so
+    // findIndex on the new array gives the post-move position.
+    const idsBefore = line.behaviors.map(function (b) { return b.id; });
+    const moved = line.behaviors.splice(fromIdx, 1)[0];
+    const insertAt = (toIdx > fromIdx) ? toIdx - 1 : toIdx;
+    line.behaviors.splice(insertAt, 0, moved);
+    const newIdxOfOld = {};
+    line.behaviors.forEach(function (b, i) {
+      const oldIdx = idsBefore.indexOf(b.id);
+      if (oldIdx !== -1) newIdxOfOld[oldIdx] = i;
+    });
+    // Remap loopTo targets. If the remapped target is no longer
+    // earlier than the loopTo block itself, the reference is now
+    // invalid (target must precede the loop) — drop it; the editor
+    // will show the dropdown unselected and the runtime treats
+    // missing target as a no-op snapshot.
+    line.behaviors.forEach(function (b, i) {
+      if (!b.duration || b.duration.mode !== 'loopTo') return;
+      if (!Number.isInteger(b.duration.target)) return;
+      const remapped = newIdxOfOld[b.duration.target];
+      if (remapped == null || remapped >= i) {
+        delete b.duration.target;
+      } else {
+        b.duration.target = remapped;
+      }
+    });
   }
   // Behavior block field writers. v0.8.7 split — trigger.when /
   // trigger.range / trigger.selector / trigger.delay vs
@@ -5941,10 +6053,56 @@
           lr.className = 'ed-line-row' + (isSelected(line.id) ? ' is-selected' : '');
           // Drag-and-drop source: a line row can be dragged onto any
           // group row in the sidebar to move the line into that group.
+          // v0.8.28: line rows are ALSO drop targets — dropping onto
+          // a row inserts the dragged line(s) above or below it, in
+          // either the same or another group (state.lines position
+          // drives canvas Z-stacking, so this is also "send forward /
+          // backward").
           lr.draggable = true;
           lr.addEventListener('dragstart', function (e) {
             e.dataTransfer.setData('text/x-line-id', line.id);
             e.dataTransfer.effectAllowed = 'move';
+            lr.classList.add('ed-line-dragging');
+          });
+          lr.addEventListener('dragend', function () {
+            lr.classList.remove('ed-line-dragging');
+          });
+          lr.addEventListener('dragover', function (e) {
+            if (!e.dataTransfer) return;
+            if (Array.from(e.dataTransfer.types).indexOf('text/x-line-id') === -1) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const rect = lr.getBoundingClientRect();
+            const isAbove = e.clientY < rect.top + rect.height / 2;
+            lr.classList.toggle('ed-drop-above', isAbove);
+            lr.classList.toggle('ed-drop-below', !isAbove);
+          });
+          lr.addEventListener('dragleave', function (e) {
+            if (!lr.contains(e.relatedTarget)) {
+              lr.classList.remove('ed-drop-above');
+              lr.classList.remove('ed-drop-below');
+            }
+          });
+          lr.addEventListener('drop', function (e) {
+            lr.classList.remove('ed-drop-above');
+            lr.classList.remove('ed-drop-below');
+            const draggedId = e.dataTransfer && e.dataTransfer.getData('text/x-line-id');
+            if (!draggedId || draggedId === line.id) return;
+            e.preventDefault();
+            // Stop the bubble — without this the group row's drop
+            // handler also fires and moves the line to the END of
+            // the group, undoing the positional drop.
+            e.stopPropagation();
+            const rect = lr.getBoundingClientRect();
+            const isAbove = e.clientY < rect.top + rect.height / 2;
+            // Multi-selection lockstep, same idiom as the group-row
+            // drop: if the dragged line is part of an active multi-
+            // selection, every selected line moves together.
+            const inSel = state.selectedIds.indexOf(draggedId) !== -1;
+            const ids = (inSel && state.selectedIds.length > 1)
+              ? state.selectedIds.slice()
+              : [draggedId];
+            moveLinesAdjacentTo(ids, line.id, isAbove ? 'before' : 'after', g.id);
           });
           const idSpan = document.createElement('span');
           if (line.name) {
@@ -6861,6 +7019,22 @@
 
     const head = document.createElement('div');
     head.className = 'ed-behavior-head';
+    // v0.8.28: the head strip is the block's drag handle — only it
+    // is draggable, so number / select inputs further down the card
+    // stay interactive. Block order maps to execution order (and to
+    // loopTo's target index), so reordering rewires the sequence.
+    head.draggable = true;
+    head.title = 'Drag to reorder';
+    head.addEventListener('dragstart', function (e) {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.setData('text/x-behavior-block', String(blockIdx));
+      e.dataTransfer.setData('text/x-behavior-line', line.id);
+      e.dataTransfer.effectAllowed = 'move';
+      card.classList.add('ed-behavior-dragging');
+    });
+    head.addEventListener('dragend', function () {
+      card.classList.remove('ed-behavior-dragging');
+    });
     const title = document.createElement('span');
     title.className = 'ed-behavior-title';
     title.textContent = 'Block ' + (blockIdx + 1);
@@ -6870,9 +7044,50 @@
     rm.className = 'ed-behavior-remove';
     rm.textContent = '×';
     rm.title = 'Remove this block';
+    // The remove button sits inside a draggable head, which on some
+    // browsers swallows click-through. Stopping pointerdown keeps
+    // the click reaching the button without starting a drag.
+    rm.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
     rm.addEventListener('click', function () { removeBehaviorBlock(line.id, blockIdx); });
     head.appendChild(rm);
     card.appendChild(head);
+
+    // Drop zone — every card listens for drops of OTHER blocks
+    // from the same line. The mouse Y vs midpoint decides insert-
+    // above vs insert-below, mirrored in the CSS bar indicator.
+    card.addEventListener('dragover', function (e) {
+      if (!e.dataTransfer) return;
+      if (Array.from(e.dataTransfer.types).indexOf('text/x-behavior-block') === -1) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = card.getBoundingClientRect();
+      const isAbove = e.clientY < rect.top + rect.height / 2;
+      card.classList.toggle('ed-drop-above', isAbove);
+      card.classList.toggle('ed-drop-below', !isAbove);
+    });
+    card.addEventListener('dragleave', function (e) {
+      // The leave event fires when entering a child element too;
+      // only clear when actually exiting the card.
+      if (!card.contains(e.relatedTarget)) {
+        card.classList.remove('ed-drop-above');
+        card.classList.remove('ed-drop-below');
+      }
+    });
+    card.addEventListener('drop', function (e) {
+      if (!e.dataTransfer) return;
+      const fromIdxStr  = e.dataTransfer.getData('text/x-behavior-block');
+      const fromLineId  = e.dataTransfer.getData('text/x-behavior-line');
+      card.classList.remove('ed-drop-above');
+      card.classList.remove('ed-drop-below');
+      if (fromIdxStr === '' || fromLineId !== line.id) return;
+      e.preventDefault();
+      const fromIdx = parseInt(fromIdxStr, 10);
+      if (!Number.isFinite(fromIdx)) return;
+      const rect = card.getBoundingClientRect();
+      const isAbove = e.clientY < rect.top + rect.height / 2;
+      const toIdx = isAbove ? blockIdx : blockIdx + 1;
+      moveBehaviorBlock(line.id, fromIdx, toIdx);
+    });
 
     // v0.8.7: trigger (When) and duration (How) on independent
     // axes. Each is a button group; invalid combos are greyed and
