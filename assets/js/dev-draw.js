@@ -1021,7 +1021,7 @@
         <p>Every line carries an ordered list of behavior blocks. Each block has two independent axes — <strong>Activate when</strong> (the trigger that turns the block on) and <strong>Progress</strong> (how the block\'s 0→1 advances once active) — plus per-block translate / rotate deltas that get weighted by progress. The side panel summary describes the active combination on the selected block; the table below catalogs every option.</p>\
         <p><strong>Activate when</strong> — picks the trigger:</p>\
         <ul>\
-          <li><strong>Scroll range</strong> — fires the first time scroll position enters [start, end] (expressed as a fraction of page scroll). The only trigger compatible with Progress = Scroll-driven.</li>\
+          <li><strong>Scroll range</strong> — fires the first time scroll position enters [start, end] (expressed as a fraction of page scroll). Pairs with any progress mode.</li>\
           <li><strong>Page load</strong> — fires at page load. Optional delay (s) pushes it later.</li>\
           <li><strong>Scroll key</strong> — fires when scroll brings a named DOM element (by selector) past a viewport anchor (top / middle / bottom / the object itself). Set <em>Repeat</em> to fire once or every crossing.</li>\
           <li><strong>In view (partial)</strong> — fires when the animated object first enters the viewport.</li>\
