@@ -120,6 +120,15 @@
       const out = { mode: b.duration.mode };
       if (typeof b.duration.seconds === 'number') out.seconds = b.duration.seconds;
       if (b.duration.easing) out.easing = String(b.duration.easing);
+      // v0.8.23: loopTo carries target + optional maxIterations.
+      if (b.duration.mode === 'loopTo') {
+        if (Number.isInteger(b.duration.target) && b.duration.target >= 0) {
+          out.target = b.duration.target;
+        }
+        if (Number.isInteger(b.duration.maxIterations) && b.duration.maxIterations > 0) {
+          out.maxIterations = b.duration.maxIterations;
+        }
+      }
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -617,7 +626,7 @@
       //   trigger.when  ∈ scroll-range | page-load | scroll-key |
       //                   in-view-partial | in-view-full |
       //                   after-previous
-      //   duration.mode ∈ scroll | time | loop | pingpong
+      //   duration.mode ∈ scroll | time | loop | pingpong | loopTo
       // Activation timestamp per block (activationState[i]) is the
       // moment the block crossed its trigger; time-based durations
       // measure elapsed from there + trigger.delay.
@@ -689,6 +698,28 @@
       // from when the user actually reached the trigger, not
       // page load).
       const activationState = blocks.map(function () { return null; });
+
+      // v0.8.23: loopTo bookkeeping (only meaningful for blocks
+      // whose duration.mode === 'loopTo').
+      //   loopOffset[i]      snapshot of the sequence's cumulative
+      //                      (tx, ty, rot) at the instant this
+      //                      block activated — what the loop will
+      //                      undo over its `seconds`. Re-snapshotted
+      //                      each iteration (cleared on reset).
+      //   loopPlayed[i]      one-shot guard: did the current play
+      //                      already fire its completion handler?
+      //                      Prevents re-firing the reset every
+      //                      frame after bp hits 1.
+      //   loopIterCount[i]   how many iterations the loop has
+      //                      completed. Compared to maxIterations.
+      //   loopDone[i]        true once the iteration cap is hit;
+      //                      the block stays at bp=1 (line parked
+      //                      at the target's start position) and
+      //                      stops triggering further resets.
+      const loopOffset    = blocks.map(function () { return null; });
+      const loopPlayed    = blocks.map(function () { return false; });
+      const loopIterCount = blocks.map(function () { return 0; });
+      const loopDone      = blocks.map(function () { return false; });
 
       // For each non-scroll duration block, schedule its
       // activation per the `when` axis. scroll-range activations
@@ -842,7 +873,7 @@
         if (t <= 0) return 0;
         const dur = (b.duration && b.duration.seconds > 0) ? b.duration.seconds : 1;
         let raw;
-        if (mode === 'time') {
+        if (mode === 'time' || mode === 'loopTo') {
           raw = Math.min(1, t / dur);
         } else if (mode === 'loop') {
           raw = (t / dur) % 1;
@@ -853,6 +884,65 @@
         } else {
           raw = 0;
         }
+
+        // v0.8.23: loopTo housekeeping. (a) On the first frame
+        // post-activation snapshot the offset we'll undo — sum of
+        // tx/ty/rot over time-mode blocks in [target..idx). That
+        // chain has just finished (loopTo is normally triggered
+        // 'after-previous' off the last chain link), so each
+        // contributor is at bp=1 and authored deltas equal the
+        // displayed offset. (b) When raw hits 1, fire the
+        // completion exactly once: bump the iteration counter; if
+        // a cap was set and we've reached it, stay parked at bp=1
+        // forever (line at the target's start position); otherwise
+        // re-activate the target and clear the chain so it replays.
+        if (mode === 'loopTo') {
+          if (loopOffset[idx] == null) {
+            const K0 = (b.duration && Number.isInteger(b.duration.target))
+                       ? b.duration.target : -1;
+            let sx = 0, sy = 0, sr = 0;
+            if (K0 >= 0 && K0 < idx) {
+              for (let j = K0; j < idx; j++) {
+                const bj = blocks[j];
+                const bjm = bj && bj.duration && bj.duration.mode;
+                if (bjm === 'time') {
+                  sx += bj.tx  || 0;
+                  sy += bj.ty  || 0;
+                  sr += bj.rot || 0;
+                }
+              }
+            }
+            loopOffset[idx] = { x: sx, y: sy, rot: sr };
+          }
+          if (raw >= 1 && !loopPlayed[idx] && !loopDone[idx]) {
+            loopPlayed[idx] = true;
+            loopIterCount[idx]++;
+            const maxIter = (b.duration && Number.isInteger(b.duration.maxIterations)
+                              && b.duration.maxIterations > 0)
+                            ? b.duration.maxIterations : 0;
+            const K = (b.duration && Number.isInteger(b.duration.target))
+                      ? b.duration.target : -1;
+            if (maxIter > 0 && loopIterCount[idx] >= maxIter) {
+              loopDone[idx] = true;
+              // Stay parked: bp clamped to 1, contribution stays
+              // at -loopOffset (cancels the chain so the line
+              // rests at the target's start position).
+            } else if (K >= 0 && K < idx) {
+              const pEnd = activationState[idx] + delay + dur;
+              activationState[K] = pEnd;
+              for (let j = K + 1; j <= idx; j++) {
+                activationState[j] = null;
+              }
+              loopOffset[idx] = null;
+              loopPlayed[idx] = false;
+            }
+            // K invalid (tampered data): we incremented the
+            // counter but there's no chain to restart — block
+            // just stays at bp=1, contribution 0 (loopOffset
+            // snapshot was all zeros). Harmless.
+          }
+        }
+
         return blockEases[idx](raw);
       };
       // v0.8.17: drift accumulator support.
@@ -905,6 +995,21 @@
         for (let i = 0; i < blocks.length; i++) {
           const b  = blocks[i];
           const bp = blockProg(b, i, scrollP, nowSec);
+          // v0.8.23: loopTo blocks contribute -bp * snapshot. The
+          // snapshot equals the chain's accumulated offset at the
+          // moment loopTo activated, so bp=1 cancels the chain
+          // exactly and parks the line at the target block's
+          // start position. Authored tx/ty/rot fields are ignored
+          // (the editor doesn't expose them on loopTo blocks).
+          if (b.duration && b.duration.mode === 'loopTo') {
+            const off = loopOffset[i];
+            if (off) {
+              tx  -= bp * off.x;
+              ty  -= bp * off.y;
+              rot -= bp * off.rot;
+            }
+            continue;
+          }
           tx  += b.driftX ? blockDrift[i].x : bp * b.tx;
           ty  += b.driftY ? blockDrift[i].y : bp * b.ty;
           rot += bp * b.rot;

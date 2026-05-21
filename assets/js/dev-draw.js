@@ -128,8 +128,11 @@
     //   trigger: { when, range?, selector?, delay }
     //     when ∈ { scroll-range, page-load, scroll-key,
     //              in-view-partial, in-view-full, after-previous }
-    //   duration: { mode, seconds?, easing? }
-    //     mode ∈ { scroll, time, loop, pingpong }
+    //   duration: { mode, seconds?, easing?, target?, maxIterations? }
+    //     mode ∈ { scroll, time, loop, pingpong, loopTo }
+    //     target, maxIterations: loopTo only (target = index of an
+    //     earlier time-mode block to return to; maxIterations = 0/
+    //     missing means run forever, else stop after N iterations).
     //
     // Old shapes are healed in-place: legacy block.range / legacy
     // trigger.type fall back to the new shape via cloneBehaviorTrigger
@@ -169,6 +172,15 @@
       const out = { mode: b.duration.mode };
       if (typeof b.duration.seconds === 'number') out.seconds = b.duration.seconds;
       if (b.duration.easing)                       out.easing  = String(b.duration.easing);
+      // v0.8.23: loopTo carries a target block index + optional cap.
+      if (b.duration.mode === 'loopTo') {
+        if (Number.isInteger(b.duration.target) && b.duration.target >= 0) {
+          out.target = b.duration.target;
+        }
+        if (Number.isInteger(b.duration.maxIterations) && b.duration.maxIterations > 0) {
+          out.maxIterations = b.duration.maxIterations;
+        }
+      }
       return out;
     }
     // Legacy: trigger.type 'time' carried duration seconds.
@@ -4150,6 +4162,25 @@
       if (value === 'scroll') {
         delete b.duration.seconds;
       }
+      // v0.8.23: loopTo needs a target index. Seed with the
+      // earliest time-mode block before this one so the user
+      // sees a working default; if they wanted a different
+      // target they can pick from the dropdown.
+      if (value === 'loopTo') {
+        if (!Number.isInteger(b.duration.target)) {
+          for (let j = 0; j < blockIdx; j++) {
+            const bj = line.behaviors[j];
+            const bjm = bj && bj.duration && bj.duration.mode;
+            if (bjm === 'time') { b.duration.target = j; break; }
+          }
+        }
+      } else {
+        // Switching away from loopTo: clear loopTo-only fields so
+        // the data model doesn't carry stale config on a block
+        // that no longer uses them. Re-entering loopTo re-seeds.
+        delete b.duration.target;
+        delete b.duration.maxIterations;
+      }
     } else if (key === 'seconds') {
       let v = Number(value);
       if (!Number.isFinite(v) || v <= 0) v = 0.01;
@@ -4159,6 +4190,22 @@
         delete b.duration.easing;
       } else {
         b.duration.easing = String(value);
+      }
+    } else if (key === 'target') {
+      // v0.8.23: loopTo target = index of an earlier block.
+      const v = Math.floor(Number(value));
+      if (Number.isInteger(v) && v >= 0 && v < blockIdx) {
+        b.duration.target = v;
+      } else {
+        delete b.duration.target;
+      }
+    } else if (key === 'maxIterations') {
+      // 0 / blank / non-positive = run forever (clear the cap).
+      const v = Math.floor(Number(value));
+      if (Number.isFinite(v) && v > 0) {
+        b.duration.maxIterations = v;
+      } else {
+        delete b.duration.maxIterations;
       }
     }
   }
@@ -6654,6 +6701,15 @@
       prog = 'then loops every ' + secs + ease;
     } else if (dmode === 'pingpong') {
       prog = 'then ping-pongs every ' + secs + ease;
+    } else if (dmode === 'loopTo') {
+      // v0.8.23
+      const tgt = Number.isInteger(duration.target) ? duration.target : null;
+      const tgtTxt = (tgt != null) ? 'block ' + (tgt + 1) : '(no target set)';
+      const cap   = (Number.isInteger(duration.maxIterations) && duration.maxIterations > 0)
+                    ? ' (' + duration.maxIterations + ' iterations max)' : ' (forever)';
+      prog = 'then animates over ' + secs + ease
+           + ' back to the position where ' + tgtTxt + ' started, ' +
+           'and replays the chain from there' + cap;
     } else {
       prog = 'progress mode: ' + dmode;
     }
@@ -6907,7 +6963,18 @@
           'Pick a different activation OR a different progress mode.' },
       { value: 'time',     label: 'Timed run (seconds)' },
       { value: 'loop',     label: 'Loop forever' },
-      { value: 'pingpong', label: 'Ping-pong forever' }
+      { value: 'pingpong', label: 'Ping-pong forever' },
+      // v0.8.23: loopTo turns the preceding sequence into a
+      // continuous oscillating loop — over `seconds`, animate back
+      // to where the target block started, then replay the chain.
+      // Reuses the same "earlier timed block exists?" gate as the
+      // after-previous trigger, since both need a finite anchor.
+      { value: 'loopTo',   label: 'Loop back to earlier block',
+        disabledIf: prevTimedIdx < 0,
+        disabledReason: 'Loop-back needs an earlier Timed block to ' +
+          'return to. Add at least one block above this one with ' +
+          'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
+          'ping-pong blocks have no fixed start position to anchor to.' }
     ];
     card.appendChild(behaviorButtonGroup('Progress', dmode, durationOpts,
       function (v) { updateBehaviorDuration(line.id, blockIdx, 'mode', v); },
@@ -6918,13 +6985,42 @@
     // and has no per-block time/easing). Lets the user see the
     // values they had set under Timed/Loop/Ping-pong even after
     // switching back to Scroll-driven.
-    card.appendChild(setInactive(numberField('Seconds', duration.seconds || 1, function (v) {
+    const secondsLabel = (dmode === 'loopTo') ? 'Return time (s)' : 'Seconds';
+    card.appendChild(setInactive(numberField(secondsLabel, duration.seconds || 1, function (v) {
       updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
     }), dmode === 'scroll'));
     card.appendChild(setInactive(selectField('Easing', duration.easing || 'linear',
       EASING_OPTIONS,
       function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }),
       dmode === 'scroll'));
+
+    // v0.8.23: loopTo-specific fields — target picker (earlier
+    // time-mode blocks only) + optional max-iterations cap. When
+    // dmode === 'loopTo' we stop rendering after these because the
+    // per-block tx/ty/rot/drift/draw-in fields don't apply: a loopTo
+    // block's contribution is computed at runtime from the chain it's
+    // returning over, not from authored deltas. Fields stay in the
+    // data model and reappear if the user flips Progress back.
+    if (dmode === 'loopTo') {
+      const targets = [];
+      for (let j = 0; j < blockIdx; j++) {
+        const bj = line.behaviors && line.behaviors[j];
+        const bjm = bj && bj.duration && bj.duration.mode;
+        if (bjm === 'time') {
+          targets.push({ value: String(j), label: 'Block ' + (j + 1) + ' (Timed)' });
+        }
+      }
+      const curTarget = Number.isInteger(duration.target) ? String(duration.target) : '';
+      card.appendChild(selectField('Loop back to', curTarget, targets, function (v) {
+        updateBehaviorDuration(line.id, blockIdx, 'target', parseInt(v, 10));
+      }));
+      const maxIter = (Number.isInteger(duration.maxIterations) && duration.maxIterations > 0)
+                      ? duration.maxIterations : 0;
+      card.appendChild(numberField('Max iterations (0 = forever)', maxIter, function (v) {
+        updateBehaviorDuration(line.id, blockIdx, 'maxIterations', v);
+      }));
+      return card;
+    }
 
     // v0.8.17: open-ended translate mode. 'Fixed' = current
     // behavior (translateX/Y are final displacements weighted
