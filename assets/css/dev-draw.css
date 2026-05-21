@@ -336,6 +336,15 @@ body.editor {
   color: #c0c0c0;
   font-weight: 600;
 }
+/* v0.8.47: small muted count of behavior blocks, right-aligned in
+   the panel header. Same color family as the meta line under the
+   title so it reads as a secondary stat, not as a clickable chip. */
+.ed-panel-head-count {
+  color: #909090;
+  font-size: 0.78em;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
 .ed-mini {
   background: transparent;
   color: var(--accent);

@@ -7570,6 +7570,17 @@
     const h3 = document.createElement('h3');
     h3.textContent = line.name ? line.name : 'Line';
     head.appendChild(h3);
+    // v0.8.47: behavior count badge in the header, right-aligned —
+    // the parent .ed-panel-head is already flex/space-between, so a
+    // second child lands on the opposite end without extra layout.
+    // Always shown (including "0 behaviors") so the user sees the
+    // value without inferring its absence.
+    const bCount = Array.isArray(line.behaviors) ? line.behaviors.length : 0;
+    const countBadge = document.createElement('span');
+    countBadge.className = 'ed-panel-head-count';
+    countBadge.textContent = bCount + ' behavior' + (bCount === 1 ? '' : 's');
+    countBadge.title = 'Behavior blocks on this object';
+    head.appendChild(countBadge);
     selectionPanel.appendChild(head);
 
     const meta = document.createElement('p');
