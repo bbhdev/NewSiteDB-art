@@ -5011,6 +5011,296 @@
     saveInput.focus();
   }
 
+  // v0.8.43: orphan detection + "Find orphans" maintenance dialog.
+  // Three categories, conservative semantics:
+  //   - Masters in state.masters that no class has an instance of.
+  //   - Palette colors not referenced by any master.stroke,
+  //     line.stroke, line.overrides.stroke, or group.defaults.stroke.
+  //   - Per-class groups with zero lines (listed but opt-in via
+  //     checkbox since empty groups are often intentional).
+  function findOrphans() {
+    const masterUsage = {};
+    const colorUsage  = {};
+    Object.keys(state.byClass).forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket) return;
+      (bucket.lines || []).forEach(function (line) {
+        if (line.masterId) masterUsage[line.masterId] = (masterUsage[line.masterId] || 0) + 1;
+        if (line.stroke)   colorUsage[line.stroke]    = (colorUsage[line.stroke]    || 0) + 1;
+        if (line.overrides && line.overrides.stroke) {
+          colorUsage[line.overrides.stroke] = (colorUsage[line.overrides.stroke] || 0) + 1;
+        }
+      });
+      (bucket.groups || []).forEach(function (g) {
+        if (g.defaults && g.defaults.stroke) {
+          colorUsage[g.defaults.stroke] = (colorUsage[g.defaults.stroke] || 0) + 1;
+        }
+      });
+    });
+    (state.masters || []).forEach(function (m) {
+      if (m.stroke) colorUsage[m.stroke] = (colorUsage[m.stroke] || 0) + 1;
+    });
+    const orphanMasters = (state.masters || []).filter(function (m) {
+      return !(masterUsage[m.id] > 0);
+    });
+    const orphanColors = (state.palette || []).filter(function (c) {
+      return !(colorUsage[c.id] > 0);
+    });
+    const emptyGroupsByClass = {};
+    Object.keys(state.byClass).forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket) return;
+      const lineCounts = {};
+      (bucket.lines || []).forEach(function (l) {
+        if (l.groupId) lineCounts[l.groupId] = (lineCounts[l.groupId] || 0) + 1;
+      });
+      const empties = (bucket.groups || []).filter(function (g) {
+        return !(lineCounts[g.id] > 0);
+      });
+      if (empties.length) emptyGroupsByClass[cid] = empties;
+    });
+    return {
+      masters: orphanMasters,
+      colors:  orphanColors,
+      emptyGroupsByClass: emptyGroupsByClass
+    };
+  }
+
+  function showOrphansDialog() {
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal ed-orphans-modal';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Find orphans';
+    head.appendChild(title);
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close'; x.textContent = '×';
+    x.addEventListener('click', cleanup);
+    head.appendChild(x);
+    modal.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body ed-orphans-body';
+    modal.appendChild(body);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) cleanup(); });
+
+    // Track which empty groups the user has opted in to remove
+    // (checkbox state). Persisted across re-renders.
+    const groupCheckState = {}; // cid|gid → boolean
+
+    function render() {
+      body.innerHTML = '';
+      const orphans = findOrphans();
+      const nothing = !orphans.masters.length
+                   && !orphans.colors.length
+                   && !Object.keys(orphans.emptyGroupsByClass).length;
+      if (nothing) {
+        const ok = document.createElement('div');
+        ok.className = 'ed-orphans-empty';
+        ok.textContent = 'No orphans found. Everything in state.* is referenced.';
+        body.appendChild(ok);
+        return;
+      }
+
+      // ── Orphan masters ─────────────────────────────────────────
+      if (orphans.masters.length) {
+        body.appendChild(buildSection(
+          'Orphan masters',
+          orphans.masters.length + ' master record' + (orphans.masters.length === 1 ? '' : 's')
+            + ' with no instances in any class.',
+          function (removeAllBtn) {
+            removeAllBtn.addEventListener('click', function () {
+              if (!confirm('Remove all ' + orphans.masters.length + ' orphan masters?')) return;
+              const ids = orphans.masters.map(function (m) { return m.id; });
+              state.masters = state.masters.filter(function (m) { return ids.indexOf(m.id) === -1; });
+              commit();
+            });
+          },
+          orphans.masters.map(function (m) {
+            return {
+              label: m.name || m.id,
+              sub:   m.id + ' · ' + (m.kind || 'unknown'),
+              onRemove: function () {
+                state.masters = state.masters.filter(function (x) { return x.id !== m.id; });
+                commit();
+              }
+            };
+          })
+        ));
+      }
+
+      // ── Unused colors ──────────────────────────────────────────
+      if (orphans.colors.length) {
+        body.appendChild(buildSection(
+          'Unused colors',
+          orphans.colors.length + ' palette color' + (orphans.colors.length === 1 ? '' : 's')
+            + ' not referenced anywhere.',
+          function (removeAllBtn) {
+            removeAllBtn.addEventListener('click', function () {
+              if (!confirm('Remove all ' + orphans.colors.length + ' unused colors?')) return;
+              const ids = orphans.colors.map(function (c) { return c.id; });
+              state.palette = state.palette.filter(function (c) { return ids.indexOf(c.id) === -1; });
+              commit();
+            });
+          },
+          orphans.colors.map(function (c) {
+            return {
+              swatch: c.value,
+              label:  c.name || c.id,
+              sub:    c.value,
+              onRemove: function () {
+                state.palette = state.palette.filter(function (x) { return x.id !== c.id; });
+                commit();
+              }
+            };
+          })
+        ));
+      }
+
+      // ── Empty groups ───────────────────────────────────────────
+      const groupKeys = Object.keys(orphans.emptyGroupsByClass);
+      if (groupKeys.length) {
+        const section = document.createElement('div');
+        section.className = 'ed-orphans-section';
+        const h = document.createElement('h4');
+        const total = groupKeys.reduce(function (s, cid) {
+          return s + orphans.emptyGroupsByClass[cid].length;
+        }, 0);
+        h.textContent = 'Empty groups (' + total + ')';
+        section.appendChild(h);
+        const note = document.createElement('p');
+        note.className = 'ed-orphans-note';
+        note.textContent = 'Empty groups are often intentional (a placeholder you'
+          + ' plan to fill). Tick only the ones you want removed.';
+        section.appendChild(note);
+        groupKeys.forEach(function (cid) {
+          const cls = state.classes.find(function (c) { return c.id === cid; });
+          const clsLabel = (cls && cls.name) ? cls.name : cid;
+          const sub = document.createElement('div');
+          sub.className = 'ed-orphans-subhead';
+          sub.textContent = clsLabel;
+          section.appendChild(sub);
+          orphans.emptyGroupsByClass[cid].forEach(function (g) {
+            const key = cid + '|' + g.id;
+            const row = document.createElement('label');
+            row.className = 'ed-orphans-row ed-orphans-row-check';
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = !!groupCheckState[key];
+            chk.addEventListener('change', function () { groupCheckState[key] = chk.checked; });
+            row.appendChild(chk);
+            const nm = document.createElement('span');
+            nm.className = 'ed-orphans-name';
+            nm.textContent = g.name || g.id;
+            row.appendChild(nm);
+            section.appendChild(row);
+          });
+        });
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'ed-mini ed-danger';
+        removeBtn.textContent = 'Remove checked';
+        removeBtn.addEventListener('click', function () {
+          const todo = []; // [{cid, gid}]
+          Object.keys(groupCheckState).forEach(function (key) {
+            if (!groupCheckState[key]) return;
+            const i = key.indexOf('|');
+            if (i < 0) return;
+            todo.push({ cid: key.slice(0, i), gid: key.slice(i + 1) });
+          });
+          if (!todo.length) { alert('No groups checked.'); return; }
+          if (!confirm('Remove ' + todo.length + ' empty group' + (todo.length === 1 ? '' : 's') + '?')) return;
+          todo.forEach(function (t) {
+            const bucket = state.byClass[t.cid];
+            if (!bucket || !Array.isArray(bucket.groups)) return;
+            bucket.groups = bucket.groups.filter(function (g) { return g.id !== t.gid; });
+          });
+          Object.keys(groupCheckState).forEach(function (k) { delete groupCheckState[k]; });
+          commit();
+        });
+        section.appendChild(removeBtn);
+        body.appendChild(section);
+      }
+    }
+
+    function buildSection(heading, summary, wireRemoveAll, items) {
+      const section = document.createElement('div');
+      section.className = 'ed-orphans-section';
+      const head = document.createElement('div');
+      head.className = 'ed-orphans-section-head';
+      const h = document.createElement('h4');
+      h.textContent = heading + ' (' + items.length + ')';
+      head.appendChild(h);
+      const removeAllBtn = document.createElement('button');
+      removeAllBtn.type = 'button';
+      removeAllBtn.className = 'ed-mini ed-danger';
+      removeAllBtn.textContent = 'Remove all';
+      head.appendChild(removeAllBtn);
+      wireRemoveAll(removeAllBtn);
+      section.appendChild(head);
+      if (summary) {
+        const p = document.createElement('p');
+        p.className = 'ed-orphans-note';
+        p.textContent = summary;
+        section.appendChild(p);
+      }
+      items.forEach(function (it) {
+        const row = document.createElement('div');
+        row.className = 'ed-orphans-row';
+        if (it.swatch) {
+          const sw = document.createElement('span');
+          sw.className = 'ed-orphans-swatch';
+          sw.style.background = it.swatch;
+          row.appendChild(sw);
+        }
+        const labelWrap = document.createElement('div');
+        labelWrap.className = 'ed-orphans-labels';
+        const nm = document.createElement('div');
+        nm.className = 'ed-orphans-name';
+        nm.textContent = it.label;
+        labelWrap.appendChild(nm);
+        if (it.sub) {
+          const s = document.createElement('div');
+          s.className = 'ed-orphans-sub';
+          s.textContent = it.sub;
+          labelWrap.appendChild(s);
+        }
+        row.appendChild(labelWrap);
+        const rmBtn = document.createElement('button');
+        rmBtn.type = 'button';
+        rmBtn.className = 'ed-mini ed-danger';
+        rmBtn.textContent = 'Remove';
+        rmBtn.addEventListener('click', function () { it.onRemove(); });
+        row.appendChild(rmBtn);
+        section.appendChild(row);
+      });
+      return section;
+    }
+
+    function commit() {
+      state.dirty = true;
+      snapshot();
+      renderAll();
+      render(); // re-detect + re-render the orphans list
+    }
+
+    render();
+  }
+
   function showLibraryDialog() {
     const overlay = document.createElement('div');
     overlay.className = 'ed-modal-overlay';
@@ -5041,6 +5331,17 @@
     snapBtn.title = 'Save / load named copies of every content file';
     snapBtn.addEventListener('click', function () { showSnapshotsDialog(); });
     head.appendChild(snapBtn);
+
+    // v0.8.43: orphans cleanup affordance, same idiom as Snapshots.
+    // Opens a sibling overlay listing orphan masters, unused colors,
+    // and empty groups, each with per-item Remove + Remove-all.
+    const orphBtn = document.createElement('button');
+    orphBtn.type = 'button';
+    orphBtn.className = 'ed-library-snapshots-btn';
+    orphBtn.textContent = '🧹 Find orphans';
+    orphBtn.title = 'Detect masters with no instances, unused palette colors, and empty groups — remove them piecemeal or in bulk.';
+    orphBtn.addEventListener('click', function () { showOrphansDialog(); });
+    head.appendChild(orphBtn);
 
     // Class filter buttons — one per screen class, plus an "All"
     // reset. Active button shows accent border like the class
@@ -5194,10 +5495,12 @@
       const chips = document.createElement('div');
       chips.className = 'ed-library-chips';
       const usage = countMasterUsage(master.id);
+      let totalUsage = 0;
       state.pageConfig.useClasses.forEach(function (cid) {
         const cls = state.classes.find(function (c) { return c.id === cid; });
         const label = cls ? cls.name : cid;
         const count = usage[cid] || 0;
+        totalUsage += count;
         const chip = document.createElement('span');
         chip.className = 'ed-library-chip' + (count === 0 ? ' is-absent' : '');
         chip.textContent = label + (count > 1 ? ' ×' + count : '');
@@ -5206,6 +5509,18 @@
           : count + ' instance' + (count === 1 ? '' : 's') + ' in ' + label;
         chips.appendChild(chip);
       });
+      // v0.8.43: dim the whole row + add a "0 instances" badge when
+      // the master has no instances anywhere. Surfaces orphan
+      // masters without needing to open the Find-orphans dialog;
+      // the dialog still handles bulk cleanup.
+      if (totalUsage === 0) {
+        row.classList.add('is-orphan');
+        const badge = document.createElement('span');
+        badge.className = 'ed-library-chip ed-library-chip-orphan';
+        badge.textContent = '0 instances';
+        badge.title = 'No instances anywhere — orphan master, safe to delete.';
+        chips.appendChild(badge);
+      }
       meta.appendChild(chips);
 
       // Scope summary.
