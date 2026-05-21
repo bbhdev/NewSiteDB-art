@@ -1145,10 +1145,12 @@ body.editor input[type="range"] {
   font-weight: 600;
 }
 .ed-create-import-btn {
-  /* Compact: takes only the space its content needs, not the
-     full column width like the type tiles. Hover behavior comes
-     from the shared .ed-create-type rules. */
-  max-width: 26rem;
+  /* Compact: stays left-aligned, but wide enough that the
+     description text doesn't wrap mid-clause. 36rem comfortably
+     fits the longest line of the explanation; auto width below
+     that if the parent is narrower. */
+  max-width: 36rem;
+  width: 100%;
 }
 
 /* v0.8.40: inline-SVG arrow icons (.ed-arrow-icon = down,
@@ -1158,6 +1160,11 @@ body.editor input[type="range"] {
    aliasing are identical. width:1.1em scales with surrounding
    text but stays cap-height-ish so it doesn't dominate the row. */
 .ed-arrow-icon {
+  /* Explicit inline-block: SVG default `display` is inconsistent
+     across browsers when CSS width/height is set, and without it
+     the icon got pushed to its own line above the button title
+     in some renderings. */
+  display: inline-block;
   width: 1.1em;
   height: 1.1em;
   vertical-align: -0.18em;
