@@ -3818,27 +3818,24 @@
   // of band).
   function moveLinesToGroup(lineIds, newGroupId) {
     let changed = false;
-    const movedMasterIds = {};
+    // v0.8.30: track groupId changes as { masterId: groupName } so
+    // fanOutZReorder can mirror them in sibling classes by name.
+    // Replaces the old per-line forSiblingsOf loop — fanOutZReorder
+    // also takes care of repositioning sibling lines, which the
+    // previous fan-out skipped (group changed but Z didn't follow).
+    const groupIdChanges = {};
+    const targetGroup = state.groups.find(function (g) { return g.id === newGroupId; });
+    const targetName = targetGroup ? targetGroup.name : null;
     lineIds.forEach(function (id) {
       const line = state.lines.find(function (l) { return l.id === id; });
       if (!line || line.groupId === newGroupId) return;
       line.groupId = newGroupId;
-      if (line.masterId) movedMasterIds[line.masterId] = true;
+      if (line.masterId && targetName) {
+        groupIdChanges[line.masterId] = targetName;
+      }
       changed = true;
     });
     if (!changed) return;
-    if (modeIsAll()) {
-      const targetGroup = state.groups.find(function (g) { return g.id === newGroupId; });
-      const targetName = targetGroup ? targetGroup.name : null;
-      if (targetName) {
-        Object.keys(movedMasterIds).forEach(function (mid) {
-          forSiblingsOf(mid, function (sib, cid, bucket) {
-            const peer = bucket.groups.find(function (g) { return g.name === targetName; });
-            if (peer) sib.groupId = peer.id;
-          });
-        });
-      }
-    }
     // Auto-open the destination group so the user sees the move land.
     state.openGroupIds[newGroupId] = true;
     state.activeGroupId = newGroupId;
@@ -3846,6 +3843,7 @@
     // moved line lands at the end of the destination group's
     // run in state.lines, matching where the sidebar shows it.
     rebuildLinesInGroupOrder();
+    fanOutZReorder({ groupIdChanges: groupIdChanges });
     state.dirty = true;
     snapshot();
     renderAll();
@@ -3888,11 +3886,22 @@
     const anchorIdx = state.lines.findIndex(function (l) { return l.id === anchorLineId; });
     if (anchorIdx === -1) return;
     const insertAt = (where === 'before') ? anchorIdx : anchorIdx + 1;
+    // v0.8.30: track which masterIds actually cross groups in this
+    // operation. fanOutZReorder uses this list — and ONLY this list —
+    // to update sibling groupIds, so siblings that intentionally
+    // diverged on groupId for an unrelated master aren't dragged
+    // along by a Z reorder elsewhere.
+    const groupIdChanges = {};
+    const anchorGroupName = (anchorGroupId
+      && (state.groups.find(function (g) { return g.id === anchorGroupId; }) || {}).name) || null;
     let groupChanged = false;
     draggedLines.forEach(function (l) {
       if (anchorGroupId && l.groupId !== anchorGroupId) {
         l.groupId = anchorGroupId;
         groupChanged = true;
+        if (l.masterId && anchorGroupName) {
+          groupIdChanges[l.masterId] = anchorGroupName;
+        }
       }
     });
     state.lines.splice.apply(state.lines, [insertAt, 0].concat(draggedLines));
@@ -3906,6 +3915,7 @@
     // matching canvas Z (renderLines + decomposeForSave both walk
     // state.lines top-to-bottom).
     rebuildLinesInGroupOrder();
+    fanOutZReorder({ groupIdChanges: groupIdChanges });
     state.dirty = true;
     snapshot();
     renderAll();
@@ -3918,16 +3928,131 @@
   // groupId doesn't match any group (orphans) sort to the end so
   // they're still visible on canvas; the user can re-home them.
   function rebuildLinesInGroupOrder() {
+    rebuildLinesInGroupOrderFor(state.byClass[state.classId]);
+  }
+  function rebuildLinesInGroupOrderFor(bucket) {
+    if (!bucket || !Array.isArray(bucket.groups) || !Array.isArray(bucket.lines)) return;
     const groupIdx = {};
-    state.groups.forEach(function (g, i) { groupIdx[g.id] = i; });
-    const withPos = state.lines.map(function (l, i) { return { l: l, i: i }; });
+    bucket.groups.forEach(function (g, i) { groupIdx[g.id] = i; });
+    const withPos = bucket.lines.map(function (l, i) { return { l: l, i: i }; });
     withPos.sort(function (a, b) {
       const ag = (groupIdx[a.l.groupId] != null) ? groupIdx[a.l.groupId] : Infinity;
       const bg = (groupIdx[b.l.groupId] != null) ? groupIdx[b.l.groupId] : Infinity;
       if (ag !== bg) return ag - bg;
       return a.i - b.i;
     });
-    state.lines = withPos.map(function (x) { return x.l; });
+    bucket.lines = withPos.map(function (x) { return x.l; });
+  }
+
+  // v0.8.30: orphan-preserving reorder. Given sibling's PRE-reorder
+  // sequence and current's NEW order over the shared items, return
+  // the sibling's NEW sequence: shared items reordered to match
+  // current; orphans (items in sibSeq with no counterpart in
+  // currentNewOrder) anchored to their immediate predecessor
+  // shared item from sibSeq, falling back to "before everything"
+  // when the orphan sits before the first shared item.
+  //
+  // sibIdentity:   (sibItem) → identity key
+  // curIdentity:   (curItem) → identity key (typically the same
+  //                identity domain — group name, master id, etc.)
+  function applyReorderToSibling(sibSeq, currentNewOrder, sibIdentity, curIdentity) {
+    if (!Array.isArray(sibSeq) || !sibSeq.length) return sibSeq || [];
+    const curIds = {};
+    currentNewOrder.forEach(function (c) { curIds[curIdentity(c)] = true; });
+    // Bucket orphans by the immediate-predecessor shared item they
+    // follow in sibSeq. Orphans before any shared item go to head.
+    const head = [];
+    const trailingByIdentity = {};
+    const sharedBySibIdentity = {};
+    let lastSharedId = null;
+    sibSeq.forEach(function (item) {
+      const id = sibIdentity(item);
+      if (curIds[id]) {
+        lastSharedId = id;
+        sharedBySibIdentity[id] = item;
+        if (!trailingByIdentity[id]) trailingByIdentity[id] = [];
+      } else {
+        if (lastSharedId == null) head.push(item);
+        else trailingByIdentity[lastSharedId].push(item);
+      }
+    });
+    // Re-emit: head + (each shared in current's new order, then its trailing orphans).
+    const out = head.slice();
+    currentNewOrder.forEach(function (c) {
+      const id = curIdentity(c);
+      const sib = sharedBySibIdentity[id];
+      if (!sib) return; // current item has no counterpart in this sibling — skip.
+      out.push(sib);
+      const trail = trailingByIdentity[id];
+      if (trail && trail.length) out.push.apply(out, trail);
+    });
+    return out;
+  }
+
+  // v0.8.30: ALL-mode fan-out for Z reorders. Applies the
+  // current class's new (group order, line order, groupId
+  // changes) to every sibling class:
+  //   1. Sibling groups reorder to match current's group-name
+  //      sequence; sibling-only groups float with their
+  //      predecessor.
+  //   2. Sibling lines whose masterId appears in opts.groupIdChanges
+  //      get their groupId re-homed by group-name lookup (only
+  //      the explicit list — Z drag isn't supposed to silently
+  //      sync siblings that intentionally diverged on groupId).
+  //   3. Sibling lines reorder by masterId to match current's
+  //      line order; sibling-only lines (master not in current)
+  //      float with their predecessor master.
+  //   4. rebuildLinesInGroupOrderFor flattens the sibling's lines
+  //      by its OWN group order, same invariant the current class
+  //      maintains.
+  // opts.groupIdChanges: { masterId: targetGroupName | null }.
+  //   Empty / omitted = pure positional reorder; nothing in
+  //   sibling switches groups.
+  function fanOutZReorder(opts) {
+    if (!modeIsAll()) return;
+    opts = opts || {};
+    const groupIdChanges = opts.groupIdChanges || {};
+    const curGroupOrder = state.groups.slice();
+    const curMasterOrder = state.lines
+      .map(function (l) { return l.masterId; })
+      .filter(Boolean);
+
+    state.pageConfig.useClasses.forEach(function (cid) {
+      if (cid === state.classId) return;
+      const bucket = state.byClass[cid];
+      if (!bucket) return;
+
+      if (Array.isArray(bucket.groups)) {
+        bucket.groups = applyReorderToSibling(
+          bucket.groups,
+          curGroupOrder,
+          function (g) { return g.name; },
+          function (g) { return g.name; }
+        );
+      }
+      if (!Array.isArray(bucket.lines)) return;
+
+      const sibGroupIdByName = {};
+      (bucket.groups || []).forEach(function (g) { sibGroupIdByName[g.name] = g.id; });
+      Object.keys(groupIdChanges).forEach(function (mid) {
+        const tgtName = groupIdChanges[mid];
+        if (tgtName == null) return;
+        const tgtId = sibGroupIdByName[tgtName];
+        if (!tgtId) return;
+        bucket.lines.forEach(function (sibLine) {
+          if (sibLine.masterId === mid && sibLine.groupId !== tgtId) {
+            sibLine.groupId = tgtId;
+          }
+        });
+      });
+      bucket.lines = applyReorderToSibling(
+        bucket.lines,
+        curMasterOrder,
+        function (sibLine) { return sibLine.masterId || ('__nm__' + sibLine.id); },
+        function (mid) { return mid; }
+      );
+      rebuildLinesInGroupOrderFor(bucket);
+    });
   }
 
   // v0.8.29: drag-to-reorder for groups themselves. State.groups
@@ -3935,9 +4060,11 @@
   // rebuild above it also drives canvas Z (earlier group = drawn
   // first = behind). Same toIdx contract as moveBehaviorBlock —
   // pre-move insertion index, so fromIdx → toIdx reads as "place
-  // this group at slot toIdx". 'all' mode is sidestepped: each
-  // class can have its own visual stacking, and the on-disk
-  // group records are per-class anyway.
+  // this group at slot toIdx".
+  // v0.8.30: in ALL mode, fan out the reorder to sibling classes
+  // via group-name match. Pure positional change — no groupId
+  // rewrites, so sibling-only groups float with their
+  // predecessor and no cross-class group dependency is rewritten.
   function moveGroup(fromIdx, toIdx) {
     if (!Array.isArray(state.groups)) return;
     if (fromIdx < 0 || fromIdx >= state.groups.length) return;
@@ -3948,6 +4075,7 @@
     const insertAt = (toIdx > fromIdx) ? toIdx - 1 : toIdx;
     state.groups.splice(insertAt, 0, moved);
     rebuildLinesInGroupOrder();
+    fanOutZReorder();
     state.dirty = true;
     snapshot();
     renderAll();
