@@ -88,6 +88,7 @@ $payload = json_encode([
     'byClass'    => $byClass,
     'palette'    => $palette,
     'svgImports' => $svgImports,
+    'version'    => option('version', 'dev'),
 ], JSON_UNESCAPED_SLASHES);
 ?>
 <svg id="lines-layer" viewBox="<?= art_viewbox_attr($initialDims) ?>" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>

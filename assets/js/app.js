@@ -278,6 +278,12 @@
     const byClass    = (data.byClass && typeof data.byClass === 'object') ? data.byClass : {};
     const palette    = Array.isArray(data.palette)    ? data.palette    : [];
     const svgImports = Array.isArray(data.svgImports) ? data.svgImports : [];
+    // v0.8.31: app version is surfaced inside the page-area outline
+    // when the editor's "show page area" diagnostic is on, so the
+    // author can confirm at a glance which build is rendering on a
+    // page they're poking at. Falls back to 'dev' if the payload
+    // didn't include it (older saves).
+    const appVersion = (typeof data.version === 'string' && data.version) ? data.version : 'dev';
 
     const useClasses = Array.isArray(pageCfg.useClasses) ? pageCfg.useClasses : [];
     const dimsByClass = (pageCfg.dims && typeof pageCfg.dims === 'object') ? pageCfg.dims : {};
@@ -483,7 +489,7 @@
     // own when authors place objects in the bleed area and want to
     // see where the visible page sits, without the label clutter.
     if (hasLS && localStorage.getItem('ed-show-page-area') === '1') {
-      renderRuntimePageGuide(layer, page);
+      renderRuntimePageGuide(layer, page, appVersion);
     }
     if (diagMode) {
       renderRuntimeDiagGrid(layer, page);
@@ -1333,7 +1339,7 @@
     layer.insertBefore(g, layer.firstChild);
   }
 
-  function renderRuntimePageGuide(layer, page) {
+  function renderRuntimePageGuide(layer, page, version) {
     const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
     const pw = page.pageW, ph = page.pageH;
 
@@ -1349,6 +1355,24 @@
     rect.style.vectorEffect = 'non-scaling-stroke';
     rect.style.pointerEvents = 'none';
     layer.appendChild(rect);
+
+    // v0.8.31: version badge in the top-right of the page area,
+    // inset from the dashed outline so it reads as outline metadata
+    // (not a corner-coordinate label). Same color family as the
+    // outline + corner labels; tagged with the page-guide so it
+    // appears and disappears together with the rest of the guide.
+    if (version) {
+      const vt = document.createElementNS(SVG_NS_LOCAL, 'text');
+      vt.setAttribute('x', pw - 8);
+      vt.setAttribute('y', 16);
+      vt.setAttribute('text-anchor', 'end');
+      vt.setAttribute('fill', '#9a4');
+      vt.setAttribute('font-family', 'ui-monospace, monospace');
+      vt.setAttribute('font-size', 11);
+      vt.style.pointerEvents = 'none';
+      vt.textContent = 'v' + version;
+      layer.appendChild(vt);
+    }
 
     // Reference markers — page-area corners + center. Each is a small
     // crosshair + coord label so the author can spot-check the

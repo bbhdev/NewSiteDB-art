@@ -868,28 +868,34 @@
     inp.value = String(current);
     inp.style.width = '5.5em';
     const pct = document.createElement('span'); pct.textContent = '%';
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'ed-mini';
-    reset.textContent = '100%';
-    reset.title = 'Reset to 100%';
-    reset.addEventListener('click', function () {
-      inp.value = '100';
-      apply();
-    });
     const range = document.createElement('span');
     range.style.color = '#888';
     range.style.fontSize = '0.85em';
     range.textContent = 'range 25–400';
     row.appendChild(inp);
     row.appendChild(pct);
-    row.appendChild(reset);
     row.appendChild(range);
     body.appendChild(row);
     modal.appendChild(body);
 
     const btnRow = document.createElement('div');
     btnRow.className = 'ed-modal-buttons';
+    // v0.8.31: "100%" is a first-class action that commits and
+    // closes the dialog, just like Apply — promote it to the same
+    // visual weight (.ed-primary, accent orange) and put it on the
+    // buttons row. margin-right:auto pushes Cancel/Apply to the
+    // far end so the buttons read as "shortcut … Cancel / Apply".
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'ed-primary';
+    reset.textContent = '100%';
+    reset.title = 'Reset to 100% and apply';
+    reset.style.marginRight = 'auto';
+    reset.addEventListener('click', function () {
+      inp.value = '100';
+      apply();
+    });
+    btnRow.appendChild(reset);
     const cancel = document.createElement('button');
     cancel.textContent = 'Cancel';
     cancel.addEventListener('click', cleanup);
