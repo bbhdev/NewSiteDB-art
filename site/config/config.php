@@ -11,6 +11,14 @@ return [
   'version' => trim(@file_get_contents(__DIR__ . '/../../VERSION')) ?: 'dev',
 
   /*
+   * Schema version (integer). Bumped manually when the on-disk
+   * content/ shape changes in a way that older snapshots can't be
+   * loaded into. Read once here; used by the snapshot library so a
+   * snapshot taken at schema=N refuses to load on schema=N+1.
+   */
+  'schemaVersion' => (int)(trim(@file_get_contents(__DIR__ . '/../../SCHEMA_VERSION')) ?: '1'),
+
+  /*
    * Routes for the /dev/draw editor.
    *
    *   POST /dev/draw/save  — persists, atomically per save, every
@@ -27,6 +35,214 @@ return [
    *                          }
    */
   'routes' => [
+    /*
+     * Snapshot library — local backup/restore of content/.
+     *
+     *   GET  dev/draw/library/list   → { ok, schemaVersion, snapshots: [...] }
+     *   POST dev/draw/library/save   body { name } — copy content/ → library/<name>/content/
+     *   POST dev/draw/library/load   body { name } — refuse on schema mismatch, else
+     *                                                replace content/ from library/<name>/content/
+     *
+     * Snapshot folder layout:
+     *   library/<name>/meta.json     { savedAt, appVersion, schemaVersion }
+     *   library/<name>/content/      recursive copy of content/
+     *
+     * Names are validated against [A-Za-z0-9 _.-]{1,80} so a payload can't
+     * escape into a parent directory or shell-confuse the FS.
+     */
+    [
+      'pattern' => 'dev/draw/library/list',
+      'method'  => 'GET',
+      'action'  => function () {
+        $libRoot = realpath(__DIR__ . '/../../library') ?: (__DIR__ . '/../../library');
+        $out = [];
+        if (is_dir($libRoot)) {
+          $entries = scandir($libRoot);
+          if ($entries === false) $entries = [];
+          foreach ($entries as $e) {
+            if ($e === '.' || $e === '..' || $e[0] === '.') continue;
+            $p = $libRoot . '/' . $e;
+            if (!is_dir($p)) continue;
+            $meta = [];
+            $metaPath = $p . '/meta.json';
+            if (is_file($metaPath)) {
+              $meta = json_decode(@file_get_contents($metaPath), true) ?: [];
+            }
+            $out[] = [
+              'name'           => $e,
+              'savedAt'        => $meta['savedAt']        ?? null,
+              'appVersion'     => $meta['appVersion']     ?? null,
+              'schemaVersion'  => $meta['schemaVersion']  ?? null
+            ];
+          }
+          usort($out, function ($a, $b) {
+            return strcmp((string)($b['savedAt'] ?? ''), (string)($a['savedAt'] ?? ''));
+          });
+        }
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'schemaVersion' => option('schemaVersion'), 'snapshots' => $out]),
+          'application/json'
+        );
+      }
+    ],
+    [
+      'pattern' => 'dev/draw/library/save',
+      'method'  => 'POST',
+      'action'  => function () {
+        $body = kirby()->request()->body()->toArray();
+        $name = isset($body['name']) ? trim((string)$body['name']) : '';
+        if (!preg_match('/^[A-Za-z0-9 _.\-]{1,80}$/', $name)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Invalid snapshot name. Use letters, digits, space, underscore, dot, or hyphen (1–80 chars).']),
+            'application/json', 400
+          );
+        }
+        $libRoot = __DIR__ . '/../../library';
+        if (!is_dir($libRoot) && !mkdir($libRoot, 0755, true)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Could not create library/ directory.']),
+            'application/json', 500
+          );
+        }
+        $dest = $libRoot . '/' . $name;
+        if (is_dir($dest)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'A snapshot with that name already exists.']),
+            'application/json', 409
+          );
+        }
+        $contentSrc  = kirby()->root('content');
+        $contentDest = $dest . '/content';
+        if (!mkdir($contentDest, 0755, true)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Could not create snapshot directory.']),
+            'application/json', 500
+          );
+        }
+        // Recursive copy — content/ is small (JSON + .txt), simple
+        // iteration is fine. Skip dotfiles so .DS_Store and friends
+        // don't pollute the snapshot.
+        $copy = function ($srcDir, $dstDir) use (&$copy) {
+          if (!is_dir($dstDir) && !mkdir($dstDir, 0755, true)) return false;
+          $items = scandir($srcDir);
+          if ($items === false) return false;
+          foreach ($items as $it) {
+            if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+            $s = $srcDir . '/' . $it;
+            $d = $dstDir . '/' . $it;
+            if (is_dir($s)) {
+              if (!$copy($s, $d)) return false;
+            } else if (is_file($s)) {
+              if (copy($s, $d) === false) return false;
+            }
+          }
+          return true;
+        };
+        if (!$copy($contentSrc, $contentDest)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Failed to copy content into snapshot.']),
+            'application/json', 500
+          );
+        }
+        $meta = [
+          'name'           => $name,
+          'savedAt'        => date('c'),
+          'appVersion'     => option('version'),
+          'schemaVersion'  => option('schemaVersion')
+        ];
+        @file_put_contents($dest . '/meta.json',
+          json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'snapshot' => $meta]),
+          'application/json'
+        );
+      }
+    ],
+    [
+      'pattern' => 'dev/draw/library/load',
+      'method'  => 'POST',
+      'action'  => function () {
+        $body = kirby()->request()->body()->toArray();
+        $name = isset($body['name']) ? trim((string)$body['name']) : '';
+        if (!preg_match('/^[A-Za-z0-9 _.\-]{1,80}$/', $name)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Invalid snapshot name.']),
+            'application/json', 400
+          );
+        }
+        $libRoot = __DIR__ . '/../../library';
+        $src     = $libRoot . '/' . $name;
+        if (!is_dir($src) || !is_dir($src . '/content')) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Snapshot not found.']),
+            'application/json', 404
+          );
+        }
+        $meta = is_file($src . '/meta.json')
+          ? (json_decode(file_get_contents($src . '/meta.json'), true) ?: [])
+          : [];
+        $snapSchema = isset($meta['schemaVersion']) ? (int)$meta['schemaVersion'] : 0;
+        $curSchema  = (int) option('schemaVersion');
+        if ($snapSchema !== $curSchema) {
+          return new Kirby\Http\Response(
+            json_encode([
+              'ok' => false,
+              'error' => 'Schema mismatch: snapshot=' . $snapSchema . ', current=' . $curSchema
+                . '. Refusing to load — bumping SCHEMA_VERSION is your signal that the data shape changed.'
+            ]),
+            'application/json', 409
+          );
+        }
+        $contentRoot = kirby()->root('content');
+        // Wipe the current content/ then copy the snapshot's content/
+        // over it. Wipe + copy (rather than rsync-style merge) so a
+        // snapshot taken before a file existed actually reverts to
+        // "no such file". Dotfiles in the live content/ (e.g. .git
+        // artifacts in dev setups) are left in place.
+        $wipe = function ($dir) use (&$wipe) {
+          if (!is_dir($dir)) return true;
+          $items = scandir($dir);
+          if ($items === false) return false;
+          foreach ($items as $it) {
+            if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+            $p = $dir . '/' . $it;
+            if (is_dir($p)) {
+              if (!$wipe($p)) return false;
+              @rmdir($p);
+            } else {
+              if (@unlink($p) === false) return false;
+            }
+          }
+          return true;
+        };
+        $copy = function ($srcDir, $dstDir) use (&$copy) {
+          if (!is_dir($dstDir) && !mkdir($dstDir, 0755, true)) return false;
+          $items = scandir($srcDir);
+          if ($items === false) return false;
+          foreach ($items as $it) {
+            if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+            $s = $srcDir . '/' . $it;
+            $d = $dstDir . '/' . $it;
+            if (is_dir($s)) {
+              if (!$copy($s, $d)) return false;
+            } else if (is_file($s)) {
+              if (copy($s, $d) === false) return false;
+            }
+          }
+          return true;
+        };
+        if (!$wipe($contentRoot) || !$copy($src . '/content', $contentRoot)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Failed to restore content from snapshot.']),
+            'application/json', 500
+          );
+        }
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'restored' => $meta]),
+          'application/json'
+        );
+      }
+    ],
     [
       'pattern' => 'dev/draw/save',
       'method'  => 'POST',

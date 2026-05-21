@@ -4770,6 +4770,187 @@
    * v0.6.0 MVP. Inline rename + per-key scope flippers + sort
    * options are queued for a follow-up.
    */
+  // v0.8.34: snapshots dialog — save/load named copies of every
+  // content/* file via the dev/draw/library/{list,save,load} routes.
+  // Each snapshot is a folder under /library/ with a meta.json
+  // (savedAt, appVersion, schemaVersion) and a recursive copy of
+  // content/. Load refuses on schemaVersion mismatch — the bump
+  // signal that the on-disk shape has changed and the snapshot is
+  // no longer structurally compatible.
+  function showSnapshotsDialog() {
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal ed-snapshots-modal';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Snapshots';
+    head.appendChild(title);
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close'; x.textContent = '×';
+    x.addEventListener('click', cleanup);
+    head.appendChild(x);
+    modal.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body ed-snapshots-body';
+    const saveRow = document.createElement('div');
+    saveRow.className = 'ed-snapshots-save';
+    const saveLabel = document.createElement('span');
+    saveLabel.textContent = 'Save current content as:';
+    const saveInput = document.createElement('input');
+    saveInput.type = 'text';
+    saveInput.placeholder = 'snapshot name';
+    saveInput.maxLength = 80;
+    const saveBtnEl = document.createElement('button');
+    saveBtnEl.type = 'button';
+    saveBtnEl.className = 'ed-primary';
+    saveBtnEl.textContent = 'Save snapshot';
+    saveBtnEl.addEventListener('click', function () { doSave(saveInput.value); });
+    saveInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doSave(saveInput.value);
+    });
+    saveRow.appendChild(saveLabel);
+    saveRow.appendChild(saveInput);
+    saveRow.appendChild(saveBtnEl);
+    body.appendChild(saveRow);
+
+    const status = document.createElement('div');
+    status.className = 'ed-snapshots-status';
+    body.appendChild(status);
+
+    const list = document.createElement('div');
+    list.className = 'ed-snapshots-list';
+    body.appendChild(list);
+
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
+    });
+
+    function setStatus(msg, isError) {
+      status.textContent = msg || '';
+      status.classList.toggle('is-error', !!isError);
+    }
+
+    async function refresh() {
+      list.innerHTML = '';
+      setStatus('Loading…');
+      try {
+        const res = await fetch('/dev/draw/library/list');
+        const body = await res.json().catch(function () { return {}; });
+        if (!res.ok || !body.ok) throw new Error(body.error || 'HTTP ' + res.status);
+        setStatus('');
+        const snaps = body.snapshots || [];
+        if (!snaps.length) {
+          const empty = document.createElement('div');
+          empty.className = 'ed-snapshots-empty';
+          empty.textContent = 'No snapshots yet. Save one above.';
+          list.appendChild(empty);
+          return;
+        }
+        snaps.forEach(function (s) { list.appendChild(buildRow(s, body.schemaVersion)); });
+      } catch (err) {
+        setStatus('Failed to load list: ' + err.message, true);
+      }
+    }
+
+    function buildRow(snap, currentSchema) {
+      const row = document.createElement('div');
+      row.className = 'ed-snapshots-row';
+      const loadBtn = document.createElement('button');
+      loadBtn.type = 'button';
+      loadBtn.className = 'ed-snapshots-load';
+      loadBtn.textContent = 'Load';
+      const schemaMismatch = (snap.schemaVersion !== currentSchema);
+      if (schemaMismatch) {
+        loadBtn.disabled = true;
+        loadBtn.title = 'Snapshot schema v' + snap.schemaVersion
+          + ' is incompatible with current schema v' + currentSchema;
+      }
+      loadBtn.addEventListener('click', function () { doLoad(snap.name); });
+      row.appendChild(loadBtn);
+      const meta = document.createElement('div');
+      meta.className = 'ed-snapshots-meta';
+      const nm = document.createElement('div');
+      nm.className = 'ed-snapshots-name';
+      nm.textContent = snap.name;
+      meta.appendChild(nm);
+      const sub = document.createElement('div');
+      sub.className = 'ed-snapshots-sub';
+      const when = snap.savedAt ? new Date(snap.savedAt).toLocaleString() : '(unknown date)';
+      const ver  = snap.appVersion ? 'v' + snap.appVersion : '';
+      const sch  = (snap.schemaVersion != null) ? ' · schema ' + snap.schemaVersion
+        + (schemaMismatch ? ' (incompatible)' : '') : '';
+      sub.textContent = when + (ver ? ' · ' + ver : '') + sch;
+      meta.appendChild(sub);
+      row.appendChild(meta);
+      return row;
+    }
+
+    async function doSave(name) {
+      name = String(name || '').trim();
+      if (!name) { setStatus('Enter a name first.', true); saveInput.focus(); return; }
+      setStatus('Saving…');
+      saveBtnEl.disabled = true;
+      try {
+        const res = await fetch('/dev/draw/library/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name })
+        });
+        const body = await res.json().catch(function () { return {}; });
+        if (!res.ok || !body.ok) throw new Error(body.error || 'HTTP ' + res.status);
+        saveInput.value = '';
+        setStatus('Saved snapshot "' + name + '".');
+        await refresh();
+      } catch (err) {
+        setStatus('Save failed: ' + err.message, true);
+      } finally {
+        saveBtnEl.disabled = false;
+      }
+    }
+
+    async function doLoad(name) {
+      const dirtyWarn = state.dirty
+        ? '\n\nYou have unsaved edits — they will be discarded.' : '';
+      if (!window.confirm('Replace current content files with snapshot "' + name + '"?' + dirtyWarn)) return;
+      setStatus('Loading "' + name + '"…');
+      try {
+        const res = await fetch('/dev/draw/library/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name })
+        });
+        const body = await res.json().catch(function () { return {}; });
+        if (!res.ok || !body.ok) throw new Error(body.error || 'HTTP ' + res.status);
+        setStatus('Loaded. Reloading editor…');
+        // The editor's in-memory state is stale now; the simplest
+        // way to pick up the restored content/ is a hard reload.
+        // Mark dirty=false first so the beforeunload handler doesn't
+        // prompt about losing changes that no longer matter.
+        state.dirty = false;
+        setTimeout(function () { location.reload(); }, 400);
+      } catch (err) {
+        setStatus('Load failed: ' + err.message, true);
+      }
+    }
+
+    refresh();
+    saveInput.focus();
+  }
+
   function showLibraryDialog() {
     const overlay = document.createElement('div');
     overlay.className = 'ed-modal-overlay';
@@ -4786,6 +4967,21 @@
     const title = document.createElement('h3');
     title.textContent = 'Master library';
     head.appendChild(title);
+
+    // v0.8.34: snapshots affordance. Opens the snapshots dialog as a
+    // sibling overlay (this library modal stays open underneath so
+    // the user can dismiss snapshots and come back to filter/search
+    // without losing their place).
+    const snapBtn = document.createElement('button');
+    snapBtn.type = 'button';
+    snapBtn.className = 'ed-library-snapshots-btn';
+    // Unicode "downwards arrow into rectangular slot" — reads as
+    // save-to-storage in most fonts; we caption it too so the icon
+    // alone doesn't have to carry the meaning.
+    snapBtn.innerHTML = '↧ Snapshots';
+    snapBtn.title = 'Save / load named copies of every content file';
+    snapBtn.addEventListener('click', function () { showSnapshotsDialog(); });
+    head.appendChild(snapBtn);
 
     // Class filter buttons — one per screen class, plus an "All"
     // reset. Active button shows accent border like the class
