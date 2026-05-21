@@ -125,6 +125,20 @@
     + 'aria-hidden="true">'
     + '<path d="M5 1 L5 8 L1.5 8 L8 14.5 L14.5 8 L11 8 L11 1 Z"/>'
     + '</svg>';
+  // v0.8.45: monochrome magnifying-glass icon for the Orphans
+  // button. Matches the arrow icons' line weight + currentColor
+  // approach so the editor's icon vocabulary stays white-on-dark
+  // throughout — colored emoji (the previous 🧹 broom) read as
+  // out of place and had a dark interior segment that disappeared
+  // against the button background.
+  const FIND_ICON_SVG_HTML =
+    '<svg class="ed-arrow-icon" viewBox="0 0 16 16" '
+    + 'fill="none" stroke="currentColor" stroke-width="1.4" '
+    + 'stroke-linecap="round" stroke-linejoin="round" '
+    + 'aria-hidden="true">'
+    + '<circle cx="7" cy="7" r="4.5"/>'
+    + '<line x1="10.5" y1="10.5" x2="14" y2="14"/>'
+    + '</svg>';
 
   /**
    * Read the scope of a property on a master. Returns 'local' or
@@ -5435,13 +5449,14 @@
     // v0.8.43: orphans cleanup affordance, same idiom as Snapshots.
     // Opens a sibling overlay listing orphan masters, unused colors,
     // empty groups, and dangling-ref instances.
-    // v0.8.44: shortened label to "Orphans" so it doesn't crowd
-    // the header; broom emoji wrapped in .ed-emoji-icon so it
-    // renders at a readable size instead of font-baseline tiny.
+    // v0.8.45: monochrome magnifying-glass SVG instead of the 🧹
+    // emoji — colored emoji break the editor's white-on-dark icon
+    // vocabulary, and the broom had a dark segment that vanished
+    // against the button background.
     const orphBtn = document.createElement('button');
     orphBtn.type = 'button';
     orphBtn.className = 'ed-library-snapshots-btn';
-    orphBtn.innerHTML = '<span class="ed-emoji-icon">🧹</span> Orphans';
+    orphBtn.innerHTML = FIND_ICON_SVG_HTML + ' Orphans';
     orphBtn.title = 'Detect masters with no instances, unused palette colors, empty groups, and instances with broken master/group refs — remove them piecemeal or in bulk.';
     orphBtn.addEventListener('click', function () { showOrphansDialog(); });
     head.appendChild(orphBtn);
