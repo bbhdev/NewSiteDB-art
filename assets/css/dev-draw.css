@@ -1151,23 +1151,18 @@ body.editor input[type="range"] {
   max-width: 26rem;
 }
 
-/* v0.8.37: unicode arrow glyphs (⇪ / ⇩) inside action buttons.
-   Bumped relative to the surrounding label so the directional
-   intent reads at a glance — at 1em they sit thin and ambiguous
-   alongside the text. Used on Import SVG (.ed-create-import-btn)
-   and Snapshots (.ed-library-snapshots-btn). */
+/* v0.8.40: inline-SVG arrow icons (.ed-arrow-icon = down,
+   .ed-arrow-icon-flip = up via vertical mirror). Vector path is
+   defined once in dev-draw.js (ARROW_SVG_DOWN_HTML / _UP_HTML);
+   both buttons reference the same shape so size/stroke/anti-
+   aliasing are identical. width:1.1em scales with surrounding
+   text but stays cap-height-ish so it doesn't dominate the row. */
 .ed-arrow-icon {
-  display: inline-block;  /* required so transform applies */
-  font-size: 1.25em;
-  line-height: 0.9;
-  margin-right: 0.1em;
-  vertical-align: -0.05em;
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.18em;
+  margin-right: 0.15em;
 }
-/* v0.8.39: render the SAME glyph (⇩) flipped for the upwards
-   variant so the two arrows are pixel-for-pixel identical at all
-   font sizes / on all platforms. Picking distinct up- and down-
-   codepoints leaves the pair at the mercy of the active font's
-   glyph design. */
 .ed-arrow-icon-flip { transform: scaleY(-1); }
 .ed-create-types-col {
   display: flex;

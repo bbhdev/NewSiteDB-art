@@ -104,6 +104,28 @@
                          'drawIn', 'drawInDirection',
                          'rotateOriginX', 'rotateOriginY'];
 
+  // v0.8.40: hand-drawn outline arrows for the Import (up) and
+  // Snapshots (down) buttons. Inline SVG so they render
+  // identically regardless of font / weight / parent context —
+  // the prior Unicode-glyph approach (⇧ / ⇩) was at the mercy
+  // of glyph variants and anti-aliasing differences between the
+  // two button cascades. Same path, just one flipped via CSS
+  // (scaleY(-1)) so the up/down geometry is provably identical.
+  const ARROW_SVG_DOWN_HTML =
+    '<svg class="ed-arrow-icon" viewBox="0 0 16 16" '
+    + 'fill="none" stroke="currentColor" stroke-width="1.4" '
+    + 'stroke-linejoin="round" stroke-linecap="round" '
+    + 'aria-hidden="true">'
+    + '<path d="M5 1 L5 8 L1.5 8 L8 14.5 L14.5 8 L11 8 L11 1 Z"/>'
+    + '</svg>';
+  const ARROW_SVG_UP_HTML =
+    '<svg class="ed-arrow-icon ed-arrow-icon-flip" viewBox="0 0 16 16" '
+    + 'fill="none" stroke="currentColor" stroke-width="1.4" '
+    + 'stroke-linejoin="round" stroke-linecap="round" '
+    + 'aria-hidden="true">'
+    + '<path d="M5 1 L5 8 L1.5 8 L8 14.5 L14.5 8 L11 8 L11 1 Z"/>'
+    + '</svg>';
+
   /**
    * Read the scope of a property on a master. Returns 'local' or
    * 'canonical'. Default is canonical when the master has no scope
@@ -3456,11 +3478,12 @@
     const importBtn = document.createElement('button');
     importBtn.type = 'button';
     importBtn.className = 'ed-create-type ed-create-import-btn';
-    // v0.8.39: use ⇩ for BOTH arrows and flip the import one via
-    // CSS — guarantees identical pixel-for-pixel dimensions across
-    // fonts. ⇧ as a separate codepoint can render at subtly
-    // different proportions depending on the font's glyph design.
-    importBtn.innerHTML = '<strong><span class="ed-arrow-icon ed-arrow-icon-flip">⇩</span> Import SVG file…</strong>'
+    // v0.8.40: inline SVG arrow instead of a Unicode glyph — the
+    // ⇧ / ⇩ pair was at the mercy of font fallbacks (bolder weight
+    // from <strong> in this context vs the lighter weight on the
+    // Snapshots button picked up a different glyph rendering on
+    // some platforms). SVG is identical everywhere.
+    importBtn.innerHTML = '<strong>' + ARROW_SVG_UP_HTML + ' Import SVG file…</strong>'
                        + '<span>One or more SVG files. Each top-level shape '
                        + 'becomes a master + an instance in the current class, '
                        + 'dropped into the currently-active group.</span>';
@@ -5012,11 +5035,9 @@
     const snapBtn = document.createElement('button');
     snapBtn.type = 'button';
     snapBtn.className = 'ed-library-snapshots-btn';
-    // v0.8.37: U+21E9 DOWNWARDS WHITE ARROW — same outline / double-
-    // line style as the import button's ⇪, paired direction so the
-    // two "data in / data out" buttons read as a set. The arrow gets
-    // a touch larger than the surrounding label via .ed-arrow-icon.
-    snapBtn.innerHTML = '<span class="ed-arrow-icon">⇩</span> Snapshots';
+    // v0.8.40: see ARROW_SVG_* — inline SVG so this arrow and the
+    // Import button's arrow render identically across platforms.
+    snapBtn.innerHTML = ARROW_SVG_DOWN_HTML + ' Snapshots';
     snapBtn.title = 'Save / load named copies of every content file';
     snapBtn.addEventListener('click', function () { showSnapshotsDialog(); });
     head.appendChild(snapBtn);
