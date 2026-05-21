@@ -5021,21 +5021,42 @@
   function findOrphans() {
     const masterUsage = {};
     const colorUsage  = {};
+    // v0.8.44: also detect "orphan instances" — lines whose
+    // masterId doesn't resolve to a master, or whose groupId
+    // doesn't resolve to a group in the same class. These are
+    // the dangling refs that the user's initial concern was
+    // about (instances surviving the deletion of their master /
+    // group). Indexed by class for the dialog's per-class layout.
+    const masterIdSet = {};
+    (state.masters || []).forEach(function (m) { masterIdSet[m.id] = true; });
+    const orphanInstancesByClass = {};
     Object.keys(state.byClass).forEach(function (cid) {
       const bucket = state.byClass[cid];
       if (!bucket) return;
+      const groupIdSet = {};
+      (bucket.groups || []).forEach(function (g) { groupIdSet[g.id] = true; });
+      const dangling = [];
       (bucket.lines || []).forEach(function (line) {
         if (line.masterId) masterUsage[line.masterId] = (masterUsage[line.masterId] || 0) + 1;
         if (line.stroke)   colorUsage[line.stroke]    = (colorUsage[line.stroke]    || 0) + 1;
         if (line.overrides && line.overrides.stroke) {
           colorUsage[line.overrides.stroke] = (colorUsage[line.overrides.stroke] || 0) + 1;
         }
+        const reasons = [];
+        if (line.masterId && !masterIdSet[line.masterId]) {
+          reasons.push('master ' + line.masterId + ' missing');
+        }
+        if (line.groupId && !groupIdSet[line.groupId]) {
+          reasons.push('group ' + line.groupId + ' missing');
+        }
+        if (reasons.length) dangling.push({ line: line, reasons: reasons });
       });
       (bucket.groups || []).forEach(function (g) {
         if (g.defaults && g.defaults.stroke) {
           colorUsage[g.defaults.stroke] = (colorUsage[g.defaults.stroke] || 0) + 1;
         }
       });
+      if (dangling.length) orphanInstancesByClass[cid] = dangling;
     });
     (state.masters || []).forEach(function (m) {
       if (m.stroke) colorUsage[m.stroke] = (colorUsage[m.stroke] || 0) + 1;
@@ -5062,7 +5083,8 @@
     return {
       masters: orphanMasters,
       colors:  orphanColors,
-      emptyGroupsByClass: emptyGroupsByClass
+      emptyGroupsByClass: emptyGroupsByClass,
+      orphanInstancesByClass: orphanInstancesByClass
     };
   }
 
@@ -5107,7 +5129,8 @@
       const orphans = findOrphans();
       const nothing = !orphans.masters.length
                    && !orphans.colors.length
-                   && !Object.keys(orphans.emptyGroupsByClass).length;
+                   && !Object.keys(orphans.emptyGroupsByClass).length
+                   && !Object.keys(orphans.orphanInstancesByClass).length;
       if (nothing) {
         const ok = document.createElement('div');
         ok.className = 'ed-orphans-empty';
@@ -5169,6 +5192,83 @@
             };
           })
         ));
+      }
+
+      // ── Orphan instances (dangling refs) ───────────────────────
+      // v0.8.44: lines that have a masterId or groupId that doesn't
+      // resolve. The user's original concern was about exactly this
+      // category — instances that survive the deletion of what they
+      // referenced and end up stranded in the on-disk class files.
+      const instKeys = Object.keys(orphans.orphanInstancesByClass);
+      if (instKeys.length) {
+        const totalInst = instKeys.reduce(function (s, cid) {
+          return s + orphans.orphanInstancesByClass[cid].length;
+        }, 0);
+        const section = document.createElement('div');
+        section.className = 'ed-orphans-section';
+        const head = document.createElement('div');
+        head.className = 'ed-orphans-section-head';
+        const h = document.createElement('h4');
+        h.textContent = 'Orphan instances (' + totalInst + ')';
+        head.appendChild(h);
+        const removeAllBtn = document.createElement('button');
+        removeAllBtn.type = 'button';
+        removeAllBtn.className = 'ed-mini ed-danger';
+        removeAllBtn.textContent = 'Remove all';
+        removeAllBtn.addEventListener('click', function () {
+          if (!confirm('Remove all ' + totalInst + ' orphan instance'
+                       + (totalInst === 1 ? '' : 's') + '?')) return;
+          instKeys.forEach(function (cid) {
+            const bucket = state.byClass[cid];
+            if (!bucket || !Array.isArray(bucket.lines)) return;
+            const ids = orphans.orphanInstancesByClass[cid].map(function (x) { return x.line.id; });
+            bucket.lines = bucket.lines.filter(function (l) { return ids.indexOf(l.id) === -1; });
+          });
+          commit();
+        });
+        head.appendChild(removeAllBtn);
+        section.appendChild(head);
+        const note = document.createElement('p');
+        note.className = 'ed-orphans-note';
+        note.textContent = 'Lines whose masterId or groupId no longer resolves. '
+          + 'Safe to remove — the references are already broken.';
+        section.appendChild(note);
+        instKeys.forEach(function (cid) {
+          const cls = state.classes.find(function (c) { return c.id === cid; });
+          const clsLabel = (cls && cls.name) ? cls.name : cid;
+          const sub = document.createElement('div');
+          sub.className = 'ed-orphans-subhead';
+          sub.textContent = clsLabel;
+          section.appendChild(sub);
+          orphans.orphanInstancesByClass[cid].forEach(function (entry) {
+            const row = document.createElement('div');
+            row.className = 'ed-orphans-row';
+            const labelWrap = document.createElement('div');
+            labelWrap.className = 'ed-orphans-labels';
+            const nm = document.createElement('div');
+            nm.className = 'ed-orphans-name';
+            nm.textContent = entry.line.name || entry.line.id;
+            labelWrap.appendChild(nm);
+            const s = document.createElement('div');
+            s.className = 'ed-orphans-sub';
+            s.textContent = entry.line.id + ' · ' + entry.reasons.join(', ');
+            labelWrap.appendChild(s);
+            row.appendChild(labelWrap);
+            const rmBtn = document.createElement('button');
+            rmBtn.type = 'button';
+            rmBtn.className = 'ed-mini ed-danger';
+            rmBtn.textContent = 'Remove';
+            rmBtn.addEventListener('click', function () {
+              const bucket = state.byClass[cid];
+              if (!bucket || !Array.isArray(bucket.lines)) return;
+              bucket.lines = bucket.lines.filter(function (l) { return l.id !== entry.line.id; });
+              commit();
+            });
+            row.appendChild(rmBtn);
+            section.appendChild(row);
+          });
+        });
+        body.appendChild(section);
       }
 
       // ── Empty groups ───────────────────────────────────────────
@@ -5334,12 +5434,15 @@
 
     // v0.8.43: orphans cleanup affordance, same idiom as Snapshots.
     // Opens a sibling overlay listing orphan masters, unused colors,
-    // and empty groups, each with per-item Remove + Remove-all.
+    // empty groups, and dangling-ref instances.
+    // v0.8.44: shortened label to "Orphans" so it doesn't crowd
+    // the header; broom emoji wrapped in .ed-emoji-icon so it
+    // renders at a readable size instead of font-baseline tiny.
     const orphBtn = document.createElement('button');
     orphBtn.type = 'button';
     orphBtn.className = 'ed-library-snapshots-btn';
-    orphBtn.textContent = '🧹 Find orphans';
-    orphBtn.title = 'Detect masters with no instances, unused palette colors, and empty groups — remove them piecemeal or in bulk.';
+    orphBtn.innerHTML = '<span class="ed-emoji-icon">🧹</span> Orphans';
+    orphBtn.title = 'Detect masters with no instances, unused palette colors, empty groups, and instances with broken master/group refs — remove them piecemeal or in bulk.';
     orphBtn.addEventListener('click', function () { showOrphansDialog(); });
     head.appendChild(orphBtn);
 

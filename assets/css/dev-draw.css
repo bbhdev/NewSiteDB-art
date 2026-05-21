@@ -969,8 +969,11 @@ body.editor input[type="range"] {
    per-master row (preview + meta + chips + actions) fits
    comfortably. Scroll lives inside the list, not the modal. */
 .ed-library-modal {
-  min-width: 38rem;
-  max-width: 56rem;
+  /* v0.8.44: bumped from 38/56 → 44/64 so the header row fits
+     "Snapshots" + "Orphans" + the four class-filter chips +
+     the close button without wrapping at common widths. */
+  min-width: 44rem;
+  max-width: 64rem;
   width: 90vw;
   max-height: 80vh;
 }
@@ -1589,7 +1592,11 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 /* v0.8.35: filled action button — same visual weight as the
    Library / Import / Save toolbar buttons since this is a
    direct action, not a state toggle. Hover lightens; reads
-   as a sibling of the action buttons elsewhere on the page. */
+   as a sibling of the action buttons elsewhere on the page.
+   v0.8.44: white-space: nowrap so the icon + label stay on one
+   line even when sibling buttons crowd the header — the
+   library modal header has the Snapshots + Orphans pair plus
+   class filter buttons, and wrapping looked broken. */
 .ed-library-snapshots-btn {
   margin-left: 0.5rem;
   background: #3a3a3a;
@@ -1601,8 +1608,19 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 .ed-library-snapshots-btn:hover { background: #4a4a4a; }
+/* v0.8.44: emoji icons render at the parent's font-size by
+   default (around 14px in this editor), which is way too small
+   for a glyph carrying visual meaning. Bump to 1.3em and tweak
+   vertical-align so it sits on the baseline next to the label. */
+.ed-emoji-icon {
+  font-size: 1.3em;
+  line-height: 1;
+  vertical-align: -0.05em;
+  margin-right: 0.1em;
+}
 .ed-snapshots-modal { min-width: min(560px, 92vw); max-width: 760px; }
 .ed-snapshots-body  { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.8rem; }
 .ed-snapshots-save  { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
