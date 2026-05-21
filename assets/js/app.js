@@ -1130,12 +1130,12 @@
           try { localPoint = guide.getPointAtLength(frac * totalLen); }
           catch (e) { continue; }
           // Transform from guide's local coords → SVG viewBox coords
-          // (this layer's coordinate space). svg.getCTM().inverse()
+          // (this layer's coordinate space). layer.getCTM().inverse()
           // × guide.getCTM() composes the two; whatever the guide's
           // own translate/rotate is at this frame is automatically
           // baked in via guide.getCTM().
           const ctmGuide = guide.getCTM();
-          const ctmLayer = svg.getCTM();
+          const ctmLayer = layer.getCTM();
           if (!ctmGuide || !ctmLayer) continue;
           const guideToLayer = ctmLayer.inverse().multiply(ctmGuide);
           const layerPt = guideToLayer.transformPoint(localPoint);
