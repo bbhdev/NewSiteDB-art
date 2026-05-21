@@ -8443,19 +8443,66 @@
     // block" — saves authoring a precise translate value when
     // the exact distance doesn't matter, only the direction.
     const tmode = (params.translateMode || gd.translateMode || 'fixed');
+    // v0.8.53: enumerate same-class lines that can serve as path
+    // guides for the new pathFollow translate mode. Restricted to
+    // kinds that produce SVG <path> elements with usable d data;
+    // primitives (circle / rect / polygon / star) don't expose
+    // SVGGeometryElement.getPointAtLength uniformly so they're
+    // excluded for now. Self-reference also excluded.
+    const PATH_BEARING_KINDS = ['freehand', 'freehandClosed', 'bezier',
+                                'lineChain', 'lineLoop', 'svgImport'];
+    const guideOpts = state.lines
+      .filter(function (l) {
+        return l.id !== line.id && PATH_BEARING_KINDS.indexOf(l.kind) !== -1;
+      })
+      .map(function (l) {
+        return { value: l.id, label: (l.name || l.id) + ' (' + l.kind + ')' };
+      });
+    const canPathFollow = guideOpts.length > 0;
     card.appendChild(behaviorButtonGroup('Translate mode', tmode, [
-      { value: 'fixed',     label: 'Fixed' },
-      { value: 'driftX',    label: 'Drift X' },
-      { value: 'driftY',    label: 'Drift Y' },
-      { value: 'driftBoth', label: 'Drift both' }
+      { value: 'fixed',      label: 'Fixed' },
+      { value: 'driftX',     label: 'Drift X' },
+      { value: 'driftY',     label: 'Drift Y' },
+      { value: 'driftBoth',  label: 'Drift both' },
+      { value: 'pathFollow', label: 'Along path',
+        disabledIf: !canPathFollow,
+        disabledReason: 'No other path-bearing lines in this class. '
+          + 'Add at least one freehand, bezier, chain, loop, or imported '
+          + 'SVG line to use as a path guide.' }
     ], function (v) {
       updateBehaviorParam(line.id, 'translateMode', v === 'fixed' ? null : v, blockIdx);
       renderSelectionPanel();
-    }, null));
+    }, function (opt) {
+      if (opt && opt.disabledReason) alert(opt.disabledReason);
+    }));
     const xDrift = (tmode === 'driftX' || tmode === 'driftBoth');
     const yDrift = (tmode === 'driftY' || tmode === 'driftBoth');
-    card.appendChild(overrideNumberField(xDrift ? 'TranslateX (×scroll)' : 'TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
-    card.appendChild(overrideNumberField(yDrift ? 'TranslateY (×scroll)' : 'TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
+    const isPathFollow = (tmode === 'pathFollow');
+    // v0.8.53: hide translateX / translateY when in pathFollow —
+    // position is driven by the guide path, not authored deltas.
+    // Stay editable in all other modes including drift.
+    if (!isPathFollow) {
+      card.appendChild(overrideNumberField(xDrift ? 'TranslateX (×scroll)' : 'TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
+      card.appendChild(overrideNumberField(yDrift ? 'TranslateY (×scroll)' : 'TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
+    } else {
+      // pathFollow-specific fields. Path guide picker + tangent
+      // toggle + path-end behavior.
+      const currentGuide = (typeof params.pathRef === 'string') ? params.pathRef : '';
+      card.appendChild(selectField('Path guide', currentGuide, guideOpts, function (v) {
+        updateBehaviorParam(line.id, 'pathRef', v || null, blockIdx);
+      }));
+      card.appendChild(checkboxField('Align to tangent', !!params.pathAlignToTangent, function (v) {
+        updateBehaviorParam(line.id, 'pathAlignToTangent', v ? true : null, blockIdx);
+      }));
+      const endMode = params.pathEndMode || 'stop';
+      card.appendChild(selectField('At end of path', endMode, [
+        { value: 'stop',     label: 'Stop at end' },
+        { value: 'loop',     label: 'Loop (snap to start)' },
+        { value: 'pingpong', label: 'Ping-pong (reverse direction)' }
+      ], function (v) {
+        updateBehaviorParam(line.id, 'pathEndMode', (v === 'stop' ? null : v), blockIdx);
+      }));
+    }
     card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
     // v0.8.19: pivot fields + set-origin button gate on the
     // RESOLVED rotate (block override OR group default). If neither

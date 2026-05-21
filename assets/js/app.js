@@ -664,6 +664,16 @@
         const fadeOpacity = !!p.fadeOpacity;
         const opacityFrom = (typeof p.opacityFrom === 'number') ? p.opacityFrom : 1;
         const opacityTo   = (typeof p.opacityTo   === 'number') ? p.opacityTo   : 0;
+        // v0.8.53: pathFollow params. Position is driven by another
+        // line's path (the guide); pathRef = guide line id, picked
+        // by the editor's translate-mode 'Along path' picker.
+        // pathAlignToTangent: rotate this line to match the guide's
+        // direction at the current point.
+        // pathEndMode: only meaningful when bp can exceed 1 or wrap
+        // (loop / pingpong duration); see computeAt below.
+        const pathRef             = (typeof p.pathRef === 'string') ? p.pathRef : null;
+        const pathAlignToTangent  = !!p.pathAlignToTangent;
+        const pathEndMode         = p.pathEndMode || 'stop';
         return {
           trigger:  trigger,
           duration: duration,
@@ -673,6 +683,10 @@
           translateMode: tmode,
           driftX:   (tmode === 'driftX' || tmode === 'driftBoth'),
           driftY:   (tmode === 'driftY' || tmode === 'driftBoth'),
+          pathFollow:          (tmode === 'pathFollow'),
+          pathRef:             pathRef,
+          pathAlignToTangent:  pathAlignToTangent,
+          pathEndMode:         pathEndMode,
           fadeOpacity: fadeOpacity,
           opacityFrom: opacityFrom,
           opacityTo:   opacityTo,
@@ -693,10 +707,13 @@
         }
       });
       const hasMotion = blocks.some(function (b) {
-        // v0.8.26: fadeOpacity counts as motion — a block that
-        // only changes opacity still needs writeAt to run each
-        // frame so the opacity attribute tracks progress.
-        return b.tx !== 0 || b.ty !== 0 || b.rot !== 0 || b.fadeOpacity;
+        // v0.8.26: fadeOpacity counts as motion.
+        // v0.8.53: pathFollow counts too — a block with only
+        // pathFollow has zero tx/ty/rot in the block data, but
+        // it needs writeAt every frame to re-evaluate the path
+        // position (and to follow a guide that's animating).
+        return b.tx !== 0 || b.ty !== 0 || b.rot !== 0
+            || b.fadeOpacity || b.pathFollow;
       });
       // v0.8.17: drift accumulators — one entry per block. Holds
       // the running translate contribution from per-scroll-px
@@ -739,6 +756,21 @@
       const loopPlayed    = blocks.map(function () { return false; });
       const loopIterCount = blocks.map(function () { return 0; });
       const loopDone      = blocks.map(function () { return false; });
+
+      // v0.8.53: pathFollow per-block end-mode state.
+      //   pathStopMax[i]   monotonic max of bp ever seen; used by
+      //                    pathEndMode='stop' so that once the
+      //                    follower reaches the end of the guide
+      //                    path it stays there even if bp wraps.
+      //   pathLastBp[i]    last frame's bp; used by pathEndMode=
+      //                    'pingpong' to detect bp wraps and flip
+      //                    pathDirection on each one.
+      //   pathDirection[i] +1 (forward along path) / -1 (backward).
+      //                    Flipped on each detected bp wrap when
+      //                    pathEndMode='pingpong'.
+      const pathStopMax   = blocks.map(function () { return 0; });
+      const pathLastBp    = blocks.map(function () { return 0; });
+      const pathDirection = blocks.map(function () { return 1; });
 
       // For each non-scroll duration block, schedule its
       // activation per the `when` axis. scroll-range activations
@@ -1016,12 +1048,6 @@
           const b  = blocks[i];
           const bp = blockProg(b, i, scrollP, nowSec);
           bps[i] = bp;
-          // v0.8.23: loopTo blocks contribute -bp * snapshot. The
-          // snapshot equals the chain's accumulated offset at the
-          // moment loopTo activated, so bp=1 cancels the chain
-          // exactly and parks the line at the target block's
-          // start position. Authored tx/ty/rot fields are ignored
-          // (the editor doesn't expose them on loopTo blocks).
           if (b.duration && b.duration.mode === 'loopTo') {
             const off = loopOffset[i];
             if (off) {
@@ -1031,17 +1057,23 @@
             }
             continue;
           }
+          // v0.8.53: pathFollow blocks don't contribute the usual
+          // tx/ty/rot deltas — their position is computed in the
+          // reverse pass below (last-active-wins so chained guides
+          // hand off cleanly). bp itself still drives the path
+          // fraction; pathLastBp tracking happens once per frame
+          // regardless of whether the block is the dominant
+          // pathFollow this frame.
+          if (b.pathFollow) {
+            pathLastBp[i] = bp;
+            continue;
+          }
           tx  += b.driftX ? blockDrift[i].x : bp * b.tx;
           ty  += b.driftY ? blockDrift[i].y : bp * b.ty;
           rot += bp * b.rot;
         }
         // v0.8.26: opacity composition — last active fade-opacity
-        // block wins. Walk in reverse and take the first block
-        // whose progress has started; lerp its opacityFrom →
-        // opacityTo by that bp. A completed block (bp clamped to
-        // 1) holds at opacityTo until a later fade block overrides
-        // it, so chained fades read sequentially. No fade blocks
-        // anywhere → opacity stays at 1.
+        // block wins.
         let opacity = 1;
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i];
@@ -1051,7 +1083,104 @@
           opacity = b.opacityFrom + (b.opacityTo - b.opacityFrom) * bp;
           break;
         }
-        return { tx: tx, ty: ty, rot: rot, opacity: opacity };
+        // v0.8.53: pathFollow composition — last active pathFollow
+        // block wins (chained guides: a later block takes over
+        // when its bp starts). Skipped silently if pathRef doesn't
+        // resolve to a path element. When active, the path-derived
+        // target overrides positionOffset in writeAt (the path
+        // dictates absolute position, not an offset).
+        let pathFollowActive = false;
+        let pathTx = 0, pathTy = 0, pathRot = 0;
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i];
+          if (!b.pathFollow) continue;
+          const bp = bps[i];
+          if (bp <= 0) continue;
+          const guide = b.pathRef
+            ? document.querySelector('[data-line-id="' + b.pathRef + '"]')
+            : null;
+          if (!guide || typeof guide.getTotalLength !== 'function') continue;
+          const totalLen = guide.getTotalLength();
+          if (!(totalLen > 0)) continue;
+          // Map bp → path fraction via pathEndMode.
+          let frac;
+          if (b.pathEndMode === 'stop') {
+            pathStopMax[i] = Math.max(pathStopMax[i] || 0, bp);
+            frac = pathStopMax[i];
+          } else if (b.pathEndMode === 'pingpong') {
+            // Detect bp wrap (large backwards jump) and flip
+            // direction so the path traversal reverses instead
+            // of snapping back to start.
+            const last = pathLastBp[i] || 0;
+            if (last - bp > 0.5) pathDirection[i] = -(pathDirection[i] || 1);
+            frac = (pathDirection[i] === -1) ? (1 - bp) : bp;
+          } else {
+            // 'loop' or default — use bp directly, accepting any
+            // visual snap on the wrap (fine for closed paths).
+            frac = bp;
+          }
+          if (frac < 0) frac = 0; else if (frac > 1) frac = 1;
+          let localPoint;
+          try { localPoint = guide.getPointAtLength(frac * totalLen); }
+          catch (e) { continue; }
+          // Transform from guide's local coords → SVG viewBox coords
+          // (this layer's coordinate space). svg.getCTM().inverse()
+          // × guide.getCTM() composes the two; whatever the guide's
+          // own translate/rotate is at this frame is automatically
+          // baked in via guide.getCTM().
+          const ctmGuide = guide.getCTM();
+          const ctmLayer = svg.getCTM();
+          if (!ctmGuide || !ctmLayer) continue;
+          const guideToLayer = ctmLayer.inverse().multiply(ctmGuide);
+          const layerPt = guideToLayer.transformPoint(localPoint);
+          // Follower's natural center: bbox center in its own
+          // local coords. We translate so that center lands on
+          // layerPt. The translate replaces positionOffset (handled
+          // in writeAt via pathFollowActive flag).
+          let cx = 0, cy = 0;
+          try {
+            const bbox = pathEl.getBBox();
+            cx = bbox.x + bbox.width  / 2;
+            cy = bbox.y + bbox.height / 2;
+          } catch (e) { /* path has no bbox yet */ }
+          pathTx = layerPt.x - cx;
+          pathTy = layerPt.y - cy;
+          if (b.pathAlignToTangent) {
+            // Sample one path-unit ahead for tangent direction;
+            // transform both points so the tangent is in the
+            // layer's coord space (handles guide rotation).
+            const aheadFrac = Math.min(1, frac + 0.5 / totalLen);
+            let aheadLocal;
+            try { aheadLocal = guide.getPointAtLength(aheadFrac * totalLen); }
+            catch (e) { aheadLocal = null; }
+            if (aheadLocal) {
+              const aheadLayer = guideToLayer.transformPoint(aheadLocal);
+              const dx = aheadLayer.x - layerPt.x;
+              const dy = aheadLayer.y - layerPt.y;
+              if (dx !== 0 || dy !== 0) {
+                let ang = Math.atan2(dy, dx) * 180 / Math.PI;
+                // If we walked backwards (pingpong reversed), flip
+                // the tangent so the follower faces its travel
+                // direction, not the path's authored direction.
+                if (b.pathEndMode === 'pingpong' && pathDirection[i] === -1) {
+                  ang += 180;
+                }
+                pathRot = ang;
+              }
+            }
+          }
+          pathFollowActive = true;
+          break;
+        }
+        if (pathFollowActive) {
+          tx  += pathTx;
+          ty  += pathTy;
+          rot += pathRot;
+        }
+        return {
+          tx: tx, ty: ty, rot: rot, opacity: opacity,
+          pathFollowActive: pathFollowActive
+        };
       };
       // hasTime: any block whose progress is wall-clock-driven —
       // needs a gsap.ticker so the runtime keeps painting even
@@ -1091,9 +1220,17 @@
       if (hasMotion && !diagMode) {
         const writeAt = function (scrollP, nowSec) {
           const t = computeAt(scrollP, nowSec);
+          // v0.8.53: when pathFollow is the dominant translate
+          // contributor this frame, the path dictates absolute
+          // position — positionOffset would shift the follower
+          // off the path. Skip the static offset in that case;
+          // t.tx/t.ty already include (layerPathPoint - bbox
+          // center) so the follower's center lands on the path.
+          const useOffX = t.pathFollowActive ? 0 : offX;
+          const useOffY = t.pathFollowActive ? 0 : offY;
           pathEl.setAttribute(
             'transform',
-            'translate(' + (offX + t.tx) + ' ' + (offY + t.ty) + ') ' +
+            'translate(' + (useOffX + t.tx) + ' ' + (useOffY + t.ty) + ') ' +
             'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')'
           );
           // v0.8.26: opacity is always written (cheap setAttribute,
