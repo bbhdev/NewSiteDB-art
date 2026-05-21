@@ -651,6 +651,13 @@
         // displacement — accumulated drift is added on top of
         // the fixed contribution from the other axis.
         const tmode = p.translateMode || gd.translateMode || 'fixed';
+        // v0.8.26: per-block opacity fade. Authored as absolute
+        // from→to values (not progress-weighted deltas like
+        // tx/ty/rot), so blocks compose by "last active wins"
+        // instead of summing — see computeAt below.
+        const fadeOpacity = !!p.fadeOpacity;
+        const opacityFrom = (typeof p.opacityFrom === 'number') ? p.opacityFrom : 1;
+        const opacityTo   = (typeof p.opacityTo   === 'number') ? p.opacityTo   : 0;
         return {
           trigger:  trigger,
           duration: duration,
@@ -660,6 +667,9 @@
           translateMode: tmode,
           driftX:   (tmode === 'driftX' || tmode === 'driftBoth'),
           driftY:   (tmode === 'driftY' || tmode === 'driftBoth'),
+          fadeOpacity: fadeOpacity,
+          opacityFrom: opacityFrom,
+          opacityTo:   opacityTo,
           drawIn:   typeof p.drawIn === 'boolean' ? p.drawIn : !!gd.drawIn,
           drawInDirection: p.drawInDirection || gd.drawInDirection || 'forward'
         };
@@ -677,7 +687,10 @@
         }
       });
       const hasMotion = blocks.some(function (b) {
-        return b.tx !== 0 || b.ty !== 0 || b.rot !== 0;
+        // v0.8.26: fadeOpacity counts as motion — a block that
+        // only changes opacity still needs writeAt to run each
+        // frame so the opacity attribute tracks progress.
+        return b.tx !== 0 || b.ty !== 0 || b.rot !== 0 || b.fadeOpacity;
       });
       // v0.8.17: drift accumulators — one entry per block. Holds
       // the running translate contribution from per-scroll-px
@@ -992,9 +1005,11 @@
       const computeAt = function (scrollP, nowSec) {
         tickDrift(scrollP, nowSec);
         let tx = 0, ty = 0, rot = 0;
+        const bps = new Array(blocks.length);
         for (let i = 0; i < blocks.length; i++) {
           const b  = blocks[i];
           const bp = blockProg(b, i, scrollP, nowSec);
+          bps[i] = bp;
           // v0.8.23: loopTo blocks contribute -bp * snapshot. The
           // snapshot equals the chain's accumulated offset at the
           // moment loopTo activated, so bp=1 cancels the chain
@@ -1014,7 +1029,23 @@
           ty  += b.driftY ? blockDrift[i].y : bp * b.ty;
           rot += bp * b.rot;
         }
-        return { tx: tx, ty: ty, rot: rot };
+        // v0.8.26: opacity composition — last active fade-opacity
+        // block wins. Walk in reverse and take the first block
+        // whose progress has started; lerp its opacityFrom →
+        // opacityTo by that bp. A completed block (bp clamped to
+        // 1) holds at opacityTo until a later fade block overrides
+        // it, so chained fades read sequentially. No fade blocks
+        // anywhere → opacity stays at 1.
+        let opacity = 1;
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i];
+          if (!b.fadeOpacity) continue;
+          const bp = bps[i];
+          if (bp <= 0) continue;
+          opacity = b.opacityFrom + (b.opacityTo - b.opacityFrom) * bp;
+          break;
+        }
+        return { tx: tx, ty: ty, rot: rot, opacity: opacity };
       };
       // hasTime: any block whose progress is wall-clock-driven —
       // needs a gsap.ticker so the runtime keeps painting even
@@ -1059,6 +1090,11 @@
             'translate(' + (offX + t.tx) + ' ' + (offY + t.ty) + ') ' +
             'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')'
           );
+          // v0.8.26: opacity is always written (cheap setAttribute,
+          // and a constant 1 from no-fade blocks is the SVG default
+          // — net no-op visually). Lets fade blocks just work
+          // without an extra "has any fade?" precompute.
+          pathEl.setAttribute('opacity', t.opacity);
         };
         const st = ScrollTrigger.create({
           trigger: stConfig.trigger,

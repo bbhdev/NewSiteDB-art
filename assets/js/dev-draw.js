@@ -1036,14 +1036,16 @@
           <li><strong>Ping-pong forever</strong> — progress oscillates 0→1→0 every 2×<em>Seconds</em>.</li>\
           <li><strong>Loop back to earlier block</strong> — animates the line over <em>Seconds</em> back to where the chosen target block started, then replays the chain from the target onward. Pair with After previous + a sequence of Timed blocks above to build a walking / looping multi-step animation. Optional <em>Max iterations</em> caps the cycles (0 = forever); when capped, the line parks at the target\'s start position.</li>\
         </ul>\
+        <p>Each block also carries a set of "what changes" controls — translation, rotation, opacity, draw-in. They\'re independent: a single block can move, rotate, and fade at the same time, all driven by the block\'s Progress.</p>\
         <p><strong>Translate / Rotate</strong> — per-block deltas weighted by Progress. TranslateX / TranslateY / Rotate at Progress = 1 equals the authored value; at 0.5 it\'s half. Pivot (Δx, Δy) offsets the rotation center from the object\'s natural center.</p>\
         <p><strong>Translate mode</strong> — switches TranslateX / TranslateY between two interpretations:</p>\
         <ul>\
           <li><strong>Fixed</strong> — the authored value is the final displacement at Progress = 1.</li>\
           <li><strong>Drift X / Y / Both</strong> — the value is a per-scroll-pixel multiplier on the chosen axis. The displacement accumulates while the block is active and freezes the moment the next block activates. Useful for "drift in from off-canvas indefinitely, then hand off".</li>\
         </ul>\
+        <p><strong>Fade opacity</strong> — opt-in opacity transition. When on, the line\'s opacity is interpolated each frame from <em>Opacity from</em> (at Progress = 0) to <em>Opacity to</em> (at Progress = 1). Authored as absolute values (0 = invisible, 1 = fully opaque), not deltas — so 1→0 fades out, 0→1 fades in, 1→1 keeps it solid. Composes by "last active block wins": a chain of fade blocks reads as a sequence (fade to 0.5, then to 0, etc.); blocks without Fade opacity don\'t touch the line\'s opacity.</p>\
         <p><strong>Draw-in</strong> — when on, the line\'s stroke draws on with Progress instead of appearing fully drawn. <em>Direction</em> reverses the draw order.</p>\
-        <p>Multiple blocks compose: their (TranslateX, TranslateY, Rotate) contributions sum each frame. A Loop-back block contributes a <em>negative</em> snapshot of the chain it\'s undoing, so the line returns exactly to the target\'s start.</p>'
+        <p>Multiple blocks compose: TranslateX / TranslateY / Rotate contributions sum each frame; opacity uses last-active-wins. A Loop-back block contributes a <em>negative</em> snapshot of the chain it\'s undoing, so the line returns exactly to the target\'s start.</p>'
     }
   };
 
@@ -7093,6 +7095,26 @@
     card.appendChild(setInactive(setOriginButton(function () {
       startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
     }), noRotate));
+    // v0.8.26: opacity fade is a per-block "mode of change" like
+    // translate / rotate, except authored as absolute from→to
+    // values instead of progress-weighted deltas. Off by default —
+    // when on, the line's opacity is interpolated each frame by
+    // this block's progress; if multiple opacity blocks overlap,
+    // the latest active one (highest index) wins so a chained
+    // sequence reads as a sequence of fades.
+    const fadeOn = !!params.fadeOpacity;
+    card.appendChild(checkboxField('Fade opacity', fadeOn, function (v) {
+      updateBehaviorParam(line.id, 'fadeOpacity', v ? true : null, blockIdx);
+      renderSelectionPanel();
+    }));
+    const oFrom = (typeof params.opacityFrom === 'number') ? params.opacityFrom : 1;
+    const oTo   = (typeof params.opacityTo   === 'number') ? params.opacityTo   : 0;
+    card.appendChild(setInactive(numberField('Opacity from (0–1)', oFrom, function (v) {
+      updateBehaviorParam(line.id, 'opacityFrom', v, blockIdx);
+    }), !fadeOn));
+    card.appendChild(setInactive(numberField('Opacity to (0–1)', oTo, function (v) {
+      updateBehaviorParam(line.id, 'opacityTo', v, blockIdx);
+    }), !fadeOn));
     card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v, blockIdx); }));
     // v0.8.19: Direction gates on resolved drawIn (override OR
     // group default). drawIn=false → direction is a no-op.
