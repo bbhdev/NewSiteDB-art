@@ -3823,6 +3823,11 @@
   // to pick the destination via drag-and-drop, so creation is out
   // of band).
   function moveLinesToGroup(lineIds, newGroupId) {
+    // v0.8.32 DIAGNOSTIC — same idea as moveLinesAdjacentTo.
+    console.log('[move-to-group/start]', {
+      mode: state.mode, classId: state.classId,
+      lineIds: lineIds, newGroupId: newGroupId
+    });
     let changed = false;
     // v0.8.30: track groupId changes as { masterId: groupName } so
     // fanOutZReorder can mirror them in sibling classes by name.
@@ -3863,6 +3868,41 @@
   // "drag-to-group" and "drag-to-reorder" into one gesture.
   function moveLinesAdjacentTo(draggedIds, anchorLineId, where, anchorGroupId) {
     if (!draggedIds || !draggedIds.length || !anchorLineId) return;
+    // v0.8.32 DIAGNOSTIC: capture pre-move snapshots of every
+    // master-matched line across all classes so we can see where
+    // appearance / behaviors are getting lost on a cross-group
+    // drag. Cheap to leave on; remove once the bug is fixed.
+    var _dbgSnap = function (line) {
+      if (!line) return '(none)';
+      return {
+        id: line.id, masterId: line.masterId, groupId: line.groupId,
+        stroke: line.stroke,
+        behaviorsLen: Array.isArray(line.behaviors) ? line.behaviors.length : -1,
+        behaviorIds: Array.isArray(line.behaviors)
+          ? line.behaviors.map(function (b) { return b.id; }) : null,
+        paramKeys: line.params ? Object.keys(line.params) : null,
+        overrideKeys: line.overrides ? Object.keys(line.overrides) : null
+      };
+    };
+    var _dbgSibs = function (mid) {
+      var out = {};
+      state.pageConfig.useClasses.forEach(function (cid) {
+        var bucket = state.byClass[cid];
+        if (!bucket || !Array.isArray(bucket.lines)) return;
+        var l = bucket.lines.find(function (x) { return x.masterId === mid; });
+        out[cid] = _dbgSnap(l);
+      });
+      return out;
+    };
+    var _dbgFirstId = draggedIds[0];
+    var _dbgFirstLine = state.lines.find(function (l) { return l.id === _dbgFirstId; });
+    var _dbgFirstMid = _dbgFirstLine && _dbgFirstLine.masterId;
+    console.log('[drag/start]', {
+      mode: state.mode, classId: state.classId,
+      draggedIds: draggedIds, anchorLineId: anchorLineId, where: where,
+      anchorGroupId: anchorGroupId,
+      sibsForMaster: _dbgFirstMid ? _dbgSibs(_dbgFirstMid) : null
+    });
     // De-dupe + drop the anchor (dropping on yourself is a no-op).
     const ids = [];
     draggedIds.forEach(function (id) {
@@ -3921,7 +3961,20 @@
     // matching canvas Z (renderLines + decomposeForSave both walk
     // state.lines top-to-bottom).
     rebuildLinesInGroupOrder();
+    // v0.8.32 DIAGNOSTIC: just before fan-out, dump current-class
+    // snapshot of the dragged line + every sibling's master-matched
+    // line. If they look fine here but corrupted after fan-out, the
+    // bug is in fanOutZReorder.
+    console.log('[drag/post-local]', {
+      groupIdChanges: groupIdChanges,
+      sibsForMaster: _dbgFirstMid ? _dbgSibs(_dbgFirstMid) : null,
+      currentDraggedSnap: _dbgSnap(state.lines.find(function (l) { return l.id === _dbgFirstId; }))
+    });
     fanOutZReorder({ groupIdChanges: groupIdChanges });
+    console.log('[drag/post-fanout]', {
+      sibsForMaster: _dbgFirstMid ? _dbgSibs(_dbgFirstMid) : null,
+      currentDraggedSnap: _dbgSnap(state.lines.find(function (l) { return l.id === _dbgFirstId; }))
+    });
     state.dirty = true;
     snapshot();
     renderAll();
@@ -6727,6 +6780,18 @@
   }
 
   function renderLinePanel(line) {
+    // v0.8.32 DIAGNOSTIC: log what the panel is actually reading.
+    // If `line` looks intact here but the panel still shows defaults,
+    // the bug is downstream (in the field-render code). If `line` is
+    // already empty, the data was mutated earlier.
+    console.log('[panel/render]', {
+      id: line && line.id, masterId: line && line.masterId,
+      groupId: line && line.groupId, stroke: line && line.stroke,
+      behaviorsLen: line && Array.isArray(line.behaviors) ? line.behaviors.length : -1,
+      behaviorIds: line && Array.isArray(line.behaviors)
+        ? line.behaviors.map(function (b) { return b.id; }) : null,
+      sameRefAsInState: line === state.lines.find(function (l) { return l && l.id === (line && line.id); })
+    });
     const group = state.groups.find(function (g) { return g.id === line.groupId; });
     const head = document.createElement('header');
     head.className = 'ed-panel-head';
