@@ -1344,7 +1344,7 @@
     rect.setAttribute('height', ph);
     rect.setAttribute('fill', 'none');
     rect.setAttribute('stroke', '#9a4');
-    rect.setAttribute('stroke-width', 1);
+    rect.setAttribute('stroke-width', 2);
     rect.setAttribute('stroke-dasharray', '8 4');
     rect.style.vectorEffect = 'non-scaling-stroke';
     rect.style.pointerEvents = 'none';

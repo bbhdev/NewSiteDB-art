@@ -5966,7 +5966,8 @@
             // click replaces with just this line. Matches the canvas
             // modifier-click behavior so both selection surfaces stay
             // in sync.
-            if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            const isMulti = (e.metaKey || e.ctrlKey || e.shiftKey);
+            if (isMulti) {
               toggleInSelection(line.id);
             } else {
               selectOnly(line.id);
@@ -5976,7 +5977,9 @@
             updateSelectAllButton();
             renderGroupsList();
             renderLines();
-            renderSelectionPanel();
+            // v0.8.27: see canvas click handler — multi-select gesture
+            // doesn't auto-scroll the sidebar panel.
+            renderSelectionPanel(isMulti ? { suppressScroll: true } : undefined);
           });
           ll.appendChild(lr);
         });
@@ -6081,7 +6084,7 @@
   // is preserved.
   let lastScrolledSelectionId = null;
 
-  function renderSelectionPanel() {
+  function renderSelectionPanel(opts) {
     selectionPanel.innerHTML = '';
     const wasSingleSelect = state.selectedIds.length === 1;
     // Multi-select takes precedence: show a compact bulk-actions panel.
@@ -6104,11 +6107,22 @@
     // and used to snap back to the top of the panel, hiding
     // wherever the user was working. Track the last-scrolled id;
     // only fire scrollIntoView when the primary selection changes.
+    //
+    // v0.8.27: caller can pass { suppressScroll: true } to skip the
+    // scroll-into-view even on a brand-new selection — used by
+    // modifier-click handlers (Cmd / Shift / Ctrl) so initiating a
+    // multi-selection from an empty selection doesn't jerk the
+    // sidebar to the per-line panel the user is about to abandon
+    // on the next modifier-click.
+    const suppress  = !!(opts && opts.suppressScroll);
     const primaryId = wasSingleSelect ? primarySelectedId() : null;
-    if (wasSingleSelect && selectionPanel.scrollIntoView
+    if (!suppress && wasSingleSelect && selectionPanel.scrollIntoView
         && primaryId !== lastScrolledSelectionId) {
       selectionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    // Update the tracker even when suppressed, so a later plain click
+    // on the SAME object doesn't re-trigger the scroll (the user
+    // already saw that panel via the modifier-click).
     lastScrolledSelectionId = primaryId;
   }
 
@@ -7895,7 +7909,12 @@
           updateSelectAllButton();
           renderGroupsList();
           renderLines();
-          renderSelectionPanel();
+          // v0.8.27: modifier-click is a multi-select gesture — skip
+          // the scroll-into-view that normally lands on the per-line
+          // panel for a fresh single-selection. Plain click keeps the
+          // scroll so "click an object, see its properties" still
+          // works.
+          renderSelectionPanel(modifier ? { suppressScroll: true } : undefined);
         }
       }
     }
