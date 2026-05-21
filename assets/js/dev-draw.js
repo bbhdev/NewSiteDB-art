@@ -992,6 +992,7 @@
     general: {
       title: 'Editor tips',
       html: '\
+        <h4>Tools</h4>\
         <p>Pick a tool then draw on the canvas. Each tool commits on release.</p>\
         <ul>\
           <li><strong>Freehand / Loop</strong> — click-drag for an organic stroke. Loop auto-closes and fills.</li>\
@@ -1015,7 +1016,34 @@
         <p>Click an existing line on the canvas to select it. Drag its body to move; drag handles to reshape. Click the same spot again to cycle to a line beneath.</p>\
         <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
         <p>Drag a line row onto another group in the sidebar to move it between groups.</p>\
-        <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>'
+        <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>\
+        <h4>Behaviors</h4>\
+        <p>Every line carries an ordered list of behavior blocks. Each block has two independent axes — <strong>Activate when</strong> (the trigger that turns the block on) and <strong>Progress</strong> (how the block\'s 0→1 advances once active) — plus per-block translate / rotate deltas that get weighted by progress. The side panel summary describes the active combination on the selected block; the table below catalogs every option.</p>\
+        <p><strong>Activate when</strong> — picks the trigger:</p>\
+        <ul>\
+          <li><strong>Scroll range</strong> — fires the first time scroll position enters [start, end] (expressed as a fraction of page scroll). The only trigger compatible with Progress = Scroll-driven.</li>\
+          <li><strong>Page load</strong> — fires at page load. Optional delay (s) pushes it later.</li>\
+          <li><strong>Scroll key</strong> — fires when scroll brings a named DOM element (by selector) past a viewport anchor (top / middle / bottom / the object itself). Set <em>Repeat</em> to fire once or every crossing.</li>\
+          <li><strong>In view (partial)</strong> — fires when the animated object first enters the viewport.</li>\
+          <li><strong>In view (full)</strong> — fires when the animated object is fully inside the viewport.</li>\
+          <li><strong>After previous</strong> — fires at the exact instant the previous timed block ends, for gapless chains. Requires a Timed / Loop-back block earlier in the list.</li>\
+        </ul>\
+        <p><strong>Progress</strong> — picks how 0→1 advances:</p>\
+        <ul>\
+          <li><strong>Scroll-driven</strong> — progress = scroll position within the trigger\'s range. Only valid when the trigger is Scroll range. Seconds / easing don\'t apply.</li>\
+          <li><strong>Timed run (seconds)</strong> — progress runs 0→1 over <em>Seconds</em> of wall-clock time after the trigger fires, then stays at 1.</li>\
+          <li><strong>Loop forever</strong> — progress cycles 0→1 every <em>Seconds</em>, sawtooth-style.</li>\
+          <li><strong>Ping-pong forever</strong> — progress oscillates 0→1→0 every 2×<em>Seconds</em>.</li>\
+          <li><strong>Loop back to earlier block</strong> — animates the line over <em>Seconds</em> back to where the chosen target block started, then replays the chain from the target onward. Pair with After previous + a sequence of Timed blocks above to build a walking / looping multi-step animation. Optional <em>Max iterations</em> caps the cycles (0 = forever); when capped, the line parks at the target\'s start position.</li>\
+        </ul>\
+        <p><strong>Translate / Rotate</strong> — per-block deltas weighted by Progress. TranslateX / TranslateY / Rotate at Progress = 1 equals the authored value; at 0.5 it\'s half. Pivot (Δx, Δy) offsets the rotation center from the object\'s natural center.</p>\
+        <p><strong>Translate mode</strong> — switches TranslateX / TranslateY between two interpretations:</p>\
+        <ul>\
+          <li><strong>Fixed</strong> — the authored value is the final displacement at Progress = 1.</li>\
+          <li><strong>Drift X / Y / Both</strong> — the value is a per-scroll-pixel multiplier on the chosen axis. The displacement accumulates while the block is active and freezes the moment the next block activates. Useful for "drift in from off-canvas indefinitely, then hand off".</li>\
+        </ul>\
+        <p><strong>Draw-in</strong> — when on, the line\'s stroke draws on with Progress instead of appearing fully drawn. <em>Direction</em> reverses the draw order.</p>\
+        <p>Multiple blocks compose: their (TranslateX, TranslateY, Rotate) contributions sum each frame. A Loop-back block contributes a <em>negative</em> snapshot of the chain it\'s undoing, so the line returns exactly to the target\'s start.</p>'
     }
   };
 
