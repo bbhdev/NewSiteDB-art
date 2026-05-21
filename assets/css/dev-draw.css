@@ -1157,11 +1157,18 @@ body.editor input[type="range"] {
    alongside the text. Used on Import SVG (.ed-create-import-btn)
    and Snapshots (.ed-library-snapshots-btn). */
 .ed-arrow-icon {
+  display: inline-block;  /* required so transform applies */
   font-size: 1.25em;
   line-height: 0.9;
   margin-right: 0.1em;
   vertical-align: -0.05em;
 }
+/* v0.8.39: render the SAME glyph (⇩) flipped for the upwards
+   variant so the two arrows are pixel-for-pixel identical at all
+   font sizes / on all platforms. Picking distinct up- and down-
+   codepoints leaves the pair at the mercy of the active font's
+   glyph design. */
+.ed-arrow-icon-flip { transform: scaleY(-1); }
 .ed-create-types-col {
   display: flex;
   flex-direction: column;
