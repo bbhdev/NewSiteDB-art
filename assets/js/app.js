@@ -1130,9 +1130,24 @@
           // elements. Legacy pathRef values that stored a per-
           // class line id won't resolve here — user re-picks the
           // guide in the editor's panel to save a master id.
-          const guide = b.pathRef
+          let guide = b.pathRef
             ? layer.querySelector('[data-master-id="' + b.pathRef + '"]')
             : null;
+          // v0.8.60: master-id lookup fails when the user's data
+          // has per-class master drift (the "same" logical line
+          // has different masterIds in different classes — common
+          // in datasets that survived the v0.8.42–46 skeleton-
+          // corruption cycle). Fall back to NAME lookup: find a
+          // line in the current class whose name matches what the
+          // editor saved as pathRefName at pick time.
+          if (!guide && b.pathRefName) {
+            const sibLine = lines.find(function (l) {
+              return (l.name || l.id) === b.pathRefName;
+            });
+            if (sibLine) {
+              guide = layer.querySelector('[data-line-id="' + sibLine.id + '"]');
+            }
+          }
           if (!guide && b.pathRef && !pathDiagLogged[i]) {
             // v0.8.59: when the lookup fails, dump every master id
             // present on the layer so the user can see whether the

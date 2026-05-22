@@ -8506,6 +8506,13 @@
                        && l2.behaviors[blockIdx].params;
         if (cur && !cur.pathRef) {
           updateBehaviorParam(line.id, 'pathRef', guideOpts[0].value, blockIdx);
+          // v0.8.60: seed the cross-class-fallback name too so a
+          // first-time pathFollow setup works in every class even
+          // when masterIds differ per class.
+          const seeded = state.lines.find(function (l) { return l.masterId === guideOpts[0].value; });
+          if (seeded) {
+            updateBehaviorParam(line.id, 'pathRefName', seeded.name || seeded.id, blockIdx);
+          }
         }
       }
       renderSelectionPanel();
@@ -8527,6 +8534,13 @@
       const currentGuide = (typeof params.pathRef === 'string') ? params.pathRef : '';
       card.appendChild(selectField('Path guide', currentGuide, guideOpts, function (v) {
         updateBehaviorParam(line.id, 'pathRef', v || null, blockIdx);
+        // v0.8.60: also save the guide's display name as a fallback
+        // identity. Runtime uses it when the masterId lookup fails
+        // (cross-class data drift cases where each class has its
+        // own master id for the same logical line).
+        const picked = v ? state.lines.find(function (l) { return l.masterId === v; }) : null;
+        const nm = picked ? (picked.name || picked.id) : null;
+        updateBehaviorParam(line.id, 'pathRefName', nm, blockIdx);
       }));
       card.appendChild(checkboxField('Align to tangent', !!params.pathAlignToTangent, function (v) {
         updateBehaviorParam(line.id, 'pathAlignToTangent', v ? true : null, blockIdx);
