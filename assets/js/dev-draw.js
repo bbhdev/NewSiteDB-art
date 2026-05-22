@@ -4399,7 +4399,19 @@
   function updateGroupDefaults(id, patch) {
     const g = state.groups.find(function (g) { return g.id === id; });
     if (!g) return;
+    // v0.8.64: in ALL mode, mirror onto same-named groups in every
+    // other class — analogous to updateGroup's existing fan-out for
+    // name / hidden changes. Without this, ALL mode left group
+    // defaults (translateX/Y, rotate, stroke, width, drawIn,
+    // rotateOriginX/Y) inconsistent across classes despite the
+    // user's explicit "edit applies everywhere" intent.
+    const peerName = g.name;
     g.defaults = Object.assign({}, g.defaults, patch);
+    if (modeIsAll()) {
+      forSiblingGroupsByName(peerName, function (peer) {
+        peer.defaults = Object.assign({}, peer.defaults, patch);
+      });
+    }
     state.dirty = true;
     // Stroke/width default changes affect canvas rendering of every line
     // that doesn't override them.
