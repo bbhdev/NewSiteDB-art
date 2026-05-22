@@ -1102,14 +1102,22 @@
         </ul>\
         <p>Each block also carries a set of "what changes" controls — translation, rotation, opacity, draw-in. They\'re independent: a single block can move, rotate, and fade at the same time, all driven by the block\'s Progress.</p>\
         <p><strong>Translate / Rotate</strong> — per-block deltas weighted by Progress. TranslateX / TranslateY / Rotate at Progress = 1 equals the authored value; at 0.5 it\'s half. Pivot (Δx, Δy) offsets the rotation center from the object\'s natural center.</p>\
-        <p><strong>Translate mode</strong> — switches TranslateX / TranslateY between two interpretations:</p>\
+        <p><strong>Translate mode</strong> — switches how the object\'s position is driven:</p>\
         <ul>\
-          <li><strong>Fixed</strong> — the authored value is the final displacement at Progress = 1.</li>\
+          <li><strong>Fixed</strong> — TranslateX / TranslateY are the final displacement at Progress = 1.</li>\
           <li><strong>Drift X / Y / Both</strong> — the value is a per-scroll-pixel multiplier on the chosen axis. The displacement accumulates while the block is active and freezes the moment the next block activates. Useful for "drift in from off-canvas indefinitely, then hand off".</li>\
+          <li><strong>Along path</strong> — the object travels along another line\'s path (its <em>guide</em>) as Progress goes 0→1. The guide can be any path-bearing line: freehand, loop, bezier, chain, or imported SVG. Three sub-controls appear:\
+            <ul>\
+              <li><em>Path guide</em> picks the guide line from the current class. The guide can be visible or hidden — hidden guides still drive the motion (the runtime renders them invisibly so they can be sampled).</li>\
+              <li><em>Align to tangent</em> rotates the moving object to match the path direction at each point, so it "faces forward" along its travel.</li>\
+              <li><em>At end of path</em> controls what happens once Progress reaches 1 on an open path: <strong>Stop</strong> parks the object at the end; <strong>Loop</strong> snaps back to the start (smooth on closed paths, jump on open); <strong>Ping-pong</strong> reverses direction at each end. Closed paths (loops) make the choice mostly cosmetic since end ≈ start.</li>\
+            </ul>\
+            The guide can itself be animating (via its own behavior blocks) — the follower tracks the guide\'s current shape and position frame-by-frame. Multiple Along-path blocks can chain in time: the most recent active one wins, so the follower can hand off between guides over the timeline.\
+          </li>\
         </ul>\
         <p><strong>Fade opacity</strong> — opt-in opacity transition. When on, the line\'s opacity is interpolated each frame from <em>Opacity from</em> (at Progress = 0) to <em>Opacity to</em> (at Progress = 1). Authored as absolute values (0 = invisible, 1 = fully opaque), not deltas — so 1→0 fades out, 0→1 fades in, 1→1 keeps it solid. Composes by "last active block wins": a chain of fade blocks reads as a sequence (fade to 0.5, then to 0, etc.); blocks without Fade opacity don\'t touch the line\'s opacity.</p>\
         <p><strong>Draw-in</strong> — when on, the line\'s stroke draws on with Progress instead of appearing fully drawn. <em>Direction</em> reverses the draw order.</p>\
-        <p>Multiple blocks compose: TranslateX / TranslateY / Rotate contributions sum each frame; opacity uses last-active-wins. A Loop-back block contributes a <em>negative</em> snapshot of the chain it\'s undoing, so the line returns exactly to the target\'s start.</p>'
+        <p>Multiple blocks compose: TranslateX / TranslateY / Rotate contributions sum each frame; opacity uses last-active-wins; Along-path also uses last-active-wins for the position contribution but its own tx/ty replace the block\'s authored deltas (other blocks\' Fixed / Drift values still sum on top). A Loop-back block contributes a <em>negative</em> snapshot of the chain it\'s undoing, so the line returns exactly to the target\'s start.</p>'
     }
   };
 
