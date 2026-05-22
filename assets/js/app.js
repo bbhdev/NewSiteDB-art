@@ -1428,6 +1428,17 @@
           }
         });
         ownTriggers.push(st);
+        // v0.8.71: prime the first frame. ScrollTrigger.create doesn't
+        // reliably fire onUpdate at setup when scroll = 0 and the
+        // trigger's start is also 0 (no scroll-position delta to
+        // react to). That left visual state at the path's SVG
+        // defaults — most visibly opacity (=1 by default) instead
+        // of the block's opacityFrom — until the user scrolled,
+        // producing a jump on first scroll. Calling writeAt
+        // explicitly here applies the block's starting state on
+        // page load, so the very first paint matches what the
+        // animation should look like at bp = 0.
+        writeAt(st.progress || 0, performance.now() / 1000);
         // Time-driven blocks (any duration.mode !== 'scroll')
         // need per-frame updates independent of scroll — the user
         // might not scroll while a time / loop / pingpong block is
