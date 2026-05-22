@@ -493,7 +493,13 @@
     // own when authors place objects in the bleed area and want to
     // see where the visible page sits, without the label clutter.
     if (hasLS && localStorage.getItem('ed-show-page-area') === '1') {
-      renderRuntimePageGuide(layer, page, appVersion);
+      // v0.8.58: page-guide diagnostic also shows which class the
+      // runtime selected (useful when debugging cross-class
+      // mismatches — e.g. the editor was on wide but the runtime
+      // picked narrow due to viewport width).
+      const clsDef = classes.find(function (c) { return c.id === currentClassId; });
+      const clsLabel = (clsDef && clsDef.name) ? clsDef.name : (currentClassId || '?');
+      renderRuntimePageGuide(layer, page, appVersion, clsLabel);
     }
     if (diagMode) {
       renderRuntimeDiagGrid(layer, page);
@@ -1528,7 +1534,7 @@
     layer.insertBefore(g, layer.firstChild);
   }
 
-  function renderRuntimePageGuide(layer, page, version) {
+  function renderRuntimePageGuide(layer, page, version, classLabel) {
     const SVG_NS_LOCAL = 'http://www.w3.org/2000/svg';
     const pw = page.pageW, ph = page.pageH;
 
@@ -1550,7 +1556,12 @@
     // (not a corner-coordinate label). Same color family as the
     // outline + corner labels; tagged with the page-guide so it
     // appears and disappears together with the rest of the guide.
-    if (version) {
+    if (version || classLabel) {
+      // v0.8.58: combined version + class label, right-aligned in
+      // the top-right of the page area. Class label tells the
+      // author which class the runtime selected at the current
+      // viewport width — critical when debugging behaviors that
+      // reference other lines (cross-class id mismatches).
       const vt = document.createElementNS(SVG_NS_LOCAL, 'text');
       vt.setAttribute('x', pw - 8);
       vt.setAttribute('y', 16);
@@ -1559,7 +1570,10 @@
       vt.setAttribute('font-family', 'ui-monospace, monospace');
       vt.setAttribute('font-size', 11);
       vt.style.pointerEvents = 'none';
-      vt.textContent = 'v' + version;
+      const parts = [];
+      if (version)    parts.push('v' + version);
+      if (classLabel) parts.push('class: ' + classLabel);
+      vt.textContent = parts.join(' · ');
       layer.appendChild(vt);
     }
 
