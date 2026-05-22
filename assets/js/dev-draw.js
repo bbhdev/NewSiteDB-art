@@ -1103,10 +1103,11 @@
           <li><strong>After previous</strong> — fires at the exact instant the previous timed block ends, for gapless chains. Requires a Timed / Loop-back block earlier in the list.</li>\
           <li><strong>Scroll stops</strong> — fires when the user stops scrolling. <em>Delay</em> (s) is how long the page must stay still before firing; if scrolling resumes before the delay elapses, the pending fire is cancelled.</li>\
           <li><strong>Scroll resumes</strong> — symmetric to <em>Scroll stops</em>: fires when the user starts scrolling after being still. <em>Delay</em> is how long scrolling must continue before firing; a stop before the delay elapses cancels the pending fire.</li>\
+          <li><strong>Wait for Start</strong> — does nothing on its own. The block sits dormant until another object\'s trigger fires a Start command targeting this class. Use this to build externally-driven sequences where the activation is owned by a different object.</li>\
         </ul>\
         <p><strong>Cross-object Start / Stop</strong> — every trigger can optionally affect <em>another</em> object when it fires. The target is picked by class name (objects sharing a class animate together). Self is excluded from the lists.</p>\
         <ul>\
-          <li><strong>Start object</strong> — re-arms the target\'s triggers and fires them: <em>Page-load</em> blocks activate immediately; <em>In-view</em> and <em>Scroll-key</em> blocks re-evaluate against current scroll state. If the target is already animating normally, this is a no-op (won\'t interrupt a healthy animation).</li>\
+          <li><strong>Start object</strong> — fires the target\'s <em>earliest waiting block</em> (the first block in the list whose natural trigger hasn\'t fired yet) as if its trigger had just fired. Already-fired blocks stay fired — Start never double-fires a block. If every block has already fired, Start is a no-op. If the target is currently Stopped (or mid-cleanup), Start first cancels the cleanup and rearms every block to waiting, then fires the earliest waiting one. Pairs with <em>Wait for Start</em> triggers for fully externally-driven chains.</li>\
           <li><strong>Stop object</strong> — visually resets the target to its neutral, pre-fire state: no translation, no rotation, original opacity, original draw-in fully drawn. The target ends ready to fire again from frame zero. Two optional cleanups: <em>fade out to opacity 0</em> and <em>return to original position</em>; both share a single <em>cleanup duration</em> (0 = instant) and <em>easing</em>. A second Stop while a cleanup is already running is ignored; a Start while a cleanup is running cancels the cleanup and re-arms.</li>\
         </ul>\
         <p><strong>Progress</strong> — picks how 0→1 advances:</p>\
@@ -8158,6 +8159,9 @@
       act = (delay > 0)
         ? 'Triggers ' + formatSeconds(delay) + ' after the user resumes scrolling'
         : 'Triggers the moment the user resumes scrolling';
+    } else if (when === 'wait') {
+      // v0.8.82
+      act = 'Waits for another object’s Start command (does not fire on its own)';
     } else {
       act = 'Triggers (' + when + ')';
     }
@@ -8527,7 +8531,13 @@
       // X is already running) and stop X (freeze X at its end
       // state; idle blocks are unaffected).
       { value: 'scroll-stop',      label: 'Scroll stops' },
-      { value: 'scroll-start',     label: 'Scroll resumes' }
+      { value: 'scroll-start',     label: 'Scroll resumes' },
+      // v0.8.82: explicit "never auto-fires" trigger. Block sits
+      // dormant until another object's Start command targets this
+      // class. Pairs with cross-object Start to build externally-
+      // driven chains. Delay is honored — Start at t fires the
+      // block's contribution starting at t + delay.
+      { value: 'wait',             label: 'Wait for Start' }
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
        function (opt) { explainDurationDisabled(opt); }));
 

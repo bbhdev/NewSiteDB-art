@@ -1826,11 +1826,26 @@
             }
           };
           const requestStart = function () {
+            // v0.8.82: unified Start semantics.
+            //
+            //   (a) If the target is stopped or mid-cleanup, rearm
+            //       first — that resets every activationState[i] to
+            //       null so all blocks return to the "waiting" state.
+            //   (b) Then force-fire the EARLIEST waiting block: set
+            //       its activationState, tear down its natural-arming
+            //       listener so the natural condition can't fire it
+            //       again later, and fan out applyObjectEffects.
+            //
+            // A "waiting" block is one whose natural trigger hasn't
+            // fired yet (activationState[i] == null). Already-fired
+            // blocks stay fired — Start never double-fires. If every
+            // block has already fired, Start is a no-op.
+            //
+            // Earliest-only (not all) preserves the authored chain
+            // ordering: an after-previous block will still chain off
+            // the Start-fired block's completion; a later
+            // scroll-range block still waits for its scroll cue.
             if (stopState) {
-              // Mid-cleanup: cancel and fully re-arm. Effectively a
-              // restart with whatever interpolated state we were
-              // painting — but rearm() will overwrite it on first
-              // frame post-arm.
               stopState = null;
               if (cleanupTicker) {
                 try { gsap.ticker.remove(cleanupTicker); } catch (e) {}
@@ -1839,15 +1854,19 @@
               isStopped = false;
               paintNeutral();
               rearm();
-              return;
-            }
-            if (isStopped) {
+            } else if (isStopped) {
               isStopped = false;
               paintNeutral();
               rearm();
-              return;
             }
-            // Already animating normally — no-op (per spec).
+            for (let i = 0; i < blocks.length; i++) {
+              if (activationState[i] == null) {
+                activationState[i] = performance.now() / 1000;
+                teardownBlockTrigger(i);
+                applyObjectEffects(blocks[i].trigger);
+                break;
+              }
+            }
           };
           registerObjectController(classKey, {
             classKey: classKey,
