@@ -266,12 +266,12 @@ Past examples where clarifying first was correct:
   restriction but the rendering is still single-tween. If you build "the
   drawings" feature you'll be touching this code.
 
-## Where to start, generically
+## Vocabulary
 
-1. `git log --oneline -30` — read recent commits to absorb the latest decisions.
-2. Skim `assets/js/app.js` and `assets/js/dev-draw.js` headers/comments —
-   they're heavily annotated.
-3. If a specific feature: search for the v0.8.X version that introduced it via
-   `git log --grep "feature-name"` — commit message has the design rationale.
-4. Diagnostics first — when something's broken, run `_dumpLine` / check DOM
-   `data-master-id` / check console for trapped errors before guessing causes.
+**Lines** : initially all the graphical objects were lines and this 
+designation was always used. 
+Later geometric primitives were added and user often uses the 
+designation **objects** which is more general and appropriate.
+The meaning of both is the same: the word addresses the elementary
+graphical items referenced in masters.json and instances.json,
+which are the holders of behavior blocks.  
