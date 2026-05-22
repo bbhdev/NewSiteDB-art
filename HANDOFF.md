@@ -121,11 +121,49 @@ identical to any other trigger.
 runs and the block's progression gets painted even when the user isn't
 scrolling.
 
-**Cross-object start/stop control is a planned but unimplemented feature.**
-An earlier v0.8.77 included same-line `startBlockIndex` / `stopBlockIndex`
-side effects on these triggers; it was ripped out in v0.8.78 because acting
-on other blocks of the same object is pointless (each block has its own
-trigger). The meaningful axis is acting on other OBJECTS — needs design.
+### Cross-object Start / Stop side effects (v0.8.79)
+
+Every trigger (not just scroll-stop/start) carries optional `startObjectId`
+and `stopObjectId` fields. The target is identified by class name
+(`masterId` for lines; `name` for groups — v1 implements line/masterId
+only). When the host block's trigger fires, the runtime calls
+`applyObjectEffects(trigger)` which dispatches to each matching
+controller registered in the shared `objectRegistry` keyed by masterId.
+
+- **Start** — re-arms target's triggers and fires them. Page-load fires
+  immediately; in-view + scroll-key re-evaluate. No-op if the target is
+  already animating normally (won't interrupt a healthy animation).
+  Implementation: `armTrigger(i, b)` extracted from the original
+  `blocks.forEach` setup; `rearm()` tears down per-block listeners
+  (`blockTriggerTeardown[i]`) and re-runs `armTrigger` for every block.
+- **Stop** — clean reset to neutral pre-fire state (NOT pause). Optional
+  cleanups: `stopFadeOut` (opacity → 0) and `stopReturnHome` (translation
+  + rotation → 0), sharing `stopDurationSec` + `stopEasing`. The
+  cleanup tween snapshots `lastContribution` (captured at end of every
+  `writeAt`) and scales tx/ty/rot/opacity toward zero by
+  `easing(elapsed/dur)`. At finalize, all per-block trigger state clears
+  and the target ends ready to fire again from frame zero. Re-stop during
+  cleanup is ignored; re-start during cleanup cancels and re-arms.
+- **Init ordering**: page-load triggers fire during per-line init, but
+  target controllers may not exist yet. `pendingObjectEffects` queues
+  effects while `objectInitFlushing === true`; the queue flushes after
+  all lines are registered (end of `renderClassContent`).
+- **Cleanup paint without permanent ticker**: lines whose blocks are all
+  scroll-driven don't run `gsap.ticker`. `requestStop` installs a
+  temporary `cleanupTicker` (`gsap.ticker.add(writeAt)`) removed at
+  cleanup finalization or on `requestStart`.
+
+Authored in editor via Start object / Stop object dropdowns (one per
+trigger). When Stop is set, four sub-fields appear: Fade-out checkbox,
+Return-home checkbox, Cleanup duration (s), Cleanup easing. Self is
+excluded from the picker; the picker enumerates unique masterIds across
+`state.lines`. Re-render gate in `updateBehaviorTrigger` includes
+`startObjectId` / `stopObjectId` so sub-field visibility updates.
+
+Earlier v0.8.77 same-line `startBlockIndex` / `stopBlockIndex`
+side effects were ripped out in v0.8.78 as architecturally wrong —
+acting on other blocks of the same object is pointless (each block has
+its own trigger).
 
 ## Recent architectural decisions and why
 

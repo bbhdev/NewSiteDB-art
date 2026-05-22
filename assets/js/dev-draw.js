@@ -200,6 +200,16 @@
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
+      // v0.8.79: cross-object Start / Stop side effects on fire.
+      if (b.trigger.startObjectId)  out.startObjectId  = String(b.trigger.startObjectId);
+      if (b.trigger.stopObjectId)   out.stopObjectId   = String(b.trigger.stopObjectId);
+      if (b.trigger.stopFadeOut)    out.stopFadeOut    = true;
+      if (b.trigger.stopReturnHome) out.stopReturnHome = true;
+      if (b.trigger.stopDurationSec != null) {
+        const d = Number(b.trigger.stopDurationSec);
+        if (d >= 0) out.stopDurationSec = d;
+      }
+      if (b.trigger.stopEasing)     out.stopEasing     = String(b.trigger.stopEasing);
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.
@@ -1093,6 +1103,11 @@
           <li><strong>After previous</strong> — fires at the exact instant the previous timed block ends, for gapless chains. Requires a Timed / Loop-back block earlier in the list.</li>\
           <li><strong>Scroll stops</strong> — fires when the user stops scrolling. <em>Delay</em> (s) is how long the page must stay still before firing; if scrolling resumes before the delay elapses, the pending fire is cancelled.</li>\
           <li><strong>Scroll resumes</strong> — symmetric to <em>Scroll stops</em>: fires when the user starts scrolling after being still. <em>Delay</em> is how long scrolling must continue before firing; a stop before the delay elapses cancels the pending fire.</li>\
+        </ul>\
+        <p><strong>Cross-object Start / Stop</strong> — every trigger can optionally affect <em>another</em> object when it fires. The target is picked by class name (objects sharing a class animate together). Self is excluded from the lists.</p>\
+        <ul>\
+          <li><strong>Start object</strong> — re-arms the target\'s triggers and fires them: <em>Page-load</em> blocks activate immediately; <em>In-view</em> and <em>Scroll-key</em> blocks re-evaluate against current scroll state. If the target is already animating normally, this is a no-op (won\'t interrupt a healthy animation).</li>\
+          <li><strong>Stop object</strong> — visually resets the target to its neutral, pre-fire state: no translation, no rotation, original opacity, original draw-in fully drawn. The target ends ready to fire again from frame zero. Two optional cleanups: <em>fade out to opacity 0</em> and <em>return to original position</em>; both share a single <em>cleanup duration</em> (0 = instant) and <em>easing</em>. A second Stop while a cleanup is already running is ignored; a Start while a cleanup is running cancels the cleanup and re-arms.</li>\
         </ul>\
         <p><strong>Progress</strong> — picks how 0→1 advances:</p>\
         <ul>\
@@ -4609,7 +4624,8 @@
     // available; re-render so the right ones appear and the
     // greyed-out duration options update. viewportAt also goes
     // through re-render so its button-group active state flips.
-    if (key === 'when' || key === 'viewportAt' || key === 'repeat') {
+    if (key === 'when' || key === 'viewportAt' || key === 'repeat'
+        || key === 'startObjectId' || key === 'stopObjectId') {
       renderSelectionPanel();
     } else {
       refreshBehaviorSummary(lineId, blockIdx);
@@ -4656,6 +4672,31 @@
         v = Math.max(0, Math.min(1, v));
         b.trigger.range[key === 'rangeStart' ? 'start' : 'end'] = v;
       }
+    } else if (key === 'startObjectId' || key === 'stopObjectId') {
+      // v0.8.79: target a class (masterId). Empty string clears the
+      // slot. Clearing stopObjectId also drops its sub-fields — they
+      // only mean anything paired with a target.
+      if (value === '' || value == null) {
+        delete b.trigger[key];
+        if (key === 'stopObjectId') {
+          delete b.trigger.stopFadeOut;
+          delete b.trigger.stopReturnHome;
+          delete b.trigger.stopDurationSec;
+          delete b.trigger.stopEasing;
+        }
+      } else {
+        b.trigger[key] = String(value);
+      }
+    } else if (key === 'stopFadeOut' || key === 'stopReturnHome') {
+      if (value) b.trigger[key] = true;
+      else       delete b.trigger[key];
+    } else if (key === 'stopDurationSec') {
+      let v = Number(value);
+      if (!Number.isFinite(v) || v < 0) v = 0;
+      b.trigger.stopDurationSec = v;
+    } else if (key === 'stopEasing') {
+      if (!value || value === 'linear') delete b.trigger.stopEasing;
+      else b.trigger.stopEasing = String(value);
     }
   }
 
@@ -8143,7 +8184,28 @@
     } else {
       prog = 'progress mode: ' + dmode;
     }
-    return act + ', ' + prog + '.';
+    let summary = act + ', ' + prog + '.';
+    // v0.8.79: cross-object side effects on trigger fire.
+    const sideParts = [];
+    if (trigger.startObjectId) {
+      sideParts.push('starts "' + trigger.startObjectId + '"');
+    }
+    if (trigger.stopObjectId) {
+      const cleanups = [];
+      if (trigger.stopFadeOut)    cleanups.push('fade out');
+      if (trigger.stopReturnHome) cleanups.push('return to origin');
+      const dur = (typeof trigger.stopDurationSec === 'number' && trigger.stopDurationSec > 0)
+        ? ' over ' + formatSeconds(trigger.stopDurationSec) : '';
+      const ez  = (trigger.stopEasing && trigger.stopEasing !== 'linear')
+        ? ' (eased: ' + trigger.stopEasing + ')' : '';
+      let stopTxt = 'stops "' + trigger.stopObjectId + '"';
+      if (cleanups.length) stopTxt += ' with ' + cleanups.join(' + ') + dur + ez;
+      sideParts.push(stopTxt);
+    }
+    if (sideParts.length) {
+      summary += ' On fire: ' + sideParts.join('; ') + '.';
+    }
+    return summary;
   }
 
   // v0.8.20: drift behavior is independent of trigger × duration and
@@ -8508,6 +8570,41 @@
     card.appendChild(setInactive(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
       updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
     }), when === 'scroll-range' && dmode === 'scroll'));
+
+    // v0.8.79: cross-object Start/Stop side effects. When this
+    // trigger fires, optionally Start (re-arm + fire triggers on) or
+    // Stop (clean-reset to neutral) another object identified by its
+    // class (masterId). Stop additionally offers fade-out and/or
+    // return-to-origin tweens with a shared duration + easing.
+    // Self is excluded from the options. Available on every trigger
+    // type — useful regardless of how this block was activated.
+    const selfMaster = line.masterId || null;
+    const objectIds = [];
+    const seenObjMasters = {};
+    state.lines.forEach(function (ln) {
+      const m = ln.masterId;
+      if (!m || m === selfMaster) return;
+      if (seenObjMasters[m]) return;
+      seenObjMasters[m] = true;
+      objectIds.push({ value: m, label: m });
+    });
+    const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
+    card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
+      function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
+    card.appendChild(selectField('Stop object', trigger.stopObjectId || '', objOptsWithNone,
+      function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopObjectId', v); }));
+    if (trigger.stopObjectId) {
+      card.appendChild(checkboxField('  …fade out to opacity 0', !!trigger.stopFadeOut,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopFadeOut', v); }));
+      card.appendChild(checkboxField('  …return to original position', !!trigger.stopReturnHome,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopReturnHome', v); }));
+      const stopDur = (typeof trigger.stopDurationSec === 'number') ? trigger.stopDurationSec : 0;
+      card.appendChild(numberField('  …cleanup duration (s, 0 = instant)', stopDur,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopDurationSec', v); }));
+      card.appendChild(selectField('  …cleanup easing', trigger.stopEasing || 'linear',
+        EASING_OPTIONS,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopEasing', v); }));
+    }
 
     // Progress (How) picker — 'scroll' is only valid when
     // when=scroll-range; greyed otherwise and click-explains.

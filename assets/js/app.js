@@ -104,6 +104,19 @@
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
+      // v0.8.79: cross-object Start / Stop side effects on fire.
+      // Target is a class identity (line.masterId, stable string).
+      // Stop has optional fade-out + return-home cleanup tween;
+      // duration 0 OR neither bool set = instantaneous reset.
+      if (b.trigger.startObjectId)   out.startObjectId   = String(b.trigger.startObjectId);
+      if (b.trigger.stopObjectId)    out.stopObjectId    = String(b.trigger.stopObjectId);
+      if (b.trigger.stopFadeOut)     out.stopFadeOut     = true;
+      if (b.trigger.stopReturnHome)  out.stopReturnHome  = true;
+      if (b.trigger.stopDurationSec != null) {
+        const d = Number(b.trigger.stopDurationSec);
+        if (d >= 0) out.stopDurationSec = d;
+      }
+      if (b.trigger.stopEasing)      out.stopEasing      = String(b.trigger.stopEasing);
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -386,6 +399,57 @@
       };
     })();
 
+    // v0.8.79: cross-object Start / Stop registry. Every line whose
+    // class identity is known (line.masterId) registers a controller
+    // here under that key. Controllers expose requestStart() and
+    // requestStop(opts) — fired by triggers carrying startObjectId /
+    // stopObjectId. One masterId can have many controllers (every
+    // rendered instance of that class), all driven together.
+    //
+    // The pendingObjectEffects queue defers any cross-object fires
+    // that happen DURING per-line init (page-load triggers, scroll-
+    // range immediate entries, etc.) until every line is registered
+    // — otherwise a page-load trigger on the first line could try to
+    // stop a class whose controller hasn't been registered yet.
+    const objectRegistry = new Map();
+    let objectInitFlushing = true;
+    const pendingObjectEffects = [];
+    function registerObjectController(key, ctrl) {
+      if (!key) return;
+      if (!objectRegistry.has(key)) objectRegistry.set(key, []);
+      objectRegistry.get(key).push(ctrl);
+    }
+    function applyObjectEffects(trig) {
+      if (!trig) return;
+      if (!trig.startObjectId && !trig.stopObjectId) return;
+      if (objectInitFlushing) {
+        pendingObjectEffects.push(trig);
+        return;
+      }
+      if (trig.stopObjectId) {
+        const ctrls = objectRegistry.get(trig.stopObjectId);
+        if (ctrls) {
+          const opts = {
+            fadeOut:     !!trig.stopFadeOut,
+            returnHome:  !!trig.stopReturnHome,
+            durationSec: Number(trig.stopDurationSec) || 0,
+            easing:      trig.stopEasing || 'linear'
+          };
+          for (let i = 0; i < ctrls.length; i++) {
+            try { ctrls[i].requestStop(opts); } catch (e) {}
+          }
+        }
+      }
+      if (trig.startObjectId) {
+        const ctrls = objectRegistry.get(trig.startObjectId);
+        if (ctrls) {
+          for (let i = 0; i < ctrls.length; i++) {
+            try { ctrls[i].requestStart(); } catch (e) {}
+          }
+        }
+      }
+    }
+
     function renderForClass(classId) {
       // Tear down previous render.
       ownTriggers.forEach(function (t) { try { t.kill(); } catch (e) {} });
@@ -400,6 +464,11 @@
       ownListeners.length = 0;
       ownCleanups.forEach(function (fn) { try { fn(); } catch (e) {} });
       ownCleanups.length = 0;
+      // v0.8.79: drop every per-line stop/start controller; the next
+      // class render will re-register fresh ones.
+      objectRegistry.clear();
+      pendingObjectEffects.length = 0;
+      objectInitFlushing = true;
       layer.innerHTML = '';
       currentClassId = classId;
 
@@ -912,48 +981,60 @@
       // subsequent ticks for the same block.
       const pathDiagLogged = blocks.map(function () { return false; });
 
-      // For each non-scroll duration block, schedule its
-      // activation per the `when` axis. scroll-range activations
-      // are picked up inside the per-frame writeAt; the other
-      // four are wired here.
-      const lineStartedAt = performance.now() / 1000;
-      blocks.forEach(function (b, i) {
+      // v0.8.79: cross-object Stop / Start state. isStopped = the
+      // target has been reset to its neutral pre-fire state (writeAt
+      // no-ops; current rendered attrs frozen). stopState != null =
+      // a cleanup tween (fadeOut and/or returnHome) is in progress
+      // toward the neutral state; writeAt paints interpolated values
+      // each frame and finalizes when elapsed >= durationSec.
+      let isStopped = false;
+      let stopState = null;
+
+      // v0.8.79: per-block trigger teardown closures. Filled by
+      // armTrigger(i, b) — each call pushes one teardown function.
+      // Re-arming first runs and clears any prior teardown so a
+      // requestStart() can wire everything fresh without leaking
+      // listeners.
+      const blockTriggerTeardown = blocks.map(function () { return []; });
+      function teardownBlockTrigger(i) {
+        const arr = blockTriggerTeardown[i];
+        for (let k = 0; k < arr.length; k++) {
+          try { arr[k](); } catch (e) {}
+        }
+        arr.length = 0;
+      }
+
+      // v0.8.79: extracted from the old `blocks.forEach` setup loop.
+      // Callable repeatedly per block — wires (or re-wires) one
+      // block's trigger from scratch. Each branch ends by pushing a
+      // teardown closure so the listener/observer ownership stays
+      // per-block (the older line-global ownListeners/ownObservers/
+      // ownCleanups arrays are still used at the line level for
+      // class-render teardown, but per-block re-arm needs finer
+      // control). Object effects (startObjectId / stopObjectId) fire
+      // at every activation site via applyObjectEffects(b.trigger).
+      function armTrigger(i, b) {
+        teardownBlockTrigger(i);
         const when = b.trigger.when;
-        // 'scroll-range' for non-scroll durations: activated by
-        // scroll progress, handled in writeAt below. For 'scroll'
-        // duration no activation timestamp is needed.
-        if (when === 'scroll-range') return;
+        if (when === 'scroll-range') {
+          // Activated lazily inside blockProg when scrollP enters
+          // the range (applyObjectEffects called from there).
+          return;
+        }
         if (when === 'page-load') {
-          // Active immediately at page load. trigger.delay is
-          // baked into blockProg's elapsed math (no need to
-          // postpone activation itself).
-          activationState[i] = lineStartedAt;
+          activationState[i] = performance.now() / 1000;
+          applyObjectEffects(b.trigger);
+          return;
+        }
+        if (when === 'after-previous') {
+          // Activated lazily inside blockProg when the predecessor
+          // timed block finishes (applyObjectEffects called from
+          // there).
           return;
         }
         if (when === 'scroll-key' && b.trigger.selector) {
           const el = document.querySelector(b.trigger.selector);
           if (!el) return;
-          // v0.8.11: "Scroll to key" — fire when the key enters a
-          //   chosen trigger zone in viewport coords.
-          // v0.8.14: 'object' tier — zone is the animated object's
-          //   own rect (#lines-layer is fixed, so its viewport rect
-          //   is a stable reference each scroll). The rect is read
-          //   live, so a block chained after earlier transforms
-          //   sees the current rendered position, not the natural
-          //   one.
-          // v0.8.15: bidirectional enter/leave + repeat tiers.
-          //   The zone has an interior; an outside→inside
-          //   transition activates. With repeat='every', each
-          //   such transition re-activates (timed runs replay,
-          //   loop/pingpong phases reset). Initial state is
-          //   evaluated at creation so a key already inside the
-          //   zone at load doesn't fire — the user has to scroll
-          //   out and back in.
-          //
-          // For viewport-line tiers the zone is "key.top ≤ line";
-          // for 'object' the zone is true vertical overlap of the
-          // key and object rects (top OR bottom of the key
-          // touching the object's rect from either side).
           const viewportAt = b.trigger.viewportAt || 'middle';
           const repeat     = b.trigger.repeat     || 'once';
           const insideZone = function () {
@@ -974,12 +1055,15 @@
             if (!wasInside && nowInside) {
               if (repeat === 'every' || activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
+                applyObjectEffects(b.trigger);
               }
             }
             wasInside = nowInside;
           };
           window.addEventListener('scroll', onScroll, { passive: true });
-          ownListeners.push({ target: window, type: 'scroll', fn: onScroll });
+          blockTriggerTeardown[i].push(function () {
+            try { window.removeEventListener('scroll', onScroll); } catch (e) {}
+          });
           return;
         }
         if (when === 'scroll-stop' || when === 'scroll-start') {
@@ -996,6 +1080,7 @@
             scheduled = null;
             const t = performance.now() / 1000;
             activationState[i] = t;
+            applyObjectEffects(trig);
           };
           const cancel = function () {
             if (scheduled != null) {
@@ -1019,27 +1104,61 @@
                 onStop: cancel
               };
           scrollActivity.add(sub);
-          ownCleanups.push(function () {
+          blockTriggerTeardown[i].push(function () {
             scrollActivity.remove(sub);
             cancel();
           });
           return;
         }
         if (when === 'in-view-partial' || when === 'in-view-full') {
-          // Watch the rendered element itself. IntersectionObserver
-          // threshold: 0 for partial (any pixel intersects), 1 for
-          // fully visible.
           const threshold = (when === 'in-view-full') ? 0.999 : 0.001;
           const obs = new IntersectionObserver(function (entries) {
             entries.forEach(function (entry) {
               if (entry.isIntersecting && activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
+                applyObjectEffects(b.trigger);
               }
             });
           }, { threshold: threshold });
           obs.observe(pathEl);
-          ownObservers.push(obs);
+          blockTriggerTeardown[i].push(function () {
+            try { obs.disconnect(); } catch (e) {}
+          });
           return;
+        }
+      }
+
+      // v0.8.79: rearm() resets every per-block runtime variable
+      // (activation, loop bookkeeping, path-follow trackers, drift
+      // accumulator) and re-runs armTrigger(i) for every block.
+      // Called from requestStart() — by the time a stopped target
+      // is restarted, all derived state must look brand-new so the
+      // animation re-fires from frame 0.
+      function rearm() {
+        for (let i = 0; i < blocks.length; i++) {
+          activationState[i]  = null;
+          loopOffset[i]       = null;
+          loopPlayed[i]       = false;
+          loopIterCount[i]    = 0;
+          loopDone[i]         = false;
+          pathStopMax[i]      = 0;
+          pathLastBp[i]       = 0;
+          pathDirection[i]    = 1;
+          pathDiagLogged[i]   = false;
+          blockDrift[i]       = { x: 0, y: 0, lastAct: null };
+        }
+        for (let i = 0; i < blocks.length; i++) armTrigger(i, blocks[i]);
+      }
+
+      blocks.forEach(function (b, i) { armTrigger(i, b); });
+
+      // Class-render teardown must release every per-block trigger
+      // listener too (independent of the line-level ownListeners
+      // path — those are now empty since armTrigger keeps its own
+      // teardowns).
+      ownCleanups.push(function () {
+        for (let i = 0; i < blockTriggerTeardown.length; i++) {
+          teardownBlockTrigger(i);
         }
       });
 
@@ -1080,7 +1199,10 @@
         if (activationState[idx] == null) {
           if (when === 'scroll-range') {
             const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
-            if (scrollP >= r.start) { activationState[idx] = nowSec; }
+            if (scrollP >= r.start) {
+              activationState[idx] = nowSec;
+              applyObjectEffects(b.trigger);  // v0.8.79
+            }
             else return 0;
           } else if (when === 'after-previous') {
             let prevIdx = -1;
@@ -1097,6 +1219,7 @@
             const pEnd     = activationState[prevIdx] + pDelay + pSeconds;
             if (nowSec < pEnd) return 0;
             activationState[idx] = pEnd;
+            applyObjectEffects(b.trigger);  // v0.8.79
           } else {
             return 0;
           }
@@ -1169,6 +1292,11 @@
               }
               loopOffset[idx] = null;
               loopPlayed[idx] = false;
+              // v0.8.79: each loopTo cycle restarts block K's
+              // chain — re-apply its trigger's object effects so
+              // long-running loops can repeatedly nudge other
+              // objects on every iteration.
+              applyObjectEffects(blocks[K].trigger);
             }
             // K invalid (tampered data): we incremented the
             // counter but there's no chain to restart — block
@@ -1494,8 +1622,90 @@
       // setup so per-element triggers can't apply a mid-viewport progress
       // at scrollY=0.
       if (hasMotion && !diagMode) {
+        // v0.8.79: snapshot of the most recent computeAt output.
+        // requestStop() reads this as the "frozen" contribution
+        // that the cleanup tween will scale toward zero — avoids
+        // re-running computeAt (which has drift / loop side
+        // effects) just to capture a still frame.
+        let lastContribution = null;
+        const paintNeutral = function () {
+          pathEl.setAttribute(
+            'transform',
+            'translate(' + offX + ' ' + offY + ') ' +
+            'rotate(0 ' + originX + ' ' + originY + ')'
+          );
+          pathEl.setAttribute('opacity', '1');
+        };
         const writeAt = function (scrollP, nowSec) {
+          // v0.8.79: cleanup tween painter. While stopState is set,
+          // ignore the live behavior chain and tween the frozen
+          // contribution toward zero (returnHome) and/or opacity
+          // toward zero (fadeOut). At elapsed >= duration, finalize
+          // into isStopped + clear per-block state so the target
+          // sits in its neutral pre-fire form.
+          if (stopState) {
+            const elapsed = nowSec - stopState.t0;
+            const dur = stopState.durationSec;
+            if (elapsed >= dur) {
+              const fz = stopState.frozen;
+              const ftx  = stopState.returnHome ? 0 : fz.tx;
+              const fty  = stopState.returnHome ? 0 : fz.ty;
+              const frot = stopState.returnHome ? 0 : fz.rot;
+              const fop  = stopState.fadeOut    ? 0 : fz.opacity;
+              pathEl.setAttribute(
+                'transform',
+                'translate(' + (offX + ftx) + ' ' + (offY + fty) + ') ' +
+                'rotate(' + frot + ' ' + originX + ' ' + originY + ')'
+              );
+              pathEl.setAttribute('opacity', fop);
+              isStopped = true;
+              stopState = null;
+              // Clear every per-block runtime variable so a future
+              // requestStart() rearms from a clean slate.
+              for (let i = 0; i < blocks.length; i++) {
+                activationState[i] = null;
+                loopOffset[i]      = null;
+                loopPlayed[i]      = false;
+                loopIterCount[i]   = 0;
+                loopDone[i]        = false;
+                pathStopMax[i]     = 0;
+                pathLastBp[i]      = 0;
+                pathDirection[i]   = 1;
+                pathDiagLogged[i]  = false;
+                blockDrift[i]      = { x: 0, y: 0, lastAct: null };
+                teardownBlockTrigger(i);
+              }
+              // Stop the cleanup ticker if requestStop installed one.
+              if (cleanupTicker) {
+                try { gsap.ticker.remove(cleanupTicker); } catch (e) {}
+                cleanupTicker = null;
+              }
+              return;
+            }
+            const tNorm = dur > 0 ? elapsed / dur : 1;
+            const e = stopState.easingFn(tNorm);
+            const inv = 1 - e;
+            const fz = stopState.frozen;
+            const txc  = stopState.returnHome ? fz.tx  * inv : fz.tx;
+            const tyc  = stopState.returnHome ? fz.ty  * inv : fz.ty;
+            const rotc = stopState.returnHome ? fz.rot * inv : fz.rot;
+            const opc  = stopState.fadeOut    ? fz.opacity * inv : fz.opacity;
+            pathEl.setAttribute(
+              'transform',
+              'translate(' + (offX + txc) + ' ' + (offY + tyc) + ') ' +
+              'rotate(' + rotc + ' ' + originX + ' ' + originY + ')'
+            );
+            pathEl.setAttribute('opacity', opc);
+            return;
+          }
+          // v0.8.79: target is in neutral pre-fire state until
+          // requestStart() re-arms us. writeAt leaves the path
+          // attributes untouched (whatever paintNeutral / final
+          // cleanup frame already set).
+          if (isStopped) return;
+
           const t = computeAt(scrollP, nowSec);
+          lastContribution = t;
           // v0.8.53: when pathFollow is the dominant translate
           // contributor this frame, the path dictates absolute
           // position — positionOffset would shift the follower
@@ -1515,6 +1725,12 @@
           // without an extra "has any fade?" precompute.
           pathEl.setAttribute('opacity', t.opacity);
         };
+        // v0.8.79: cleanupTicker drives writeAt every frame during
+        // a stopState tween, so the cleanup paints smoothly even
+        // on a target line that has no time-driven blocks of its
+        // own (and therefore no permanent ticker). Installed in
+        // requestStop, removed on finalization or on requestStart.
+        let cleanupTicker = null;
         const st = ScrollTrigger.create({
           trigger: stConfig.trigger,
           start:   stConfig.start,
@@ -1547,6 +1763,97 @@
           };
           gsap.ticker.add(tick);
           ownTickers.push(tick);
+        }
+
+        // v0.8.79: register this line as a Stop / Start target. Key
+        // = line.masterId (class identity, shared by every rendered
+        // instance of this class — siblings pause / restart together
+        // by design). Lines without a masterId are not targetable;
+        // they animate but can't be controlled cross-object.
+        const classKey = line.masterId || null;
+        if (classKey) {
+          const requestStop = function (opts) {
+            if (isStopped || stopState) return;  // already stopped / in cleanup
+            const dur = Number(opts && opts.durationSec) || 0;
+            const fadeOut = !!(opts && opts.fadeOut);
+            const returnHome = !!(opts && opts.returnHome);
+            if (dur <= 0 || (!fadeOut && !returnHome)) {
+              // Instantaneous reset — paint neutral, clear all
+              // per-block state, tear down listeners.
+              isStopped = true;
+              paintNeutral();
+              for (let i = 0; i < blocks.length; i++) {
+                activationState[i] = null;
+                loopOffset[i]      = null;
+                loopPlayed[i]      = false;
+                loopIterCount[i]   = 0;
+                loopDone[i]        = false;
+                pathStopMax[i]     = 0;
+                pathLastBp[i]      = 0;
+                pathDirection[i]   = 1;
+                pathDiagLogged[i]  = false;
+                blockDrift[i]      = { x: 0, y: 0, lastAct: null };
+                teardownBlockTrigger(i);
+              }
+              return;
+            }
+            const frozen = lastContribution
+              ? { tx: lastContribution.tx, ty: lastContribution.ty,
+                  rot: lastContribution.rot, opacity: lastContribution.opacity }
+              : { tx: 0, ty: 0, rot: 0, opacity: 1 };
+            let easingFn;
+            try {
+              const en = (opts && opts.easing) || 'linear';
+              easingFn = (en === 'linear')
+                ? function (x) { return x; }
+                : (gsap.parseEase && gsap.parseEase(en)) || function (x) { return x; };
+            } catch (eEase) { easingFn = function (x) { return x; }; }
+            stopState = {
+              t0: performance.now() / 1000,
+              durationSec: dur,
+              easingFn: easingFn,
+              fadeOut: fadeOut,
+              returnHome: returnHome,
+              frozen: frozen
+            };
+            // Ensure the cleanup paints every frame even if this
+            // line has no time-driven blocks of its own.
+            if (!cleanupTicker) {
+              cleanupTicker = function () {
+                writeAt(st ? st.progress : 0, performance.now() / 1000);
+              };
+              gsap.ticker.add(cleanupTicker);
+            }
+          };
+          const requestStart = function () {
+            if (stopState) {
+              // Mid-cleanup: cancel and fully re-arm. Effectively a
+              // restart with whatever interpolated state we were
+              // painting — but rearm() will overwrite it on first
+              // frame post-arm.
+              stopState = null;
+              if (cleanupTicker) {
+                try { gsap.ticker.remove(cleanupTicker); } catch (e) {}
+                cleanupTicker = null;
+              }
+              isStopped = false;
+              paintNeutral();
+              rearm();
+              return;
+            }
+            if (isStopped) {
+              isStopped = false;
+              paintNeutral();
+              rearm();
+              return;
+            }
+            // Already animating normally — no-op (per spec).
+          };
+          registerObjectController(classKey, {
+            classKey: classKey,
+            requestStart: requestStart,
+            requestStop: requestStop
+          });
         }
       }
 
@@ -1594,6 +1901,16 @@
         if (tween && tween.scrollTrigger) ownTriggers.push(tween.scrollTrigger);
       }
     });
+
+    // v0.8.79: every line is now registered in objectRegistry. Flush
+    // any cross-object effects that fired during init (page-load
+    // triggers, scroll-range immediate entries) — they were queued
+    // because the first line couldn't safely act on the last line's
+    // controller before that controller existed.
+    objectInitFlushing = false;
+    const queued = pendingObjectEffects.slice();
+    pendingObjectEffects.length = 0;
+    queued.forEach(applyObjectEffects);
 
     // Diagnostic dump: for every named line, log
     //   { id, name, expected_cx, expected_cy, bbox_cx, bbox_cy,
