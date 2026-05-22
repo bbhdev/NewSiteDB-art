@@ -687,6 +687,18 @@
         } catch (e) { /* bbox unavailable */ }
       }
       let originX = centerX, originY = centerY;
+      // v0.8.70: re-derive block0params here (v0.8.68 removed the
+      // top-level variable when it lifted drawIn out of the
+      // "block 0 only" assumption, but the rotate-pivot lookup
+      // below still uses block 0's params, and the missing
+      // variable threw a ReferenceError per frame). Multi-block
+      // pivot is a separate refactor — for now keep block 0 as
+      // the pivot source so the runtime matches v0.8.67's
+      // rendering exactly.
+      const block0params = (Array.isArray(lineDef.behaviors)
+                             && lineDef.behaviors[0]
+                             && lineDef.behaviors[0].params)
+        ? lineDef.behaviors[0].params : {};
       const linePivotX = block0params.rotateOriginX;
       const linePivotY = block0params.rotateOriginY;
       if (Number.isFinite(linePivotX) && Number.isFinite(linePivotY)) {
