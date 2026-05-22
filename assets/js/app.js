@@ -771,6 +771,11 @@
       const pathStopMax   = blocks.map(function () { return 0; });
       const pathLastBp    = blocks.map(function () { return 0; });
       const pathDirection = blocks.map(function () { return 1; });
+      // v0.8.56 DIAGNOSTIC: one-shot logs per pathFollow block so
+      // we can see in the console which check is bailing when
+      // motion doesn't appear. Set to true on first log; suppresses
+      // subsequent ticks for the same block.
+      const pathDiagLogged = blocks.map(function () { return false; });
 
       // For each non-scroll duration block, schedule its
       // activation per the `when` axis. scroll-range activations
@@ -1094,20 +1099,40 @@
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i];
           if (!b.pathFollow) continue;
-          // v0.8.54: use isBlockActive instead of `bp <= 0` so the
-          // pathFollow kicks in the moment the block's trigger fires —
-          // at bp = 0 the follower should be parked AT the path's
-          // starting point, not still at its natural position.
-          // Pre-trigger lines (bp = 0 but trigger not yet fired) are
-          // correctly skipped by isBlockActive.
-          if (!isBlockActive(i, scrollP, nowSec)) continue;
+          // v0.8.56 DIAGNOSTIC: log once per block on first reach.
+          const _diagLog = function (msg, extra) {
+            if (pathDiagLogged[i]) return;
+            pathDiagLogged[i] = true;
+            console.log('[pathFollow blk ' + i + ' on ' + (lineDef && lineDef.id) + '] '
+              + msg, extra || '');
+          };
+          if (!isBlockActive(i, scrollP, nowSec)) {
+            _diagLog('skipped: !isBlockActive', {
+              triggerWhen: b.trigger && b.trigger.when,
+              activationState: activationState[i],
+              scrollP: scrollP, nowSec: nowSec
+            });
+            continue;
+          }
           const bp = bps[i];
           const guide = b.pathRef
             ? document.querySelector('[data-line-id="' + b.pathRef + '"]')
             : null;
-          if (!guide || typeof guide.getTotalLength !== 'function') continue;
+          if (!guide) {
+            _diagLog('skipped: guide not found', { pathRef: b.pathRef });
+            continue;
+          }
+          if (typeof guide.getTotalLength !== 'function') {
+            _diagLog('skipped: guide has no getTotalLength', {
+              pathRef: b.pathRef, tag: guide.tagName, kind: guide.dataset && guide.dataset.kind
+            });
+            continue;
+          }
           const totalLen = guide.getTotalLength();
-          if (!(totalLen > 0)) continue;
+          if (!(totalLen > 0)) {
+            _diagLog('skipped: totalLen <= 0', { totalLen: totalLen, pathRef: b.pathRef });
+            continue;
+          }
           // Map bp → path fraction via pathEndMode.
           let frac;
           if (b.pathEndMode === 'stop') {
@@ -1136,7 +1161,12 @@
           // baked in via guide.getCTM().
           const ctmGuide = guide.getCTM();
           const ctmLayer = layer.getCTM();
-          if (!ctmGuide || !ctmLayer) continue;
+          if (!ctmGuide || !ctmLayer) {
+            _diagLog('skipped: null CTM', {
+              ctmGuide: !!ctmGuide, ctmLayer: !!ctmLayer
+            });
+            continue;
+          }
           const guideToLayer = ctmLayer.inverse().multiply(ctmGuide);
           const layerPt = guideToLayer.transformPoint(localPoint);
           // Follower's natural center: bbox center in its own
@@ -1175,6 +1205,13 @@
               }
             }
           }
+          _diagLog('ACTIVE', {
+            bp: bp, frac: frac, totalLen: totalLen,
+            localPt: { x: localPoint.x, y: localPoint.y },
+            layerPt: { x: layerPt.x, y: layerPt.y },
+            followerCenter: { x: cx, y: cy },
+            pathTx: pathTx, pathTy: pathTy, pathRot: pathRot
+          });
           pathFollowActive = true;
           break;
         }
