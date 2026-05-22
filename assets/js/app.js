@@ -104,14 +104,6 @@
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
-      // v0.8.77: scroll-stop / scroll-start triggers can carry side-
-      // effect indices targeting same-line blocks (start / stop).
-      if (Number.isInteger(b.trigger.startBlockIndex) && b.trigger.startBlockIndex >= 0) {
-        out.startBlockIndex = b.trigger.startBlockIndex;
-      }
-      if (Number.isInteger(b.trigger.stopBlockIndex) && b.trigger.stopBlockIndex >= 0) {
-        out.stopBlockIndex = b.trigger.stopBlockIndex;
-      }
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -877,12 +869,6 @@
       // from when the user actually reached the trigger, not
       // page load).
       const activationState = blocks.map(function () { return null; });
-      // v0.8.77: per-block "force end" flag. Set by another block's
-      // scroll-stop/scroll-start trigger via its stopBlockIndex side
-      // effect — when true, blockProg returns 1 (the block's end
-      // state). Cleared whenever activationState[i] is set anew (any
-      // natural re-trigger, or another start-block side effect).
-      const forcedEnd = blocks.map(function () { return false; });
 
       // v0.8.23: loopTo bookkeeping (only meaningful for blocks
       // whose duration.mode === 'loopTo').
@@ -926,33 +912,6 @@
       // subsequent ticks for the same block.
       const pathDiagLogged = blocks.map(function () { return false; });
 
-      // v0.8.77: side-effect helper for scroll-stop / scroll-start
-      // triggers. When such a trigger fires (its block's own duration
-      // starts running normally — that's handled by the caller setting
-      // activationState[triggerIdx]), this also acts on at most one
-      // start-target and one stop-target (same-line indices). Editor
-      // already filters out scroll-driven blocks from both pickers.
-      //   start X: if X is forced-ended OR idle, kick it now; if X is
-      //            normally running, no-op (don't restart a healthy
-      //            animation).
-      //   stop  X: if X is running normally, freeze at end state; if X
-      //            is idle OR already forced-ended, no-op.
-      function applyStartStop(triggerIdx, trig, nowSec) {
-        const s = trig.startBlockIndex;
-        const e = trig.stopBlockIndex;
-        if (Number.isInteger(s) && s >= 0 && s < blocks.length && s !== triggerIdx) {
-          if (forcedEnd[s] || activationState[s] == null) {
-            activationState[s] = nowSec;
-            forcedEnd[s] = false;
-          }
-        }
-        if (Number.isInteger(e) && e >= 0 && e < blocks.length && e !== triggerIdx) {
-          if (activationState[e] != null && !forcedEnd[e]) {
-            forcedEnd[e] = true;
-          }
-        }
-      }
-
       // For each non-scroll duration block, schedule its
       // activation per the `when` axis. scroll-range activations
       // are picked up inside the per-frame writeAt; the other
@@ -969,7 +928,6 @@
           // baked into blockProg's elapsed math (no need to
           // postpone activation itself).
           activationState[i] = lineStartedAt;
-          forcedEnd[i] = false;
           return;
         }
         if (when === 'scroll-key' && b.trigger.selector) {
@@ -1016,7 +974,6 @@
             if (!wasInside && nowInside) {
               if (repeat === 'every' || activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
-                forcedEnd[i] = false;
               }
             }
             wasInside = nowInside;
@@ -1039,8 +996,6 @@
             scheduled = null;
             const t = performance.now() / 1000;
             activationState[i] = t;
-            forcedEnd[i] = false;
-            applyStartStop(i, trig, t);
           };
           const cancel = function () {
             if (scheduled != null) {
@@ -1079,7 +1034,6 @@
             entries.forEach(function (entry) {
               if (entry.isIntersecting && activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
-                forcedEnd[i] = false;
               }
             });
           }, { threshold: threshold });
@@ -1096,14 +1050,6 @@
       const blockProg = function (b, idx, scrollP, nowSec) {
         const mode = b.duration && b.duration.mode || 'scroll';
         const when = b.trigger.when;
-
-        // v0.8.77: another block's scroll-stop trigger has frozen
-        // this one at its end state. Editor prevents pointing
-        // stopBlockIndex at scroll-mode blocks (their bp is bound
-        // to scrollP), so this gate is unreachable for mode==='scroll'
-        // — but the check sits here so the contract is one rule
-        // regardless of mode.
-        if (forcedEnd[idx]) return 1;
 
         // Scroll-driven progress (the only mode that reads
         // scrollP directly).
@@ -1134,7 +1080,7 @@
         if (activationState[idx] == null) {
           if (when === 'scroll-range') {
             const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
-            if (scrollP >= r.start) { activationState[idx] = nowSec; forcedEnd[idx] = false; }
+            if (scrollP >= r.start) { activationState[idx] = nowSec; }
             else return 0;
           } else if (when === 'after-previous') {
             let prevIdx = -1;
@@ -1151,7 +1097,6 @@
             const pEnd     = activationState[prevIdx] + pDelay + pSeconds;
             if (nowSec < pEnd) return 0;
             activationState[idx] = pEnd;
-            forcedEnd[idx] = false;
           } else {
             return 0;
           }
@@ -1219,10 +1164,8 @@
             } else if (K >= 0 && K < idx) {
               const pEnd = activationState[idx] + delay + dur;
               activationState[K] = pEnd;
-              forcedEnd[K] = false;
               for (let j = K + 1; j <= idx; j++) {
                 activationState[j] = null;
-                forcedEnd[j] = false;
               }
               loopOffset[idx] = null;
               loopPlayed[idx] = false;
@@ -1519,8 +1462,7 @@
       // continuous tick is cheap.
       const hasTime = blocks.some(function (b) {
         // v0.8.77: scroll-stop / scroll-start trigger blocks need a
-        // ticker so their fire (and any forcedEnd side effect on other
-        // blocks of this line) gets painted — the trigger may fire
+        // ticker so their fire gets painted — the trigger may fire
         // while the user is NOT scrolling, so ScrollTrigger.onUpdate
         // won't kick in on its own.
         const when = b.trigger && b.trigger.when;
