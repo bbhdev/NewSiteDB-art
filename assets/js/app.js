@@ -446,6 +446,10 @@
       if (wantsFill && stroke) p.style.fill = stroke;
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
+      // v0.8.57: master id on the DOM lets pathFollow resolve a
+      // guide across classes (line.id is per-class; masterId is
+      // the shared canonical identity).
+      if (line.masterId) p.dataset.masterId = line.masterId;
       layer.appendChild(p);
     });
 
@@ -1115,8 +1119,13 @@
             continue;
           }
           const bp = bps[i];
+          // v0.8.57: pathRef is now a master id (shared across
+          // classes), looked up via data-master-id on the path
+          // elements. Legacy pathRef values that stored a per-
+          // class line id won't resolve here — user re-picks the
+          // guide in the editor's panel to save a master id.
           const guide = b.pathRef
-            ? document.querySelector('[data-line-id="' + b.pathRef + '"]')
+            ? layer.querySelector('[data-master-id="' + b.pathRef + '"]')
             : null;
           if (!guide) {
             _diagLog('skipped: guide not found', { pathRef: b.pathRef });

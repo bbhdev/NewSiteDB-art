@@ -8112,9 +8112,11 @@
       // v0.8.54: pathFollow isn't drift — it's a path-driven
       // translate that replaces tx/ty. Produce a short summary
       // line here so the same red strip explains both modes.
-      const guideId = params.pathRef;
-      const guide = guideId
-        ? state.lines.find(function (l) { return l.id === guideId; })
+      // v0.8.57: pathRef stores the guide's MASTER id (shared
+      // across classes), so the lookup matches by masterId.
+      const guideMid = params.pathRef;
+      const guide = guideMid
+        ? state.lines.find(function (l) { return l.masterId === guideMid; })
         : null;
       const guideLbl = guide ? (guide.name || guide.id) : '(no guide picked)';
       const tan = params.pathAlignToTangent ? ', aligned to tangent' : '';
@@ -8465,12 +8467,18 @@
     // excluded for now. Self-reference also excluded.
     const PATH_BEARING_KINDS = ['freehand', 'freehandClosed', 'bezier',
                                 'lineChain', 'lineLoop', 'svgImport'];
+    // v0.8.57: dropdown values are MASTER ids so pathRef resolves
+    // across classes at runtime (each class has its own line ids;
+    // masters are shared site-wide). Lines without a masterId are
+    // excluded — they can't be cross-class referenced.
     const guideOpts = state.lines
       .filter(function (l) {
-        return l.id !== line.id && PATH_BEARING_KINDS.indexOf(l.kind) !== -1;
+        return l.id !== line.id
+            && !!l.masterId
+            && PATH_BEARING_KINDS.indexOf(l.kind) !== -1;
       })
       .map(function (l) {
-        return { value: l.id, label: (l.name || l.id) + ' (' + l.kind + ')' };
+        return { value: l.masterId, label: (l.name || l.id) + ' (' + l.kind + ')' };
       });
     const canPathFollow = guideOpts.length > 0;
     card.appendChild(behaviorButtonGroup('Translate mode', tmode, [
