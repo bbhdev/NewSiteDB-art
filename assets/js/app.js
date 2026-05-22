@@ -1136,12 +1136,21 @@
         }
         // v0.8.26: opacity composition — last active fade-opacity
         // block wins.
+        // v0.8.67: replaced `bp <= 0` with isBlockActive — at
+        // bp=0 the block is at its FROM value and should
+        // contribute (block triggered, just at the start of its
+        // animation). The old skip caused an opacity jump on
+        // first scroll when a block had scroll range 0–X and
+        // fade 0.5→1: page load showed opacity 1 (default,
+        // because bp=0 was skipped), then scroll>0 immediately
+        // showed 0.5. isBlockActive correctly skips only the
+        // pre-trigger case.
         let opacity = 1;
         for (let i = blocks.length - 1; i >= 0; i--) {
           const b = blocks[i];
           if (!b.fadeOpacity) continue;
+          if (!isBlockActive(i, scrollP, nowSec)) continue;
           const bp = bps[i];
-          if (bp <= 0) continue;
           opacity = b.opacityFrom + (b.opacityTo - b.opacityFrom) * bp;
           break;
         }
