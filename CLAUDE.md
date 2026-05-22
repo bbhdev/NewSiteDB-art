@@ -26,6 +26,10 @@ high-leverage ones.
   inspect actual user data, ask them to share specific files.
 - Commit messages are the design journal — write them detailed enough that a
   future Claude reading them can understand the why, not just the what.
+- **Commit vs push are separate.** Commit every update locally (cheap, full
+  design journal, safe recovery). Push only when a coherent functional unit
+  has been validated by the user. Batching commits to reduce effort is a
+  false economy — local commits are essentially free.
 
 ## SCHEMA_VERSION bump protocol
 
