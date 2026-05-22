@@ -1133,6 +1133,20 @@
           const guide = b.pathRef
             ? layer.querySelector('[data-master-id="' + b.pathRef + '"]')
             : null;
+          if (!guide && b.pathRef && !pathDiagLogged[i]) {
+            // v0.8.59: when the lookup fails, dump every master id
+            // present on the layer so the user can see whether the
+            // expected one is even rendered. Caps at 30 to avoid
+            // flooding the console.
+            const allMids = Array.prototype.slice
+              .call(layer.querySelectorAll('[data-master-id]'))
+              .map(function (el) { return el.dataset.masterId; });
+            const sampleMids = allMids.slice(0, 30);
+            console.log('[pathFollow blk ' + i + ' on ' + (lineDef && lineDef.id) + '] '
+              + 'guide not found — DOM has ' + allMids.length
+              + ' elements with data-master-id. First ' + sampleMids.length + ':',
+              sampleMids);
+          }
           if (!guide) {
             _diagLog('skipped: guide not found', { pathRef: b.pathRef });
             continue;
