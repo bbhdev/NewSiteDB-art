@@ -7778,7 +7778,16 @@
     // (the default for primitives), `round` produces the bulgy
     // rounded-tip effect that scales with line width; `miter` keeps
     // sharp geometric points; `bevel` flattens them.
-    wrap.appendChild(withScope(selectField('Corners', line.linejoin || 'round',
+    // v0.8.65: gray out for kinds that have no corner geometry —
+    // smooth conic primitives (circle / ellipse) and images. The
+    // field stays rendered so a value the user previously set is
+    // still visible; it just doesn't affect anything on these
+    // kinds. Other kinds (rect, polygon, star, chain, loop,
+    // freehand, bezier, svgImport) may have corners and keep the
+    // setting active.
+    const noCorners = (line.kind === 'circle' || line.kind === 'ellipse'
+                    || line.kind === 'image');
+    wrap.appendChild(setInactive(withScope(selectField('Corners', line.linejoin || 'round',
       [
         { value: 'round', label: 'Round' },
         { value: 'miter', label: 'Miter' },
@@ -7788,7 +7797,7 @@
         setVisualProp(line.id, 'linejoin', v);
         scheduleSnapshot();
         renderLines();
-      }), line.masterId, 'linejoin'));
+      }), line.masterId, 'linejoin'), noCorners));
 
     wrap.appendChild(divider('Behavior'));
     // v0.4.1: behaviors[] authoring. Each block is a card with
