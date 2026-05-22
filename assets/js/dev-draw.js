@@ -4862,6 +4862,15 @@
         return l ? l.masterId : null;
       })
       .filter(function (mid) { return mid != null; });
+    // v0.8.69: also capture the active GROUP's name before the
+    // class flip. Groups have per-class ids but share names across
+    // classes (forSiblingGroupsByName uses that), so name is the
+    // cross-class identity. Without this, switching class would
+    // lose the active group selection in the no-line-selected case.
+    const oldGroups = (state.byClass[state.classId] && state.byClass[state.classId].groups) || [];
+    const activeGroupName = state.activeGroupId
+      ? ((oldGroups.find(function (g) { return g.id === state.activeGroupId; }) || {}).name) || null
+      : null;
     state.classId = newClassId;
     try { localStorage.setItem('ed-last-class', newClassId); } catch (e) {}
     // Re-select counterparts in the new class. Any masters that don't
@@ -4873,10 +4882,15 @@
     if (state.selectedIds.length) {
       const first = newLines.find(function (l) { return l.id === state.selectedIds[0]; });
       state.activeGroupId = (first && first.groupId) || null;
+    } else if (activeGroupName) {
+      // No line selection but we had a group active — find the
+      // same-named group in the new class.
+      const newGroups = (state.byClass[newClassId] && state.byClass[newClassId].groups) || [];
+      const peer = newGroups.find(function (g) { return g.name === activeGroupName; });
+      state.activeGroupId = peer ? peer.id : null;
     } else {
-      // No selection follows over → leave activeGroupId null so the
-      // selection panel stays neutral (matches the launch state from
-      // v0.5.7). User picks a group/object when they want to focus.
+      // Neither selection nor active group followed over → leave
+      // activeGroupId null so the selection panel stays neutral.
       state.activeGroupId = null;
     }
     // openGroupIds is global (keyed by class-scoped group ids), so
