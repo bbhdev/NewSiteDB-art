@@ -1106,7 +1106,7 @@
         <ul>\
           <li><strong>Fixed</strong> — TranslateX / TranslateY are the final displacement at Progress = 1.</li>\
           <li><strong>Drift X / Y / Both</strong> — the value is a per-scroll-pixel multiplier on the chosen axis. The displacement accumulates while the block is active and freezes the moment the next block activates. Useful for "drift in from off-canvas indefinitely, then hand off".</li>\
-          <li><strong>Along path</strong> — the object travels along another line\'s path (its <em>guide</em>) as Progress goes 0→1. The guide can be any path-bearing line: freehand, loop, bezier, chain, or imported SVG. Three sub-controls appear:\
+          <li><strong>Along path</strong> — the object travels along another line\'s path (its <em>guide</em>) as Progress goes 0→1. The guide can be almost any line — freehand, loop, bezier, chain, imported SVG, or any primitive (circle, ellipse, rect, polygon, star). Only image objects can\'t serve as guides since they don\'t carry a path. Three sub-controls appear:\
             <ul>\
               <li><em>Path guide</em> picks the guide line from the current class. The guide can be visible or hidden — hidden guides still drive the motion (the runtime renders them invisibly so they can be sampled).</li>\
               <li><em>Align to tangent</em> rotates the moving object to match the path direction at each point, so it "faces forward" along its travel.</li>\
@@ -8573,17 +8573,18 @@
     // primitives (circle / rect / polygon / star) don't expose
     // SVGGeometryElement.getPointAtLength uniformly so they're
     // excluded for now. Self-reference also excluded.
-    const PATH_BEARING_KINDS = ['freehand', 'freehandClosed', 'bezier',
-                                'lineChain', 'lineLoop', 'svgImport'];
-    // v0.8.57: dropdown values are MASTER ids so pathRef resolves
-    // across classes at runtime (each class has its own line ids;
-    // masters are shared site-wide). Lines without a masterId are
-    // excluded — they can't be cross-class referenced.
+    // v0.8.72: any kind that resolves to an SVG <path> at runtime
+    // can serve as a guide — its computed `d` is what
+    // getPointAtLength samples. That includes primitives (their
+    // generateD produces a d attribute, e.g. circle → an arc-pair,
+    // rect → 4 segments + close). Only `image` is excluded (it
+    // renders as <image>, not <path>, and has no path geometry).
+    const NON_PATH_KINDS = ['image'];
     const guideOpts = state.lines
       .filter(function (l) {
         return l.id !== line.id
             && !!l.masterId
-            && PATH_BEARING_KINDS.indexOf(l.kind) !== -1;
+            && NON_PATH_KINDS.indexOf(l.kind) === -1;
       })
       .map(function (l) {
         return { value: l.masterId, label: (l.name || l.id) + ' (' + l.kind + ')' };
