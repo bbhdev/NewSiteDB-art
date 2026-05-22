@@ -1770,7 +1770,7 @@
         // instance of this class — siblings pause / restart together
         // by design). Lines without a masterId are not targetable;
         // they animate but can't be controlled cross-object.
-        const classKey = line.masterId || null;
+        const classKey = lineDef.masterId || null;
         if (classKey) {
           const requestStop = function (opts) {
             if (isStopped || stopState) return;  // already stopped / in cleanup
