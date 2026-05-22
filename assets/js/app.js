@@ -1259,7 +1259,13 @@
             continue;
           }
           const guideToLayer = ctmLayer.inverse().multiply(ctmGuide);
-          const layerPt = guideToLayer.transformPoint(localPoint);
+          // v0.8.62: use SVGPoint.matrixTransform instead of
+          // DOMMatrix.transformPoint — older browsers / certain
+          // SVG element implementations return SVGMatrix from
+          // getCTM(), which has no transformPoint. matrixTransform
+          // is on every SVGPoint / DOMPoint and accepts either
+          // matrix type.
+          const layerPt = localPoint.matrixTransform(guideToLayer);
           // Follower's natural center: bbox center in its own
           // local coords. We translate so that center lands on
           // layerPt. The translate replaces positionOffset (handled
@@ -1281,7 +1287,7 @@
             try { aheadLocal = guide.getPointAtLength(aheadFrac * totalLen); }
             catch (e) { aheadLocal = null; }
             if (aheadLocal) {
-              const aheadLayer = guideToLayer.transformPoint(aheadLocal);
+              const aheadLayer = aheadLocal.matrixTransform(guideToLayer);
               const dx = aheadLayer.x - layerPt.x;
               const dy = aheadLayer.y - layerPt.y;
               if (dx !== 0 || dy !== 0) {
