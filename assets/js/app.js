@@ -566,16 +566,34 @@
       if (!group) return;
 
       const lineDef = lines.find(function (l) { return l.id === pathEl.dataset.lineId; }) || {};
-      // v0.4.0: behavior keys live on lineDef.behaviors[0].params
-      // (single-block UI today; multi-block lands in v0.4.1).
-      // Group defaults provide fallbacks for any unset field. If
-      // behaviors[] is empty, we fall back to group defaults
-      // wholesale — an "uninherited" line carrying no overrides.
-      const block0params = (Array.isArray(lineDef.behaviors)
-                             && lineDef.behaviors[0]
-                             && lineDef.behaviors[0].params)
-        ? lineDef.behaviors[0].params : {};
-      const behaviors = Object.assign({}, group.defaults || {}, block0params);
+      // v0.4.0: behavior keys live on lineDef.behaviors[].params.
+      // v0.8.68: drawIn now reads from ANY block, not just block 0.
+      // The v0.4.0-era assumption that behaviors were single-block
+      // is long gone — translate/rotate already iterate every block
+      // via computeAt. Lifting the same restriction here so a
+      // chained block can set drawIn (planned "the drawings"
+      // feature builds on this — multi-stage progressive reveal
+      // along a single path).
+      // Resolution rules:
+      //   - Start from the group default.
+      //   - Block 0's explicit drawIn:false overrides group on
+      //     (matches legacy override behavior).
+      //   - First block (any index) with drawIn:true enables;
+      //     its drawInDirection (if set) takes the direction.
+      let drawInFlag = !!(group.defaults && group.defaults.drawIn);
+      let drawInDir  = (group.defaults && group.defaults.drawInDirection) || 'forward';
+      if (Array.isArray(lineDef.behaviors)) {
+        const bp0 = lineDef.behaviors[0] && lineDef.behaviors[0].params;
+        if (bp0 && bp0.drawIn === false) drawInFlag = false;
+        for (let i = 0; i < lineDef.behaviors.length; i++) {
+          const bp = (lineDef.behaviors[i] && lineDef.behaviors[i].params) || {};
+          if (bp.drawIn === true) {
+            drawInFlag = true;
+            if (bp.drawInDirection) drawInDir = bp.drawInDirection;
+            break;
+          }
+        }
+      }
 
       const triggerSel = group.trigger || 'body';
       const isPageWide = !group.trigger || group.trigger === 'body' || group.trigger === 'html';
@@ -1440,10 +1458,10 @@
       // Path-only — <image> has no stroke for dashing, so this is
       // a no-op there (would just clutter the element with dash
       // attrs that do nothing).
-      if (behaviors.drawIn && !diagMode && pathEl.tagName.toLowerCase() === 'path') {
+      if (drawInFlag && !diagMode && pathEl.tagName.toLowerCase() === 'path') {
         pathEl.setAttribute('pathLength',       '1');
         pathEl.setAttribute('stroke-dasharray', '1 1');
-        const dir = behaviors.drawInDirection === 'reverse' ? -1 : 1;
+        const dir = drawInDir === 'reverse' ? -1 : 1;
         pathEl.setAttribute('stroke-dashoffset', String(dir));
         const tween = gsap.fromTo(pathEl,
           { attr: { 'stroke-dashoffset': dir } },
