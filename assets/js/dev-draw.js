@@ -8185,10 +8185,21 @@
       prog = 'progress mode: ' + dmode;
     }
     let summary = act + ', ' + prog + '.';
-    // v0.8.79: cross-object side effects on trigger fire.
+    // v0.8.79: cross-object side effects on trigger fire. Resolve
+    // the opaque masterId to a human-readable label (master.name,
+    // else any instance's line.name, else the line.id, else the
+    // masterId itself as last resort).
+    const labelForMasterId = function (mid) {
+      if (!mid) return '';
+      const master = state.masters.find(function (x) { return x.id === mid; });
+      if (master && master.name) return master.name;
+      const inst = state.lines.find(function (l) { return l.masterId === mid; });
+      if (inst && (inst.name || inst.id)) return inst.name || inst.id;
+      return mid;
+    };
     const sideParts = [];
     if (trigger.startObjectId) {
-      sideParts.push('starts "' + trigger.startObjectId + '"');
+      sideParts.push('starts "' + labelForMasterId(trigger.startObjectId) + '"');
     }
     if (trigger.stopObjectId) {
       const cleanups = [];
@@ -8586,8 +8597,14 @@
       if (!m || m === selfMaster) return;
       if (seenObjMasters[m]) return;
       seenObjMasters[m] = true;
-      objectIds.push({ value: m, label: m });
+      // Label by master.name when available (human-readable), else
+      // fall back to line.name, else the line's own id. masterId
+      // itself is an opaque hash and meaningless to the user.
+      const master = state.masters.find(function (x) { return x.id === m; });
+      const label = (master && master.name) || ln.name || ln.id || m;
+      objectIds.push({ value: m, label: label });
     });
+    objectIds.sort(function (a, b) { return a.label.localeCompare(b.label); });
     const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
     card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
       function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
