@@ -7819,15 +7819,35 @@
         'whose progress has reached 1 keep contributing until the block\'s trigger ends.';
       wrap.appendChild(addNote);
     }
+    // v0.8.66: render the warning paragraph unconditionally and
+    // hide it when there are no overlaps. That gives
+    // refreshBehaviorOverlapMarkers a stable node to update on
+    // every range edit without re-rendering the whole panel.
     const overlaps = findBehaviorOverlaps(blocks);
+    const warn = document.createElement('p');
+    warn.className = 'ed-behavior-warning' + (overlaps.length ? '' : ' is-hidden');
+    warn.dataset.lineId = line.id;
     if (overlaps.length) {
-      const warn = document.createElement('p');
-      warn.className = 'ed-behavior-warning';
       warn.textContent = 'Overlapping blocks: ' +
         overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
         '. Overlapping ranges contribute simultaneously — their deltas sum during the overlap. ' +
         'Sometimes intentional (parallel motion); otherwise space the ranges out.';
-      wrap.appendChild(warn);
+    }
+    wrap.appendChild(warn);
+    // Mark each overlap-affected card with .is-overlap so the red
+    // border shows from the initial render, not just after the
+    // first range edit.
+    if (overlaps.length) {
+      const inOverlap = {};
+      overlaps.forEach(function (o) { inOverlap[o.a] = true; inOverlap[o.b] = true; });
+      blocks.forEach(function (b, idx) {
+        if (!inOverlap[idx]) return;
+        // The card DOM was appended earlier in this same loop; tag
+        // via querySelectorAll-then-filter to find ours.
+        const sel = '.ed-behavior-block[data-line-id="' + line.id + '"][data-block-idx="' + idx + '"]';
+        const c = wrap.querySelector(sel);
+        if (c) c.classList.add('is-overlap');
+      });
     }
     if (!blocks.length) {
       const ph = document.createElement('p');
@@ -8178,14 +8198,55 @@
       if (n.dataset.lineId !== String(lineId)) continue;
       if (n.dataset.blockIdx !== String(blockIdx)) continue;
       if (n.dataset.kind === 'drift') {
-        // v0.8.20: drift node may not exist (it's only rendered when
-        // translateMode != fixed). If it does and drift just turned
-        // off, blank it; the next full re-render will drop the node.
         n.textContent = driftText || '';
       } else {
         n.textContent = behaviorSummaryText(block);
       }
     }
+    // v0.8.66: range edits change which blocks overlap; refresh the
+    // warning text and the per-block red-border markers so the
+    // visual signal stays in sync without losing the focused
+    // numeric input.
+    refreshBehaviorOverlapMarkers(lineId);
+  }
+
+  // v0.8.66: re-evaluate behavior-overlap state and update DOM
+  // accordingly. Updates two surfaces:
+  //   - The bottom-of-list .ed-behavior-warning text (cleared if
+  //     no overlaps; the paragraph stays in the DOM either way so
+  //     it doesn't reflow the panel).
+  //   - The .ed-behavior-block cards involved in any overlap get
+  //     an .is-overlap class (2 px red border via CSS) — visible
+  //     even when the warning paragraph has scrolled out of view.
+  function refreshBehaviorOverlapMarkers(lineId) {
+    const l = state.lines.find(function (x) { return x.id === lineId; });
+    if (!l) return;
+    const blocks = Array.isArray(l.behaviors) ? l.behaviors : [];
+    const overlaps = findBehaviorOverlaps(blocks);
+    const inOverlap = {};
+    overlaps.forEach(function (o) { inOverlap[o.a] = true; inOverlap[o.b] = true; });
+    const cards = document.querySelectorAll('.ed-behavior-block');
+    cards.forEach(function (card) {
+      const idx = parseInt(card.dataset.blockIdx, 10);
+      if (card.dataset.lineId !== String(lineId)) return;
+      if (Number.isInteger(idx)) {
+        card.classList.toggle('is-overlap', !!inOverlap[idx]);
+      }
+    });
+    const warns = document.querySelectorAll('.ed-behavior-warning');
+    warns.forEach(function (w) {
+      if (w.dataset.lineId !== String(lineId)) return;
+      if (overlaps.length) {
+        w.textContent = 'Overlapping blocks: ' +
+          overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
+          '. Overlapping ranges contribute simultaneously — their deltas sum during the overlap. ' +
+          'Sometimes intentional (parallel motion); otherwise space the ranges out.';
+        w.classList.remove('is-hidden');
+      } else {
+        w.textContent = '';
+        w.classList.add('is-hidden');
+      }
+    });
   }
 
   function rangeNumberField(label, value, onChange) {
@@ -8213,6 +8274,10 @@
 
     const card = document.createElement('div');
     card.className = 'ed-behavior-block';
+    // v0.8.66: tag the card so refreshBehaviorOverlapMarkers can
+    // find it by (lineId, blockIdx) without a full re-render.
+    card.dataset.lineId  = line.id;
+    card.dataset.blockIdx = String(blockIdx);
 
     const head = document.createElement('div');
     head.className = 'ed-behavior-head';

@@ -730,6 +730,16 @@ body.editor input[type="range"] {
   border-radius: 3px;
   font-size: 0.85em;
 }
+.ed-behavior-warning.is-hidden { display: none; }
+/* v0.8.66: 2 px red border on every block card whose range
+   currently overlaps another block's. Stays visible in the
+   panel even when the overlap-warning paragraph at the bottom
+   has scrolled out of view. Higher-priority than the default
+   #4a4a4a border, so the visual signal is unambiguous. */
+.ed-behavior-block.is-overlap {
+  border-color: #ff4d4d;
+  box-shadow: 0 0 0 1px #ff4d4d;
+}
 /* v0.8.20: per-line note shown when a line has ≥2 behavior blocks.
    Informational (not a warning) — dimmer + cooler than the orange
    overlap warning so the eye reads it as background context, not
