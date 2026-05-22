@@ -210,6 +210,8 @@
         if (d >= 0) out.stopDurationSec = d;
       }
       if (b.trigger.stopEasing)     out.stopEasing     = String(b.trigger.stopEasing);
+      // v0.8.84: easy-hit opt-in for click/hover triggers.
+      if (b.trigger.treatAsFilled)  out.treatAsFilled  = true;
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.
@@ -1104,6 +1106,8 @@
           <li><strong>Scroll stops</strong> — fires when the user stops scrolling. <em>Delay</em> (s) is how long the page must stay still before firing; if scrolling resumes before the delay elapses, the pending fire is cancelled.</li>\
           <li><strong>Scroll resumes</strong> — symmetric to <em>Scroll stops</em>: fires when the user starts scrolling after being still. <em>Delay</em> is how long scrolling must continue before firing; a stop before the delay elapses cancels the pending fire.</li>\
           <li><strong>Wait for external Start</strong> — does nothing on its own. The block sits dormant until another object\'s trigger fires a Start command targeting this class. Use this to build externally-driven sequences where the activation is owned by a different object.</li>\
+          <li><strong>Wait for click</strong> — fires when the user clicks the object. Default hit test is SVG-native (the filled body of closed shapes; stroke only on unfilled outlines). Optional checkbox <em>Treat shape as filled for hit test</em> flips it to "click anywhere inside the shape\'s bounds counts" — useful for unfilled outlines where stroke-only would be too narrow to target. Fires once.</li>\
+          <li><strong>Wait for hover</strong> — fires the first time the pointer enters the object. Same hit-test options as click, including the optional fill-extent override. On touch devices (no hover), the trigger also accepts a click as a fallback — whichever comes first fires it. Fires once.</li>\
         </ul>\
         <p><strong>Cross-object Start / Stop</strong> — every trigger can optionally affect <em>another</em> object when it fires. The target is picked by class name (objects sharing a class animate together). Self is excluded from the lists.</p>\
         <ul>\
@@ -4657,6 +4661,11 @@
       if (b.duration && b.duration.mode === 'scroll' && value !== 'scroll-range') {
         b.duration = { mode: 'time', seconds: 1 };
       }
+      // v0.8.84: treatAsFilled is only meaningful for click /
+      // hover triggers — strip it when leaving those.
+      if (value !== 'click' && value !== 'hover') {
+        delete b.trigger.treatAsFilled;
+      }
     } else if (key === 'selector') {
       b.trigger.selector = String(value || '');
     } else if (key === 'viewportAt') {
@@ -4691,6 +4700,13 @@
     } else if (key === 'stopFadeOut' || key === 'stopReturnHome') {
       if (value) b.trigger[key] = true;
       else       delete b.trigger[key];
+    } else if (key === 'treatAsFilled') {
+      // v0.8.84: easy-hit opt-in. Only meaningful for click /
+      // hover; harmless to carry on other when's but cleaner to
+      // strip — see updateBehaviorTrigger 'when' branch below
+      // (clears it when when changes away from pointer triggers).
+      if (value) b.trigger.treatAsFilled = true;
+      else       delete b.trigger.treatAsFilled;
     } else if (key === 'stopDurationSec') {
       let v = Number(value);
       if (!Number.isFinite(v) || v < 0) v = 0;
@@ -8162,6 +8178,15 @@
     } else if (when === 'wait') {
       // v0.8.82
       act = 'Waits for another object’s Start command (does not fire on its own)';
+    } else if (when === 'click') {
+      // v0.8.84
+      act = trigger.treatAsFilled
+        ? 'Triggers when the user clicks anywhere inside the object’s bounds'
+        : 'Triggers when the user clicks the object';
+    } else if (when === 'hover') {
+      // v0.8.84
+      const where = trigger.treatAsFilled ? 'anywhere inside the object’s bounds' : 'the object';
+      act = 'Triggers when the user hovers over ' + where + ' (or clicks it on touch devices)';
     } else {
       act = 'Triggers (' + when + ')';
     }
@@ -8537,7 +8562,15 @@
       // class. Pairs with cross-object Start to build externally-
       // driven chains. Delay is honored — Start at t fires the
       // block's contribution starting at t + delay.
-      { value: 'wait',             label: 'Wait for external Start' }
+      { value: 'wait',             label: 'Wait for external Start' },
+      // v0.8.84: pointer-driven one-shot triggers. The path's
+      // pointer-events flips to 'all' while armed so a click /
+      // hover anywhere inside the shape's geometric bounds counts
+      // as a hit, even on un-filled outlines. On touch devices
+      // mouseenter doesn't fire, so 'hover' also accepts click as
+      // a fallback (no media-query branching).
+      { value: 'click',            label: 'Wait for click' },
+      { value: 'hover',            label: 'Wait for hover' }
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
        function (opt) { explainDurationDisabled(opt); }));
 
@@ -8591,6 +8624,19 @@
     card.appendChild(setInactive(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
       updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
     }), when === 'scroll-range' && dmode === 'scroll'));
+
+    // v0.8.84: pointer-trigger hit-test opt-in. Only for click /
+    // hover; lets the author override the SVG-native hit (stroke
+    // only on unfilled outlines) with full-shape-as-fill hit,
+    // so a click anywhere inside an outline registers. Default
+    // off — keeps the hit zone honest by default.
+    if (when === 'click' || when === 'hover') {
+      card.appendChild(checkboxField(
+        'Treat shape as filled for hit test',
+        !!trigger.treatAsFilled,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v); }
+      ));
+    }
 
     // v0.8.79: cross-object Start/Stop side effects. When this
     // trigger fires, optionally Start (re-arm + fire triggers on) or

@@ -117,6 +117,11 @@
         if (d >= 0) out.stopDurationSec = d;
       }
       if (b.trigger.stopEasing)      out.stopEasing      = String(b.trigger.stopEasing);
+      // v0.8.84: opt-in easy hit test for click/hover. When true,
+      // the path is set to pointer-events:all so a click anywhere
+      // inside the shape's geometric bounds counts (handy for
+      // unfilled outlines). Default = SVG-native (visiblePainted).
+      if (b.trigger.treatAsFilled)   out.treatAsFilled   = true;
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -1123,6 +1128,56 @@
           obs.observe(pathEl);
           blockTriggerTeardown[i].push(function () {
             try { obs.disconnect(); } catch (e) {}
+          });
+          return;
+        }
+        // v0.8.84: 'click' and 'hover' — pointer-driven one-shot
+        // triggers on the path itself.
+        //
+        // Hit-testing: the lines layer has pointer-events:none
+        // globally so animated paths never intercept page scrolls
+        // or button clicks. We override per-path here so the
+        // arming path receives events at all.
+        //
+        //   - default: pointer-events='auto'  — SVG-native hit
+        //     test (filled body of closed shapes; stroke only on
+        //     unfilled outlines). An outline drawn at 1px stroke
+        //     has a 1px hit zone, which is intentional: the
+        //     author chose a thin stroke.
+        //   - opt-in (trig.treatAsFilled === true):
+        //     pointer-events='all' — hit-test as if the shape
+        //     were filled, regardless of paint. Useful when the
+        //     author wants click-anywhere-inside-the-outline
+        //     UX without thickening the stroke.
+        //
+        // Reverted on teardown so the layer returns to its
+        // transparent-to-pointer state.
+        //
+        // Mobile fallback for hover: touch devices don't fire
+        // mouseenter on hover (no hover affordance), so we bind
+        // BOTH mouseenter and click. Whichever fires first wins,
+        // teardown removes both. No (hover: none) detection
+        // needed — works uniformly across desktop and touch.
+        if (when === 'click' || when === 'hover') {
+          const prevPE = pathEl.getAttribute('pointer-events');
+          const easyHit = !!(b.trigger && b.trigger.treatAsFilled);
+          pathEl.setAttribute('pointer-events', easyHit ? 'all' : 'auto');
+          const fire = function () {
+            if (activationState[i] != null) return;
+            activationState[i] = performance.now() / 1000;
+            applyObjectEffects(b.trigger);
+          };
+          pathEl.addEventListener('click', fire);
+          if (when === 'hover') {
+            pathEl.addEventListener('mouseenter', fire);
+          }
+          blockTriggerTeardown[i].push(function () {
+            try { pathEl.removeEventListener('click', fire); } catch (e) {}
+            try { pathEl.removeEventListener('mouseenter', fire); } catch (e) {}
+            // Restore prior pointer-events so the path goes back
+            // to inheriting the layer's `none`.
+            if (prevPE == null) pathEl.removeAttribute('pointer-events');
+            else                pathEl.setAttribute('pointer-events', prevPE);
           });
           return;
         }
