@@ -385,15 +385,46 @@
       return paletteById[ref] ? paletteById[ref].value : ref;
     }
 
+    // v0.8.61: pre-scan behaviors to figure out which lines are
+    // referenced as pathFollow guides anywhere. A hidden guide
+    // would normally be skipped (line.hidden / group.hidden), but
+    // pathFollow needs the guide's <path> element in the DOM to
+    // sample geometry — without it, layer.querySelector(
+    // '[data-master-id=...]') misses and the follower never
+    // moves. We render referenced-but-hidden guides invisibly
+    // (visibility: hidden + pointer-events: none) so they're
+    // queryable but stay out of sight.
+    const guideMastersNeeded = {};
+    const guideNamesNeeded   = {};
+    lines.forEach(function (line) {
+      if (!Array.isArray(line.behaviors)) return;
+      line.behaviors.forEach(function (b) {
+        const p = (b && b.params) || {};
+        if (p.translateMode !== 'pathFollow') return;
+        if (p.pathRef)     guideMastersNeeded[p.pathRef] = true;
+        if (p.pathRefName) guideNamesNeeded[p.pathRefName] = true;
+      });
+    });
+
     // Render JSON-defined lines. Hidden lines (instance or group)
     // are skipped entirely on the live site — the editor's Visible
     // toggles are the gate. Image-kind lines without a src are also
     // skipped (no visible content + no placeholder outline outside
     // the editor).
     lines.forEach(function (line) {
-      if (line.hidden) return;
+      // v0.8.61: a hidden line still needs to render (invisibly)
+      // when some other line references it as a pathFollow guide —
+      // pathFollow reads geometry from the DOM. needAsGuide is the
+      // is-this-line-a-guide check; on match, we render with
+      // visibility hidden so viewers don't see it but
+      // layer.querySelector('[data-master-id=...]') / [data-line-id=...]
+      // still resolves.
+      const lineName = line.name || line.id;
+      const needAsGuide = (line.masterId && guideMastersNeeded[line.masterId])
+                       || (lineName && guideNamesNeeded[lineName]);
       const group = groupById[line.groupId];
-      if (group && group.hidden) return;
+      const isHidden = line.hidden || (group && group.hidden);
+      if (isHidden && !needAsGuide) return;
 
       if (line.kind === 'image') {
         if (!line.params || !line.params.src) return;
@@ -422,6 +453,14 @@
         }
         img.dataset.lineId  = line.id;
         img.dataset.groupId = line.groupId || '';
+        // v0.8.61: same invisible-but-rendered treatment as the
+        // path branch, for consistency. Images aren't valid path
+        // guides today but the hidden-line semantics should be
+        // uniform across kinds.
+        if (isHidden) {
+          img.style.visibility = 'hidden';
+          img.style.pointerEvents = 'none';
+        }
         layer.appendChild(img);
         return;
       }
@@ -450,6 +489,14 @@
       // guide across classes (line.id is per-class; masterId is
       // the shared canonical identity).
       if (line.masterId) p.dataset.masterId = line.masterId;
+      // v0.8.61: hidden-but-needed-as-guide → render invisibly so
+      // the DOM has the element for pathFollow's getPointAtLength /
+      // getCTM, but the viewer doesn't see it. pointer-events none
+      // so hit-testing also skips it.
+      if (isHidden) {
+        p.style.visibility = 'hidden';
+        p.style.pointerEvents = 'none';
+      }
       layer.appendChild(p);
     });
 
