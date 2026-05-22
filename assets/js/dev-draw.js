@@ -200,6 +200,13 @@
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
+      // v0.8.77: scroll-stop / scroll-start side-effect indices.
+      if (Number.isInteger(b.trigger.startBlockIndex) && b.trigger.startBlockIndex >= 0) {
+        out.startBlockIndex = b.trigger.startBlockIndex;
+      }
+      if (Number.isInteger(b.trigger.stopBlockIndex) && b.trigger.stopBlockIndex >= 0) {
+        out.stopBlockIndex = b.trigger.stopBlockIndex;
+      }
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.
@@ -1091,6 +1098,8 @@
           <li><strong>In view (partial)</strong> — fires when the animated object first enters the viewport.</li>\
           <li><strong>In view (full)</strong> — fires when the animated object is fully inside the viewport.</li>\
           <li><strong>After previous</strong> — fires at the exact instant the previous timed block ends, for gapless chains. Requires a Timed / Loop-back block earlier in the list.</li>\
+          <li><strong>Scroll stops</strong> — fires when the user stops scrolling. <em>Delay</em> (s) is how long the page must stay still before firing; if scrolling resumes before the delay elapses, the pending fire is cancelled. Two optional same-line side effects: <em>Start block X</em> kicks block X (as if its own trigger fired now; no-op if X is already running) and <em>Stop block X</em> freezes block X at its end state (idle blocks are unaffected). Stopped blocks re-activate normally when their own trigger fires again — the freeze is a state, not a disable. Scroll-driven blocks can\'t be Start/Stop targets (their progress is bound to scroll position).</li>\
+          <li><strong>Scroll resumes</strong> — symmetric to <em>Scroll stops</em>: fires when the user starts scrolling after being still. <em>Delay</em> is how long scrolling must continue before firing; a stop before the delay elapses cancels the pending fire. Same Start / Stop block side effects.</li>\
         </ul>\
         <p><strong>Progress</strong> — picks how 0→1 advances:</p>\
         <ul>\
@@ -4587,6 +4596,23 @@
         b.duration.target = remapped;
       }
     });
+    // v0.8.77: same id-preserving remap for scroll-stop / scroll-
+    // start side-effect indices. Self-reference after remap (target
+    // = trigger's own block index) is meaningless — drop it; the
+    // runtime already guards against self-targeting but clean data
+    // is cheaper than runtime guards.
+    line.behaviors.forEach(function (b, i) {
+      if (!b.trigger) return;
+      ['startBlockIndex', 'stopBlockIndex'].forEach(function (k) {
+        if (!Number.isInteger(b.trigger[k])) return;
+        const remapped = newIdxOfOld[b.trigger[k]];
+        if (remapped == null || remapped === i) {
+          delete b.trigger[k];
+        } else {
+          b.trigger[k] = remapped;
+        }
+      });
+    });
   }
   // Behavior block field writers. v0.8.7 split — trigger.when /
   // trigger.range / trigger.selector / trigger.delay vs
@@ -4607,7 +4633,8 @@
     // available; re-render so the right ones appear and the
     // greyed-out duration options update. viewportAt also goes
     // through re-render so its button-group active state flips.
-    if (key === 'when' || key === 'viewportAt' || key === 'repeat') {
+    if (key === 'when' || key === 'viewportAt' || key === 'repeat'
+        || key === 'startBlockIndex' || key === 'stopBlockIndex') {
       renderSelectionPanel();
     } else {
       refreshBehaviorSummary(lineId, blockIdx);
@@ -4632,11 +4659,29 @@
         b.trigger.viewportAt = 'middle';
       }
       if (typeof b.trigger.delay !== 'number') b.trigger.delay = 0;
+      // v0.8.77: scroll-stop / scroll-start side-effect indices are
+      // only meaningful on those triggers; clear them on every flip
+      // away. Defensive — leftover indices wouldn't be read by the
+      // runtime (it ignores them outside these `when` kinds) but it
+      // keeps the data clean.
+      if (value !== 'scroll-stop' && value !== 'scroll-start') {
+        delete b.trigger.startBlockIndex;
+        delete b.trigger.stopBlockIndex;
+      }
       // Auto-flip duration if the previous combination is now
       // invalid (only valid invalidation today: scroll duration
       // requires scroll-range activation).
       if (b.duration && b.duration.mode === 'scroll' && value !== 'scroll-range') {
         b.duration = { mode: 'time', seconds: 1 };
+      }
+    } else if (key === 'startBlockIndex' || key === 'stopBlockIndex') {
+      // v0.8.77: value '' (or null/-1) clears the slot.
+      if (value === '' || value == null) {
+        delete b.trigger[key];
+      } else {
+        const v = parseInt(value, 10);
+        if (Number.isInteger(v) && v >= 0) b.trigger[key] = v;
+        else delete b.trigger[key];
       }
     } else if (key === 'selector') {
       b.trigger.selector = String(value || '');
@@ -8106,10 +8151,31 @@
     } else if (when === 'after-previous') {
       // v0.8.22
       act = 'Triggers when the previous timed block ends';
+    } else if (when === 'scroll-stop') {
+      // v0.8.77
+      act = (delay > 0)
+        ? 'Triggers ' + formatSeconds(delay) + ' after the user stops scrolling'
+        : 'Triggers the moment the user stops scrolling';
+    } else if (when === 'scroll-start') {
+      act = (delay > 0)
+        ? 'Triggers ' + formatSeconds(delay) + ' after the user resumes scrolling'
+        : 'Triggers the moment the user resumes scrolling';
     } else {
       act = 'Triggers (' + when + ')';
     }
-    if (delay > 0) act += ', waits ' + formatSeconds(delay);
+    if (delay > 0 && when !== 'scroll-stop' && when !== 'scroll-start') {
+      act += ', waits ' + formatSeconds(delay);
+    }
+    // v0.8.77: surface scroll-stop / scroll-start side effects so
+    // the summary makes the cross-block control obvious.
+    if (when === 'scroll-stop' || when === 'scroll-start') {
+      const sx = Number.isInteger(trigger.startBlockIndex) ? trigger.startBlockIndex : null;
+      const ex = Number.isInteger(trigger.stopBlockIndex)  ? trigger.stopBlockIndex  : null;
+      const parts = [];
+      if (sx != null) parts.push('starts block ' + (sx + 1));
+      if (ex != null) parts.push('stops block ' + (ex + 1));
+      if (parts.length) act += ' (' + parts.join(', ') + ')';
+    }
 
     let prog;
     if (dmode === 'time') {
@@ -8432,7 +8498,16 @@
         disabledReason: 'No previous timed block to chain after. ' +
           'Add a block above this one with Progress = "Timed run (seconds)" ' +
           '— scroll-driven / loop / ping-pong blocks are skipped because ' +
-          'they have no discrete end.' }
+          'they have no discrete end.' },
+      // v0.8.77: event-driven triggers fed by a global scroll-
+      // activity watcher (150 ms debounce). Delay is in seconds;
+      // the opposite event before delay elapses cancels the pending
+      // fire (symmetric). Two optional side effects on same-line
+      // blocks: start X (act as if X's trigger fired now; no-op if
+      // X is already running) and stop X (freeze X at its end
+      // state; idle blocks are unaffected).
+      { value: 'scroll-stop',      label: 'Scroll stops' },
+      { value: 'scroll-start',     label: 'Scroll resumes' }
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
        function (opt) { explainDurationDisabled(opt); }));
 
@@ -8486,6 +8561,33 @@
     card.appendChild(setInactive(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
       updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
     }), when === 'scroll-range' && dmode === 'scroll'));
+
+    // v0.8.77: scroll-stop / scroll-start side-effect pickers.
+    // Two same-line slots: start X (kick another block now) and
+    // stop X (freeze another block at its end state). Scroll-driven
+    // blocks are filtered out — their bp is bound to scroll position,
+    // so start/stop has no defined meaning there. The trigger's own
+    // block is also filtered (can't target self).
+    const sideEffectVisible = (when === 'scroll-stop' || when === 'scroll-start');
+    const sideEffectOpts = [{ value: '', label: '(none)' }];
+    if (Array.isArray(line.behaviors)) {
+      line.behaviors.forEach(function (bb, j) {
+        if (j === blockIdx) return;
+        const bm = bb && bb.duration && bb.duration.mode;
+        if (bm === 'scroll') return;
+        sideEffectOpts.push({ value: String(j), label: 'Block ' + (j + 1) });
+      });
+    }
+    const curStart = Number.isInteger(trigger.startBlockIndex)
+      ? String(trigger.startBlockIndex) : '';
+    const curStop  = Number.isInteger(trigger.stopBlockIndex)
+      ? String(trigger.stopBlockIndex)  : '';
+    card.appendChild(setInactive(selectField('Start block', curStart, sideEffectOpts, function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'startBlockIndex', v);
+    }), !sideEffectVisible));
+    card.appendChild(setInactive(selectField('Stop block', curStop, sideEffectOpts, function (v) {
+      updateBehaviorTrigger(line.id, blockIdx, 'stopBlockIndex', v);
+    }), !sideEffectVisible));
 
     // Progress (How) picker — 'scroll' is only valid when
     // when=scroll-range; greyed otherwise and click-explains.

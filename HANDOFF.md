@@ -64,8 +64,10 @@ Per the v4 schema:
 Each line has a `behaviors[]` array. Each block has:
 
 - **Trigger** — `trigger.when` ∈ scroll-range / page-load / scroll-key /
-  in-view-partial / in-view-full / after-previous. With `range`, `selector`,
-  `delay`, `viewportAt`, `repeat`.
+  in-view-partial / in-view-full / after-previous / scroll-stop / scroll-start.
+  With `range`, `selector`, `delay`, `viewportAt`, `repeat`, and (scroll-stop /
+  scroll-start only) `startBlockIndex`, `stopBlockIndex` — same-line block
+  indices for side effects on fire.
 - **Duration** — `duration.mode` ∈ scroll / time / loop / pingpong / loopTo.
 - **Visual contributions:**
   - `tx`, `ty`, `rot` (per-block progress-weighted deltas)
@@ -102,6 +104,36 @@ setAttribute.
   doesn't fire onUpdate at setup when scroll=0 + range.start=0, so behaviors
   that have a non-default state at bp=0 (e.g. opacity 0.5→1) would jump on
   first scroll. This is a pattern worth remembering.
+
+### Scroll-stop / scroll-start triggers (v0.8.77)
+
+Event-driven triggers fed by a single global passive-scroll listener with a
+150 ms debounce. The watcher emits two events to every subscriber:
+
+- `scroll-stop` — user was scrolling, then no scroll event for 150 ms.
+- `scroll-start` — user resumes scrolling after a stopped state.
+
+Each subscribed block has a `delay` (seconds). On the watcher event it
+schedules its fire at `t + delay`. The OPPOSITE event before the delay
+elapses CANCELS the pending fire (symmetric). On fire:
+
+1. The block's own `activationState[i]` is set to now (so its duration
+   starts running normally — this is independent of side effects).
+2. Optional `startBlockIndex` side effect: if target block is forced-ended
+   or idle, kick it now. If target is already running normally, no-op.
+3. Optional `stopBlockIndex` side effect: if target is running normally,
+   set `forcedEnd[i] = true` (its progress becomes 1 — `blockProg` early-
+   returns 1 for forced-ended blocks). Idle / already forced-ended blocks
+   are unaffected.
+
+`forcedEnd[i]` is cleared every time `activationState[i]` is set anew — so
+any natural re-trigger (or another `startBlockIndex` side effect) releases
+the freeze. Editor filters out scroll-mode blocks from both pickers (their
+bp is bound to `scrollP`, so start/stop have no defined meaning there).
+
+`hasTime` is force-true for any block with these triggers, so the ticker
+runs and side-effect changes to other same-line blocks get painted even
+when the user isn't scrolling.
 
 ## Recent architectural decisions and why
 

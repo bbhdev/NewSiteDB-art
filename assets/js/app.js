@@ -104,6 +104,14 @@
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
+      // v0.8.77: scroll-stop / scroll-start triggers can carry side-
+      // effect indices targeting same-line blocks (start / stop).
+      if (Number.isInteger(b.trigger.startBlockIndex) && b.trigger.startBlockIndex >= 0) {
+        out.startBlockIndex = b.trigger.startBlockIndex;
+      }
+      if (Number.isInteger(b.trigger.stopBlockIndex) && b.trigger.stopBlockIndex >= 0) {
+        out.stopBlockIndex = b.trigger.stopBlockIndex;
+      }
       return out;
     }
     if (b.trigger && b.trigger.type === 'time') {
@@ -338,7 +346,53 @@
     // v0.8.11: window scroll listeners for scroll-key activations
     // (crossing-detection — see comments at the registration site).
     const ownListeners = [];
+    // v0.8.77: generic per-class teardown callbacks. Used by scroll-
+    // stop / scroll-start subscriptions which own a scrollActivity
+    // subscriber AND a pending setTimeout — both need to be released
+    // on class-boundary re-render, and the (target, type, fn) shape
+    // of ownListeners doesn't fit.
+    const ownCleanups = [];
     let currentClassId = null;
+
+    // v0.8.77: shared scroll-activity watcher for scroll-stop /
+    // scroll-start triggers. One passive scroll listener at the
+    // window level emits start/stop events to every subscriber; per-
+    // block code (registered further down) subscribes here. "Stopped"
+    // = no scroll event for STILL_MS after the last motion. The
+    // initial state is "not scrolling and never has scrolled," so the
+    // first start event waits until the user actually scrolls — no
+    // false fires at page load.
+    const SCROLL_STILL_MS = 150;
+    const scrollActivity = (function () {
+      const subs = [];
+      let scrolling = false;
+      let stillTimer = null;
+      function onScroll() {
+        if (!scrolling) {
+          scrolling = true;
+          const t = performance.now() / 1000;
+          for (let i = 0; i < subs.length; i++) {
+            try { if (subs[i].onStart) subs[i].onStart(t); } catch (e) {}
+          }
+        }
+        clearTimeout(stillTimer);
+        stillTimer = setTimeout(function () {
+          scrolling = false;
+          const t = performance.now() / 1000;
+          for (let i = 0; i < subs.length; i++) {
+            try { if (subs[i].onStop) subs[i].onStop(t); } catch (e) {}
+          }
+        }, SCROLL_STILL_MS);
+      }
+      window.addEventListener('scroll', onScroll, { passive: true });
+      return {
+        add: function (s) { subs.push(s); },
+        remove: function (s) {
+          const i = subs.indexOf(s);
+          if (i !== -1) subs.splice(i, 1);
+        }
+      };
+    })();
 
     function renderForClass(classId) {
       // Tear down previous render.
@@ -352,6 +406,8 @@
         try { L.target.removeEventListener(L.type, L.fn); } catch (e) {}
       });
       ownListeners.length = 0;
+      ownCleanups.forEach(function (fn) { try { fn(); } catch (e) {} });
+      ownCleanups.length = 0;
       layer.innerHTML = '';
       currentClassId = classId;
 
@@ -821,6 +877,12 @@
       // from when the user actually reached the trigger, not
       // page load).
       const activationState = blocks.map(function () { return null; });
+      // v0.8.77: per-block "force end" flag. Set by another block's
+      // scroll-stop/scroll-start trigger via its stopBlockIndex side
+      // effect — when true, blockProg returns 1 (the block's end
+      // state). Cleared whenever activationState[i] is set anew (any
+      // natural re-trigger, or another start-block side effect).
+      const forcedEnd = blocks.map(function () { return false; });
 
       // v0.8.23: loopTo bookkeeping (only meaningful for blocks
       // whose duration.mode === 'loopTo').
@@ -864,6 +926,33 @@
       // subsequent ticks for the same block.
       const pathDiagLogged = blocks.map(function () { return false; });
 
+      // v0.8.77: side-effect helper for scroll-stop / scroll-start
+      // triggers. When such a trigger fires (its block's own duration
+      // starts running normally — that's handled by the caller setting
+      // activationState[triggerIdx]), this also acts on at most one
+      // start-target and one stop-target (same-line indices). Editor
+      // already filters out scroll-driven blocks from both pickers.
+      //   start X: if X is forced-ended OR idle, kick it now; if X is
+      //            normally running, no-op (don't restart a healthy
+      //            animation).
+      //   stop  X: if X is running normally, freeze at end state; if X
+      //            is idle OR already forced-ended, no-op.
+      function applyStartStop(triggerIdx, trig, nowSec) {
+        const s = trig.startBlockIndex;
+        const e = trig.stopBlockIndex;
+        if (Number.isInteger(s) && s >= 0 && s < blocks.length && s !== triggerIdx) {
+          if (forcedEnd[s] || activationState[s] == null) {
+            activationState[s] = nowSec;
+            forcedEnd[s] = false;
+          }
+        }
+        if (Number.isInteger(e) && e >= 0 && e < blocks.length && e !== triggerIdx) {
+          if (activationState[e] != null && !forcedEnd[e]) {
+            forcedEnd[e] = true;
+          }
+        }
+      }
+
       // For each non-scroll duration block, schedule its
       // activation per the `when` axis. scroll-range activations
       // are picked up inside the per-frame writeAt; the other
@@ -880,6 +969,7 @@
           // baked into blockProg's elapsed math (no need to
           // postpone activation itself).
           activationState[i] = lineStartedAt;
+          forcedEnd[i] = false;
           return;
         }
         if (when === 'scroll-key' && b.trigger.selector) {
@@ -926,12 +1016,58 @@
             if (!wasInside && nowInside) {
               if (repeat === 'every' || activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
+                forcedEnd[i] = false;
               }
             }
             wasInside = nowInside;
           };
           window.addEventListener('scroll', onScroll, { passive: true });
           ownListeners.push({ target: window, type: 'scroll', fn: onScroll });
+          return;
+        }
+        if (when === 'scroll-stop' || when === 'scroll-start') {
+          // v0.8.77: event-driven triggers fed by the shared
+          // scrollActivity watcher. Subscribers schedule fire at
+          // t + delay; the opposite event before delay elapses
+          // cancels the pending fire (symmetric for both kinds).
+          // Fire re-runs unconditionally — these triggers don't
+          // expire or honor a repeat/once flag.
+          const trig = b.trigger;
+          const delaySec = (trig && trig.delay) || 0;
+          let scheduled = null;
+          const fire = function () {
+            scheduled = null;
+            const t = performance.now() / 1000;
+            activationState[i] = t;
+            forcedEnd[i] = false;
+            applyStartStop(i, trig, t);
+          };
+          const cancel = function () {
+            if (scheduled != null) {
+              clearTimeout(scheduled);
+              scheduled = null;
+            }
+          };
+          const sub = (when === 'scroll-stop')
+            ? {
+                onStop: function () {
+                  cancel();
+                  scheduled = setTimeout(fire, delaySec * 1000);
+                },
+                onStart: cancel
+              }
+            : {
+                onStart: function () {
+                  cancel();
+                  scheduled = setTimeout(fire, delaySec * 1000);
+                },
+                onStop: cancel
+              };
+          scrollActivity.add(sub);
+          ownCleanups.push(function () {
+            scrollActivity.remove(sub);
+            cancel();
+          });
           return;
         }
         if (when === 'in-view-partial' || when === 'in-view-full') {
@@ -943,6 +1079,7 @@
             entries.forEach(function (entry) {
               if (entry.isIntersecting && activationState[i] == null) {
                 activationState[i] = performance.now() / 1000;
+                forcedEnd[i] = false;
               }
             });
           }, { threshold: threshold });
@@ -959,6 +1096,14 @@
       const blockProg = function (b, idx, scrollP, nowSec) {
         const mode = b.duration && b.duration.mode || 'scroll';
         const when = b.trigger.when;
+
+        // v0.8.77: another block's scroll-stop trigger has frozen
+        // this one at its end state. Editor prevents pointing
+        // stopBlockIndex at scroll-mode blocks (their bp is bound
+        // to scrollP), so this gate is unreachable for mode==='scroll'
+        // — but the check sits here so the contract is one rule
+        // regardless of mode.
+        if (forcedEnd[idx]) return 1;
 
         // Scroll-driven progress (the only mode that reads
         // scrollP directly).
@@ -989,7 +1134,7 @@
         if (activationState[idx] == null) {
           if (when === 'scroll-range') {
             const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
-            if (scrollP >= r.start) activationState[idx] = nowSec;
+            if (scrollP >= r.start) { activationState[idx] = nowSec; forcedEnd[idx] = false; }
             else return 0;
           } else if (when === 'after-previous') {
             let prevIdx = -1;
@@ -1006,6 +1151,7 @@
             const pEnd     = activationState[prevIdx] + pDelay + pSeconds;
             if (nowSec < pEnd) return 0;
             activationState[idx] = pEnd;
+            forcedEnd[idx] = false;
           } else {
             return 0;
           }
@@ -1073,8 +1219,10 @@
             } else if (K >= 0 && K < idx) {
               const pEnd = activationState[idx] + delay + dur;
               activationState[K] = pEnd;
+              forcedEnd[K] = false;
               for (let j = K + 1; j <= idx; j++) {
                 activationState[j] = null;
+                forcedEnd[j] = false;
               }
               loopOffset[idx] = null;
               loopPlayed[idx] = false;
@@ -1370,8 +1518,15 @@
       // itself no-ops when scrollY is unchanged, so the
       // continuous tick is cheap.
       const hasTime = blocks.some(function (b) {
+        // v0.8.77: scroll-stop / scroll-start trigger blocks need a
+        // ticker so their fire (and any forcedEnd side effect on other
+        // blocks of this line) gets painted — the trigger may fire
+        // while the user is NOT scrolling, so ScrollTrigger.onUpdate
+        // won't kick in on its own.
+        const when = b.trigger && b.trigger.when;
         return (b.duration && b.duration.mode !== 'scroll')
-            || b.driftX || b.driftY;
+            || b.driftX || b.driftY
+            || when === 'scroll-stop' || when === 'scroll-start';
       });
       // v6+: per-class positionOffset baked into the path's transform.
       // line.d is canonical (master geometry) on the runtime side;
