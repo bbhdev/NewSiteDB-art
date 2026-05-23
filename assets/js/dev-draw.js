@@ -8364,11 +8364,43 @@
         title: 'Linked instances will be removed',
         message: msg,
         html: true,
+        // v0.8.98: "Cancel" reads as "cancel the whole delete operation";
+        // here we just want to choose whether the linked siblings tag
+        // along. "Keep" / "Delete too" makes the scope of the choice
+        // explicit — keep them and only delete the group's own lines,
+        // or delete them too.
         buttons: [
-          { label: 'Cancel', value: null },
-          { label: 'Delete anyway', value: 'ok', className: 'ed-danger' }
+          { label: 'Keep',       value: 'keep' },
+          { label: 'Delete too', value: 'ok', className: 'ed-danger' }
         ]
       });
+      if (confirm === 'keep') {
+        // "Keep the outside-group siblings": remove only lines that
+        // are actually IN the group being deleted (per the cascade
+        // scope — current class in ONE mode, same-name peer groups
+        // in ALL mode), then let deleteGroup tear down the group
+        // entity with alsoDeleteLines=false so it doesn't run its
+        // own master-id cascade. Masters survive (still referenced
+        // by the kept siblings), and the kept siblings stay where
+        // they were.
+        const isAll = modeIsAll();
+        const cidsToTouch = isAll ? state.pageConfig.useClasses : [state.classId];
+        cidsToTouch.forEach(function (cid) {
+          const bucket = state.byClass[cid];
+          if (!bucket || !Array.isArray(bucket.lines)) return;
+          let inScopeGroupId = null;
+          if (isAll) {
+            const peer = (bucket.groups || []).find(function (gr) { return gr.name === g.name; });
+            if (peer) inScopeGroupId = peer.id;
+          } else {
+            inScopeGroupId = g.id;
+          }
+          if (!inScopeGroupId) return;
+          bucket.lines = bucket.lines.filter(function (l) { return l.groupId !== inScopeGroupId; });
+        });
+        deleteGroup(g.id, false);
+        return;
+      }
       if (confirm !== 'ok') return;
     }
     deleteGroup(g.id, true);
@@ -8430,6 +8462,24 @@
       renderLines();
       renderGroupsList();
     }, 'optional'), line.masterId, 'name'));
+
+    // v0.8.98: Group affordance — explicit selector to move this
+    // object to a different group without resorting to drag-and-drop.
+    // Especially needed for linked objects: previously the only way
+    // to take an instance out of a group was to delete the group
+    // (which cascaded) or drag the row in the sidebar, neither of
+    // which is discoverable from the panel. moveLinesToGroup also
+    // fans the change out to sibling classes in ALL mode by name.
+    if (state.groups.length > 1) {
+      wrap.appendChild(selectField(
+        'Group',
+        line.groupId || '',
+        state.groups.map(function (gr) { return { value: gr.id, label: gr.name }; }),
+        function (newId) {
+          if (newId && newId !== line.groupId) moveLinesToGroup([line.id], newId);
+        }
+      ));
+    }
 
     // Visibility — toggle off to hide on the live site without
     // deleting. Useful for trying variants. Renders faded in the
