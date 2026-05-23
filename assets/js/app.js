@@ -1200,7 +1200,16 @@
           const onClick = function (e) {
             if (pointHits(e.clientX, e.clientY)) fire();
           };
-          document.addEventListener('click', onClick);
+          // v0.8.86: capture phase. document-level bubble fires
+          // last, after every other handler in the chain — if any
+          // ancestor calls stopPropagation (which any third-party
+          // overlay or button handler might), our listener never
+          // fires. Capture phase walks top-down before bubble, so
+          // we always see the event first. mousemove doesn't have
+          // this problem in practice (no per-element handlers
+          // call stopPropagation on it), but we use capture there
+          // too for symmetry.
+          document.addEventListener('click', onClick, true);
           let onMove = null;
           if (when === 'hover') {
             // Edge-triggered: fire only on the transition from
@@ -1215,12 +1224,12 @@
               if (inside && !wasInside) fire();
               wasInside = inside;
             };
-            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mousemove', onMove, true);
           }
           blockTriggerTeardown[i].push(function () {
-            try { document.removeEventListener('click', onClick); } catch (e) {}
+            try { document.removeEventListener('click', onClick, true); } catch (e) {}
             if (onMove) {
-              try { document.removeEventListener('mousemove', onMove); } catch (e) {}
+              try { document.removeEventListener('mousemove', onMove, true); } catch (e) {}
             }
           });
           return;
