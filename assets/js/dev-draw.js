@@ -7228,6 +7228,7 @@
         const z = state.zoom || 1;
         const leader = document.createElementNS(SVG_NS, 'line');
         leader.setAttribute('class', 'ed-label-leader');
+        leader.setAttribute('data-line-id', line.id);
         leader.setAttribute('x1', pos.x);
         leader.setAttribute('y1', pos.y);
         leader.setAttribute('x2', lx);
@@ -7292,15 +7293,22 @@
       outer.style.stroke = fill;
       g.insertBefore(outer, text);
 
-      // v0.8.104: pointerdown on the label group starts a drag that
-      // updates line.labelOffset. Re-renders labels on each move
-      // (cheap — only the labels layer; doesn't tear down line handles
-      // so the pointer capture stays valid). Snapshots once at
-      // pointerup. e.stopPropagation prevents the svg-level
-      // pointerdown from interpreting this as a canvas click /
-      // marquee-select.
+      // v0.8.108: pointerdown on the label group starts an in-place
+      // drag. CRITICAL: we MUST NOT call renderLabels() mid-drag, because
+      // that does labelsG.innerHTML = '' — which destroys `g`, releases
+      // the pointer capture, and silently kills the gesture. Instead we
+      // mutate g's transform and the leader line attributes directly.
+      // renderLabels() runs only on pointerup (after snapshot).
+      //
+      // Capture refs so we can close over them in the move handler.
+      // leaderRef may be null at start (no offset yet) — created lazily.
+      const anchorX = pos.x;
+      const anchorY = pos.y;
       let dragStartPt = null;
       let dragStartOff = null;
+      let leaderRef = hasOffset ? labelsG.querySelector(
+        '.ed-label-leader[data-line-id="' + line.id + '"]'
+      ) : null;
       g.addEventListener('pointerdown', function (e) {
         e.stopPropagation();
         e.preventDefault();
@@ -7315,13 +7323,31 @@
       g.addEventListener('pointermove', function (e) {
         if (!dragStartPt) return;
         const cur = clientToSvg(e.clientX, e.clientY);
-        const dx = cur.x - dragStartPt.x;
-        const dy = cur.y - dragStartPt.y;
-        line.labelOffset = {
-          x: dragStartOff.x + dx,
-          y: dragStartOff.y + dy,
-        };
-        renderLabels();
+        const newOffX = dragStartOff.x + (cur.x - dragStartPt.x);
+        const newOffY = dragStartOff.y + (cur.y - dragStartPt.y);
+        const lxNew = anchorX + newOffX;
+        const lyNew = anchorY + newOffY;
+        // Mutate live, no re-render.
+        g.setAttribute('transform', 'translate(' + lxNew + ',' + lyNew + ')');
+        if (!leaderRef) {
+          // Lazily create the leader the first time the label moves
+          // off the anchor — covers the common case of starting at
+          // offset (0,0) and dragging away.
+          leaderRef = document.createElementNS(SVG_NS, 'line');
+          leaderRef.setAttribute('class', 'ed-label-leader');
+          leaderRef.setAttribute('data-line-id', line.id);
+          leaderRef.setAttribute('x1', anchorX);
+          leaderRef.setAttribute('y1', anchorY);
+          leaderRef.setAttribute('stroke', fill);
+          leaderRef.setAttribute('stroke-width', (2 / (state.zoom || 1)));
+          leaderRef.style.pointerEvents = 'none';
+          labelsG.insertBefore(leaderRef, g);
+        }
+        leaderRef.setAttribute('x2', lxNew);
+        leaderRef.setAttribute('y2', lyNew);
+        // Store the committed offset on the line so pointerup snapshot
+        // captures it.
+        line.labelOffset = { x: newOffX, y: newOffY };
       });
       g.addEventListener('pointerup', function (e) {
         if (!dragStartPt) return;
@@ -7337,8 +7363,8 @@
             Math.abs(line.labelOffset.x) < 2 &&
             Math.abs(line.labelOffset.y) < 2) {
           delete line.labelOffset;
-          renderLabels();
         }
+        renderLabels();
         snapshot();
       });
     });
@@ -7362,22 +7388,28 @@
     const z = state.zoom || 1;
     const selectedSet = {};
     state.selectedIds.forEach(function (id) { selectedSet[id] = true; });
+    // v0.8.108: per-class instance counts to match the sidebar's
+    // in-class gating semantics. Singletons (in-class count < 2)
+    // get a hollow neutral ring instead of nothing — same "nothing
+    // to say here" treatment as the sidebar, keeps the canvas
+    // visually consistent.
+    const inClassCounts = {};
+    state.lines.forEach(function (l) {
+      if (!l.masterId) return;
+      inClassCounts[l.masterId] = (inClassCounts[l.masterId] || 0) + 1;
+    });
     state.lines.forEach(function (line) {
       if (!line.masterId) return;
       const entry = rel[line.masterId];
-      if (!entry || !entry.badge) return;  // singleton — no badge
       // Visibility gate: when labels are off, only render for the
       // currently selected lines so the canvas stays clean.
       if (!state.showLabels && !selectedSet[line.id]) return;
       const hasGeo = (Array.isArray(line.points) && line.points.length) ||
                      (PRIMITIVES[line.kind] && line.params);
       if (!hasGeo) return;
+      const inClassCount = inClassCounts[line.masterId] || 0;
+      const linked = entry && entry.badge && inClassCount >= 2;
       const pos = labelPositionFor(line);
-      // Place the badge ABOVE-LEFT of the label anchor with enough
-      // clearance that it doesn't overlay the vertex/bbox handles
-      // sitting near the same point. Sized larger than the sidebar
-      // pill because there's no space pressure on canvas and the
-      // letter must be readable at typical zoom levels.
       const cx = pos.x - (14 / z);
       const cy = pos.y - (24 / z);
       const r  = 14 / z;
@@ -7389,27 +7421,35 @@
       circ.setAttribute('cx', cx);
       circ.setAttribute('cy', cy);
       circ.setAttribute('r',  r);
-      circ.setAttribute('fill',   'hsl(' + entry.hue + ', 70%, 32%)');
-      circ.setAttribute('stroke', '#fff');
-      circ.setAttribute('stroke-width', (1.4 / z));
+      if (linked) {
+        circ.setAttribute('fill',   'hsl(' + entry.hue + ', 70%, 32%)');
+        circ.setAttribute('stroke', '#fff');
+        circ.setAttribute('stroke-width', (1.4 / z));
+      } else {
+        // Hollow neutral ring — transparent fill, mid-gray stroke.
+        circ.setAttribute('fill',   'none');
+        circ.setAttribute('stroke', '#7a7a7a');
+        circ.setAttribute('stroke-width', (1.4 / z));
+      }
       g.appendChild(circ);
-      const letter = document.createElementNS(SVG_NS, 'text');
-      letter.setAttribute('x', cx);
-      letter.setAttribute('y', cy);
-      letter.setAttribute('text-anchor', 'middle');
-      letter.setAttribute('dominant-baseline', 'central');
-      letter.setAttribute('fill', '#fff');
-      letter.setAttribute('font-weight', '700');
-      letter.setAttribute('font-size', (17 / z));
-      letter.setAttribute('font-family', 'system-ui, sans-serif');
-      letter.textContent = entry.badge;
-      g.appendChild(letter);
-      // v0.8.103: master ID moved into the label block (see
-      // renderLabels) for legibility. Canvas keeps only the color
-      // circle + letter — the ID itself is read from the label.
+      if (linked) {
+        const letter = document.createElementNS(SVG_NS, 'text');
+        letter.setAttribute('x', cx);
+        letter.setAttribute('y', cy);
+        letter.setAttribute('text-anchor', 'middle');
+        letter.setAttribute('dominant-baseline', 'central');
+        letter.setAttribute('fill', '#fff');
+        letter.setAttribute('font-weight', '700');
+        letter.setAttribute('font-size', (17 / z));
+        letter.setAttribute('font-family', 'system-ui, sans-serif');
+        letter.textContent = entry.badge;
+        g.appendChild(letter);
+      }
       const ttl = document.createElementNS(SVG_NS, 'title');
-      ttl.textContent = (master && master.name ? master.name : line.masterId) +
-                        ' · ' + entry.count + ' linked';
+      ttl.textContent = linked
+        ? ((master && master.name ? master.name : line.masterId) +
+           ' · ' + inClassCount + ' linked')
+        : 'No linked siblings in this class';
       g.appendChild(ttl);
       labelsG.appendChild(g);
     });
