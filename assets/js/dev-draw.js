@@ -2989,6 +2989,117 @@
     return { minX: minX, minY: minY };
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // v0.8.101: Instance ↔ master relationships — visual identity for
+  // the "two objects share a master" case so the user can spot
+  // linked instances at a glance in the sidebar AND on the canvas.
+  //
+  // Vocabulary recap:
+  //   - "linked" = master is shared by ≥2 instances (counting across
+  //     every useClass — same masterId in any bucket counts).
+  //   - badge = short alphabetic identifier per linked master, A→Z,
+  //     AA→AZ, BA→… (Excel-column scheme), assigned by master order
+  //     in state.masters so it stays stable across renders/sessions.
+  //   - color = hue hashed from masterId — same master always paints
+  //     the same color regardless of which class you're viewing.
+  // ────────────────────────────────────────────────────────────────
+
+  function letterBadge(idx) {
+    if (idx < 0) return '';
+    let s = '';
+    let n = idx;
+    do {
+      s = String.fromCharCode(65 + (n % 26)) + s;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return s;
+  }
+
+  function masterHashHue(masterId) {
+    if (!masterId) return 0;
+    let h = 0;
+    for (let i = 0; i < masterId.length; i++) {
+      h = ((h * 31) + masterId.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h) % 360;
+  }
+
+  // Walks every useClass, counts instances per masterId, then assigns
+  // a badge letter only to masters with ≥2 instances. Returns
+  // { masterId: { badge, count, hue } } for every master (count
+  // included even for singletons so callers can check linkage).
+  // Cheap enough to call per render — total work is O(sum of all
+  // lines across classes).
+  function computeMasterRelationships() {
+    const counts = {};
+    (state.pageConfig.useClasses || []).forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      bucket.lines.forEach(function (l) {
+        if (!l.masterId) return;
+        counts[l.masterId] = (counts[l.masterId] || 0) + 1;
+      });
+    });
+    const map = {};
+    let badgeIdx = 0;
+    (state.masters || []).forEach(function (m) {
+      const c = counts[m.id] || 0;
+      const entry = { badge: null, count: c, hue: masterHashHue(m.id) };
+      if (c >= 2) {
+        entry.badge = letterBadge(badgeIdx);
+        badgeIdx += 1;
+      }
+      map[m.id] = entry;
+    });
+    return map;
+  }
+
+  // Short, readable master ID for canvas labels. Full IDs look like
+  // "m-abc12345" — the "m-" prefix is noise, last 5 chars are enough
+  // to disambiguate visually.
+  function shortMasterId(masterId) {
+    if (!masterId) return '';
+    return masterId.replace(/^m-/, '').slice(-5);
+  }
+
+  /**
+   * Build an HTML link badge for sidebar / panel use. Returns null
+   * for non-linked instances (no badge needed). The badge is a span
+   * with a hsl background, white letter inside, and a tooltip
+   * showing "<master.name> · N linked".
+   */
+  function buildLinkBadgeHTML(masterId, rel) {
+    if (!masterId || !rel) return null;
+    const entry = rel[masterId];
+    if (!entry || !entry.badge) return null;
+    const master = state.masters.find(function (m) { return m.id === masterId; });
+    const span = document.createElement('span');
+    span.className = 'ed-link-badge';
+    span.textContent = entry.badge;
+    span.style.background = 'hsl(' + entry.hue + ', 65%, 45%)';
+    span.title = (master && master.name ? master.name : masterId) +
+                 ' · ' + entry.count + ' linked';
+    return span;
+  }
+
+  /**
+   * Select every instance of `masterId` in the current class.
+   * Powers the "click chip → highlight siblings" action in the line
+   * panel header.
+   */
+  function selectSiblingsOfMaster(masterId) {
+    if (!masterId) return;
+    const ids = state.lines
+      .filter(function (l) { return l.masterId === masterId; })
+      .map(function (l) { return l.id; });
+    if (!ids.length) return;
+    state.selectedIds = ids;
+    updateSelectAllButton();
+    renderGroupsList();
+    renderLines();
+    renderSelectionPanel();
+  }
+
   /**
    * Apply a translation (dx, dy) to a line's authored form.
    *
@@ -7063,6 +7174,10 @@
    */
   function renderLabels() {
     labelsG.innerHTML = '';
+    // v0.8.101: link badges run independently of showLabels — they
+    // need to appear next to selected objects even when labels are
+    // off. Hoisted past the early return below.
+    renderLinkBadges();
     if (!state.showLabels) return;
 
     state.lines.forEach(function (line) {
@@ -7123,6 +7238,85 @@
       outer.style.fill   = 'white';
       outer.style.stroke = fill;
       g.insertBefore(outer, text);
+    });
+  }
+
+  /**
+   * v0.8.101: On-canvas link badge — a small colored circle with the
+   * master's letter, paired with a short master-ID label. Drawn for
+   * every linked instance (master shared by ≥2 instances) when
+   * showLabels is on, OR for any selected linked instance even when
+   * labels are off. Singletons get nothing — keeps the canvas
+   * uncluttered in the common case.
+   *
+   * Position: just above the label-anchor point, offset up-left so
+   * it sits next to (not on top of) the named label when both are
+   * visible. Sized in viewBox units / zoom so the visual size stays
+   * constant across zoom levels.
+   */
+  function renderLinkBadges() {
+    const rel = computeMasterRelationships();
+    const z = state.zoom || 1;
+    const selectedSet = {};
+    state.selectedIds.forEach(function (id) { selectedSet[id] = true; });
+    state.lines.forEach(function (line) {
+      if (!line.masterId) return;
+      const entry = rel[line.masterId];
+      if (!entry || !entry.badge) return;  // singleton — no badge
+      // Visibility gate: when labels are off, only render for the
+      // currently selected lines so the canvas stays clean.
+      if (!state.showLabels && !selectedSet[line.id]) return;
+      const hasGeo = (Array.isArray(line.points) && line.points.length) ||
+                     (PRIMITIVES[line.kind] && line.params);
+      if (!hasGeo) return;
+      const pos = labelPositionFor(line);
+      // Place the badge ABOVE the label anchor so the named label
+      // (when present) doesn't collide. Magic numbers tuned by eye.
+      const cx = pos.x;
+      const cy = pos.y - (16 / z);
+      const r  = 8 / z;
+      const master = state.masters.find(function (m) { return m.id === line.masterId; });
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'ed-link-canvas-badge');
+      g.style.pointerEvents = 'none';
+      const circ = document.createElementNS(SVG_NS, 'circle');
+      circ.setAttribute('cx', cx);
+      circ.setAttribute('cy', cy);
+      circ.setAttribute('r',  r);
+      circ.setAttribute('fill',   'hsl(' + entry.hue + ', 65%, 45%)');
+      circ.setAttribute('stroke', '#000');
+      circ.setAttribute('stroke-width', (0.6 / z));
+      g.appendChild(circ);
+      const letter = document.createElementNS(SVG_NS, 'text');
+      letter.setAttribute('x', cx);
+      letter.setAttribute('y', cy);
+      letter.setAttribute('text-anchor', 'middle');
+      letter.setAttribute('dominant-baseline', 'central');
+      letter.setAttribute('fill', '#fff');
+      letter.setAttribute('font-weight', '700');
+      letter.setAttribute('font-size', (10 / z));
+      letter.setAttribute('font-family', 'system-ui, sans-serif');
+      letter.textContent = entry.badge;
+      g.appendChild(letter);
+      // Master ID label — placed to the LEFT of the badge so the
+      // sequence reads naturally as "[masterId] [badge]" (matches
+      // the spec: "always add the master ID before the badge").
+      const mid = document.createElementNS(SVG_NS, 'text');
+      mid.setAttribute('x', cx - r - (4 / z));
+      mid.setAttribute('y', cy);
+      mid.setAttribute('text-anchor', 'end');
+      mid.setAttribute('dominant-baseline', 'central');
+      mid.setAttribute('fill', 'hsl(' + entry.hue + ', 65%, 35%)');
+      mid.setAttribute('font-size', (9 / z));
+      mid.setAttribute('font-family', 'ui-monospace, monospace');
+      mid.textContent = shortMasterId(line.masterId);
+      // Tooltip via <title> so hovering shows the full name + count.
+      const ttl = document.createElementNS(SVG_NS, 'title');
+      ttl.textContent = (master && master.name ? master.name : line.masterId) +
+                        ' · ' + entry.count + ' linked';
+      g.appendChild(ttl);
+      g.appendChild(mid);
+      labelsG.appendChild(g);
     });
   }
 
@@ -7766,6 +7960,10 @@
 
   function renderGroupsList() {
     groupsListEl.innerHTML = '';
+    // v0.8.101: compute once per render so every line row in this
+    // pass gets the same badge map (cheap, but pointless to redo
+    // per line).
+    const rel = computeMasterRelationships();
     state.groups.forEach(function (g, gIdx) {
       const isOpen = !!state.openGroupIds[g.id];
       const li = document.createElement('li');
@@ -8018,6 +8216,13 @@
           const bCount = Array.isArray(line.behaviors) ? line.behaviors.length : 0;
           const rightWrap = document.createElement('span');
           rightWrap.className = 'ed-line-row-right';
+          // v0.8.101: link badge — colored circle with a per-master
+          // letter. Only present when this line's master has ≥2
+          // instances (linked); single-instance objects stay
+          // uncluttered. Lives in the right column alongside the
+          // override marker and behavior count.
+          const linkBadge = buildLinkBadgeHTML(line.masterId, rel);
+          if (linkBadge) rightWrap.appendChild(linkBadge);
           rightWrap.appendChild(overrideTag);
           // v0.8.52: always render the behavior badge — "-" for zero
           // counts, the number otherwise. Consistent column position
@@ -8641,6 +8846,45 @@
     meta.appendChild(grpStrong);
     meta.appendChild(document.createTextNode(' · ' + line.kind));
     selectionPanel.appendChild(meta);
+
+    // v0.8.101: master chip — visible whenever the line has a master.
+    // Shows the master's badge letter (color-coded), master name, and
+    // the linked count. Clicking selects every sibling instance in
+    // the current class so the user can edit or move the linked
+    // family together. Singleton masters get a faded chip with no
+    // letter and no "linked" suffix, so the user still sees which
+    // master owns this instance.
+    if (line.masterId) {
+      const rel = computeMasterRelationships();
+      const entry = rel[line.masterId];
+      const master = state.masters.find(function (m) { return m.id === line.masterId; });
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'ed-master-chip' + (entry && entry.badge ? '' : ' is-singleton');
+      const dot = document.createElement('span');
+      dot.className = 'ed-link-badge';
+      dot.style.background = 'hsl(' + (entry ? entry.hue : 0) + ', 65%, 45%)';
+      dot.textContent = entry && entry.badge ? entry.badge : '·';
+      chip.appendChild(dot);
+      const nm = document.createElement('span');
+      nm.className = 'ed-master-chip-name';
+      nm.textContent = (master && master.name) ? master.name : shortMasterId(line.masterId);
+      chip.appendChild(nm);
+      if (entry && entry.count >= 2) {
+        const cnt = document.createElement('span');
+        cnt.className = 'ed-master-chip-count';
+        cnt.textContent = entry.count + ' linked';
+        chip.appendChild(cnt);
+        chip.title = 'Click to select all ' + entry.count + ' linked instances in this class';
+        chip.addEventListener('click', function () {
+          selectSiblingsOfMaster(line.masterId);
+        });
+      } else {
+        chip.title = 'Singleton — no other linked instances';
+        chip.disabled = true;
+      }
+      selectionPanel.appendChild(chip);
+    }
 
     const wrap = document.createElement('div');
     wrap.className = 'ed-settings';
