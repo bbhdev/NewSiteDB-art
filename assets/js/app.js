@@ -1131,53 +1131,97 @@
           });
           return;
         }
-        // v0.8.84: 'click' and 'hover' — pointer-driven one-shot
-        // triggers on the path itself.
+        // v0.8.85: 'click' and 'hover' — pointer-driven one-shot
+        // triggers using document-level listeners + SVG geometry
+        // hit-testing.
         //
-        // Hit-testing: the lines layer has pointer-events:none
-        // globally so animated paths never intercept page scrolls
-        // or button clicks. We override per-path here so the
-        // arming path receives events at all.
+        // Why not just pointer-events on the path? The lines layer
+        // is z-index:0; .layout is z-index:1 ABOVE it. Even with
+        // pointer-events:none on the layer and pointer-events:all
+        // on a path, clicks at the layer's pixels first hit .layout
+        // (which doesn't opt out of pointer-events) and never reach
+        // the path. Tried in v0.8.84 — confirmed dead in testing.
         //
-        //   - default: pointer-events='auto'  — SVG-native hit
-        //     test (filled body of closed shapes; stroke only on
-        //     unfilled outlines). An outline drawn at 1px stroke
-        //     has a 1px hit zone, which is intentional: the
-        //     author chose a thin stroke.
-        //   - opt-in (trig.treatAsFilled === true):
-        //     pointer-events='all' — hit-test as if the shape
-        //     were filled, regardless of paint. Useful when the
-        //     author wants click-anywhere-inside-the-outline
-        //     UX without thickening the stroke.
+        // The document-level approach: install a `click` (and for
+        // hover, also `mousemove`) listener on `document`, and on
+        // each event ask the path itself via SVGGeometryElement's
+        // isPointInFill / isPointInStroke whether the cursor is
+        // inside its geometry. This is independent of z-order /
+        // overlap / pointer-events anywhere in the tree.
         //
-        // Reverted on teardown so the layer returns to its
-        // transparent-to-pointer state.
+        // Coordinate transform: getScreenCTM() returns the matrix
+        // mapping the path's local "d" coordinates to screen px,
+        // INCLUDING the path's own transform attribute (the
+        // positionOffset translate + any animation rotate). Its
+        // inverse converts clientX/clientY into d-space, where
+        // isPointInFill/Stroke operate. So a path scrolled or
+        // translated mid-animation is hit-tested where it
+        // currently APPEARS, not where it was authored.
+        //
+        // Hit modes:
+        //   - default: stroke-only via isPointInStroke. In this
+        //     app every path has fill:none (set by the layer's
+        //     `#lines-layer path { fill: none }` rule), so the
+        //     SVG-native equivalent is stroke-only — narrow but
+        //     honest. The author chose the stroke width.
+        //   - opt-in (b.trigger.treatAsFilled === true): hit if
+        //     isPointInFill OR isPointInStroke — treats unfilled
+        //     outlines as if they were filled.
         //
         // Mobile fallback for hover: touch devices don't fire
-        // mouseenter on hover (no hover affordance), so we bind
-        // BOTH mouseenter and click. Whichever fires first wins,
-        // teardown removes both. No (hover: none) detection
-        // needed — works uniformly across desktop and touch.
+        // mousemove until a tap occurs, so 'hover' also installs
+        // the click listener. Whichever event arrives first fires;
+        // the activationState guard makes the loser a no-op.
         if (when === 'click' || when === 'hover') {
-          const prevPE = pathEl.getAttribute('pointer-events');
           const easyHit = !!(b.trigger && b.trigger.treatAsFilled);
-          pathEl.setAttribute('pointer-events', easyHit ? 'all' : 'auto');
+          const pointHits = function (clientX, clientY) {
+            try {
+              const svg = pathEl.ownerSVGElement;
+              if (!svg) return false;
+              const ctm = pathEl.getScreenCTM();
+              if (!ctm) return false;
+              const pt = svg.createSVGPoint();
+              pt.x = clientX;
+              pt.y = clientY;
+              const local = pt.matrixTransform(ctm.inverse());
+              if (easyHit) {
+                return pathEl.isPointInFill(local) || pathEl.isPointInStroke(local);
+              }
+              return pathEl.isPointInStroke(local);
+            } catch (e) {
+              return false;
+            }
+          };
           const fire = function () {
             if (activationState[i] != null) return;
             activationState[i] = performance.now() / 1000;
             applyObjectEffects(b.trigger);
           };
-          pathEl.addEventListener('click', fire);
+          const onClick = function (e) {
+            if (pointHits(e.clientX, e.clientY)) fire();
+          };
+          document.addEventListener('click', onClick);
+          let onMove = null;
           if (when === 'hover') {
-            pathEl.addEventListener('mouseenter', fire);
+            // Edge-triggered: fire only on the transition from
+            // outside → inside. Without this, every pixel of
+            // movement inside the path would re-fire (well, the
+            // activationState guard would no-op them, but the
+            // hit-test still runs per move). Rising-edge keeps
+            // the per-move work to a single isPointInStroke call.
+            let wasInside = false;
+            onMove = function (e) {
+              const inside = pointHits(e.clientX, e.clientY);
+              if (inside && !wasInside) fire();
+              wasInside = inside;
+            };
+            document.addEventListener('mousemove', onMove);
           }
           blockTriggerTeardown[i].push(function () {
-            try { pathEl.removeEventListener('click', fire); } catch (e) {}
-            try { pathEl.removeEventListener('mouseenter', fire); } catch (e) {}
-            // Restore prior pointer-events so the path goes back
-            // to inheriting the layer's `none`.
-            if (prevPE == null) pathEl.removeAttribute('pointer-events');
-            else                pathEl.setAttribute('pointer-events', prevPE);
+            try { document.removeEventListener('click', onClick); } catch (e) {}
+            if (onMove) {
+              try { document.removeEventListener('mousemove', onMove); } catch (e) {}
+            }
           });
           return;
         }
