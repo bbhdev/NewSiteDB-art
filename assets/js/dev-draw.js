@@ -4643,13 +4643,24 @@
         groupId = peerGroup ? peerGroup.id
                             : ((bucket.groups[0] && bucket.groups[0].id) || null);
       }
+      // v0.8.100: linked-duplicate line.name suffix. The master is
+      // shared, so master.name can't distinguish the new instance
+      // from the source. Append " linked" to line.name on each new
+      // instance — the sidebar prefers line.name over master.name
+      // when set, so the duplicate is recognisable at a glance.
+      // Guard against stacking ("foo linked linked") if the source's
+      // own name already ends with " linked".
+      let linkedName = sourceInstance.name || srcMaster.name || 'object';
+      if (linked && !/ linked(?: \d+)?$/.test(linkedName)) {
+        linkedName = linkedName + ' linked';
+      }
       const newLine = cloneLineRecord(sourceInstance, {
         masterId: newMasterId,
         groupId:  groupId,
         // 'name' on a line is mostly vestigial (name is canonical on
         // the master), but copy it through so older code paths that
         // read line.name display the new name.
-        name: linked ? sourceInstance.name : newName,
+        name: linked ? linkedName : newName,
         offsetDx: offsetMM, offsetDy: offsetMM
       });
       bucket.lines.push(newLine);
@@ -7235,6 +7246,11 @@
 
       let dragging = false;
       c.addEventListener('pointerdown', function (e) {
+        // v0.8.100: Alt-bypass — Alt+drag-anywhere should translate
+        // the whole object even when the click lands on a vertex
+        // handle. Returning without stopPropagation lets the event
+        // bubble to svg.pointerdown, which then arms a move.
+        if (e.altKey) return;
         e.stopPropagation();
         e.preventDefault();
         dragging = true;
@@ -7358,6 +7374,8 @@
 
     let dragging = false;
     c.addEventListener('pointerdown', function (e) {
+      // v0.8.100: Alt-bypass (see vertex-handle pointerdown above).
+      if (e.altKey) return;
       e.stopPropagation();
       e.preventDefault();
       // For bezier-kind lines the segments aren't stored — they're
@@ -7447,6 +7465,11 @@
 
       let dragging = false;
       c.addEventListener('pointerdown', function (e) {
+        // v0.8.100: Alt-bypass — Alt+drag-anywhere should translate
+        // the whole object even when the click lands on a vertex
+        // handle. Returning without stopPropagation lets the event
+        // bubble to svg.pointerdown, which then arms a move.
+        if (e.altKey) return;
         e.stopPropagation();
         e.preventDefault();
         dragging = true;
