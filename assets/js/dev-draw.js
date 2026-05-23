@@ -2918,6 +2918,35 @@
   }
 
   /**
+   * v0.8.96: Read the current bbox top-left of a line's authored
+   * geometry. Used by the non-primitive Position X/Y edit handlers to
+   * recompute the delta against the live shape — the panel-build-time
+   * minX/minY captured in the closure becomes stale on each keystroke
+   * once shiftLineBy has moved the geometry. Returns null if the line
+   * has no finite-coord points or segments.
+   */
+  function currentBboxTopLeft(line) {
+    let minX = Infinity, minY = Infinity;
+    if (Array.isArray(line.points) && line.points.length) {
+      line.points.forEach(function (p) {
+        const x = +p.x, y = +p.y;
+        if (Number.isFinite(x) && x < minX) minX = x;
+        if (Number.isFinite(y) && y < minY) minY = y;
+      });
+    } else if (Array.isArray(line.segments) && line.segments.length) {
+      line.segments.forEach(function (s) {
+        if (s.endpoint) {
+          const x = +s.endpoint.x, y = +s.endpoint.y;
+          if (Number.isFinite(x) && x < minX) minX = x;
+          if (Number.isFinite(y) && y < minY) minY = y;
+        }
+      });
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+    return { minX: minX, minY: minY };
+  }
+
+  /**
    * Apply a translation (dx, dy) to a line's authored form.
    *
    * Drag-translate is structurally per-class — the user is placing
@@ -8424,8 +8453,17 @@
       if (hasGeo) {
         // Editing X/Y translates the whole shape (geometry + offset).
         // shiftLineBy keeps stored points + positionOffset in lock-step.
+        //
+        // v0.8.96: numberField fires onChange on every keystroke, and
+        // each call must compute delta against the CURRENT minX, not
+        // the panel-build-time value. Capturing minX in the closure
+        // and reusing it for successive keystrokes compounded shifts
+        // off a moving target (typing "220" landed at −175 instead of
+        // 220). currentBboxTopLeft(line) re-walks the shape each call.
         wrap.appendChild(numberField('Position X (mm)', minX, function (v) {
-          const delta = (Number.isFinite(v) ? v : minX) - minX;
+          const cur = currentBboxTopLeft(line);
+          if (!cur) { scheduleSnapshot(); return; }
+          const delta = (Number.isFinite(v) ? v : cur.minX) - cur.minX;
           if (delta !== 0) {
             shiftLineBy(line, delta, 0);
             state.dirty = true;
@@ -8434,7 +8472,9 @@
           scheduleSnapshot();
         }));
         wrap.appendChild(numberField('Position Y (mm)', minY, function (v) {
-          const delta = (Number.isFinite(v) ? v : minY) - minY;
+          const cur = currentBboxTopLeft(line);
+          if (!cur) { scheduleSnapshot(); return; }
+          const delta = (Number.isFinite(v) ? v : cur.minY) - cur.minY;
           if (delta !== 0) {
             shiftLineBy(line, 0, delta);
             state.dirty = true;
