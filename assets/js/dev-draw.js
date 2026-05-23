@@ -1434,6 +1434,22 @@
   }
 
   /**
+   * Set one axis of an instance's positionOffset directly. Used by the
+   * Parameters panel for non-primitive kinds (freehand, bezier, manual,
+   * svgImport, ...) — they have no authored params.cx/x to drive
+   * setPositionFromPanel, so we edit the offset itself. Per-class by
+   * definition; siblings in other classes don't follow.
+   */
+  function setLinePositionOffset(lineId, axis, value) {
+    const line = state.lines.find(function (l) { return l.id === lineId; });
+    if (!line) return;
+    if (!line.positionOffset) line.positionOffset = { dx: 0, dy: 0 };
+    line.positionOffset[axis] = Number.isFinite(value) ? value : 0;
+    state.dirty = true;
+    renderLines();
+  }
+
+  /**
    * Zero a line's positionOffset, snapping it back to the master's
    * canonical placement. Only the current class is affected.
    */
@@ -8190,6 +8206,60 @@
           renderLines();
         }), line.masterId, 'filled'));
       }
+    } else {
+      // v0.8.93: Parameters fallback for non-primitive kinds (freehand,
+      // freehandClosed, manual, bezier, svgImport, line, lineChain, …).
+      // These don't have authored params.cx/x — geometry is points or
+      // segments — so the closest equivalent of "position params" is the
+      // per-class positionOffset. Read-only bbox + point count give a
+      // quick health check (handy for verifying duplicate displacement).
+      wrap.appendChild(divider('Parameters'));
+      const off = line.positionOffset || { dx: 0, dy: 0 };
+      wrap.appendChild(numberField('Position offset X (mm)', off.dx || 0, function (v) {
+        setLinePositionOffset(line.id, 'dx', v);
+        scheduleSnapshot();
+      }));
+      wrap.appendChild(numberField('Position offset Y (mm)', off.dy || 0, function (v) {
+        setLinePositionOffset(line.id, 'dy', v);
+        scheduleSnapshot();
+      }));
+      // Cheap bbox: walk whichever shape representation is present.
+      // line is the raw stored instance here (state.lines), so points/
+      // segments are in canonical-master space — bbox values are
+      // intrinsic-geometry, not resolved-on-class. positionOffset is
+      // shown separately above, so the user can sum the two if needed.
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let ptCount = 0;
+      if (Array.isArray(line.points) && line.points.length) {
+        line.points.forEach(function (p) {
+          const x = +p.x, y = +p.y;
+          if (Number.isFinite(x)) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+          if (Number.isFinite(y)) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+        });
+        ptCount = line.points.length;
+      } else if (Array.isArray(line.segments) && line.segments.length) {
+        line.segments.forEach(function (s) {
+          if (s.endpoint) {
+            const x = +s.endpoint.x, y = +s.endpoint.y;
+            if (Number.isFinite(x)) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+            if (Number.isFinite(y)) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+          }
+        });
+        ptCount = line.segments.length;
+      }
+      const info = document.createElement('div');
+      info.className = 'ed-field';
+      info.style.color = '#888';
+      info.style.fontSize = '0.85em';
+      info.style.padding = '0.25rem 0';
+      const parts = [];
+      if (Number.isFinite(minX) && Number.isFinite(minY)) {
+        parts.push('Bounding box ' + (maxX - minX).toFixed(1) + ' × ' + (maxY - minY).toFixed(1) + ' mm');
+        parts.push('origin (' + minX.toFixed(1) + ', ' + minY.toFixed(1) + ')');
+      }
+      parts.push(ptCount + (Array.isArray(line.segments) && !Array.isArray(line.points) ? ' segments' : ' points'));
+      info.textContent = parts.join(' · ');
+      wrap.appendChild(info);
     }
 
     wrap.appendChild(divider('Appearance'));
