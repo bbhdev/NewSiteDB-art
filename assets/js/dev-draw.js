@@ -8286,8 +8286,92 @@
         { label: 'Group and lines', value: 'both', className: 'ed-danger' }
       ]
     });
-    if (choice === 'group') deleteGroup(g.id, false);
-    else if (choice === 'both')  deleteGroup(g.id, true);
+    if (choice === 'group') { deleteGroup(g.id, false); return; }
+    if (choice !== 'both') return;
+
+    // v0.8.97: "Group and lines" cascade can reach instances that
+    // live OUTSIDE the group being deleted, because the cascade
+    // works by masterId (in ALL mode, site-wide; in ONE mode,
+    // across the current class). Warn the user before that
+    // collateral damage happens, listing the affected instances
+    // so they know exactly what will disappear.
+    //
+    // Detection scope mirrors deleteGroup():
+    //   ALL: every useClass; the user's "this group" intent
+    //        includes same-name peer groups in sibling classes,
+    //        so instances there are NOT considered collateral.
+    //   ONE: current class only; the deleted group is the sole
+    //        in-scope group, so any other group in this class
+    //        holding the same master counts as collateral.
+    const groupMasterIds = new Set();
+    state.lines.forEach(function (l) {
+      if (l.groupId === g.id && l.masterId) groupMasterIds.add(l.masterId);
+    });
+    const extras = [];
+    if (groupMasterIds.size > 0) {
+      const isAll = modeIsAll();
+      const cidsToScan = isAll ? state.pageConfig.useClasses : [state.classId];
+      cidsToScan.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        if (!bucket || !Array.isArray(bucket.lines)) return;
+        // In ALL mode, find the same-name peer group in this class;
+        // its members share the user's "delete this group" intent
+        // and are excluded from collateral. In ONE mode, only the
+        // current class is touched and only g.id is in-scope.
+        let inScopeGroupId = null;
+        if (isAll) {
+          const peer = (bucket.groups || []).find(function (gr) { return gr.name === g.name; });
+          if (peer) inScopeGroupId = peer.id;
+        } else {
+          inScopeGroupId = g.id;
+        }
+        bucket.lines.forEach(function (l) {
+          if (!l.masterId || !groupMasterIds.has(l.masterId)) return;
+          if (l.groupId === inScopeGroupId) return;
+          const peerGroup = (bucket.groups || []).find(function (gr) { return gr.id === l.groupId; });
+          extras.push({ classId: cid, line: l, group: peerGroup });
+        });
+      });
+    }
+
+    if (extras.length > 0) {
+      const escHtml = function (s) {
+        const d = document.createElement('div');
+        d.textContent = String(s == null ? '' : s);
+        return d.innerHTML;
+      };
+      const classLabel = function (cid) {
+        const c = state.classes.find(function (x) { return x.id === cid; });
+        return c ? c.name : cid;
+      };
+      const rows = extras.map(function (e) {
+        const master = state.masters.find(function (m) { return m.id === e.line.masterId; });
+        const objName = (e.line.name && e.line.name.trim()) || (master && master.name) || e.line.id;
+        const grpName = e.group ? e.group.name : '?';
+        return '<li><strong>' + escHtml(classLabel(e.classId)) + '</strong>' +
+               ' · ' + escHtml(grpName) +
+               ' · ' + escHtml(objName) + '</li>';
+      }).join('');
+      const msg =
+        '<p>Deleting <strong>' + escHtml(g.name) + '</strong> with its lines will also remove ' +
+        extras.length + ' linked instance' + (extras.length === 1 ? '' : 's') +
+        ' that live in other groups' +
+        (modeIsAll() ? ' across the site' : ' in this class') + ':</p>' +
+        '<ul style="max-height:200px;overflow:auto;margin:0.5em 0;padding-left:1.25em;">' +
+        rows + '</ul>' +
+        '<p>They share a master with this group and will disappear from all locations.</p>';
+      const confirm = await showChoiceDialog({
+        title: 'Linked instances will be removed',
+        message: msg,
+        html: true,
+        buttons: [
+          { label: 'Cancel', value: null },
+          { label: 'Delete anyway', value: 'ok', className: 'ed-danger' }
+        ]
+      });
+      if (confirm !== 'ok') return;
+    }
+    deleteGroup(g.id, true);
   }
 
   function renderLinePanel(line) {
