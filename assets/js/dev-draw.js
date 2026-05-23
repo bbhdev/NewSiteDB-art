@@ -1434,20 +1434,13 @@
   }
 
   /**
-   * Set one axis of an instance's positionOffset directly. Used by the
-   * Parameters panel for non-primitive kinds (freehand, bezier, manual,
-   * svgImport, ...) — they have no authored params.cx/x to drive
-   * setPositionFromPanel, so we edit the offset itself. Per-class by
-   * definition; siblings in other classes don't follow.
+   * v0.8.95 SUPERSEDED: setLinePositionOffset was a wrong-headed
+   * helper that bumped positionOffset without translating the stored
+   * geometry — leaving the object visually un-moved because the
+   * renderer draws from line.d. Use shiftLineBy(line, dx, dy) for
+   * any direct position move. The panel non-primitive Parameters
+   * block now does its edits via that helper.
    */
-  function setLinePositionOffset(lineId, axis, value) {
-    const line = state.lines.find(function (l) { return l.id === lineId; });
-    if (!line) return;
-    if (!line.positionOffset) line.positionOffset = { dx: 0, dy: 0 };
-    line.positionOffset[axis] = Number.isFinite(value) ? value : 0;
-    state.dirty = true;
-    renderLines();
-  }
 
   /**
    * Zero a line's positionOffset, snapping it back to the master's
@@ -1845,8 +1838,10 @@
 
     zoomLevelEl.textContent = Math.round(newZoom * 100) + '%';
     // Handles need to re-render at the new inverse scale so they stay
-    // a constant visual size regardless of zoom level.
+    // a constant visual size regardless of zoom level. Same for the
+    // origin indicator (lives in the grid layer; v0.8.95).
     renderHandles();
+    renderGrid();
   }
   function zoomIn(anchorX, anchorY)  { setZoom(state.zoom * ZOOM_STEP, anchorX, anchorY); }
   function zoomOut(anchorX, anchorY) { setZoom(state.zoom / ZOOM_STEP, anchorX, anchorY); }
@@ -2870,6 +2865,57 @@
   // happens at the call site via setVisualProp / setMasterScope.
   // regenerateLineD's sync hook is gone too; it just calls
   // computeLineD.)
+
+  /**
+   * v0.8.95: Translate an instance's visual geometry by (dx, dy) AND
+   * bump its positionOffset by the same delta. The two stay in lock-
+   * step: stored points/segments/params carry on-canvas coords (so
+   * renderLines/handle picking/panel display are accurate), and
+   * positionOffset is the per-class delta used by master-propagation
+   * accounting (master_points = instance_points − positionOffset).
+   *
+   * This is the same logic as translateLine() but without the drag-
+   * snapshot ceremony — useful for direct API moves: panel position
+   * edits and duplicate displacement. Both previously bumped only
+   * positionOffset without translating the geometry, which left the
+   * object visually un-moved because the renderer draws from line.d
+   * (built from the un-shifted points), not from positionOffset.
+   */
+  function shiftLineBy(line, dx, dy) {
+    if (!Number.isFinite(dx)) dx = 0;
+    if (!Number.isFinite(dy)) dy = 0;
+    if (dx === 0 && dy === 0) return;
+    if (!line.positionOffset) line.positionOffset = { dx: 0, dy: 0 };
+    line.positionOffset.dx = (line.positionOffset.dx || 0) + dx;
+    line.positionOffset.dy = (line.positionOffset.dy || 0) + dy;
+    if (Array.isArray(line.points)) {
+      line.points = line.points.map(function (p) {
+        return { x: (p.x || 0) + dx, y: (p.y || 0) + dy };
+      });
+    }
+    if (Array.isArray(line.segments)) {
+      line.segments = line.segments.map(function (s) {
+        return {
+          cmd: s.cmd,
+          controlPoints: (s.controlPoints || []).map(function (cp) {
+            return { x: (cp.x || 0) + dx, y: (cp.y || 0) + dy };
+          }),
+          endpoint: s.endpoint
+            ? { x: (s.endpoint.x || 0) + dx, y: (s.endpoint.y || 0) + dy }
+            : null
+        };
+      });
+    }
+    if (line.params && typeof line.params === 'object') {
+      ['cx', 'x'].forEach(function (k) {
+        if (Number.isFinite(line.params[k])) line.params[k] += dx;
+      });
+      ['cy', 'y'].forEach(function (k) {
+        if (Number.isFinite(line.params[k])) line.params[k] += dy;
+      });
+    }
+    computeLineD(line);
+  }
 
   /**
    * Apply a translation (dx, dy) to a line's authored form.
@@ -4374,10 +4420,13 @@
     if (opts.masterId) c.masterId = opts.masterId;
     if (opts.groupId)  c.groupId  = opts.groupId;
     if (opts.name)     c.name     = opts.name;
+    // v0.8.95: must translate the geometry too — not just bump
+    // positionOffset. The renderer draws from line.d (regenerated from
+    // line.points/segments/params), so without translating those the
+    // duplicate would render at the source's exact spot. shiftLineBy
+    // handles offset + geometry atomically.
     if (opts.offsetDx || opts.offsetDy) {
-      if (!c.positionOffset) c.positionOffset = { dx: 0, dy: 0 };
-      c.positionOffset.dx = (c.positionOffset.dx || 0) + (opts.offsetDx || 0);
-      c.positionOffset.dy = (c.positionOffset.dy || 0) + (opts.offsetDy || 0);
+      shiftLineBy(c, opts.offsetDx || 0, opts.offsetDy || 0);
     }
     // Fresh ids on behaviors so the duplicate's blocks don't collide
     // with the source's in any future block-id-keyed lookup.
@@ -6552,6 +6601,78 @@
       l.setAttribute('y1', y); l.setAttribute('y2', y);
       gridG.appendChild(l);
     }
+    // v0.8.95: permanent origin indicator. Small "+" at (0, 0) with
+    // a "0,0" label and tiny +X / +Y axis arrows. Gives every position
+    // number on canvas a visible reference point, so the Parameters
+    // panel's mm values are interpretable without the diagnostic grid.
+    renderOriginIndicator();
+  }
+
+  /**
+   * v0.8.95: Origin indicator at (0, 0). Drawn into gridG so it's part
+   * of the permanent canvas chrome (re-emitted on every page reflow).
+   * Sized via 1/state.zoom so the visual stays small at any zoom level.
+   */
+  function renderOriginIndicator() {
+    const z = state.zoom || 1;
+    const armLen   = 14 / z;   // half-length of each + arm, mm
+    const arrowLen = 28 / z;   // distance from origin to arrow tip, mm
+    const tipSize  = 4  / z;   // arrowhead size
+    const labelDx  = 6  / z;
+    const labelDy  = 6  / z;
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'ed-origin-indicator');
+    g.style.pointerEvents = 'none';
+    const mkLine = function (x1, y1, x2, y2) {
+      const l = document.createElementNS(SVG_NS, 'line');
+      l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+      l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+      l.setAttribute('stroke', '#ffaa33');
+      l.setAttribute('stroke-width', '1.5');
+      l.style.vectorEffect = 'non-scaling-stroke';
+      return l;
+    };
+    // The crosshair "+"
+    g.appendChild(mkLine(-armLen, 0, armLen, 0));
+    g.appendChild(mkLine(0, -armLen, 0, armLen));
+    // +X axis arrow (right). SVG +y is down, so +Y arrow points down.
+    g.appendChild(mkLine(armLen, 0, arrowLen, 0));
+    g.appendChild(mkLine(arrowLen, 0, arrowLen - tipSize, -tipSize));
+    g.appendChild(mkLine(arrowLen, 0, arrowLen - tipSize, tipSize));
+    g.appendChild(mkLine(0, armLen, 0, arrowLen));
+    g.appendChild(mkLine(0, arrowLen,  tipSize, arrowLen - tipSize));
+    g.appendChild(mkLine(0, arrowLen, -tipSize, arrowLen - tipSize));
+    // "0,0" label, just outside the crosshair, top-left-ish
+    const lbl = document.createElementNS(SVG_NS, 'text');
+    lbl.setAttribute('x', -labelDx);
+    lbl.setAttribute('y', -labelDy);
+    lbl.setAttribute('fill', '#ffaa33');
+    lbl.setAttribute('text-anchor', 'end');
+    lbl.setAttribute('font-size', (11 / z));
+    lbl.setAttribute('font-family', 'monospace');
+    lbl.style.pointerEvents = 'none';
+    lbl.textContent = '0,0';
+    g.appendChild(lbl);
+    // Axis labels at arrow tips
+    const xL = document.createElementNS(SVG_NS, 'text');
+    xL.setAttribute('x', arrowLen + (3 / z));
+    xL.setAttribute('y', 4 / z);
+    xL.setAttribute('fill', '#ffaa33');
+    xL.setAttribute('font-size', (10 / z));
+    xL.setAttribute('font-family', 'monospace');
+    xL.style.pointerEvents = 'none';
+    xL.textContent = '+X';
+    g.appendChild(xL);
+    const yL = document.createElementNS(SVG_NS, 'text');
+    yL.setAttribute('x', 4 / z);
+    yL.setAttribute('y', arrowLen + (10 / z));
+    yL.setAttribute('fill', '#ffaa33');
+    yL.setAttribute('font-size', (10 / z));
+    yL.setAttribute('font-family', 'monospace');
+    yL.style.pointerEvents = 'none';
+    yL.textContent = '+Y';
+    g.appendChild(yL);
+    gridG.appendChild(g);
   }
 
   // Diagnostic grid — cyan ruling spanning the full viewBox, lines
@@ -6994,6 +7115,12 @@
     // so the user can see where rotations will pivot before saving.
     renderRotateOriginMarker(line);
 
+    // v0.8.95: position marker — a small crosshair + "(x, y)" label at
+    // the selected object's bbox top-left. Makes the Position X/Y panel
+    // values directly verifiable on canvas; also makes "compare two
+    // objects' positions" a select-and-look operation.
+    renderSelectedPositionMarker(line);
+
     // Handle radius is in viewBox units, but we want a constant visual
     // size regardless of zoom — so divide by zoom.
     const handleR = 6 / state.zoom;
@@ -7325,6 +7452,67 @@
     c.setAttribute('cx', ox); c.setAttribute('cy', oy);
     c.setAttribute('r', 2 / state.zoom);
     g.appendChild(c);
+    handlesG.appendChild(g);
+  }
+
+  /**
+   * v0.8.95: Position marker for the currently-selected single object.
+   * Drawn at the bbox top-left — the same point the Parameters panel
+   * reports as "Position X/Y". A small + plus a "(x, y)" label gives
+   * the panel number a visible counterpart on canvas. Without this,
+   * mm coordinates are abstract: with it, "compare two objects" is
+   * select one, glance at the marker, select the other, repeat.
+   *
+   * Color: same accent as the origin indicator so the user reads
+   * both as "position chrome". Skipped on primitives (they have
+   * native handles that already communicate position; their cx/x in
+   * the panel reads against the canvas anyway).
+   */
+  function renderSelectedPositionMarker(line) {
+    if (!line) return;
+    if (PRIMITIVES[line.kind] && line.params) return;
+    let minX = Infinity, minY = Infinity;
+    if (Array.isArray(line.points) && line.points.length) {
+      line.points.forEach(function (p) {
+        const x = +p.x, y = +p.y;
+        if (Number.isFinite(x) && x < minX) minX = x;
+        if (Number.isFinite(y) && y < minY) minY = y;
+      });
+    } else if (Array.isArray(line.segments) && line.segments.length) {
+      line.segments.forEach(function (s) {
+        if (s.endpoint) {
+          const x = +s.endpoint.x, y = +s.endpoint.y;
+          if (Number.isFinite(x) && x < minX) minX = x;
+          if (Number.isFinite(y) && y < minY) minY = y;
+        }
+      });
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+    const z = state.zoom || 1;
+    const armLen = 8 / z;
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'ed-position-marker');
+    g.style.pointerEvents = 'none';
+    const mkLine = function (x1, y1, x2, y2) {
+      const l = document.createElementNS(SVG_NS, 'line');
+      l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+      l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+      l.setAttribute('stroke', '#ffaa33');
+      l.setAttribute('stroke-width', '1.5');
+      l.style.vectorEffect = 'non-scaling-stroke';
+      return l;
+    };
+    g.appendChild(mkLine(minX - armLen, minY, minX + armLen, minY));
+    g.appendChild(mkLine(minX, minY - armLen, minX, minY + armLen));
+    const lbl = document.createElementNS(SVG_NS, 'text');
+    lbl.setAttribute('x', minX + (armLen + 3 / z));
+    lbl.setAttribute('y', minY - (3 / z));
+    lbl.setAttribute('fill', '#ffaa33');
+    lbl.setAttribute('font-size', (11 / z));
+    lbl.setAttribute('font-family', 'monospace');
+    lbl.style.pointerEvents = 'none';
+    lbl.textContent = '(' + minX.toFixed(1) + ', ' + minY.toFixed(1) + ')';
+    g.appendChild(lbl);
     handlesG.appendChild(g);
   }
 
@@ -8207,18 +8395,13 @@
         }), line.masterId, 'filled'));
       }
     } else {
-      // v0.8.94: Parameters fallback for non-primitive kinds (freehand,
+      // v0.8.95: Parameters fallback for non-primitive kinds (freehand,
       // freehandClosed, manual, bezier, svgImport, line, lineChain, …).
-      // These don't have authored params.cx/x — geometry is points or
-      // segments. We show the instance's *absolute on-canvas position*
-      // (bbox top-left + positionOffset) as a single editable Position
-      // X/Y pair. The fact that the data model decomposes this as
-      // "canonical points + per-class offset" is an implementation
-      // detail; the user sees a single, honest position number.
+      // Stored line.points / segments are already in visual on-canvas
+      // coords (translateLine + propagateLineToMaster keep them in
+      // "offset-applied" form), so the bbox top-left IS the on-canvas
+      // position. No addition with positionOffset needed.
       wrap.appendChild(divider('Parameters'));
-      // Walk the stored shape to find canonical bbox extents. Stored
-      // instances keep points/segments in canonical-master coords; the
-      // resolver folds in positionOffset later, at render time.
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       let ptCount = 0, hasGeo = false;
       if (Array.isArray(line.points) && line.points.length) {
@@ -8238,35 +8421,31 @@
         });
         ptCount = line.segments.length;
       }
-      const off = line.positionOffset || { dx: 0, dy: 0 };
-      const offDx = Number.isFinite(off.dx) ? off.dx : 0;
-      const offDy = Number.isFinite(off.dy) ? off.dy : 0;
-      // Editable Position X/Y = canonical_top_left + offset. Edit
-      // handler converts the new absolute value back into an offset
-      // delta so the data model stays consistent. If we have no
-      // geometry (degenerate object), fall back to showing the offset
-      // directly — the bbox would be undefined anyway.
       if (hasGeo) {
-        wrap.appendChild(numberField('Position X (mm)', minX + offDx, function (v) {
-          const newOffset = (Number.isFinite(v) ? v : 0) - minX;
-          setLinePositionOffset(line.id, 'dx', newOffset);
+        // Editing X/Y translates the whole shape (geometry + offset).
+        // shiftLineBy keeps stored points + positionOffset in lock-step.
+        wrap.appendChild(numberField('Position X (mm)', minX, function (v) {
+          const delta = (Number.isFinite(v) ? v : minX) - minX;
+          if (delta !== 0) {
+            shiftLineBy(line, delta, 0);
+            state.dirty = true;
+            renderLines();
+          }
           scheduleSnapshot();
         }));
-        wrap.appendChild(numberField('Position Y (mm)', minY + offDy, function (v) {
-          const newOffset = (Number.isFinite(v) ? v : 0) - minY;
-          setLinePositionOffset(line.id, 'dy', newOffset);
+        wrap.appendChild(numberField('Position Y (mm)', minY, function (v) {
+          const delta = (Number.isFinite(v) ? v : minY) - minY;
+          if (delta !== 0) {
+            shiftLineBy(line, 0, delta);
+            state.dirty = true;
+            renderLines();
+          }
           scheduleSnapshot();
         }));
       } else {
-        // Degenerate: just expose the raw offset so it's still editable.
-        wrap.appendChild(numberField('Position X (mm)', offDx, function (v) {
-          setLinePositionOffset(line.id, 'dx', v); scheduleSnapshot();
-        }));
-        wrap.appendChild(numberField('Position Y (mm)', offDy, function (v) {
-          setLinePositionOffset(line.id, 'dy', v); scheduleSnapshot();
-        }));
+        // Degenerate: no geometry to anchor the position to.
+        wrap.appendChild(textField('Position', '— (no geometry)', function () {}, ''));
       }
-      // Bounding box (intrinsic, no position component) + point count.
       const info = document.createElement('div');
       info.className = 'ed-field';
       info.style.color = '#888';
