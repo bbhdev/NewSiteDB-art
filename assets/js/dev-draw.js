@@ -4295,6 +4295,342 @@
     renderAll();
   }
 
+  // ── Duplication ──────────────────────────────────────────────────
+  //
+  // v0.8.92: Two flavors for both object and group, exposed in the
+  // side panel:
+  //   • Duplicate (new master)  — geometry deep-copied; the duplicate
+  //                               is fully independent of the source.
+  //   • Duplicate (linked)      — geometry shared (same masterId);
+  //                               transform / behaviors / position
+  //                               offset are still per-instance, so
+  //                               the duplicate can animate on its own.
+  //
+  // ALL/1 mode is honored. In 'one' mode the duplicate lives in the
+  // current class only. In 'all' mode it fans out the same way the
+  // source is spread: every class that holds an instance of the
+  // source gets the duplicate. If the source's spread is incomplete
+  // we ask before acting (mirror existing spread vs spread into every
+  // useClass).
+  //
+  // Group duplicate rewrites cross-object behavior refs WITHIN the
+  // duplicated set (startObjectId / stopObjectId / params.pathRef on
+  // masters that are also being duplicated) so the new group is
+  // self-contained. Refs pointing OUT of the set keep pointing to
+  // the originals — almost certainly the user's intent.
+
+  function uniqueObjectName(baseName) {
+    const existing = new Set();
+    state.masters.forEach(function (m) { if (m && m.name) existing.add(m.name); });
+    const root = (baseName || 'object') + ' copy';
+    if (!existing.has(root)) return root;
+    let n = 2;
+    while (existing.has(root + ' ' + n)) n++;
+    return root + ' ' + n;
+  }
+
+  function uniqueGroupName(baseName) {
+    // Groups are per-class, linked across classes by name — so the
+    // candidate must be unused in EVERY class's group list.
+    const existing = new Set();
+    (state.pageConfig.useClasses || []).forEach(function (cid) {
+      const b = state.byClass[cid];
+      if (!b || !Array.isArray(b.groups)) return;
+      b.groups.forEach(function (g) { if (g && g.name) existing.add(g.name); });
+    });
+    const root = (baseName || 'group') + ' copy';
+    if (!existing.has(root)) return root;
+    let n = 2;
+    while (existing.has(root + ' ' + n)) n++;
+    return root + ' ' + n;
+  }
+
+  function cloneMasterRecord(src, newName) {
+    const c = deepCopy(src);
+    c.id = uid('m');
+    if (newName) c.name = newName;
+    return c;
+  }
+
+  function cloneLineRecord(src, opts) {
+    const c = deepCopy(src);
+    c.id = uid('l');
+    if (opts.masterId) c.masterId = opts.masterId;
+    if (opts.groupId)  c.groupId  = opts.groupId;
+    if (opts.name)     c.name     = opts.name;
+    if (opts.offsetDx || opts.offsetDy) {
+      if (!c.positionOffset) c.positionOffset = { dx: 0, dy: 0 };
+      c.positionOffset.dx = (c.positionOffset.dx || 0) + (opts.offsetDx || 0);
+      c.positionOffset.dy = (c.positionOffset.dy || 0) + (opts.offsetDy || 0);
+    }
+    // Fresh ids on behaviors so the duplicate's blocks don't collide
+    // with the source's in any future block-id-keyed lookup.
+    if (Array.isArray(c.behaviors)) {
+      c.behaviors.forEach(function (b) { b.id = uid('b'); });
+    }
+    return c;
+  }
+
+  // Rewrite cross-object references on a (deep-copied) line's
+  // behaviors. masterMap is { srcMasterId → newMasterId } for masters
+  // we just duplicated. Refs whose target IS in the map → rewrite.
+  // Refs whose target ISN'T → untouched.
+  function rewriteBehaviorRefs(line, masterMap) {
+    if (!Array.isArray(line.behaviors)) return;
+    line.behaviors.forEach(function (b) {
+      if (b && b.trigger) {
+        if (b.trigger.startObjectId && masterMap[b.trigger.startObjectId]) {
+          b.trigger.startObjectId = masterMap[b.trigger.startObjectId];
+        }
+        if (b.trigger.stopObjectId && masterMap[b.trigger.stopObjectId]) {
+          b.trigger.stopObjectId = masterMap[b.trigger.stopObjectId];
+        }
+      }
+      if (b && b.params && b.params.pathRef && masterMap[b.params.pathRef]) {
+        b.params.pathRef = masterMap[b.params.pathRef];
+      }
+    });
+  }
+
+  // Confirm dialog for the ALL-mode incomplete-spread case. Returns
+  // 'mirror' | 'all' | null (cancel).
+  async function askSpreadScope(presentClassIds, missingClassIds, label) {
+    const labelOf = function (cid) {
+      const c = state.classes.find(function (x) { return x.id === cid; });
+      return c ? c.name : cid;
+    };
+    const mirrorN = presentClassIds.length;
+    const allN    = mirrorN + missingClassIds.length;
+    const esc = function (s) {
+      const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
+    };
+    const missList = missingClassIds.map(function (cid) {
+      return '<li>' + esc(labelOf(cid)) + '</li>';
+    }).join('');
+    const msg = '<p>The source ' + (label || 'object') +
+                ' is present in <strong>' + mirrorN + '</strong> of <strong>' + allN +
+                '</strong> classes. Missing from:</p>' +
+                '<ul>' + missList + '</ul>' +
+                '<p>Where should the duplicate go?</p>';
+    return await showChoiceDialog({
+      title:   'Duplicate — spread choice',
+      message: msg,
+      html:    true,
+      buttons: [
+        { label: 'Cancel',                                        value: null },
+        { label: 'Mirror current spread (' + mirrorN + ')',       value: 'mirror', className: 'ed-primary' },
+        { label: 'Spread to all useClasses (' + allN + ')',       value: 'all' }
+      ]
+    });
+  }
+
+  async function duplicateObject(lineId, opts) {
+    const linked = !!(opts && opts.linked);
+    const offsetMM = 20;
+    const srcLine = state.lines.find(function (l) { return l.id === lineId; });
+    if (!srcLine) return;
+    const srcMaster = srcLine.masterId
+      ? state.masters.find(function (m) { return m.id === srcLine.masterId; })
+      : null;
+
+    // Loose-instance path (no master): can only exist in the current
+    // class anyway, so ALL/1 doesn't matter and there's no master to
+    // duplicate. Just clone the line locally.
+    if (!srcMaster) {
+      const newLine = cloneLineRecord(srcLine, {
+        name: srcLine.name ? (srcLine.name + ' copy') : null,
+        offsetDx: offsetMM, offsetDy: offsetMM
+      });
+      state.lines.push(newLine);
+      selectOnly(newLine.id);
+      state.dirty = true;
+      snapshot();
+      renderAll();
+      return;
+    }
+
+    // Target-class set.
+    let targetClassIds;
+    if (modeIsAll()) {
+      const present = [];
+      const missing = [];
+      (state.pageConfig.useClasses || []).forEach(function (cid) {
+        const b = state.byClass[cid];
+        if (!b || !Array.isArray(b.lines)) { missing.push(cid); return; }
+        const has = b.lines.some(function (l) { return l.masterId === srcMaster.id; });
+        (has ? present : missing).push(cid);
+      });
+      if (missing.length === 0) {
+        targetClassIds = present;
+      } else {
+        const choice = await askSpreadScope(present, missing, 'object');
+        if (!choice) return;
+        targetClassIds = choice === 'mirror' ? present : (state.pageConfig.useClasses || []).slice();
+      }
+    } else {
+      targetClassIds = [state.classId];
+    }
+    if (!targetClassIds.length) return;
+
+    // New master (or reuse for linked).
+    const newName = uniqueObjectName(srcMaster.name || 'object');
+    let newMasterId;
+    if (linked) {
+      newMasterId = srcMaster.id;
+    } else {
+      const newMaster = cloneMasterRecord(srcMaster, newName);
+      state.masters.push(newMaster);
+      newMasterId = newMaster.id;
+    }
+
+    let firstNewLineIdInCurrentClass = null;
+    targetClassIds.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.lines)) return;
+      // Template = source instance in THIS class. Force-spread case
+      // (class doesn't have one) → fall back to srcLine so the new
+      // instance still has plausible per-class defaults.
+      const sourceInstance = bucket.lines.find(function (l) { return l.masterId === srcMaster.id; })
+                          || srcLine;
+      // Group lookup: same group as the source instance has in this
+      // class, identified by name in cross-class cases.
+      let groupId = sourceInstance.groupId;
+      if (cid !== state.classId) {
+        const homeBucket = state.byClass[state.classId];
+        const srcGroup = homeBucket && (homeBucket.groups || []).find(function (g) {
+          return g.id === sourceInstance.groupId;
+        });
+        const peerGroup = srcGroup
+          ? (bucket.groups || []).find(function (g) { return g.name === srcGroup.name; })
+          : null;
+        groupId = peerGroup ? peerGroup.id
+                            : ((bucket.groups[0] && bucket.groups[0].id) || null);
+      }
+      const newLine = cloneLineRecord(sourceInstance, {
+        masterId: newMasterId,
+        groupId:  groupId,
+        // 'name' on a line is mostly vestigial (name is canonical on
+        // the master), but copy it through so older code paths that
+        // read line.name display the new name.
+        name: linked ? sourceInstance.name : newName,
+        offsetDx: offsetMM, offsetDy: offsetMM
+      });
+      bucket.lines.push(newLine);
+      if (cid === state.classId) firstNewLineIdInCurrentClass = newLine.id;
+    });
+
+    if (firstNewLineIdInCurrentClass) selectOnly(firstNewLineIdInCurrentClass);
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
+  async function duplicateGroupAction(groupId, opts) {
+    const linked = !!(opts && opts.linked);
+    const offsetMM = 20;
+    const srcGroup = state.groups.find(function (g) { return g.id === groupId; });
+    if (!srcGroup) return;
+    const srcLines = state.lines.filter(function (l) { return l.groupId === srcGroup.id; });
+
+    // Target-class set: classes that hold a same-named group as
+    // the source. (Groups link across classes by name.)
+    let targetClassIds;
+    if (modeIsAll()) {
+      const present = [];
+      const missing = [];
+      (state.pageConfig.useClasses || []).forEach(function (cid) {
+        const b = state.byClass[cid];
+        if (!b || !Array.isArray(b.groups)) { missing.push(cid); return; }
+        const has = b.groups.some(function (g) { return g.name === srcGroup.name; });
+        (has ? present : missing).push(cid);
+      });
+      if (missing.length === 0) {
+        targetClassIds = present;
+      } else {
+        const choice = await askSpreadScope(present, missing, 'group');
+        if (!choice) return;
+        targetClassIds = choice === 'mirror' ? present : (state.pageConfig.useClasses || []).slice();
+      }
+    } else {
+      targetClassIds = [state.classId];
+    }
+    if (!targetClassIds.length) return;
+
+    const newGroupName = uniqueGroupName(srcGroup.name || 'group');
+
+    // Old-master → new-master remap. Empty for linked (no new masters).
+    // For new-master mode, one new master per unique source master.
+    const masterMap = {};
+    if (!linked) {
+      srcLines.forEach(function (srcLine) {
+        const srcMid = srcLine.masterId;
+        if (!srcMid || masterMap[srcMid]) return;
+        const srcMaster = state.masters.find(function (m) { return m.id === srcMid; });
+        if (!srcMaster) return;
+        const newMaster = cloneMasterRecord(srcMaster, uniqueObjectName(srcMaster.name || 'object'));
+        state.masters.push(newMaster);
+        masterMap[srcMid] = newMaster.id;
+      });
+    }
+
+    let firstNewGroupIdInCurrentClass = null;
+    targetClassIds.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.groups) || !Array.isArray(bucket.lines)) return;
+      const newGroup = {
+        id: uid('g'),
+        name: newGroupName,
+        trigger: srcGroup.trigger || null,
+        defaults: deepCopy(srcGroup.defaults || {})
+      };
+      bucket.groups.push(newGroup);
+      if (cid === state.classId) firstNewGroupIdInCurrentClass = newGroup.id;
+
+      // Find the source-group's peer in THIS class (same name) so we
+      // can pick up each line's per-class overrides from this class's
+      // instance of the relevant master.
+      const peerSrcGroup = (bucket.groups || []).find(function (g) {
+        return g.name === srcGroup.name && g.id !== newGroup.id;
+      });
+
+      srcLines.forEach(function (srcLine) {
+        const srcMid = srcLine.masterId;
+        // Template line in this class. Prefer the same-named peer
+        // group's instance of this master; fall back to srcLine
+        // (force-spread case).
+        let template = null;
+        if (peerSrcGroup) {
+          template = bucket.lines.find(function (l) {
+            return l.groupId === peerSrcGroup.id && l.masterId === srcMid;
+          });
+        }
+        if (!template) template = srcLine;
+        const newMid = linked ? srcMid : masterMap[srcMid];
+        if (!newMid) return;  // No master + new-master mode → skip
+        const newLine = cloneLineRecord(template, {
+          masterId: newMid,
+          groupId:  newGroup.id,
+          offsetDx: offsetMM, offsetDy: offsetMM
+        });
+        // Internal cross-refs rewrite: only matters when masterMap is
+        // non-empty (i.e. new-master mode). In linked mode the refs
+        // already point to the originals, which IS the duplicate's
+        // intended target.
+        rewriteBehaviorRefs(newLine, masterMap);
+        bucket.lines.push(newLine);
+      });
+    });
+
+    if (firstNewGroupIdInCurrentClass) {
+      state.activeGroupId = firstNewGroupIdInCurrentClass;
+      state.openGroupIds[firstNewGroupIdInCurrentClass] = true;
+    }
+    clearSelection();
+    state.dirty = true;
+    snapshot();
+    renderAll();
+  }
+
   function addGroup() {
     // 'all' mode: a new group fans out across every class with the
     // same name (each class gets its own id). 'one' mode: just
@@ -7665,6 +8001,26 @@
     // group-row ✕ button can reuse the same flow.
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
+
+    // Duplication (v0.8.92). Two flavours so users don't have to
+    // answer a prompt: new-masters = fully independent geometry; linked
+    // = shares masters with the source, transforms/behaviors independent.
+    // Both honor ALL/1 mode and rewrite internal cross-refs to point
+    // at the duplicates in new-masters mode.
+    const dupNew = document.createElement('button');
+    dupNew.type = 'button';
+    dupNew.textContent = 'Duplicate group (new masters)';
+    dupNew.title = 'Duplicate the group with fully independent copies of every object (geometry can evolve separately).';
+    dupNew.addEventListener('click', function () { duplicateGroupAction(g.id, { linked: false }); });
+    actions.appendChild(dupNew);
+
+    const dupLink = document.createElement('button');
+    dupLink.type = 'button';
+    dupLink.textContent = 'Duplicate group (linked)';
+    dupLink.title = 'Duplicate the group; copies share geometry with the originals (transforms/behaviors independent).';
+    dupLink.addEventListener('click', function () { duplicateGroupAction(g.id, { linked: true }); });
+    actions.appendChild(dupLink);
+
     const del = document.createElement('button');
     del.className = 'ed-danger';
     del.textContent = 'Delete group';
@@ -7945,6 +8301,25 @@
 
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
+
+    // Duplication (v0.8.92). 'new master' = independent copy; 'linked'
+    // = shares the master record (geometry follows the original; per-
+    // instance transforms/behaviors are independent). Both honor ALL/1
+    // and rewrite cross-references when applicable.
+    const dupNew = document.createElement('button');
+    dupNew.type = 'button';
+    dupNew.textContent = 'Duplicate (new master)';
+    dupNew.title = 'Create a fully independent copy. New master record; geometry can evolve separately.';
+    dupNew.addEventListener('click', function () { duplicateObject(line.id, { linked: false }); });
+    actions.appendChild(dupNew);
+
+    const dupLink = document.createElement('button');
+    dupLink.type = 'button';
+    dupLink.textContent = 'Duplicate (linked)';
+    dupLink.title = 'Create a copy that shares geometry with this object. Per-instance transforms/behaviors are independent.';
+    dupLink.addEventListener('click', function () { duplicateObject(line.id, { linked: true }); });
+    actions.appendChild(dupLink);
+
     // Delete — one mode-aware button. 'all' mode cascades site-
     // wide; 'one' mode drops just THIS class's instance row.
     const del = document.createElement('button');
