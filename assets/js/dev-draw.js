@@ -7196,14 +7196,42 @@
                      (PRIMITIVES[line.kind] && line.params);
       if (!hasGeo) return;
       const pos = labelPositionFor(line);
+      // v0.8.104: user-draggable label offset. When non-zero, the
+      // label is rendered at (pos + offset) and a leader line is drawn
+      // from the anchor back to the label edge in the label's border
+      // color, so the user can still tell which object owns the label.
+      const off = (line.labelOffset && typeof line.labelOffset === 'object')
+                    ? line.labelOffset : { x: 0, y: 0 };
+      const lx = pos.x + (Number(off.x) || 0);
+      const ly = pos.y + (Number(off.y) || 0);
 
       const group = state.groups.find(function (g) { return g.id === line.groupId; });
       const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
       const fill = resolveStroke(strokeRef) || '#aaa';
 
+      // Leader line: drawn FIRST so the label background covers its
+      // tip cleanly. Skipped when the offset is effectively zero (no
+      // need to clutter the canvas with a degenerate stub).
+      const hasOffset = Math.abs(lx - pos.x) > 0.01 || Math.abs(ly - pos.y) > 0.01;
+      if (hasOffset) {
+        const z = state.zoom || 1;
+        const leader = document.createElementNS(SVG_NS, 'line');
+        leader.setAttribute('class', 'ed-label-leader');
+        leader.setAttribute('x1', pos.x);
+        leader.setAttribute('y1', pos.y);
+        leader.setAttribute('x2', lx);
+        leader.setAttribute('y2', ly);
+        leader.setAttribute('stroke', fill);
+        leader.setAttribute('stroke-width', (2 / z));
+        leader.style.pointerEvents = 'none';
+        labelsG.appendChild(leader);
+      }
+
       const g = document.createElementNS(SVG_NS, 'g');
       g.setAttribute('class', 'ed-label');
-      g.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+      g.setAttribute('transform', 'translate(' + lx + ',' + ly + ')');
+      g.style.cursor = 'grab';
+      g.setAttribute('data-line-id', line.id);
 
       const text = document.createElementNS(SVG_NS, 'text');
       text.setAttribute('class', 'ed-label-text');
@@ -7252,6 +7280,56 @@
       outer.style.fill   = 'white';
       outer.style.stroke = fill;
       g.insertBefore(outer, text);
+
+      // v0.8.104: pointerdown on the label group starts a drag that
+      // updates line.labelOffset. Re-renders labels on each move
+      // (cheap — only the labels layer; doesn't tear down line handles
+      // so the pointer capture stays valid). Snapshots once at
+      // pointerup. e.stopPropagation prevents the svg-level
+      // pointerdown from interpreting this as a canvas click /
+      // marquee-select.
+      let dragStartPt = null;
+      let dragStartOff = null;
+      g.addEventListener('pointerdown', function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        dragStartPt = clientToSvg(e.clientX, e.clientY);
+        dragStartOff = {
+          x: (line.labelOffset && Number(line.labelOffset.x)) || 0,
+          y: (line.labelOffset && Number(line.labelOffset.y)) || 0,
+        };
+        g.style.cursor = 'grabbing';
+        g.setPointerCapture(e.pointerId);
+      });
+      g.addEventListener('pointermove', function (e) {
+        if (!dragStartPt) return;
+        const cur = clientToSvg(e.clientX, e.clientY);
+        const dx = cur.x - dragStartPt.x;
+        const dy = cur.y - dragStartPt.y;
+        line.labelOffset = {
+          x: dragStartOff.x + dx,
+          y: dragStartOff.y + dy,
+        };
+        renderLabels();
+      });
+      g.addEventListener('pointerup', function (e) {
+        if (!dragStartPt) return;
+        e.stopPropagation();
+        dragStartPt = null;
+        dragStartOff = null;
+        g.style.cursor = 'grab';
+        try { g.releasePointerCapture(e.pointerId); } catch (err) {}
+        // Snap to zero if the user dragged the label very close to its
+        // anchor — lets the user reset by dragging it back rather than
+        // hunting for a "reset" affordance.
+        if (line.labelOffset &&
+            Math.abs(line.labelOffset.x) < 2 &&
+            Math.abs(line.labelOffset.y) < 2) {
+          delete line.labelOffset;
+          renderLabels();
+        }
+        snapshot();
+      });
     });
   }
 
@@ -8860,23 +8938,26 @@
     // family together. Singleton masters get a faded chip with no
     // letter and no "linked" suffix, so the user still sees which
     // master owns this instance.
+    // v0.8.104: only show the master chip when the object actually has
+    // siblings (count ≥ 2). Singletons carry no useful relationship info,
+    // so the chip was pure clutter — removed.
     if (line.masterId) {
       const rel = computeMasterRelationships();
       const entry = rel[line.masterId];
-      const master = state.masters.find(function (m) { return m.id === line.masterId; });
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'ed-master-chip' + (entry && entry.badge ? '' : ' is-singleton');
-      const dot = document.createElement('span');
-      dot.className = 'ed-link-badge';
-      dot.style.background = 'hsl(' + (entry ? entry.hue : 0) + ', 65%, 45%)';
-      dot.textContent = entry && entry.badge ? entry.badge : '·';
-      chip.appendChild(dot);
-      const nm = document.createElement('span');
-      nm.className = 'ed-master-chip-name';
-      nm.textContent = (master && master.name) ? master.name : shortMasterId(line.masterId);
-      chip.appendChild(nm);
-      if (entry && entry.count >= 2) {
+      if (entry && entry.badge && entry.count >= 2) {
+        const master = state.masters.find(function (m) { return m.id === line.masterId; });
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'ed-master-chip';
+        const dot = document.createElement('span');
+        dot.className = 'ed-link-badge';
+        dot.style.background = 'hsl(' + entry.hue + ', 70%, 32%)';
+        dot.textContent = entry.badge;
+        chip.appendChild(dot);
+        const nm = document.createElement('span');
+        nm.className = 'ed-master-chip-name';
+        nm.textContent = (master && master.name) ? master.name : shortMasterId(line.masterId);
+        chip.appendChild(nm);
         const cnt = document.createElement('span');
         cnt.className = 'ed-master-chip-count';
         cnt.textContent = entry.count + ' linked';
@@ -8885,11 +8966,8 @@
         chip.addEventListener('click', function () {
           selectSiblingsOfMaster(line.masterId);
         });
-      } else {
-        chip.title = 'Singleton — no other linked instances';
-        chip.disabled = true;
+        selectionPanel.appendChild(chip);
       }
-      selectionPanel.appendChild(chip);
     }
 
     const wrap = document.createElement('div');
