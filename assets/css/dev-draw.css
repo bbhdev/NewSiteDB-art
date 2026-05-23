@@ -1378,6 +1378,12 @@ body.editor input[type="range"] {
    a dark or light background. The rect gets a double border (black
    outer + white inner) for the same reason. Toggled by the Labels
    button in the toolbar. */
+/* v0.8.105: .ed-label group accepts pointer events (drag-to-move
+   labels). Children stay pointer-events:none so the text/bg don't
+   each handle separately; the group catches the event. */
+#draw-surface .ed-label {
+  pointer-events: all;
+}
 #draw-surface .ed-label-text {
   fill: #000;
   font-family: system-ui, -apple-system, sans-serif;
