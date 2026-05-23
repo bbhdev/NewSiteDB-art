@@ -750,6 +750,13 @@
     // separate toggle so the table only appears when we're actively
     // diagnosing a position drift — Grid alone shouldn't pay the cost.
     showRuntimeDump: localStorage.getItem('ed-show-runtime-dump') === '1',
+    // v0.8.99: keyboard-arrow nudge step (mm of canvas geometry).
+    // Persisted so refresh keeps the value. Shift+arrow multiplies
+    // by 10 (standard editor convention).
+    nudgeStepMM: (function () {
+      const raw = parseFloat(localStorage.getItem('ed-nudge-step-mm'));
+      return Number.isFinite(raw) && raw > 0 ? raw : 1;
+    })(),
     dirty: false
   };
   // Make sure every useClass has a dims slot + a byClass entry, so
@@ -2915,6 +2922,42 @@
       });
     }
     computeLineD(line);
+  }
+
+  /**
+   * v0.8.99: Translate every selected line by (dx, dy). In ALL mode,
+   * the same delta also rides along to every sibling-class instance
+   * of the affected masters (matches drag-translate's ALL-mode fan-
+   * out). Used by keyboard-arrow nudge and the bbox move grip.
+   *
+   * `opts.snapshot` controls whether to push a history entry. Pass
+   * false for incremental drag steps (the drag's pointerup commits
+   * one snapshot at the end) and true for one-shot nudges.
+   */
+  function nudgeSelectionBy(dx, dy, opts) {
+    if (!state.selectedIds.length) return;
+    if (!dx && !dy) return;
+    opts = opts || {};
+    const affectedMasterIds = {};
+    state.selectedIds.forEach(function (id) {
+      const line = state.lines.find(function (l) { return l.id === id; });
+      if (!line) return;
+      shiftLineBy(line, dx, dy);
+      if (line.masterId) affectedMasterIds[line.masterId] = true;
+    });
+    if (modeIsAll()) {
+      Object.keys(affectedMasterIds).forEach(function (mid) {
+        forSiblingsOf(mid, function (sib) { shiftLineBy(sib, dx, dy); });
+      });
+    }
+    state.dirty = true;
+    if (opts.snapshot !== false) {
+      renderLines();
+      renderHandles();
+      renderLabels();
+      renderSelectionPanel({ suppressScroll: true });
+      snapshot();
+    }
   }
 
   /**
@@ -5322,6 +5365,15 @@
         scheduleSnapshot();
       }));
     });
+    // v0.8.99: editor-wide nudge step for arrow-key moves. Not page
+    // data (doesn't go in snapshots), just an editor preference — but
+    // physically lives in the canvas panel because it's about
+    // canvas-coordinate units, not appearance toggles.
+    canvasFieldsEl.appendChild(numberField('Nudge step (mm)', state.nudgeStepMM, function (v) {
+      if (!Number.isFinite(v) || v <= 0) return;
+      state.nudgeStepMM = v;
+      try { localStorage.setItem('ed-nudge-step-mm', String(v)); } catch (e) {}
+    }));
   }
 
   /**
@@ -7150,6 +7202,13 @@
     // objects' positions" a select-and-look operation.
     renderSelectedPositionMarker(line);
 
+    // v0.8.99: bbox move grip — a small square just OUTSIDE the bbox
+    // top-left, sized so it sits clear of the corner handles. Gives
+    // dense-handle drawings a guaranteed drag-to-translate target
+    // (otherwise every interior click lands on a vertex handle).
+    // Skipped for primitives — they already have a centred move handle.
+    renderBboxMoveHandle(line);
+
     // Handle radius is in viewBox units, but we want a constant visual
     // size regardless of zoom — so divide by zoom.
     const handleR = 6 / state.zoom;
@@ -7543,6 +7602,113 @@
     lbl.textContent = '(' + minX.toFixed(1) + ', ' + minY.toFixed(1) + ')';
     g.appendChild(lbl);
     handlesG.appendChild(g);
+  }
+
+  /**
+   * v0.8.99: A draggable square positioned just OUTSIDE the bbox
+   * top-left corner — by exactly its own size, so it never collides
+   * with vertex handles that cluster at the corner. Drives the same
+   * shiftLineBy translate that arrow-key nudges use, with sibling
+   * fan-out in ALL mode and one snapshot on pointerup.
+   *
+   * Skips primitives (they have a centred move handle already) and
+   * skips lines with no finite-coord geometry. The grip element
+   * itself never re-renders mid-drag (the rest of the handle layer
+   * would be torn down, breaking pointer capture); we mutate its
+   * x/y in lockstep with the shift.
+   */
+  function renderBboxMoveHandle(line) {
+    if (!line) return;
+    if (PRIMITIVES[line.kind]) return;
+    const tl = currentBboxTopLeft(line);
+    if (!tl) return;
+    const z = state.zoom || 1;
+    const size = 14 / z;   // grip side in canvas units
+    const gap  = 2 / z;    // small breathing room between grip and bbox corner
+    const x0 = tl.minX - size - gap;
+    const y0 = tl.minY - size - gap;
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', x0);
+    rect.setAttribute('y', y0);
+    rect.setAttribute('width',  size);
+    rect.setAttribute('height', size);
+    rect.setAttribute('rx', (3 / z));
+    rect.setAttribute('ry', (3 / z));
+    rect.setAttribute('fill', 'rgba(255, 170, 51, 0.85)');
+    rect.setAttribute('stroke', '#7a4a00');
+    rect.setAttribute('stroke-width', (1 / z));
+    rect.style.vectorEffect = 'non-scaling-stroke';
+    rect.style.cursor = 'move';
+    rect.setAttribute('class', 'ed-bbox-move-grip');
+    // Visual ✥ glyph inside to communicate "move". Pointer-events
+    // none so it doesn't intercept events meant for the rect.
+    const glyph = document.createElementNS(SVG_NS, 'text');
+    glyph.setAttribute('x', x0 + size / 2);
+    glyph.setAttribute('y', y0 + size / 2);
+    glyph.setAttribute('text-anchor', 'middle');
+    glyph.setAttribute('dominant-baseline', 'central');
+    glyph.setAttribute('font-size', (10 / z));
+    glyph.setAttribute('fill', '#222');
+    glyph.style.pointerEvents = 'none';
+    glyph.textContent = '✥';
+
+    let dragging = false;
+    let lastPt = null;
+    rect.addEventListener('pointerdown', function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+      dragging = true;
+      lastPt = clientToSvg(e.clientX, e.clientY);
+      rect.setPointerCapture(e.pointerId);
+    });
+    rect.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      const cur = clientToSvg(e.clientX, e.clientY);
+      const dx = cur.x - lastPt.x;
+      const dy = cur.y - lastPt.y;
+      if (dx === 0 && dy === 0) return;
+      // Incremental shift — no snapshot, no re-render of handles
+      // (which would tear down this grip and break pointer capture).
+      nudgeSelectionBy(dx, dy, { snapshot: false });
+      lastPt = cur;
+      // Move the visible paths in lockstep. Mirrors what the regular
+      // drag does (linesG.querySelectorAll by data-line-id).
+      state.selectedIds.forEach(function (id) {
+        const l = state.lines.find(function (ll) { return ll.id === id; });
+        if (!l) return;
+        linesG.querySelectorAll('[data-line-id="' + l.id + '"]')
+          .forEach(function (el) {
+            if (el.tagName.toLowerCase() === 'image' && l.params) {
+              el.setAttribute('x', l.params.x);
+              el.setAttribute('y', l.params.y);
+            } else if (l.d) {
+              el.setAttribute('d', l.d);
+            }
+          });
+      });
+      // Slide the grip itself so it stays anchored to the moving bbox.
+      const newX = parseFloat(rect.getAttribute('x')) + dx;
+      const newY = parseFloat(rect.getAttribute('y')) + dy;
+      rect.setAttribute('x', newX);
+      rect.setAttribute('y', newY);
+      glyph.setAttribute('x', newX + size / 2);
+      glyph.setAttribute('y', newY + size / 2);
+    });
+    rect.addEventListener('pointerup', function (e) {
+      if (!dragging) return;
+      e.stopPropagation();
+      dragging = false;
+      try { rect.releasePointerCapture(e.pointerId); } catch (err) {}
+      // One snapshot per gesture, and a full re-render to refresh
+      // labels / position marker / panel / sibling-class state.
+      snapshot();
+      renderLines();
+      renderHandles();
+      renderLabels();
+      renderSelectionPanel({ suppressScroll: true });
+    });
+    handlesG.appendChild(rect);
+    handlesG.appendChild(glyph);
   }
 
   function renderMultiSelectedMarkers() {
@@ -10607,6 +10773,25 @@
     if (e.key === 's' || e.key === 'S') {
       e.preventDefault();
       save();
+      return;
+    }
+    // v0.8.99: Arrow keys nudge the current selection by state.nudgeStepMM
+    // (Shift = ×10). Honored even with Shift held (modifier check below
+    // would otherwise swallow Shift+Arrow). Cmd/Ctrl/Alt+Arrow stay free
+    // for native browser behavior. ALL-mode fan-out is inside
+    // nudgeSelectionBy.
+    if (state.selectedIds.length &&
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+         e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+        !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const step = (state.nudgeStepMM || 1) * (e.shiftKey ? 10 : 1);
+      let dx = 0, dy = 0;
+      if (e.key === 'ArrowUp')    dy = -step;
+      if (e.key === 'ArrowDown')  dy =  step;
+      if (e.key === 'ArrowLeft')  dx = -step;
+      if (e.key === 'ArrowRight') dx =  step;
+      nudgeSelectionBy(dx, dy);
       return;
     }
     // Skip remaining view shortcuts when a modifier is held — let
