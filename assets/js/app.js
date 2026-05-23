@@ -688,34 +688,23 @@
       if (!group) return;
 
       const lineDef = lines.find(function (l) { return l.id === pathEl.dataset.lineId; }) || {};
-      // v0.4.0: behavior keys live on lineDef.behaviors[].params.
-      // v0.8.68: drawIn now reads from ANY block, not just block 0.
-      // The v0.4.0-era assumption that behaviors were single-block
-      // is long gone — translate/rotate already iterate every block
-      // via computeAt. Lifting the same restriction here so a
-      // chained block can set drawIn (planned "the drawings"
-      // feature builds on this — multi-stage progressive reveal
-      // along a single path).
-      // Resolution rules:
-      //   - Start from the group default.
-      //   - Block 0's explicit drawIn:false overrides group on
-      //     (matches legacy override behavior).
-      //   - First block (any index) with drawIn:true enables;
-      //     its drawInDirection (if set) takes the direction.
-      let drawInFlag = !!(group.defaults && group.defaults.drawIn);
-      let drawInDir  = (group.defaults && group.defaults.drawInDirection) || 'forward';
-      if (Array.isArray(lineDef.behaviors)) {
-        const bp0 = lineDef.behaviors[0] && lineDef.behaviors[0].params;
-        if (bp0 && bp0.drawIn === false) drawInFlag = false;
-        for (let i = 0; i < lineDef.behaviors.length; i++) {
-          const bp = (lineDef.behaviors[i] && lineDef.behaviors[i].params) || {};
-          if (bp.drawIn === true) {
-            drawInFlag = true;
-            if (bp.drawInDirection) drawInDir = bp.drawInDirection;
-            break;
-          }
-        }
-      }
+      // v0.8.91: drawIn moved into the per-frame computeAt pipeline.
+      // Each block carries its own drawIn flag + direction (folded
+      // in from group defaults at block-normalize time, ~line 902).
+      // The runtime now treats drawIn as a per-block effect like
+      // fadeOpacity — last-active-wins composition, progress sourced
+      // from the block's own duration.mode (scroll / time / loop /
+      // pingpong / loopTo). This means drawIn:true on a block with
+      //   - trigger.when='page-load' + duration='time, X secs'
+      //     → draws over X seconds after page load
+      //   - trigger.when='scroll-range' + duration='scroll'
+      //     → legacy behavior (reveal across scroll range)
+      //   - trigger.when='time' / 'click' / 'hover' / 'wait'
+      //     → draws over duration.seconds after trigger fires
+      //   - duration.mode='pingpong'
+      //     → repeatedly draws+undraws over 2 × duration.seconds
+      // The legacy single-tween-bound-to-ScrollTrigger path is gone
+      // (it was the reason "page load + time" didn't draw at all).
 
       const triggerSel = group.trigger || 'body';
       const isPageWide = !group.trigger || group.trigger === 'body' || group.trigger === 'html';
@@ -921,9 +910,22 @@
         // pathFollow has zero tx/ty/rot in the block data, but
         // it needs writeAt every frame to re-evaluate the path
         // position (and to follow a guide that's animating).
+        // v0.8.91: drawIn counts too — when drawIn lives on the
+        // per-frame compute path, a block with only drawIn:true
+        // still needs writeAt to advance the dashoffset.
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0
-            || b.fadeOpacity || b.pathFollow;
+            || b.fadeOpacity || b.pathFollow || b.drawIn;
       });
+      // v0.8.91: any block with drawIn:true → initialize the path's
+      // stroke-dasharray state once, here. After this, computeAt
+      // produces a per-frame dashoffset that writeAt applies.
+      // <image> has no stroke, so the dash setup is path-only.
+      const anyDrawIn = blocks.some(function (b) { return b.drawIn; })
+                    && pathEl.tagName.toLowerCase() === 'path';
+      const firstDrawIn = anyDrawIn
+        ? blocks.find(function (b) { return b.drawIn; })
+        : null;
+      const initialDashDir = (firstDrawIn && firstDrawIn.drawInDirection === 'reverse') ? -1 : 1;
       // v0.8.17: drift accumulators — one entry per block. Holds
       // the running translate contribution from per-scroll-px
       // motion, plus the activation timestamp this drift was
@@ -1729,9 +1731,35 @@
           ty  += pathTy;
           rot += pathRot;
         }
+        // v0.8.91: drawIn composition — last-active-wins, like
+        // opacity. Pre-trigger blocks contribute nothing; the path
+        // keeps the initial-paint hidden state (dashoffset = ±1).
+        // Once a drawIn block is active, dashoffset = dir × (1 − bp):
+        //   bp=0 → dashoffset = dir   (fully hidden, reveal not started)
+        //   bp=1 → dashoffset = 0     (fully visible, reveal complete)
+        // dir is per-block: 'forward' = +1, 'reverse' = -1.
+        // Loop / pingpong durations make bp cycle, so dashoffset
+        // cycles too — repeating draw / undraw passes for free.
+        // null = no active drawIn this frame; writeAt leaves the
+        // attribute alone (keeps prior frame's value, which is the
+        // intent: a finished pass stays at offset=0, a not-yet-started
+        // pass stays at ±1 from initial-paint).
+        let drawInOffset = null;
+        if (anyDrawIn) {
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i];
+            if (!b.drawIn) continue;
+            if (!isBlockActive(i, scrollP, nowSec)) continue;
+            const bp = bps[i];
+            const dir = b.drawInDirection === 'reverse' ? -1 : 1;
+            drawInOffset = dir * (1 - bp);
+            break;
+          }
+        }
         return {
           tx: tx, ty: ty, rot: rot, opacity: opacity,
-          pathFollowActive: pathFollowActive
+          pathFollowActive: pathFollowActive,
+          drawInOffset: drawInOffset
         };
       };
       // hasTime: any block whose progress is wall-clock-driven —
@@ -1747,6 +1775,10 @@
         // ticker so their fire gets painted — the trigger may fire
         // while the user is NOT scrolling, so ScrollTrigger.onUpdate
         // won't kick in on its own.
+        // v0.8.91: drawIn now rides this same hasTime path implicitly:
+        // a block with drawIn + duration.mode !== 'scroll' already
+        // matches the first clause below, so the ticker fires and
+        // writeAt advances the dashoffset over wall clock.
         const when = b.trigger && b.trigger.when;
         return (b.duration && b.duration.mode !== 'scroll')
             || b.driftX || b.driftY
@@ -1770,6 +1802,32 @@
         'translate(' + offX + ' ' + offY + ') rotate(0 ' + originX + ' ' + originY + ')'
       );
 
+      // v0.8.91: drawIn initial-paint. If any block has drawIn:true,
+      // set up the dash machinery once. pathLength="1" normalizes
+      // everything to a unit-length path so dasharray "1 1" plus
+      // dashoffset ±1..0 work regardless of geometric length or any
+      // non-uniform transform — same math the old GSAP tween used.
+      // The wiring is what changed: the offset is now updated each
+      // frame inside writeAt from each active block's bp.
+      //
+      // Initial offset:
+      //   diagMode (Grid toggle) → 0 (fully visible, matches editor).
+      //                            writeAt isn't installed in diagMode
+      //                            so this value sticks.
+      //   normal mode            → ±1 (fully hidden) so the line
+      //                            doesn't flash full-visible at page
+      //                            load before the first tick. Sign
+      //                            follows the FIRST drawIn block's
+      //                            direction.
+      if (anyDrawIn) {
+        pathEl.setAttribute('pathLength',       '1');
+        pathEl.setAttribute('stroke-dasharray', '1 1');
+        pathEl.setAttribute(
+          'stroke-dashoffset',
+          diagMode ? '0' : String(initialDashDir)
+        );
+      }
+
       // Diagnostic mode (Grid toggle on): paths render at their authored
       // d coordinates with identity transform — matches the editor canvas
       // exactly so the author can compare positions. Skip ScrollTrigger
@@ -1789,6 +1847,15 @@
             'rotate(0 ' + originX + ' ' + originY + ')'
           );
           pathEl.setAttribute('opacity', '1');
+          // v0.8.91: reset draw-in to its initial-paint hidden state
+          // so a future requestStart fires a fresh reveal. Without
+          // this, a target stopped mid-reveal then restarted would
+          // jump from its frozen partial-reveal to bp=0's hidden
+          // state on the next tick — better to do it here in one
+          // assignment than tolerate the flicker.
+          if (anyDrawIn) {
+            pathEl.setAttribute('stroke-dashoffset', String(initialDashDir));
+          }
         };
         const writeAt = function (scrollP, nowSec) {
           // v0.8.79: cleanup tween painter. While stopState is set,
@@ -1878,6 +1945,13 @@
           // — net no-op visually). Lets fade blocks just work
           // without an extra "has any fade?" precompute.
           pathEl.setAttribute('opacity', t.opacity);
+          // v0.8.91: drawIn dashoffset. null = no active drawIn
+          // block this frame → leave the attribute alone (a
+          // pre-trigger block keeps the initial-paint hidden state;
+          // a completed block keeps its final visible state).
+          if (t.drawInOffset != null) {
+            pathEl.setAttribute('stroke-dashoffset', String(t.drawInOffset));
+          }
         };
         // v0.8.79: cleanupTicker drives writeAt every frame during
         // a stopState tween, so the cleanup paints smoothly even
@@ -2030,49 +2104,12 @@
         }
       }
 
-      // Draw-in: stroke-dash reveal across the same scroll range.
-      //
-      // KNOWN QUIRK: the forward (begin → end) direction occasionally
-      // shows a faint "phantom" sliver beyond the path's end at low
-      // scroll progress. The reverse (end → begin) direction does not.
-      // Multiple attempts to fix it (pathLength normalization in v0.1.8,
-      // attribute-based animation in v0.1.9) cleared reverse but left
-      // forward affected — almost certainly a browser-level rendering
-      // quirk in how stroke-dasharray + non-scaling-stroke interact
-      // with positive dashoffsets on stretched viewBoxes. The visual
-      // effect is mild and reads as intentional, so it's left as-is
-      // per the project owner's call. The code below is the cleanest
-      // implementation we landed on.
-      //
-      // pathLength="1" normalizes all stroke-length calculations to a
-      // path of length 1, so dasharray "1 1" and dashoffset ±1 → 0
-      // work regardless of the path's actual geometric length or any
-      // non-uniform transform.
-      //
-      // Direction:
-      //   forward  — dashoffset animates from +1 to 0; reveals begin → end.
-      //   reverse  — dashoffset animates from −1 to 0; reveals end → begin.
-      // Diagnostic mode: skip the drawIn reveal so the full path is
-      // visible at scroll=0 (matches the editor's render).
-      // Draw-in: stroke-dash reveal across the same scroll range.
-      // Path-only — <image> has no stroke for dashing, so this is
-      // a no-op there (would just clutter the element with dash
-      // attrs that do nothing).
-      if (drawInFlag && !diagMode && pathEl.tagName.toLowerCase() === 'path') {
-        pathEl.setAttribute('pathLength',       '1');
-        pathEl.setAttribute('stroke-dasharray', '1 1');
-        const dir = drawInDir === 'reverse' ? -1 : 1;
-        pathEl.setAttribute('stroke-dashoffset', String(dir));
-        const tween = gsap.fromTo(pathEl,
-          { attr: { 'stroke-dashoffset': dir } },
-          {
-            attr: { 'stroke-dashoffset': 0 },
-            ease: 'none',
-            scrollTrigger: stConfig
-          }
-        );
-        if (tween && tween.scrollTrigger) ownTriggers.push(tween.scrollTrigger);
-      }
+      // v0.8.91: legacy stand-alone drawIn tween removed — reveal is
+      // now driven by computeAt → writeAt (search 'drawInOffset').
+      // Initial-paint dash setup lives next to the transform init
+      // above. The change makes drawIn work with non-scroll triggers
+      // (page-load + time, click, hover, wait, …) and gives each
+      // block independent timing for free.
     });
 
     // v0.8.79: every line is now registered in objectRegistry. Flush
