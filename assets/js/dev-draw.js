@@ -3578,7 +3578,7 @@
     // from <strong> in this context vs the lighter weight on the
     // Snapshots button picked up a different glyph rendering on
     // some platforms). SVG is identical everywhere.
-    importBtn.innerHTML = '<strong>' + ARROW_SVG_UP_HTML + ' Import SVG file…</strong>'
+    importBtn.innerHTML = '<strong>' + ARROW_SVG_DOWN_HTML + ' Import SVG file…</strong>'
                        + '<span>One or more SVG files. Each top-level shape '
                        + 'becomes a master + an instance in the current class, '
                        + 'dropped into the currently-active group.</span>';
@@ -5586,7 +5586,7 @@
     snapBtn.className = 'ed-library-snapshots-btn';
     // v0.8.40: see ARROW_SVG_* — inline SVG so this arrow and the
     // Import button's arrow render identically across platforms.
-    snapBtn.innerHTML = ARROW_SVG_DOWN_HTML + ' Snapshots';
+    snapBtn.innerHTML = ARROW_SVG_UP_HTML + ' Snapshots';
     snapBtn.title = 'Save / load named copies of every content file';
     snapBtn.addEventListener('click', function () { showSnapshotsDialog(); });
     head.appendChild(snapBtn);
