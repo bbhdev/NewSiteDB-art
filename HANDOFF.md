@@ -224,6 +224,126 @@ Load wipes content/, copies the snapshot's content/ back, then `location.reload(
 Schema-version-locked: a snapshot taken under one schema can't be loaded into
 another.
 
+### Editor UX batch — Parameters, duplication, relationships, label drag (v0.8.89–v0.8.108)
+
+This batch hardened the editor around editing primitives, understanding
+linked objects, and working with dense drawings.
+
+**Parameters section unified (v0.8.93–v0.8.96).** Position X/Y is now
+shown for every object kind (primitives AND poly/path/etc.), not just
+primitives. For non-primitives the position is the bbox top-left in
+absolute coords (was: relative offset, which confused everyone).
+v0.8.96 fixed a compounding-delta bug where manual entry of Position
+X/Y applied the delta on top of the current `positionOffset` instead
+of replacing the absolute value — the writeable target is the offset,
+but the field reads/writes in absolute terms.
+
+**Duplicate object / group from side panel (v0.8.92).** The duplicate
+clones to a new line (and new master if cloning the only instance of
+a master), preserving behaviors. Linked duplicates (Alt-drag of a
+linked instance — see below) share the master.
+
+**Group-delete cascade warning (v0.8.97–v0.8.98).** Deleting a group
+that holds the only home of certain linked instances WOULD cascade-
+delete sibling instances in other classes. The dialog now lists those
+collateral instances and offers a three-way choice: Keep (remove only
+local lines, masters survive), Delete too (cascade), Cancel.
+"Cancel/Delete anyway" was renamed Keep/Delete too because "cancel"
+read as "cancel the whole operation". Companion: the line panel now
+has a Group selector so a linked object can be moved between groups
+without delete-and-recreate.
+
+**Dense-drawing translate affordances (v0.8.99–v0.8.100).** A path
+with many vertex handles had no place to grab for translation — every
+pixel was a handle. Three orthogonal solutions, all shipped:
+
+1. Arrow keys nudge by `state.nudgeStepMM` (default 1 mm, configurable
+   in canvas panel). Shift × 10. Uses `shiftLineBy` + `forSiblingsOf`
+   for ALL-mode fan-out.
+2. Bbox move grip — orange ✥ square positioned JUST OUTSIDE the bbox
+   top-left (offset by its own size + a gap) so it doesn't conflict
+   with the bbox handles that conventionally sit at top-left. Its
+   pointermove writes via `nudgeSelectionBy(dx, dy, {snapshot: false})`
+   to avoid re-rendering handles mid-drag.
+3. Alt-drag on ANY handle translates instead of editing the handle.
+   Implemented as an early `if (e.altKey) return;` in the vertex/
+   primitive handle pointerdown handlers, so the event bubbles to
+   the svg-level translate path. Shift is reserved for multi-select;
+   Alt is the standard "modify gesture" modifier.
+
+**Linked-duplicate naming (v0.8.100).** When the user creates a
+linked duplicate (vs an unlinked copy), the new instance's name gets
+a " linked" suffix (no double-append on repeat), making it visually
+distinct in the sidebar without changing the underlying master name.
+
+**Instance↔master relationships display (v0.8.101–v0.8.108).** The
+big one. To understand a drawing the user needs to see at a glance
+which objects share a master. The system:
+
+- `computeMasterRelationships()` walks `state.pageConfig.useClasses`
+  to count instances per masterId across the active class set. Masters
+  with ≥2 instances anywhere get a sequential letter badge (A, B, …
+  AA, AB) via `letterBadge(idx)`. Singletons get no badge.
+- **Color**: hues are assigned by golden-angle walk
+  `(25° + idx × 137.508°) mod 360`, NOT by hashing the master id.
+  Hashing gave color collisions on consecutive letters; golden-angle
+  guarantees max perceptual separation. Saturation 70% / lightness 32%
+  so white text reads cleanly.
+- **Sidebar row badge**: in the line list, every row gets a circle
+  slot in the right-side column. The badge gates on **in-class**
+  sibling count (filtered to `state.lines`), not the global rel.count.
+  Reason: clicking the badge / master chip selects in-class siblings
+  only, so cross-class siblings would promise something the action
+  can't deliver. Singletons get a hollow neutral gray ring (`.is-empty`)
+  instead of nothing — keeps the column visually aligned, reads as
+  "nothing to say here".
+- **Canvas badge** (`renderLinkBadges`): same gating, same hollow-ring
+  for singletons. Visibility gate: showLabels on → all instances; off
+  → only selected ones. Pointer events disabled (purely informational).
+- **Master chip** in the line panel header: visible only when in-class
+  count ≥ 2; clicking selects every sibling in the current class.
+  Singletons get no chip (no relationship to surface).
+- **Label block now carries the short master ID** as a `[abc12]` prefix
+  between the group tag and the name (v0.8.103). Was originally a
+  separate floating text element next to the canvas badge — moved into
+  the label block for legibility (white background, no hue tint).
+
+**Draggable labels (v0.8.104–v0.8.108) — three SVG gotchas worth
+remembering.**
+
+When labels overlap because objects cluster, the user can drag any
+label to reposition it. `line.labelOffset = {x, y}` (optional,
+additive — no SCHEMA_VERSION bump) stores the displacement; a 2 px
+leader in the label border color connects the moved label back to
+its anchor. Drag the label back within 2 units of the anchor to clear
+the offset (no explicit reset affordance).
+
+The implementation went through three failed attempts. Each surfaced
+a real SVG / DOM gotcha:
+
+1. **`pointer-events: all` on a `<g>` is a no-op.** SVG groups are
+   not painted, so there's no hit surface. The cursor changes
+   (CSS applies) but pointerdown never fires unless a CHILD is hit.
+   Fix: put `pointer-events: all` on the painted `.ed-label-bg-outer`
+   rect. Children with `pointer-events: none` correctly pass through
+   to the rect underneath.
+2. **Calling a layer-clearing render mid-drag kills the gesture.**
+   `renderLabels()` does `labelsG.innerHTML = ''` — that destroyed
+   the dragged `<g>`, released the pointer capture, and silently
+   dropped subsequent pointermove events. Fix: mutate `transform` and
+   the leader's `x2`/`y2` in-place during pointermove; only call
+   `renderLabels()` on pointerup. This pattern applies anywhere else
+   where a drag operates on a re-rendered layer.
+3. **Lazy leader-line creation.** If the label starts at offset (0,0)
+   (no leader yet rendered), the first pointermove has to create the
+   leader element on the fly and insert it into `labelsG` before the
+   label group. Tag with `data-line-id` so subsequent drags find it.
+
+CSS cache-busting note: `assets/css/dev-draw.css` is included with
+`?v=…` in `site/templates/draw.php`, so a `VERSION` bump invalidates
+the cache. If a CSS-only change doesn't visually take effect after
+hard-reload, check that `VERSION` was bumped.
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:
@@ -327,6 +447,15 @@ Past examples where clarifying first was correct:
 - **drawIn legacy single-tween:** v0.8.68 lifted the "block 0 only" data-side
   restriction but the rendering is still single-tween. If you build "the
   drawings" feature you'll be touching this code.
+- **SVG `<g>` is not paintable** — `pointer-events: all` on a group does
+  nothing. Put it on a painted child instead. Cursor CSS on the group
+  inherits visually, so a hand cursor without a working pointerdown is
+  the diagnostic signature. See v0.8.107 label-drag fix.
+- **Don't re-render the dragged layer mid-gesture.** If a pointermove
+  handler triggers a `layerG.innerHTML = ''` re-render, the dragged
+  element disappears, pointer capture releases, and subsequent
+  pointermoves are dropped silently. Mutate the live attributes in
+  place during the gesture; re-render only on pointerup. See v0.8.108.
 
 ## Vocabulary
 
