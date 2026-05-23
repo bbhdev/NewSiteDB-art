@@ -7215,7 +7215,12 @@
       const groupTag = gIdx >= 0 ? 'G' + (gIdx + 1) + ' ' : '';
       const nameSpan = document.createElementNS(SVG_NS, 'tspan');
       nameSpan.setAttribute('x', 6);
-      nameSpan.textContent = groupTag + line.name;
+      // Prefix with the short master ID in brackets when linked, so the
+      // label block carries the master-identity info that used to float
+      // separately next to the canvas badge — same info, readable inside
+      // the high-contrast label background.
+      const midTag = line.masterId ? '[' + shortMasterId(line.masterId) + '] ' : '';
+      nameSpan.textContent = groupTag + midTag + line.name;
       text.appendChild(nameSpan);
       // Second line: the line's center coords, useful for debugging
       // initial-position issues (same coords are visible on the live
@@ -7284,8 +7289,8 @@
       // sitting near the same point. Sized larger than the sidebar
       // pill because there's no space pressure on canvas and the
       // letter must be readable at typical zoom levels.
-      const cx = pos.x - (18 / z);
-      const cy = pos.y - (28 / z);
+      const cx = pos.x - (14 / z);
+      const cy = pos.y - (24 / z);
       const r  = 14 / z;
       const master = state.masters.find(function (m) { return m.id === line.masterId; });
       const g = document.createElementNS(SVG_NS, 'g');
@@ -7310,28 +7315,13 @@
       letter.setAttribute('font-family', 'system-ui, sans-serif');
       letter.textContent = entry.badge;
       g.appendChild(letter);
-      // Master ID label — placed to the LEFT of the badge so the
-      // sequence reads naturally as "[masterId] [badge]" (matches
-      // the spec: "always add the master ID before the badge").
-      const mid = document.createElementNS(SVG_NS, 'text');
-      mid.setAttribute('x', cx - r - (5 / z));
-      mid.setAttribute('y', cy);
-      mid.setAttribute('text-anchor', 'end');
-      mid.setAttribute('dominant-baseline', 'central');
-      mid.setAttribute('fill', 'hsl(' + entry.hue + ', 70%, 28%)');
-      mid.setAttribute('stroke', '#fff');
-      mid.setAttribute('stroke-width', (2.5 / z));
-      mid.setAttribute('paint-order', 'stroke fill');
-      mid.setAttribute('font-weight', '600');
-      mid.setAttribute('font-size', (12 / z));
-      mid.setAttribute('font-family', 'ui-monospace, monospace');
-      mid.textContent = shortMasterId(line.masterId);
-      // Tooltip via <title> so hovering shows the full name + count.
+      // v0.8.103: master ID moved into the label block (see
+      // renderLabels) for legibility. Canvas keeps only the color
+      // circle + letter — the ID itself is read from the label.
       const ttl = document.createElementNS(SVG_NS, 'title');
       ttl.textContent = (master && master.name ? master.name : line.masterId) +
                         ' · ' + entry.count + ' linked';
       g.appendChild(ttl);
-      g.appendChild(mid);
       labelsG.appendChild(g);
     });
   }
