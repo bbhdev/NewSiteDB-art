@@ -8207,33 +8207,24 @@
         }), line.masterId, 'filled'));
       }
     } else {
-      // v0.8.93: Parameters fallback for non-primitive kinds (freehand,
+      // v0.8.94: Parameters fallback for non-primitive kinds (freehand,
       // freehandClosed, manual, bezier, svgImport, line, lineChain, …).
       // These don't have authored params.cx/x — geometry is points or
-      // segments — so the closest equivalent of "position params" is the
-      // per-class positionOffset. Read-only bbox + point count give a
-      // quick health check (handy for verifying duplicate displacement).
+      // segments. We show the instance's *absolute on-canvas position*
+      // (bbox top-left + positionOffset) as a single editable Position
+      // X/Y pair. The fact that the data model decomposes this as
+      // "canonical points + per-class offset" is an implementation
+      // detail; the user sees a single, honest position number.
       wrap.appendChild(divider('Parameters'));
-      const off = line.positionOffset || { dx: 0, dy: 0 };
-      wrap.appendChild(numberField('Position offset X (mm)', off.dx || 0, function (v) {
-        setLinePositionOffset(line.id, 'dx', v);
-        scheduleSnapshot();
-      }));
-      wrap.appendChild(numberField('Position offset Y (mm)', off.dy || 0, function (v) {
-        setLinePositionOffset(line.id, 'dy', v);
-        scheduleSnapshot();
-      }));
-      // Cheap bbox: walk whichever shape representation is present.
-      // line is the raw stored instance here (state.lines), so points/
-      // segments are in canonical-master space — bbox values are
-      // intrinsic-geometry, not resolved-on-class. positionOffset is
-      // shown separately above, so the user can sum the two if needed.
+      // Walk the stored shape to find canonical bbox extents. Stored
+      // instances keep points/segments in canonical-master coords; the
+      // resolver folds in positionOffset later, at render time.
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      let ptCount = 0;
+      let ptCount = 0, hasGeo = false;
       if (Array.isArray(line.points) && line.points.length) {
         line.points.forEach(function (p) {
           const x = +p.x, y = +p.y;
-          if (Number.isFinite(x)) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+          if (Number.isFinite(x)) { hasGeo = true; if (x < minX) minX = x; if (x > maxX) maxX = x; }
           if (Number.isFinite(y)) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
         });
         ptCount = line.points.length;
@@ -8241,21 +8232,49 @@
         line.segments.forEach(function (s) {
           if (s.endpoint) {
             const x = +s.endpoint.x, y = +s.endpoint.y;
-            if (Number.isFinite(x)) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+            if (Number.isFinite(x)) { hasGeo = true; if (x < minX) minX = x; if (x > maxX) maxX = x; }
             if (Number.isFinite(y)) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
           }
         });
         ptCount = line.segments.length;
       }
+      const off = line.positionOffset || { dx: 0, dy: 0 };
+      const offDx = Number.isFinite(off.dx) ? off.dx : 0;
+      const offDy = Number.isFinite(off.dy) ? off.dy : 0;
+      // Editable Position X/Y = canonical_top_left + offset. Edit
+      // handler converts the new absolute value back into an offset
+      // delta so the data model stays consistent. If we have no
+      // geometry (degenerate object), fall back to showing the offset
+      // directly — the bbox would be undefined anyway.
+      if (hasGeo) {
+        wrap.appendChild(numberField('Position X (mm)', minX + offDx, function (v) {
+          const newOffset = (Number.isFinite(v) ? v : 0) - minX;
+          setLinePositionOffset(line.id, 'dx', newOffset);
+          scheduleSnapshot();
+        }));
+        wrap.appendChild(numberField('Position Y (mm)', minY + offDy, function (v) {
+          const newOffset = (Number.isFinite(v) ? v : 0) - minY;
+          setLinePositionOffset(line.id, 'dy', newOffset);
+          scheduleSnapshot();
+        }));
+      } else {
+        // Degenerate: just expose the raw offset so it's still editable.
+        wrap.appendChild(numberField('Position X (mm)', offDx, function (v) {
+          setLinePositionOffset(line.id, 'dx', v); scheduleSnapshot();
+        }));
+        wrap.appendChild(numberField('Position Y (mm)', offDy, function (v) {
+          setLinePositionOffset(line.id, 'dy', v); scheduleSnapshot();
+        }));
+      }
+      // Bounding box (intrinsic, no position component) + point count.
       const info = document.createElement('div');
       info.className = 'ed-field';
       info.style.color = '#888';
       info.style.fontSize = '0.85em';
       info.style.padding = '0.25rem 0';
       const parts = [];
-      if (Number.isFinite(minX) && Number.isFinite(minY)) {
+      if (hasGeo) {
         parts.push('Bounding box ' + (maxX - minX).toFixed(1) + ' × ' + (maxY - minY).toFixed(1) + ' mm');
-        parts.push('origin (' + minX.toFixed(1) + ', ' + minY.toFixed(1) + ')');
       }
       parts.push(ptCount + (Array.isArray(line.segments) && !Array.isArray(line.points) ? ' segments' : ' points'));
       info.textContent = parts.join(' · ');
