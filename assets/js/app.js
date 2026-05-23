@@ -1228,7 +1228,13 @@
             }
           };
           const fire = function () {
-            if (activationState[i] != null) return;
+            // v0.8.89: click/hover are re-fireable. Each event sets
+            // a fresh activation timestamp (restarts the block's
+            // own animation from t=0) and re-runs applyObjectEffects
+            // so cross-object Start commands re-issue on every
+            // click / hover-edge. Without this re-fire, a second
+            // click on a "Wait for click" source did nothing because
+            // activationState[i] was still set from the first fire.
             activationState[i] = performance.now() / 1000;
             applyObjectEffects(b.trigger);
           };
