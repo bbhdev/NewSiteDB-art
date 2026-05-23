@@ -8944,7 +8944,15 @@
     if (line.masterId) {
       const rel = computeMasterRelationships();
       const entry = rel[line.masterId];
-      if (entry && entry.badge && entry.count >= 2) {
+      // v0.8.106: gate by IN-CLASS sibling count, not global count.
+      // The chip's only action is selectSiblingsOfMaster, which only
+      // operates on the current class — so a master with instances in
+      // other classes but a single instance here is functionally a
+      // singleton from this object's perspective.
+      const inClassCount = state.lines.reduce(function (n, l) {
+        return n + (l.masterId === line.masterId ? 1 : 0);
+      }, 0);
+      if (entry && entry.badge && inClassCount >= 2) {
         const master = state.masters.find(function (m) { return m.id === line.masterId; });
         const chip = document.createElement('button');
         chip.type = 'button';
@@ -8960,9 +8968,9 @@
         chip.appendChild(nm);
         const cnt = document.createElement('span');
         cnt.className = 'ed-master-chip-count';
-        cnt.textContent = entry.count + ' linked';
+        cnt.textContent = inClassCount + ' linked';
         chip.appendChild(cnt);
-        chip.title = 'Click to select all ' + entry.count + ' linked instances in this class';
+        chip.title = 'Click to select all ' + inClassCount + ' linked instances in this class';
         chip.addEventListener('click', function () {
           selectSiblingsOfMaster(line.masterId);
         });
