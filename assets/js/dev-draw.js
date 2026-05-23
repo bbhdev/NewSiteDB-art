@@ -3044,9 +3044,16 @@
     let badgeIdx = 0;
     (state.masters || []).forEach(function (m) {
       const c = counts[m.id] || 0;
+      // Hue assignment: badge-bearing masters use a golden-angle walk
+      // (137.508°) starting from a fixed offset — this guarantees
+      // maximum perceptual separation between consecutive letters
+      // (A/B/C never look alike), which the previous hash-mod-360
+      // could not promise. Singletons keep the hash-based hue but it
+      // is unused (no badge is rendered for them).
       const entry = { badge: null, count: c, hue: masterHashHue(m.id) };
       if (c >= 2) {
         entry.badge = letterBadge(badgeIdx);
+        entry.hue = Math.round((25 + badgeIdx * 137.508) % 360);
         badgeIdx += 1;
       }
       map[m.id] = entry;
@@ -3076,7 +3083,9 @@
     const span = document.createElement('span');
     span.className = 'ed-link-badge';
     span.textContent = entry.badge;
-    span.style.background = 'hsl(' + entry.hue + ', 65%, 45%)';
+    // Lightness 32% — dark enough that white text reads cleanly across
+    // every hue (yellow/cyan at 45% washed out the letter).
+    span.style.background = 'hsl(' + entry.hue + ', 70%, 32%)';
     span.title = (master && master.name ? master.name : masterId) +
                  ' · ' + entry.count + ' linked';
     return span;
@@ -7270,11 +7279,14 @@
                      (PRIMITIVES[line.kind] && line.params);
       if (!hasGeo) return;
       const pos = labelPositionFor(line);
-      // Place the badge ABOVE the label anchor so the named label
-      // (when present) doesn't collide. Magic numbers tuned by eye.
-      const cx = pos.x;
-      const cy = pos.y - (16 / z);
-      const r  = 8 / z;
+      // Place the badge ABOVE-LEFT of the label anchor with enough
+      // clearance that it doesn't overlay the vertex/bbox handles
+      // sitting near the same point. Sized larger than the sidebar
+      // pill because there's no space pressure on canvas and the
+      // letter must be readable at typical zoom levels.
+      const cx = pos.x - (18 / z);
+      const cy = pos.y - (28 / z);
+      const r  = 14 / z;
       const master = state.masters.find(function (m) { return m.id === line.masterId; });
       const g = document.createElementNS(SVG_NS, 'g');
       g.setAttribute('class', 'ed-link-canvas-badge');
@@ -7283,9 +7295,9 @@
       circ.setAttribute('cx', cx);
       circ.setAttribute('cy', cy);
       circ.setAttribute('r',  r);
-      circ.setAttribute('fill',   'hsl(' + entry.hue + ', 65%, 45%)');
-      circ.setAttribute('stroke', '#000');
-      circ.setAttribute('stroke-width', (0.6 / z));
+      circ.setAttribute('fill',   'hsl(' + entry.hue + ', 70%, 32%)');
+      circ.setAttribute('stroke', '#fff');
+      circ.setAttribute('stroke-width', (1.4 / z));
       g.appendChild(circ);
       const letter = document.createElementNS(SVG_NS, 'text');
       letter.setAttribute('x', cx);
@@ -7294,7 +7306,7 @@
       letter.setAttribute('dominant-baseline', 'central');
       letter.setAttribute('fill', '#fff');
       letter.setAttribute('font-weight', '700');
-      letter.setAttribute('font-size', (10 / z));
+      letter.setAttribute('font-size', (17 / z));
       letter.setAttribute('font-family', 'system-ui, sans-serif');
       letter.textContent = entry.badge;
       g.appendChild(letter);
@@ -7302,12 +7314,16 @@
       // sequence reads naturally as "[masterId] [badge]" (matches
       // the spec: "always add the master ID before the badge").
       const mid = document.createElementNS(SVG_NS, 'text');
-      mid.setAttribute('x', cx - r - (4 / z));
+      mid.setAttribute('x', cx - r - (5 / z));
       mid.setAttribute('y', cy);
       mid.setAttribute('text-anchor', 'end');
       mid.setAttribute('dominant-baseline', 'central');
-      mid.setAttribute('fill', 'hsl(' + entry.hue + ', 65%, 35%)');
-      mid.setAttribute('font-size', (9 / z));
+      mid.setAttribute('fill', 'hsl(' + entry.hue + ', 70%, 28%)');
+      mid.setAttribute('stroke', '#fff');
+      mid.setAttribute('stroke-width', (2.5 / z));
+      mid.setAttribute('paint-order', 'stroke fill');
+      mid.setAttribute('font-weight', '600');
+      mid.setAttribute('font-size', (12 / z));
       mid.setAttribute('font-family', 'ui-monospace, monospace');
       mid.textContent = shortMasterId(line.masterId);
       // Tooltip via <title> so hovering shows the full name + count.

@@ -473,12 +473,17 @@ body.editor {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.3em;
-  height: 1.3em;
+  width: 1.65em;
+  height: 1.65em;
   border-radius: 50%;
-  font-size: 0.72em;
-  font-weight: 700;
+  font-size: 0.9em;
+  font-weight: 800;
   color: #fff;
+  /* Subtle dark shadow keeps the letter readable even when the hue
+     happens to land on a perceptually-light color (yellow/green) — the
+     inline background is set at 32% lightness which mostly handles
+     contrast, this is belt-and-braces for edge cases. */
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.6);
   line-height: 1;
   font-family: system-ui, sans-serif;
   background: #555; /* fallback — overridden inline by hue */
