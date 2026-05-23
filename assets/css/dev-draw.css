@@ -489,6 +489,15 @@ body.editor {
   background: #555; /* fallback — overridden inline by hue */
   user-select: none;
 }
+/* v0.8.107: placeholder for objects with no in-class linked siblings.
+   Same footprint as a colored badge so the right-column stays aligned,
+   but rendered as a hollow neutral ring — "nothing to say here". */
+.ed-link-badge.is-empty {
+  background: transparent !important;
+  border: 1px solid #4a4a4a;
+  /* slightly smaller inner area since the border adds outside */
+  box-sizing: border-box;
+}
 
 /* Master chip — sits in the line panel directly under the meta row.
    Click target: when the master has ≥2 instances, clicking selects
@@ -1378,11 +1387,14 @@ body.editor input[type="range"] {
    a dark or light background. The rect gets a double border (black
    outer + white inner) for the same reason. Toggled by the Labels
    button in the toolbar. */
-/* v0.8.105: .ed-label group accepts pointer events (drag-to-move
-   labels). Children stay pointer-events:none so the text/bg don't
-   each handle separately; the group catches the event. */
+/* v0.8.107: Label drag — pointer events MUST be on the painted
+   background rect, not the <g> (SVG groups aren't painted and so
+   can't be hit). Text stays pointer-events:none so click-and-drag
+   on a letter still grabs through to the rect underneath. The
+   pointerdown handler is bound to the <g> but events bubble up
+   from the rect, so the handler fires correctly. */
 #draw-surface .ed-label {
-  pointer-events: all;
+  pointer-events: none; /* container — children opt in */
 }
 #draw-surface .ed-label-text {
   fill: #000;
@@ -1395,7 +1407,11 @@ body.editor input[type="range"] {
 #draw-surface .ed-label-bg-outer {
   stroke-width: 3;
   vector-effect: non-scaling-stroke;
-  pointer-events: none;
+  pointer-events: all;
+  cursor: grab;
+}
+#draw-surface .ed-label-bg-outer:active {
+  cursor: grabbing;
 }
 #draw-surface .ed-label-coords {
   font-size: 0.8em;

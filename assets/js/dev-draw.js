@@ -3075,19 +3075,30 @@
    * with a hsl background, white letter inside, and a tooltip
    * showing "<master.name> · N linked".
    */
-  function buildLinkBadgeHTML(masterId, rel) {
-    if (!masterId || !rel) return null;
-    const entry = rel[masterId];
-    if (!entry || !entry.badge) return null;
-    const master = state.masters.find(function (m) { return m.id === masterId; });
+  function buildLinkBadgeHTML(masterId, rel, inClassCount) {
+    if (!masterId) return null;
+    const entry = rel ? rel[masterId] : null;
+    // v0.8.107: gate the colored badge by in-class count (matches the
+    // master chip's "siblings" semantic). Cross-class siblings give a
+    // global entry.badge but if there's only one instance HERE, the
+    // letter is misleading — render a neutral empty circle instead.
+    // The placeholder keeps the column visually aligned ("nothing to
+    // say here" rather than empty space jumping rows around).
+    const linked = entry && entry.badge && (inClassCount == null || inClassCount >= 2);
     const span = document.createElement('span');
-    span.className = 'ed-link-badge';
-    span.textContent = entry.badge;
-    // Lightness 32% — dark enough that white text reads cleanly across
-    // every hue (yellow/cyan at 45% washed out the letter).
-    span.style.background = 'hsl(' + entry.hue + ', 70%, 32%)';
-    span.title = (master && master.name ? master.name : masterId) +
-                 ' · ' + entry.count + ' linked';
+    span.className = 'ed-link-badge' + (linked ? '' : ' is-empty');
+    if (linked) {
+      span.textContent = entry.badge;
+      span.style.background = 'hsl(' + entry.hue + ', 70%, 32%)';
+      const master = state.masters.find(function (m) { return m.id === masterId; });
+      span.title = (master && master.name ? master.name : masterId) +
+                   ' · ' + (inClassCount != null ? inClassCount : entry.count) + ' linked';
+    } else {
+      span.textContent = '';
+      // Neutral mid-gray, no letter — reads as "no relationship to show".
+      span.style.background = 'transparent';
+      span.title = 'No linked siblings in this class';
+    }
     return span;
   }
 
@@ -8048,6 +8059,13 @@
     // pass gets the same badge map (cheap, but pointless to redo
     // per line).
     const rel = computeMasterRelationships();
+    // v0.8.107: in-class instance counts per masterId. Used by the
+    // row badge to decide colored-letter vs neutral-empty rendering.
+    const inClassCounts = {};
+    state.lines.forEach(function (l) {
+      if (!l.masterId) return;
+      inClassCounts[l.masterId] = (inClassCounts[l.masterId] || 0) + 1;
+    });
     state.groups.forEach(function (g, gIdx) {
       const isOpen = !!state.openGroupIds[g.id];
       const li = document.createElement('li');
@@ -8305,7 +8323,8 @@
           // instances (linked); single-instance objects stay
           // uncluttered. Lives in the right column alongside the
           // override marker and behavior count.
-          const linkBadge = buildLinkBadgeHTML(line.masterId, rel);
+          const linkBadge = buildLinkBadgeHTML(line.masterId, rel,
+                                                 inClassCounts[line.masterId] || 0);
           if (linkBadge) rightWrap.appendChild(linkBadge);
           rightWrap.appendChild(overrideTag);
           // v0.8.52: always render the behavior badge — "-" for zero
