@@ -1174,6 +1174,44 @@
         // the activationState guard makes the loser a no-op.
         if (when === 'click' || when === 'hover') {
           const easyHit = !!(b.trigger && b.trigger.treatAsFilled);
+          // v0.8.88: pointer-events on the path controls how
+          // isPointInFill/isPointInStroke interpret paint. The
+          // lines-layer's CSS `pointer-events: none` INHERITS
+          // down to every path — and per SVG spec, with
+          // pointer-events:none on the element, isPointInFill
+          // returns false even when fill is painted. So even a
+          // visibly-filled circle was reporting inFill=false in
+          // v0.8.87 diagnostic.
+          //
+          // Override via inline style (presentation attributes
+          // lose to CSS specificity, so setAttribute doesn't
+          // override the inherited none — only style does).
+          //   - easyHit:  pointer-events:all  → isPointInFill is
+          //               geometric, returns true for any point
+          //               inside the closed area regardless of
+          //               paint. Lets unfilled outlines act as
+          //               filled for hit purposes.
+          //   - default:  pointer-events:auto → isPointInFill
+          //               respects paint. Filled circle hits on
+          //               disc; unfilled outline hits only on
+          //               stroke.
+          // Restored on teardown.
+          //
+          // We ALWAYS check isPointInFill || isPointInStroke now
+          // — the easyHit flag controls hit-test semantics via
+          // pointer-events, not via which API to call. This
+          // gives the right behavior in every fill/stroke combo
+          // without per-mode branching in the JS.
+          //
+          // The path having pointer-events != none doesn't make
+          // it intercept clicks natively here: .layout sits at
+          // z-index:1 above the layer, so the layout div
+          // captures clicks at the layer's pixels anyway. Our
+          // document-level capture listener is what actually
+          // fires; the per-path pointer-events only affects the
+          // SVG hit-test APIs.
+          const prevStylePE = pathEl.style.pointerEvents;
+          pathEl.style.pointerEvents = easyHit ? 'all' : 'auto';
           const pointHits = function (clientX, clientY) {
             try {
               const svg = pathEl.ownerSVGElement;
@@ -1184,10 +1222,7 @@
               pt.x = clientX;
               pt.y = clientY;
               const local = pt.matrixTransform(ctm.inverse());
-              if (easyHit) {
-                return pathEl.isPointInFill(local) || pathEl.isPointInStroke(local);
-              }
-              return pathEl.isPointInStroke(local);
+              return pathEl.isPointInFill(local) || pathEl.isPointInStroke(local);
             } catch (e) {
               return false;
             }
@@ -1231,6 +1266,11 @@
             if (onMove) {
               try { document.removeEventListener('mousemove', onMove, true); } catch (e) {}
             }
+            // v0.8.88: restore inline pointer-events so a later
+            // rearm/reconfiguration doesn't inherit our 'all'/'auto'
+            // override if the trigger kind changes away from
+            // click/hover.
+            try { pathEl.style.pointerEvents = prevStylePE; } catch (e) {}
           });
           return;
         }
