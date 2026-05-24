@@ -8754,38 +8754,48 @@
     const ids = state.selectedIds.slice().sort();
     const key = ids.join('|');
     if (key === lastMultiSpawnKey) return;
-    // Reset tracker so a future selection that matches *previous*
-    // would still re-fire after going through single/empty first.
-    // (Drop-through handled by clearing on single-select below.)
-    const open = window.PanelManager.listOpen();
-    // Objects that already have a pinned panel can be skipped.
-    const pinnedObjIds = {};
-    open.forEach(function (p) {
-      if (p.type === 'object' && p.pinned && p.objectId) pinnedObjIds[p.objectId] = true;
-    });
-    const toSpawn = ids.filter(function (id) { return !pinnedObjIds[id]; });
-    if (toSpawn.length === 0) {
-      lastMultiSpawnKey = key;
-      return;
-    }
-    const limit = state.multiSelectPanelLimit | 0;
-    if (toSpawn.length > limit) {
-      const ok = window.confirm(
-        'Open ' + toSpawn.length + ' object panels (one per selected object)?\n\n' +
-        'Your current limit is ' + limit + '. You can change it in Settings ' +
-        '("Multi-select panel limit").'
-      );
-      if (!ok) { lastMultiSpawnKey = key; return; }
-    }
-    // Cascade positions slightly so panels don't stack identically.
-    // open() already does +24px per existing same-type — we just call
-    // it N times and let it handle the cascade.
-    toSpawn.forEach(function (id) {
-      try {
-        window.PanelManager.open('object', { objectId: id, pinned: true });
-      } catch (e) { console.error(e); }
-    });
+    // Set immediately so re-renders during the deferred work don't
+    // re-enter this function for the same set. If the user cancels
+    // the confirm, we still don't re-prompt — they made a choice.
     lastMultiSpawnKey = key;
+    // v0.8.120: defer past the next paint so the new selection
+    // (canvas highlights + sidebar bulk panel) is visible BEFORE
+    // any confirm() blocks the UI thread. Without this, the user
+    // hits the dialog without seeing what they selected.
+    requestAnimationFrame(function () {
+      // Re-check: selection may have changed (or class switched)
+      // between scheduling and firing.
+      const liveIds = state.selectedIds.slice().sort();
+      if (liveIds.join('|') !== key) return;
+      const open = window.PanelManager.listOpen();
+      // Objects that already have a pinned panel can be skipped.
+      const pinnedObjIds = {};
+      open.forEach(function (p) {
+        if (p.type === 'object' && p.pinned && p.objectId) pinnedObjIds[p.objectId] = true;
+      });
+      const toSpawn = liveIds.filter(function (id) { return !pinnedObjIds[id]; });
+      if (toSpawn.length === 0) return;
+      const limit = state.multiSelectPanelLimit | 0;
+      if (toSpawn.length > limit) {
+        const ok = window.confirm(
+          'Open ' + toSpawn.length + ' object panels (one per selected object)?\n\n' +
+          'Your current limit is ' + limit + '. You can change it in Settings ' +
+          '("Multi-select panel limit").'
+        );
+        if (!ok) return;
+      }
+      // Each open() bumps the same-type count, so the next call
+      // sees N+1 existing and cascades further along the diagonal.
+      // Panels open PINNED on purpose: unpinned 'object' panels
+      // follow the primary selection, which would make every panel
+      // show the same one object instead of the per-object split
+      // this fan-out exists for.
+      toSpawn.forEach(function (id) {
+        try {
+          window.PanelManager.open('object', { objectId: id, pinned: true });
+        } catch (e) { console.error(e); }
+      });
+    });
   }
   // Hook to clear the multi-spawn memo whenever selection drops out
   // of multi-select — wired into renderSelectionPanel below by
@@ -12198,8 +12208,15 @@
       // derive x/y from parent via hard-stick, and openBehaviorPanel-
       // ForBlock always passes explicit opts.x/y anyway).
       const lp = loadLastPos()[type] || null;
-      const fallbackX = (lp && !opts.parentId) ? lp.x : (defPos.x + dx);
-      const fallbackY = (lp && !opts.parentId) ? lp.y : (defPos.y + dx);
+      // v0.8.120: cascade offset (+dx) must apply on top of lastPos
+      // too, otherwise multi-spawning N panels in quick succession
+      // stacks them all at the same remembered position. The dx
+      // count is based on already-existing same-type panels at
+      // call time, so each subsequent open() in a forEach loop
+      // sees one more existing panel and lands further along the
+      // diagonal.
+      const fallbackX = ((lp && !opts.parentId) ? lp.x : defPos.x) + dx;
+      const fallbackY = ((lp && !opts.parentId) ? lp.y : defPos.y) + dx;
       const fallbackW = lp ? lp.w : defSz.w;
       const fallbackH = lp ? lp.h : defSz.h;
       const panelState = {
