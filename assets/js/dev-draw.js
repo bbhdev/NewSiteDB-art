@@ -8721,24 +8721,25 @@
     // param edits.
     if (window.PanelManager) {
       try { window.PanelManager.notifyDataChanged(); } catch (e) { console.error(e); }
-      // v0.8.112: auto-spawn the 'object' floating panel on single-
-      // select if no unpinned one already exists. Existing unpinned
-      // panels just re-render via notifySelection above. Closing
-      // the panel is a deliberate "done editing for now" signal —
-      // we don't re-spawn until the user closes-then-reselects.
-      if (wasSingleSelect) {
-        const open = window.PanelManager.listOpen();
-        const hasFollower = open.some(function (p) {
-          return p.type === 'object' && !p.pinned;
-        });
-        if (!hasFollower) {
-          try { window.PanelManager.open('object'); } catch (e) { console.error(e); }
-        }
-      } else if (state.selectedIds.length > 1) {
-        // v0.8.119: Step 2d — multi-select fan-out. Spawn one pinned
-        // 'object' panel per selected object so they can be compared
-        // side by side. Confirmation gate applied when the count
-        // exceeds state.multiSelectPanelLimit.
+      // v0.8.123: single-select no longer auto-spawns a follower
+      // panel. A first click on an object is now JUST selection — the
+      // user might be about to drag it, extend the selection, or open
+      // the panel; we don't know yet. Opening the panel is now an
+      // explicit gesture handled by the canvas pointerup code:
+      //   - plain re-click on an already-selected single object →
+      //     toggle the follower panel (open if closed, close if open)
+      //   - cmd-click on any object → toggle its follower panel in
+      //     one shot (selects it too if it wasn't already)
+      // The original auto-spawn was friendly the first time but
+      // intrusive every subsequent click; the explicit gesture fixes
+      // that without losing the one-click-to-edit feeling for users
+      // who want it (cmd-click).
+      //
+      // Multi-select fan-out (the Step 2d behavior) is intentionally
+      // kept — it triggers on shift-click extending the selection
+      // past 1, which is already an explicit "I want to work with
+      // multiple objects" gesture.
+      if (state.selectedIds.length > 1) {
         spawnMultiSelectObjectPanels();
       }
     }
@@ -11203,6 +11204,35 @@
   // target's rotateOriginX / Y, then mode exits.
   let settingOrigin = null; // { type: 'group'|'line', id: '…' }
 
+  // v0.8.123: snapshot of state.selectedIds at the moment of
+  // pointerdown, so pointerup can tell "this object was ALREADY
+  // selected before this gesture started" (→ re-click → toggle
+  // panel) apart from "this gesture itself just selected the
+  // object" (→ first click → select only, don't open panel).
+  // Without this distinction, every first-click-on-empty-area
+  // would also be a re-click at pointerup (because the implicit
+  // selectOnly in pointerdown made the object selected by the
+  // time pointerup runs).
+  let selectionAtPointerDown = [];
+
+  // v0.8.123: toggle the unpinned 'object' follower panel. Opens
+  // one if none exists; closes the existing one otherwise. The
+  // follower auto-binds to state.selectedIds[0] so we don't need
+  // to pass an objectId — caller guarantees the target object is
+  // the current single selection.
+  function toggleObjectFollowerPanel() {
+    if (!window.PanelManager) return;
+    const opn = window.PanelManager.listOpen();
+    const follower = opn.find(function (p) {
+      return p.type === 'object' && !p.pinned;
+    });
+    if (follower) {
+      try { window.PanelManager.close(follower.id); } catch (e) { console.error(e); }
+    } else {
+      try { window.PanelManager.open('object'); } catch (e) { console.error(e); }
+    }
+  }
+
   function startSetRotateOrigin(target) {
     settingOrigin = target;
     canvasWrap.classList.add('ed-set-origin-mode');
@@ -11254,6 +11284,10 @@
     pointerActive = true;
     downClient = { x: e.clientX, y: e.clientY };
     downTarget = e.target;
+    // v0.8.123: snapshot BEFORE any implicit selectOnly below, so
+    // pointerup can distinguish re-click on already-selected (toggle
+    // panel) from first-click that just selected the object.
+    selectionAtPointerDown = state.selectedIds.slice();
 
     // If the user pressed inside any selected object's hit area, and
     // no modifier is held, this drag is going to translate every
@@ -11282,21 +11316,11 @@
     if (!modifier) {
       if (pressedSelected) {
         armMove = true;
-        // v0.8.116: clicking an already-selected single object should
-        // re-open its floating panel if the user previously closed it.
-        // Clicks that don't change selection don't go through
-        // renderSelectionPanel, so the auto-spawn logic there never
-        // fires. Mirror that logic inline here for the "click on
-        // already-selected single object" case.
-        if (state.selectedIds.length === 1 && window.PanelManager) {
-          const opn = window.PanelManager.listOpen();
-          const hasFollower = opn.some(function (p) {
-            return p.type === 'object' && !p.pinned;
-          });
-          if (!hasFollower) {
-            try { window.PanelManager.open('object'); } catch (ex) { console.error(ex); }
-          }
-        }
+        // v0.8.123: removed the inline panel auto-open. Clicking an
+        // already-selected object is now a "panel toggle" gesture
+        // handled at pointerup (only if the user didn't actually
+        // drag). The pointerup plain-click branch checks
+        // selectionAtPointerDown to know this was a re-click.
       } else if (linesAtPoint.length) {
         // Implicit click → select the topmost line at the cursor.
         // Mirror the sidebar-click side-effects so the editor's
@@ -11501,15 +11525,27 @@
         const ids = document.elementsFromPoint(downClient.x, downClient.y)
           .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
           .map(function (el) { return el.dataset.lineId; });
-        const modifier = e.shiftKey || e.metaKey || e.ctrlKey;
+        // v0.8.123: split shift (multi-select extend) from cmd/ctrl
+        // (panel toggle). Previously both were lumped into a single
+        // "modifier" branch that toggled selection membership; cmd
+        // is now repurposed as a one-shot "select + open panel" /
+        // "close panel" shortcut, leaving shift as the multi-select
+        // gesture.
+        const shift = e.shiftKey;
+        const cmd   = (e.metaKey || e.ctrlKey) && !e.shiftKey;
+        const modifier = shift || cmd;
 
         let changed = false;
-        if (modifier) {
-          // Cmd/Shift-click toggles the topmost hit object in/out of
-          // the selection. Empty-area modifier-click is a no-op (don't
-          // accidentally deselect everything when the user just missed
-          // a target). Cycle state is reset so a subsequent plain
-          // click starts a fresh cycle.
+        // v0.8.123: track whether this gesture is a "panel toggle"
+        // — set true by plain re-click on the same single selection
+        // and by cmd-click. Acted on after the selection-render
+        // block so the panel sees the post-click selection state.
+        let togglePanel = false;
+        if (shift) {
+          // Shift-click toggles the topmost hit object in/out of the
+          // selection (multi-select extend). Empty-area shift-click
+          // is a no-op (don't accidentally deselect when the user
+          // just missed a target). Cycle state is reset.
           clickCycle = null;
           if (ids.length) {
             const hit = ids[0];
@@ -11520,6 +11556,26 @@
               state.activeGroupId = sel.groupId;
             }
             changed = true;
+          }
+        } else if (cmd) {
+          // v0.8.123: cmd-click — one-shot panel toggle for the
+          // topmost hit object. If the object isn't selected, also
+          // make it the sole selection (the follower panel binds to
+          // selectedIds[0], so it has to be selected for the panel
+          // to point at it). Empty-area cmd-click is a no-op.
+          clickCycle = null;
+          if (ids.length) {
+            const hit = ids[0];
+            if (!isSelected(hit)) {
+              selectOnly(hit);
+              const sel = state.lines.find(function (l) { return l.id === hit; });
+              if (sel && sel.groupId) {
+                state.openGroupIds[sel.groupId] = true;
+                state.activeGroupId = sel.groupId;
+              }
+              changed = true;
+            }
+            togglePanel = true;
           }
         } else {
           // Plain click: replace selection with one cycled-to id, or
@@ -11549,6 +11605,23 @@
             }
           }
           changed = !arraysEqual(before, state.selectedIds);
+          // v0.8.123: re-click on the already-selected single
+          // object toggles its follower panel. "Re-click" means the
+          // pre-pointerdown selection was already exactly this
+          // single object — we compare against selectionAtPointerDown
+          // (not `before`, which already reflects the pointerdown's
+          // implicit selectOnly for the first-click-into-empty
+          // case). Without that distinction, every first click that
+          // implicitly selects an object would also fire the toggle
+          // at pointerup, defeating the "first click = select only"
+          // intent.
+          if (newSelection &&
+              selectionAtPointerDown.length === 1 &&
+              selectionAtPointerDown[0] === newSelection &&
+              state.selectedIds.length === 1 &&
+              state.selectedIds[0] === newSelection) {
+            togglePanel = true;
+          }
         }
 
         if (changed) {
@@ -11562,6 +11635,11 @@
           // works.
           renderSelectionPanel(modifier ? { suppressScroll: true } : undefined);
         }
+        // v0.8.123: fire the panel toggle AFTER any selection render
+        // so the panel sees the post-click selection state when it
+        // opens. close() doesn't depend on selection, so order is
+        // fine for that branch too.
+        if (togglePanel) toggleObjectFollowerPanel();
       }
     }
     downClient = null;

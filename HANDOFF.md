@@ -494,6 +494,45 @@ the numeric input.
 blocks the UI. `lastMultiSpawnKey` is set immediately at the top of
 `spawnMultiSelectObjectPanels` so the deferred body can't re-fire.
 
+**v0.8.123 (explicit panel-open gesture)**: removed the single-select
+auto-spawn of the 'object' follower panel. First click on an object
+now JUST selects — the user might be about to drag, extend the
+selection, or open the panel, and the previous "open on every fresh
+selection" behavior fought drag-to-move and shift-extend. The panel
+is now opened by an explicit gesture handled in the canvas pointerup
+code:
+
+- Plain re-click on the *already-selected single* object → toggle
+  the follower panel (open if closed, close if open).
+- Cmd-click (alone, no shift) on any object → one-shot select +
+  panel toggle. If the hit object isn't selected, it becomes the
+  sole selection; the follower panel is then toggled. Cmd-click on
+  an already-selected object with panel open → closes it.
+- Shift-click keeps its existing multi-select extend semantics
+  (toggleInSelection) — split out from the old combined
+  "modifier-click" branch.
+- Empty-area click → clear selection (unchanged).
+
+Mechanics: `selectionAtPointerDown` is snapshotted at pointerdown,
+*before* any implicit selectOnly fires for the first-click-on-an-
+unselected-line case. pointerup compares the post-click new
+selection against that pre-down snapshot; the toggle only fires
+when the object was already selected before the gesture started,
+which cleanly separates first-click-to-select from re-click-to-
+toggle. `toggleObjectFollowerPanel` is the shared helper. The
+v0.8.116 inline auto-open inside the pointerdown `pressedSelected`
+branch was removed — its job is now done by the pointerup toggle.
+
+Multi-select fan-out (Step 2d) is intentionally kept — shift-click
+extending past 1 is itself an explicit "I want to work with multiple
+objects" gesture, so auto-spawning per-object panels there is still
+aligned with user intent.
+
+**v0.8.122 (double-rAF for multi-spawn confirm)**: single rAF in
+v0.8.120 fired pre-paint, so `confirm()` still beat the highlight to
+the screen. Double rAF defers the body to the start of the next
+frame, guaranteed after the current frame paints.
+
 **v0.8.121 (lastPos drift fix)**: applying `+dx` to `lastPos` (v0.8.120)
 created a subtle drift bug — a cascaded multi-spawn panel closed in
 place would persist `lastPos + 24px`, then the next spawn would cascade
