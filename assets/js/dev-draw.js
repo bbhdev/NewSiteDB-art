@@ -8735,13 +8735,13 @@
       // that without losing the one-click-to-edit feeling for users
       // who want it (cmd-click).
       //
-      // Multi-select fan-out (the Step 2d behavior) is intentionally
-      // kept — it triggers on shift-click extending the selection
-      // past 1, which is already an explicit "I want to work with
-      // multiple objects" gesture.
-      if (state.selectedIds.length > 1) {
-        spawnMultiSelectObjectPanels();
-      }
+      // v0.8.125: multi-select fan-out is no longer auto-fired.
+      // shift-click in the canvas or in the sidebar is "extend the
+      // selection," not "open N panels" — those are independent
+      // intents. spawnMultiSelectObjectPanels is kept as a helper
+      // (callable from an explicit "open panels for all" button if
+      // we wire one up later) but renderSelectionPanel no longer
+      // calls it.
     }
   }
 
@@ -11204,23 +11204,52 @@
   // target's rotateOriginX / Y, then mode exits.
   let settingOrigin = null; // { type: 'group'|'line', id: '…' }
 
-  // v0.8.123 / v0.8.124: toggle the unpinned 'object' follower
-  // panel. Opens
-  // one if none exists; closes the existing one otherwise. The
-  // follower auto-binds to state.selectedIds[0] so we don't need
-  // to pass an objectId — caller guarantees the target object is
-  // the current single selection.
-  function toggleObjectFollowerPanel() {
-    if (!window.PanelManager) return;
-    const opn = window.PanelManager.listOpen();
-    const follower = opn.find(function (p) {
-      return p.type === 'object' && !p.pinned;
+  // v0.8.125: toggle the 'object' panel for a specific objectId.
+  // The caller passes the opt-clicked id explicitly so we can
+  // recognize "this object already has a panel" regardless of
+  // whether it's pinned (objectId-bound) or unpinned (follower
+  // showing the primary selection). Without this, opt-clicking an
+  // object that already has a pinned panel (e.g. from a prior
+  // multi-select fan-out) spawned a *second* panel for the same
+  // object — the unpinned-only check missed the pinned one.
+  //
+  // Match rules:
+  //   - pinned panel with objectId === target → "for this object"
+  //   - unpinned follower AND state.selectedIds[0] === target → also
+  //     "for this object" (the follower is currently showing it)
+  //
+  // If a matching panel exists, close it. Otherwise open:
+  //   - the unpinned follower if target is the primary selection
+  //     (the natural single-selection case)
+  //   - a pinned panel bound to target if it isn't (opt-clicking a
+  //     non-primary object in a multi-select is rare but we should
+  //     show the panel for the object the user actually clicked,
+  //     not for whatever happens to be selectedIds[0])
+  function toggleObjectPanelFor(objectId) {
+    if (!window.PanelManager || !objectId) return;
+    const opn = window.PanelManager.listOpen()
+      .filter(function (p) { return p.type === 'object'; });
+    const primary = state.selectedIds[0];
+    const pinnedForObj = opn.find(function (p) {
+      return p.pinned && p.objectId === objectId;
     });
-    if (follower) {
-      try { window.PanelManager.close(follower.id); } catch (e) { console.error(e); }
-    } else {
-      try { window.PanelManager.open('object'); } catch (e) { console.error(e); }
+    if (pinnedForObj) {
+      try { window.PanelManager.close(pinnedForObj.id); } catch (e) { console.error(e); }
+      return;
     }
+    const follower = opn.find(function (p) { return !p.pinned; });
+    if (follower && primary === objectId) {
+      try { window.PanelManager.close(follower.id); } catch (e) { console.error(e); }
+      return;
+    }
+    // No existing panel for this object — open one.
+    try {
+      if (primary === objectId) {
+        window.PanelManager.open('object');
+      } else {
+        window.PanelManager.open('object', { objectId: objectId, pinned: true });
+      }
+    } catch (e) { console.error(e); }
   }
 
   function startSetRotateOrigin(target) {
@@ -11526,7 +11555,10 @@
         let changed = false;
         // v0.8.124: panel toggle is fired immediately on the
         // pointerup that recognized opt-click — no rAF, no setTimeout.
-        let togglePanel = false;
+        // v0.8.125: track the hit id so the toggle can match panels
+        // by objectId (including pinned ones), not just look for the
+        // global unpinned follower.
+        let togglePanelFor = null;
         if (alt) {
           // Opt-click: one-shot panel toggle for the topmost hit
           // object. If the object isn't selected, make it the sole
@@ -11544,7 +11576,7 @@
               }
               changed = true;
             }
-            togglePanel = true;
+            togglePanelFor = hit;
           }
         } else if (multi) {
           // Shift/Cmd/Ctrl-click toggles the topmost hit object in/
@@ -11608,7 +11640,7 @@
         // so the panel sees the post-click selection state when it
         // opens. close() doesn't depend on selection, so order is
         // fine for that branch too.
-        if (togglePanel) toggleObjectFollowerPanel();
+        if (togglePanelFor) toggleObjectPanelFor(togglePanelFor);
       }
     }
     downClient = null;

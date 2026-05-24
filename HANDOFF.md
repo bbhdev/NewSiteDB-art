@@ -494,6 +494,45 @@ the numeric input.
 blocks the UI. `lastMultiSpawnKey` is set immediately at the top of
 `spawnMultiSelectObjectPanels` so the deferred body can't re-fire.
 
+**v0.8.125 (no auto fan-out, objectId-aware opt-click)**: two fixes
+to the gesture model:
+
+1. Removed the auto multi-select fan-out call inside
+   `renderSelectionPanel`. shift-click in the canvas or sidebar to
+   extend a selection no longer auto-spawns N pinned object panels —
+   selection and panel-opening are independent intents.
+   `spawnMultiSelectObjectPanels` is kept as a callable helper for a
+   future explicit "open panels for all" affordance, but never auto-
+   fires.
+
+2. opt-click panel toggle now matches by `objectId` instead of just
+   "is there an unpinned follower." Previously, opt-clicking an
+   object that already had a pinned panel (e.g. from an earlier
+   manual pin, or from the now-removed auto fan-out) opened a
+   *second* unpinned panel for the same object. New logic in
+   `toggleObjectPanelFor(objectId)`:
+   - if a pinned panel exists with `objectId === target` → close it
+   - else if the unpinned follower exists AND target is
+     `selectedIds[0]` → close it
+   - else open one — unpinned if target is the primary selection,
+     pinned-for-target otherwise
+   
+   The call site passes the actually-clicked id (the topmost hit at
+   the click point), not `selectedIds[0]`, so opt-clicking a non-
+   primary object in a multi-select opens a panel for the object
+   the user actually pointed at.
+
+**v0.8.124 (opt-click for panel, cmd/shift back to multi-select)**:
+corrected v0.8.123's modifier map per user feedback. cmd-click and
+shift-click are standard multi-select extend gestures and shouldn't
+have been repurposed. opt (alt) is now the panel-toggle modifier.
+The "plain re-click reopens a closed panel" gesture from v0.8.123
+was dropped — too implicit, conflicts with selection-cycle. Final
+map: alt → panel toggle; shift/cmd/ctrl → multi-select extend;
+plain → pure selection cycle, no panel side effects. No deferred
+logic in the click path — toggle fires immediately on the pointerup
+that recognized opt-click.
+
 **v0.8.123 (explicit panel-open gesture)**: removed the single-select
 auto-spawn of the 'object' follower panel. First click on an object
 now JUST selects — the user might be about to drag, extend the
