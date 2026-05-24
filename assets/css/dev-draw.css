@@ -1918,7 +1918,9 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
    panels (orange). Pinned still wins via specificity in case the
    user pins a block panel (the .is-pinned rule below this one). */
 .ed-floating-panel.ed-floating-panel--block {
-  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 2px #3ba89e;
+  /* v0.8.115: brighter + thicker — the muted teal was hard to tell
+     apart from the blue base ring at a glance. */
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 3px #4fe0c8;
 }
 .ed-floating-panel.ed-floating-panel--block.is-pinned {
   box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 3px #e08a2c;

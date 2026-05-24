@@ -9736,8 +9736,20 @@
     if (has('drawIn'))                          effects.push('draw');
     // Cross-object side effects (trigger side) — every block can
     // optionally stop or start another object when it fires.
-    if (trigger.stopObjectId)  effects.push('stops other');
-    if (trigger.startObjectId) effects.push('starts other');
+    // v0.8.115: resolve masterId → human-readable name so the row
+    // says "stops Brown dotty" instead of an opaque "stops other".
+    // Falls back to the masterId itself if name lookup misses (e.g.
+    // stale id pointing at a deleted master).
+    function objLabelFor(masterId) {
+      if (!masterId) return '';
+      const m = state.masters && state.masters.find(function (x) { return x.id === masterId; });
+      if (m && m.name) return m.name;
+      const ln = state.lines && state.lines.find(function (l) { return l.masterId === masterId; });
+      if (ln && ln.name) return ln.name;
+      return masterId;
+    }
+    if (trigger.stopObjectId)  effects.push('stops ' + objLabelFor(trigger.stopObjectId));
+    if (trigger.startObjectId) effects.push('starts ' + objLabelFor(trigger.startObjectId));
     const effect = effects.length ? effects.join(' + ') : '(no effect)';
     return 'Block ' + n + ' · ' + triggerLabel + ' · ' + effect;
   }
@@ -12054,14 +12066,22 @@
       const p = panels[panelId]; if (!p) return;
       // v0.8.113: cascade-close children. Block-detail panels are
       // owned by their object panel — closing the parent removes
-      // them. Walk a snapshot of ids first so the recursive close
-      // doesn't mutate while iterating.
+      // them. Snapshot the child id list FIRST, then delete the
+      // panel itself, THEN recurse.
+      // v0.8.115: delete-before-recurse + self-exclude. The old order
+      // (recurse → delete) opened a stack-overflow door if any latent
+      // parentId cycle existed (panel A.parent=B and B.parent=A, or
+      // A.parent=A from a bad persist/restore): close(A) found B as
+      // child → close(B) found A as child (A still in `panels`) →
+      // close(A) again → infinite. Deleting A from `panels` before
+      // recursing breaks the cycle. The `pid !== panelId` exclusion
+      // is a second belt for the self-reference case specifically.
       const childIds = Object.keys(panels).filter(function (pid) {
-        return panels[pid].state.parentId === panelId;
+        return pid !== panelId && panels[pid].state.parentId === panelId;
       });
-      childIds.forEach(function (cid) { close(cid); });
       if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
       delete panels[panelId];
+      childIds.forEach(function (cid) { close(cid); });
       persist();
     }
 

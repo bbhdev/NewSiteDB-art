@@ -433,6 +433,34 @@ Visual: the base panel ring is now the former pinned blue (2px,
 `#4f8acb`) so floaters stand off the canvas clearly; pinned panels
 take a stronger warm accent (3px, `#e08a2c`).
 
+**v0.8.114 / v0.8.115 (testing-feedback batch on Step 2b+c)**
+
+- `behaviorAutoName` audit: derived effect list from a grep of every
+  key written by `updateBehaviorParam` / `updateBehaviorTrigger`.
+  Surfaces multi-effect blocks ("translate + stops Brown dotty") and
+  cross-object side effects (`trigger.stopObjectId` / `startObjectId`)
+  that the v0.8.113 detector missed. Stop/start effects resolve the
+  target's master.name (falls back to lines.name, then masterId).
+- Always-on multi-block additive paragraph collapsed into an ⓘ icon
+  on the BEHAVIORS divider (native `title` tooltip). New
+  `.ed-help-icon` style for reuse.
+- Group picker stages + confirms before calling `moveLinesToGroup`;
+  cancel reverts via `notifyDataChanged`. Single-membership model
+  confirmed (no multi-group UI needed).
+- Hard-stick parent/child panels: dragging any panel in a tree moves
+  every member by the same delta (root resolved via
+  `findRootPanelId`, snapshot via `collectTree`, applied in
+  `onMove`). Resizing a parent slides children to track the new
+  right edge (`repositionChildrenOf`).
+- Behavior-block panels get a brighter teal ring (3px, `#4fe0c8`) via
+  `.ed-floating-panel--block` so the child/peer distinction reads at
+  a glance.
+- **Bug fix in `close()`**: delete-before-recurse + self-exclude. Old
+  order (recurse → delete) opened a stack-overflow door if any
+  parentId cycle ever existed in `panels`. Cycles shouldn't be
+  reachable today, but defense-in-depth — the recursive close should
+  not depend on `parentId` graph correctness.
+
 Next sub-step: Step 2d — multi-select spawns one object panel per
 selected object (with a settings-driven warning threshold).
 Subsequent steps: Parameters / Style / Master info as separate
