@@ -11204,18 +11204,8 @@
   // target's rotateOriginX / Y, then mode exits.
   let settingOrigin = null; // { type: 'group'|'line', id: '…' }
 
-  // v0.8.123: snapshot of state.selectedIds at the moment of
-  // pointerdown, so pointerup can tell "this object was ALREADY
-  // selected before this gesture started" (→ re-click → toggle
-  // panel) apart from "this gesture itself just selected the
-  // object" (→ first click → select only, don't open panel).
-  // Without this distinction, every first-click-on-empty-area
-  // would also be a re-click at pointerup (because the implicit
-  // selectOnly in pointerdown made the object selected by the
-  // time pointerup runs).
-  let selectionAtPointerDown = [];
-
-  // v0.8.123: toggle the unpinned 'object' follower panel. Opens
+  // v0.8.123 / v0.8.124: toggle the unpinned 'object' follower
+  // panel. Opens
   // one if none exists; closes the existing one otherwise. The
   // follower auto-binds to state.selectedIds[0] so we don't need
   // to pass an objectId — caller guarantees the target object is
@@ -11284,10 +11274,6 @@
     pointerActive = true;
     downClient = { x: e.clientX, y: e.clientY };
     downTarget = e.target;
-    // v0.8.123: snapshot BEFORE any implicit selectOnly below, so
-    // pointerup can distinguish re-click on already-selected (toggle
-    // panel) from first-click that just selected the object.
-    selectionAtPointerDown = state.selectedIds.slice();
 
     // If the user pressed inside any selected object's hit area, and
     // no modifier is held, this drag is going to translate every
@@ -11316,11 +11302,10 @@
     if (!modifier) {
       if (pressedSelected) {
         armMove = true;
-        // v0.8.123: removed the inline panel auto-open. Clicking an
-        // already-selected object is now a "panel toggle" gesture
-        // handled at pointerup (only if the user didn't actually
-        // drag). The pointerup plain-click branch checks
-        // selectionAtPointerDown to know this was a re-click.
+        // v0.8.123/124: removed the inline panel auto-open.
+        // Opening the follower panel is now an explicit opt-click
+        // gesture handled at pointerup. Plain click on a selected
+        // object just arms drag-to-move (no panel side effect).
       } else if (linesAtPoint.length) {
         // Implicit click → select the topmost line at the cursor.
         // Mirror the sidebar-click side-effects so the editor's
@@ -11525,44 +11510,28 @@
         const ids = document.elementsFromPoint(downClient.x, downClient.y)
           .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
           .map(function (el) { return el.dataset.lineId; });
-        // v0.8.123: split shift (multi-select extend) from cmd/ctrl
-        // (panel toggle). Previously both were lumped into a single
-        // "modifier" branch that toggled selection membership; cmd
-        // is now repurposed as a one-shot "select + open panel" /
-        // "close panel" shortcut, leaving shift as the multi-select
-        // gesture.
-        const shift = e.shiftKey;
-        const cmd   = (e.metaKey || e.ctrlKey) && !e.shiftKey;
-        const modifier = shift || cmd;
+        // v0.8.124: modifier roles, corrected from v0.8.123:
+        //   - shift / cmd / ctrl → multi-select extend (standard)
+        //   - alt (opt)          → panel toggle for the hit object
+        //   - plain click        → pure selection cycle, NO panel
+        //                          side effects (drag, shift-extend,
+        //                          and click-cycle all stay clean)
+        // The "re-click opens a closed panel" gesture from v0.8.123
+        // was dropped — too implicit to discover, and conflicts with
+        // the natural "click around to navigate selection" rhythm.
+        // The follower panel is now strictly opt-click summoned.
+        const alt   = e.altKey;
+        const multi = (e.shiftKey || e.metaKey || e.ctrlKey) && !alt;
 
         let changed = false;
-        // v0.8.123: track whether this gesture is a "panel toggle"
-        // — set true by plain re-click on the same single selection
-        // and by cmd-click. Acted on after the selection-render
-        // block so the panel sees the post-click selection state.
+        // v0.8.124: panel toggle is fired immediately on the
+        // pointerup that recognized opt-click — no rAF, no setTimeout.
         let togglePanel = false;
-        if (shift) {
-          // Shift-click toggles the topmost hit object in/out of the
-          // selection (multi-select extend). Empty-area shift-click
-          // is a no-op (don't accidentally deselect when the user
-          // just missed a target). Cycle state is reset.
-          clickCycle = null;
-          if (ids.length) {
-            const hit = ids[0];
-            toggleInSelection(hit);
-            const sel = state.lines.find(function (l) { return l.id === hit; });
-            if (sel && sel.groupId) {
-              state.openGroupIds[sel.groupId] = true;
-              state.activeGroupId = sel.groupId;
-            }
-            changed = true;
-          }
-        } else if (cmd) {
-          // v0.8.123: cmd-click — one-shot panel toggle for the
-          // topmost hit object. If the object isn't selected, also
-          // make it the sole selection (the follower panel binds to
-          // selectedIds[0], so it has to be selected for the panel
-          // to point at it). Empty-area cmd-click is a no-op.
+        if (alt) {
+          // Opt-click: one-shot panel toggle for the topmost hit
+          // object. If the object isn't selected, make it the sole
+          // selection first (the follower binds to selectedIds[0]).
+          // Empty-area opt-click is a no-op.
           clickCycle = null;
           if (ids.length) {
             const hit = ids[0];
@@ -11577,9 +11546,26 @@
             }
             togglePanel = true;
           }
+        } else if (multi) {
+          // Shift/Cmd/Ctrl-click toggles the topmost hit object in/
+          // out of the selection (multi-select extend). Empty-area
+          // multi-click is a no-op (don't accidentally deselect when
+          // the user just missed a target). Cycle state is reset.
+          clickCycle = null;
+          if (ids.length) {
+            const hit = ids[0];
+            toggleInSelection(hit);
+            const sel = state.lines.find(function (l) { return l.id === hit; });
+            if (sel && sel.groupId) {
+              state.openGroupIds[sel.groupId] = true;
+              state.activeGroupId = sel.groupId;
+            }
+            changed = true;
+          }
         } else {
           // Plain click: replace selection with one cycled-to id, or
-          // clear it if the click hit empty canvas.
+          // clear it if the click hit empty canvas. NO panel side
+          // effects — opt-click is the gesture for that.
           let newSelection = null;
           if (ids.length) {
             const sameZone = clickCycle &&
@@ -11605,23 +11591,6 @@
             }
           }
           changed = !arraysEqual(before, state.selectedIds);
-          // v0.8.123: re-click on the already-selected single
-          // object toggles its follower panel. "Re-click" means the
-          // pre-pointerdown selection was already exactly this
-          // single object — we compare against selectionAtPointerDown
-          // (not `before`, which already reflects the pointerdown's
-          // implicit selectOnly for the first-click-into-empty
-          // case). Without that distinction, every first click that
-          // implicitly selects an object would also fire the toggle
-          // at pointerup, defeating the "first click = select only"
-          // intent.
-          if (newSelection &&
-              selectionAtPointerDown.length === 1 &&
-              selectionAtPointerDown[0] === newSelection &&
-              state.selectedIds.length === 1 &&
-              state.selectedIds[0] === newSelection) {
-            togglePanel = true;
-          }
         }
 
         if (changed) {
@@ -11633,9 +11602,9 @@
           // panel for a fresh single-selection. Plain click keeps the
           // scroll so "click an object, see its properties" still
           // works.
-          renderSelectionPanel(modifier ? { suppressScroll: true } : undefined);
+          renderSelectionPanel((multi || alt) ? { suppressScroll: true } : undefined);
         }
-        // v0.8.123: fire the panel toggle AFTER any selection render
+        // v0.8.124: fire the panel toggle AFTER any selection render
         // so the panel sees the post-click selection state when it
         // opens. close() doesn't depend on selection, so order is
         // fine for that branch too.
