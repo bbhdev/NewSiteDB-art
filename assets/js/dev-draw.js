@@ -5516,6 +5516,24 @@
       state.nudgeStepMM = v;
       try { localStorage.setItem('ed-nudge-step-mm', String(v)); } catch (e) {}
     }));
+    // v0.8.110: floating-panel system launcher (Step 1 stub). Until
+    // real panel types are migrated in subsequent steps, this single
+    // button opens the demo panel so the user can validate drag /
+    // resize / pin / close / per-class persistence end-to-end.
+    const launchRow = document.createElement('div');
+    launchRow.style.marginTop = '0.5rem';
+    launchRow.style.paddingTop = '0.5rem';
+    launchRow.style.borderTop = '1px dashed #3a3a3a';
+    const launchBtn = document.createElement('button');
+    launchBtn.type = 'button';
+    launchBtn.className = 'ed-mini';
+    launchBtn.textContent = '🪟 Demo floating panel';
+    launchBtn.title = 'Open the Step-1 demo panel — validates the floating-panel framework. Drag the header to move, drag the corner to resize, 📌 to pin to the current selection, ✕ to close. Position persists per class.';
+    launchBtn.addEventListener('click', function () {
+      if (window.PanelManager) window.PanelManager.open('demo');
+    });
+    launchRow.appendChild(launchBtn);
+    canvasFieldsEl.appendChild(launchRow);
   }
 
   /**
@@ -5592,6 +5610,12 @@
       b.classList.toggle('is-active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+    // v0.8.110: floating panels are keyed per (pageId, classId).
+    // Tear the current set down and rebuild from the new class's
+    // persisted snapshot so each class remembers its own layout.
+    if (window.PanelManager) {
+      try { window.PanelManager.restore(); } catch (e) { console.error(e); }
+    }
   }
 
   /**
@@ -8611,6 +8635,13 @@
     // on the SAME object doesn't re-trigger the scroll (the user
     // already saw that panel via the modifier-click).
     lastScrolledSelectionId = primaryId;
+    // v0.8.110: fan out to the floating-panel system. Every
+    // selection mutation in the editor already converges on
+    // renderSelectionPanel, so this single hook is enough to
+    // keep selection-following panels in sync.
+    if (window.PanelManager) {
+      try { window.PanelManager.notifySelection(); } catch (e) { console.error(e); }
+    }
   }
 
   function renderMultiSelectionPanel() {
@@ -11369,4 +11400,433 @@
     console.log('[_dumpAllBlocks]', JSON.stringify(out, null, 2));
     return out;
   };
+
+  // =========================================================
+  // v0.8.110 — Floating-panel system (Step 1: infra only)
+  // ---------------------------------------------------------
+  // Goal: give the editor a fleet of free-floating, draggable,
+  // non-modal panels that can be opened on demand and reused
+  // for the side-panel migration in later steps. Step 1 ships
+  // ONLY the framework + a stub 'demo' panel. No existing UI
+  // moves yet — we validate drag/resize/pin/close/persist
+  // end-to-end before any user-visible migration.
+  //
+  // Concepts:
+  //   - PANEL_REGISTRY: { type → { title, defaultSize, defaultPos,
+  //                                followsSelection?, render(host, ctx) } }
+  //   - Per-panel state: { id, type, objectId?, pinned, x, y, w, h, z }
+  //   - Persistence: localStorage key per (pageId, classId). Panel
+  //     positions, sizes, and pinned-object bindings survive reload.
+  //   - notifySelection(ids): unpinned panels that followSelection
+  //     re-render against the new selection; pinned panels ignore it.
+  //   - Z-stack: clicking any panel header bumps it to top.
+  // =========================================================
+
+  const PANEL_REGISTRY = {
+    // Stub demo panel used to validate the system. Subsequent
+    // steps register real panels (Behaviors, Parameters, ...).
+    demo: {
+      title: 'Demo panel',
+      defaultSize: { w: 320, h: 220 },
+      defaultPos:  { x: 120, y: 120 },
+      followsSelection: true,
+      render: function (bodyEl, ctx) {
+        // ctx: { panelState, primarySelectionId, primaryLine, allSelectedIds }
+        bodyEl.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.style.fontFamily = 'ui-monospace, monospace';
+        wrap.style.fontSize = '0.85em';
+        wrap.style.lineHeight = '1.5';
+        const sel = ctx.allSelectedIds || [];
+        const primary = ctx.primaryLine;
+        const lines = [
+          'pageId:  ' + state.pageId,
+          'classId: ' + state.classId,
+          'mode:    ' + state.mode,
+          'selected: ' + sel.length + (sel.length ? ' [' + sel.join(', ') + ']' : ''),
+          ctx.panelState.objectId
+            ? '📌 pinned to: ' + ctx.panelState.objectId
+            : 'follows current selection'
+        ];
+        if (primary) {
+          lines.push('—');
+          lines.push('name:   ' + (primary.name || '(unnamed)'));
+          lines.push('master: ' + (primary.masterId || '(none)'));
+          lines.push('group:  ' + (primary.groupId || '(none)'));
+        }
+        wrap.textContent = lines.join('\n');
+        wrap.style.whiteSpace = 'pre';
+        bodyEl.appendChild(wrap);
+      }
+    }
+  };
+
+  const PanelManager = (function () {
+    const hostEl = document.getElementById('panel-host');
+    // panelId → { state, frameEl, bodyEl, headerEl, titleEl, subEl, pinBtn }
+    const panels = {};
+    let zCounter = 1000;
+    let nextId   = 1;
+
+    function storageKey() {
+      return 'ed-panels-' + state.pageId + '-' + state.classId;
+    }
+
+    function persist() {
+      try {
+        const snapshot = Object.keys(panels).map(function (pid) {
+          const p = panels[pid].state;
+          return {
+            id: p.id, type: p.type, objectId: p.objectId || null,
+            pinned: !!p.pinned, x: p.x, y: p.y, w: p.w, h: p.h, z: p.z
+          };
+        });
+        localStorage.setItem(storageKey(), JSON.stringify(snapshot));
+      } catch (e) { /* private mode / quota — ignore */ }
+    }
+
+    function loadPersisted() {
+      try {
+        const raw = localStorage.getItem(storageKey());
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) { return []; }
+    }
+
+    // Clamp a position so the title bar always remains visible
+    // (≥ 40px of header inside viewport on each side). Panels
+    // dragged off-screen would otherwise become unreachable.
+    function clampPos(x, y, w) {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const minX = 40 - w, maxX = vw - 40;
+      const minY = 0,      maxY = vh - 28;
+      return {
+        x: Math.max(minX, Math.min(maxX, x)),
+        y: Math.max(minY, Math.min(maxY, y))
+      };
+    }
+
+    function bringToFront(panelId) {
+      const p = panels[panelId]; if (!p) return;
+      p.state.z = ++zCounter;
+      p.frameEl.style.zIndex = String(p.state.z);
+      persist();
+    }
+
+    function buildFrame(panelState) {
+      const reg = PANEL_REGISTRY[panelState.type];
+      const frame = document.createElement('div');
+      frame.className = 'ed-floating-panel' + (panelState.pinned ? ' is-pinned' : '');
+      frame.style.left   = panelState.x + 'px';
+      frame.style.top    = panelState.y + 'px';
+      frame.style.width  = panelState.w + 'px';
+      frame.style.height = panelState.h + 'px';
+      frame.style.zIndex = String(panelState.z);
+      frame.dataset.panelId = panelState.id;
+
+      const header = document.createElement('div');
+      header.className = 'ed-floating-panel-header';
+
+      const title = document.createElement('div');
+      title.className = 'ed-floating-panel-title';
+      title.textContent = reg ? reg.title : panelState.type;
+      header.appendChild(title);
+
+      const sub = document.createElement('span');
+      sub.className = 'ed-floating-panel-subtitle';
+      header.appendChild(sub);
+
+      const pinBtn = document.createElement('button');
+      pinBtn.type = 'button';
+      pinBtn.className = 'ed-floating-panel-btn' + (panelState.pinned ? ' is-on' : '');
+      pinBtn.title = panelState.pinned
+        ? 'Unpin — panel will follow the current selection again'
+        : 'Pin — keep showing the currently-bound object even when selection changes';
+      pinBtn.textContent = '📌';
+      pinBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        togglePin(panelState.id);
+      });
+      header.appendChild(pinBtn);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'ed-floating-panel-btn';
+      closeBtn.title = 'Close panel';
+      closeBtn.textContent = '✕';
+      closeBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        close(panelState.id);
+      });
+      header.appendChild(closeBtn);
+
+      const body = document.createElement('div');
+      body.className = 'ed-floating-panel-body';
+
+      const resize = document.createElement('div');
+      resize.className = 'ed-floating-panel-resize';
+      resize.title = 'Drag to resize';
+
+      frame.appendChild(header);
+      frame.appendChild(body);
+      frame.appendChild(resize);
+
+      // Bring-to-front on any click inside frame (not just header).
+      frame.addEventListener('pointerdown', function () {
+        bringToFront(panelState.id);
+      });
+
+      // Header drag — move the panel.
+      header.addEventListener('pointerdown', function (e) {
+        // Ignore drags that start on the buttons.
+        if (e.target.closest('.ed-floating-panel-btn')) return;
+        e.preventDefault();
+        const startX = e.clientX, startY = e.clientY;
+        const origX  = panelState.x, origY = panelState.y;
+        header.setPointerCapture(e.pointerId);
+        function onMove(ev) {
+          const c = clampPos(origX + (ev.clientX - startX),
+                             origY + (ev.clientY - startY),
+                             panelState.w);
+          panelState.x = c.x; panelState.y = c.y;
+          frame.style.left = c.x + 'px';
+          frame.style.top  = c.y + 'px';
+        }
+        function onUp() {
+          header.removeEventListener('pointermove', onMove);
+          header.removeEventListener('pointerup', onUp);
+          persist();
+        }
+        header.addEventListener('pointermove', onMove);
+        header.addEventListener('pointerup', onUp);
+      });
+
+      // Corner resize.
+      resize.addEventListener('pointerdown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX, startY = e.clientY;
+        const origW = panelState.w, origH = panelState.h;
+        resize.setPointerCapture(e.pointerId);
+        function onMove(ev) {
+          const w = Math.max(220, origW + (ev.clientX - startX));
+          const h = Math.max(120, origH + (ev.clientY - startY));
+          panelState.w = w; panelState.h = h;
+          frame.style.width  = w + 'px';
+          frame.style.height = h + 'px';
+        }
+        function onUp() {
+          resize.removeEventListener('pointermove', onMove);
+          resize.removeEventListener('pointerup', onUp);
+          persist();
+        }
+        resize.addEventListener('pointermove', onMove);
+        resize.addEventListener('pointerup', onUp);
+      });
+
+      return { frame: frame, header: header, body: body, title: title, sub: sub, pinBtn: pinBtn };
+    }
+
+    // Build the render context handed to a panel's render(). Folds
+    // in the current selection so panels that don't pin always show
+    // fresh data. Pinned panels look up their bound objectId instead.
+    function buildContext(panelState) {
+      const allSel = state.selectedIds.slice();
+      let primaryId = null;
+      if (panelState.pinned && panelState.objectId) {
+        primaryId = panelState.objectId;
+      } else {
+        primaryId = allSel.length ? allSel[allSel.length - 1] : null;
+      }
+      let primaryLine = null;
+      if (primaryId) {
+        // Search across all classes — pinned objectIds may not be
+        // present in the current class (cross-class browsing).
+        Object.keys(state.byClass).some(function (cid) {
+          const ls = state.byClass[cid] && state.byClass[cid].lines;
+          if (!ls) return false;
+          const found = ls.find(function (l) { return l.id === primaryId; });
+          if (found) { primaryLine = found; return true; }
+          return false;
+        });
+      }
+      return {
+        panelState: panelState,
+        primarySelectionId: primaryId,
+        primaryLine: primaryLine,
+        allSelectedIds: allSel
+      };
+    }
+
+    function renderPanel(panelId) {
+      const p = panels[panelId]; if (!p) return;
+      const reg = PANEL_REGISTRY[p.state.type];
+      if (!reg) return;
+      // Subtitle reflects the binding mode so the user can see at a
+      // glance whether the panel is locked to one object or live-
+      // following selection.
+      if (p.state.pinned && p.state.objectId) {
+        p.sub.textContent = '· 📌 ' + String(p.state.objectId).slice(0, 8);
+      } else if (reg.followsSelection) {
+        const sel = state.selectedIds;
+        const last = sel.length ? sel[sel.length - 1] : null;
+        p.sub.textContent = last ? '· follows: ' + String(last).slice(0, 8) : '· no selection';
+      } else {
+        p.sub.textContent = '';
+      }
+      try {
+        reg.render(p.body, buildContext(p.state));
+      } catch (e) {
+        p.body.innerHTML = '';
+        const err = document.createElement('div');
+        err.style.color = '#f88';
+        err.textContent = 'Panel render error: ' + (e && e.message ? e.message : String(e));
+        p.body.appendChild(err);
+        console.error('[PanelManager] render error', p.state, e);
+      }
+    }
+
+    function open(type, opts) {
+      opts = opts || {};
+      const reg = PANEL_REGISTRY[type];
+      if (!reg) { console.warn('[PanelManager] unknown panel type', type); return null; }
+      // Cascade subsequent same-type panels by +20px so they don't
+      // stack precisely on top of each other.
+      const existingSameType = Object.keys(panels).filter(function (pid) {
+        return panels[pid].state.type === type;
+      }).length;
+      const dx = existingSameType * 24;
+      const defPos = reg.defaultPos  || { x: 100, y: 100 };
+      const defSz  = reg.defaultSize || { w: 320, h: 240 };
+      const panelState = {
+        id:       opts.id       || ('p' + (nextId++)),
+        type:     type,
+        objectId: opts.objectId || null,
+        pinned:   !!opts.pinned,
+        x:        opts.x != null ? opts.x : (defPos.x + dx),
+        y:        opts.y != null ? opts.y : (defPos.y + dx),
+        w:        opts.w || defSz.w,
+        h:        opts.h || defSz.h,
+        z:        ++zCounter
+      };
+      const clamped = clampPos(panelState.x, panelState.y, panelState.w);
+      panelState.x = clamped.x; panelState.y = clamped.y;
+
+      const built = buildFrame(panelState);
+      panels[panelState.id] = {
+        state: panelState, frameEl: built.frame, headerEl: built.header,
+        bodyEl: built.body, body: built.body, sub: built.sub, pinBtn: built.pinBtn
+      };
+      hostEl.appendChild(built.frame);
+      renderPanel(panelState.id);
+      persist();
+      return panelState.id;
+    }
+
+    function close(panelId) {
+      const p = panels[panelId]; if (!p) return;
+      if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
+      delete panels[panelId];
+      persist();
+    }
+
+    function togglePin(panelId) {
+      const p = panels[panelId]; if (!p) return;
+      if (p.state.pinned) {
+        p.state.pinned = false;
+        p.state.objectId = null;
+      } else {
+        p.state.pinned = true;
+        // Bind to the current primary selection at pin time. If
+        // nothing is selected, pin still flips but objectId stays
+        // null (the panel just sits empty until something is bound).
+        const sel = state.selectedIds;
+        p.state.objectId = sel.length ? sel[sel.length - 1] : null;
+      }
+      p.frameEl.classList.toggle('is-pinned', p.state.pinned);
+      p.pinBtn.classList.toggle('is-on', p.state.pinned);
+      p.pinBtn.title = p.state.pinned
+        ? 'Unpin — panel will follow the current selection again'
+        : 'Pin — keep showing the currently-bound object even when selection changes';
+      renderPanel(panelId);
+      persist();
+    }
+
+    // Called by the editor when the selection changes. Unpinned
+    // panels of types that follow selection re-render against the
+    // new primary; pinned panels keep showing their bound object.
+    function notifySelection() {
+      Object.keys(panels).forEach(function (pid) {
+        const p = panels[pid];
+        const reg = PANEL_REGISTRY[p.state.type];
+        if (!reg) return;
+        if (p.state.pinned) {
+          // Pinned panels still need to re-render if their bound
+          // object's data changed elsewhere — but that's covered by
+          // notifyDataChanged (not yet used in step 1). For a pure
+          // selection change a pinned panel stays put.
+          return;
+        }
+        if (reg.followsSelection) renderPanel(pid);
+      });
+    }
+
+    // Called on bulk data changes (snapshot restore, class switch,
+    // etc.) — re-render every panel so pinned objects refresh too.
+    function notifyDataChanged() {
+      Object.keys(panels).forEach(function (pid) { renderPanel(pid); });
+    }
+
+    // Wipe and rebuild from persisted snapshot. Called on boot and
+    // any time the (pageId, classId) tuple changes — panel state is
+    // scoped per class, since class switches today change what's
+    // selectable anyway.
+    function restore() {
+      // Tear down anything currently shown.
+      Object.keys(panels).forEach(function (pid) {
+        const p = panels[pid];
+        if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
+        delete panels[pid];
+      });
+      const snap = loadPersisted();
+      snap.forEach(function (rec) {
+        if (!PANEL_REGISTRY[rec.type]) return; // stale type
+        open(rec.type, {
+          id: rec.id, objectId: rec.objectId, pinned: rec.pinned,
+          x: rec.x, y: rec.y, w: rec.w, h: rec.h
+        });
+      });
+    }
+
+    function listOpen() {
+      return Object.keys(panels).map(function (pid) {
+        return Object.assign({}, panels[pid].state);
+      });
+    }
+
+    return {
+      open: open, close: close, togglePin: togglePin,
+      bringToFront: bringToFront,
+      notifySelection: notifySelection,
+      notifyDataChanged: notifyDataChanged,
+      restore: restore,
+      listOpen: listOpen,
+      // Exposed for late additions of new panel types from outside
+      // this IIFE (debug consoles, plugin-style extensions).
+      register: function (type, def) { PANEL_REGISTRY[type] = def; },
+      _registry: PANEL_REGISTRY
+    };
+  })();
+
+  // Expose globally for diagnostic / future-step access. The actual
+  // hooks into selection / class-switch live as direct calls inside
+  // renderSelectionPanel and switchClass — wrapping a `function`
+  // declaration in strict mode is not reliable, and direct calls
+  // are simpler to grep for.
+  window.PanelManager = PanelManager;
+
+  // Boot: restore any panels persisted for this (pageId, classId).
+  // Done at the very end so PANEL_REGISTRY + state are fully set up.
+  try { PanelManager.restore(); } catch (e) { console.error('[PanelManager] restore failed', e); }
 })();

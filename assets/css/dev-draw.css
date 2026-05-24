@@ -1846,3 +1846,109 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 1.1em; line-height: 1;
 }
 .ed-load-banner-dismiss:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+/* v0.8.110: floating-panel system.
+   The host is a fixed full-viewport layer that DOES NOT capture
+   pointer events — panels inside opt back in individually. This
+   keeps the canvas/toolbar fully interactive everywhere a panel
+   isn't physically painted, including the gaps between panels. */
+.ed-panel-host {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 200;
+}
+.ed-floating-panel {
+  position: absolute;
+  pointer-events: auto;
+  background: #1f1f1f;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  min-height: 120px;
+  color: #e4e4e4;
+  font-size: 0.88em;
+  /* Resize is handled by our own corner grip — the native CSS
+     resize handle would only work on textareas and wouldn't
+     coexist with our drag/persist code. */
+  overflow: hidden;
+}
+.ed-floating-panel.is-pinned {
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45), 0 0 0 2px #4f8acb;
+}
+.ed-floating-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  background: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+  cursor: grab;
+  user-select: none;
+  flex: 0 0 auto;
+}
+.ed-floating-panel-header:active { cursor: grabbing; }
+.ed-floating-panel-title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  font-size: 0.88em;
+  color: #d8d8d8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-floating-panel-subtitle {
+  color: #9c9c9c;
+  font-weight: 400;
+  font-size: 0.85em;
+  margin-left: 0.3rem;
+}
+.ed-floating-panel-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #b8b8b8;
+  width: 22px; height: 22px;
+  border-radius: 3px;
+  padding: 0;
+  font-size: 0.95em;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ed-floating-panel-btn:hover { background: #3a3a3a; color: #fff; }
+.ed-floating-panel-btn.is-on { color: #4f8acb; }
+.ed-floating-panel-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0.5rem 0.6rem;
+}
+.ed-floating-panel-resize {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 14px; height: 14px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 6px, #6a6a6a 6px 7px, transparent 7px 9px, #6a6a6a 9px 10px, transparent 10px);
+}
+/* Narrow-screen fallback — panels become document-flow blocks
+   below the sidebar so they don't fly off a phone screen. Step 1
+   wires the bones; future steps can refine. */
+@media (max-width: 768px) {
+  .ed-panel-host {
+    position: static;
+    pointer-events: auto;
+  }
+  .ed-floating-panel {
+    position: relative;
+    inset: auto;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0.4rem 0;
+    box-shadow: none;
+  }
+  .ed-floating-panel-resize { display: none; }
+}

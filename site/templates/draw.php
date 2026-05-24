@@ -319,6 +319,14 @@ $payload = json_encode([
   </main>
 </div>
 
+<!-- v0.8.110: floating-panel host. Fixed full-viewport overlay that
+     never intercepts pointer events itself; individual floating
+     panels (added by PanelManager in dev-draw.js) opt back in via
+     their own pointer-events:auto. Lives outside .ed-body so panels
+     can float over the entire editor (toolbar included if dragged
+     up) without fighting the sidebar/canvas grid. -->
+<div id="panel-host" class="ed-panel-host" aria-hidden="false"></div>
+
 <script id="editor-data" type="application/json"><?= $payload ?></script>
 <script src="<?= url('assets/js/dev-draw.js') ?>?v=<?= $v ?>"></script>
 <!-- v<?= $v ?> -->
