@@ -11148,6 +11148,21 @@
     if (!modifier) {
       if (pressedSelected) {
         armMove = true;
+        // v0.8.116: clicking an already-selected single object should
+        // re-open its floating panel if the user previously closed it.
+        // Clicks that don't change selection don't go through
+        // renderSelectionPanel, so the auto-spawn logic there never
+        // fires. Mirror that logic inline here for the "click on
+        // already-selected single object" case.
+        if (state.selectedIds.length === 1 && window.PanelManager) {
+          const opn = window.PanelManager.listOpen();
+          const hasFollower = opn.some(function (p) {
+            return p.type === 'object' && !p.pinned;
+          });
+          if (!hasFollower) {
+            try { window.PanelManager.open('object'); } catch (ex) { console.error(ex); }
+          }
+        }
       } else if (linesAtPoint.length) {
         // Implicit click → select the topmost line at the cursor.
         // Mirror the sidebar-click side-effects so the editor's
