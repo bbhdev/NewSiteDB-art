@@ -829,6 +829,24 @@ body.editor input[type="range"] {
   font-size: 0.8em;
   line-height: 1.35;
 }
+/* v0.8.114: small (i) glyph used on section dividers to host help
+   text via the native `title` tooltip — collapses always-on help
+   paragraphs into an unobtrusive hover affordance. */
+.ed-help-icon {
+  display: inline-block;
+  width: 1.1em;
+  height: 1.1em;
+  line-height: 1.1em;
+  text-align: center;
+  font-size: 1em;
+  font-style: normal;
+  color: #9aa;
+  cursor: help;
+  border-radius: 50%;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.ed-help-icon:hover { color: #ddd; }
 .ed-behavior-empty {
   margin: 0.3rem 0;
   color: #888;
@@ -1892,6 +1910,17 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 .ed-floating-panel.is-pinned {
   /* v0.8.113: warm accent + thicker so a pinned panel reads
      unambiguously against the now-blue base ring. */
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 3px #e08a2c;
+}
+/* v0.8.114: behavior-block panels (children of an object panel) get
+   a teal ring so their "owned by another panel" nature reads at a
+   glance, distinct from peer-level object panels (blue) and pinned
+   panels (orange). Pinned still wins via specificity in case the
+   user pins a block panel (the .is-pinned rule below this one). */
+.ed-floating-panel.ed-floating-panel--block {
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 2px #3ba89e;
+}
+.ed-floating-panel.ed-floating-panel--block.is-pinned {
   box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 3px #e08a2c;
 }
 .ed-floating-panel-header {

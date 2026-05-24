@@ -9174,12 +9174,33 @@
     // which is discoverable from the panel. moveLinesToGroup also
     // fans the change out to sibling classes in ALL mode by name.
     if (state.groups.length > 1) {
+      // v0.8.114: confirm-before-move. Group reassignment fans out to
+      // sibling classes in ALL mode (via moveLinesToGroup) and is not
+      // visually obvious in the panel, so a misclick on the picker
+      // can silently relocate an object. Stage + confirm protects
+      // against that; the dialog reverts the picker on cancel by
+      // re-rendering.
       wrap.appendChild(selectField(
         'Group',
         line.groupId || '',
         state.groups.map(function (gr) { return { value: gr.id, label: gr.name }; }),
         function (newId) {
-          if (newId && newId !== line.groupId) moveLinesToGroup([line.id], newId);
+          if (!newId || newId === line.groupId) return;
+          const targetGroup = state.groups.find(function (gr) { return gr.id === newId; });
+          const targetName = targetGroup ? targetGroup.name : '(unknown)';
+          const objLabel = line.name || ('object ' + line.id);
+          const ok = window.confirm(
+            'Move "' + objLabel + '" to group "' + targetName + '"?\n\n' +
+            'This also moves sibling instances in other classes that share the same group.'
+          );
+          if (ok) {
+            moveLinesToGroup([line.id], newId);
+          } else {
+            // Re-render to revert the picker to the original groupId.
+            if (window.PanelManager) {
+              try { window.PanelManager.notifyDataChanged(); } catch (e) {}
+            }
+          }
         }
       ));
     }
@@ -9374,7 +9395,26 @@
         renderLines();
       }), line.masterId, 'linejoin'), noCorners));
 
-    wrap.appendChild(divider('BEHAVIORS'));
+    // v0.8.114: BEHAVIORS divider now carries an (i) tooltip for the
+    // multi-block additive semantics — used to be an always-on
+    // paragraph that ate vertical space on every render. The text
+    // lives in a native `title` attr so it shows on hover (desktop)
+    // and on long-press (touch).
+    const behaviorsDivider = divider('BEHAVIORS');
+    behaviorsDivider.style.display = 'flex';
+    behaviorsDivider.style.alignItems = 'center';
+    behaviorsDivider.style.justifyContent = 'space-between';
+    const helpIcon = document.createElement('span');
+    helpIcon.className = 'ed-help-icon';
+    helpIcon.textContent = 'ⓘ';
+    helpIcon.title =
+      'Multi-block: every block\'s translate / rotate is summed each frame. ' +
+      'Scroll-driven blocks stop contributing outside their range, but ' +
+      'timed/loop/ping-pong blocks whose progress has reached 1 keep ' +
+      'contributing until the block\'s trigger ends.';
+    behaviorsDivider.appendChild(helpIcon);
+    wrap.appendChild(behaviorsDivider);
+
     // v0.8.113: block list — one row per block, click to open the
     // block-detail floating panel. Replaces the inline cards that
     // used to fill this section (now relocated to the dedicated
@@ -9382,17 +9422,6 @@
     // binds the child panel; the ✕ button deletes the block.
     const blocks = Array.isArray(line.behaviors) ? line.behaviors : [];
     const overlaps = findBehaviorOverlaps(blocks);
-
-    // Multi-block additive note (kept — important context for
-    // anyone authoring 2+ blocks).
-    if (blocks.length >= 2) {
-      const addNote = document.createElement('p');
-      addNote.className = 'ed-behavior-additive-note';
-      addNote.textContent = 'Multi-block: every block\'s translate / rotate is summed each frame. ' +
-        'Scroll-driven blocks stop contributing outside their range, but timed/loop/ping-pong blocks ' +
-        'whose progress has reached 1 keep contributing until the block\'s trigger ends.';
-      wrap.appendChild(addNote);
-    }
     if (overlaps.length) {
       const warn = document.createElement('p');
       warn.className = 'ed-behavior-warning';
@@ -9688,21 +9717,28 @@
     // Detection: presence is what matters, not magnitude — a 0
     // translateX is still an authored intent and shows up in the
     // panel, so let it surface in the name too.
+    // v0.8.114: audit covers EVERY authored key written by the
+    // updateBehaviorParam / updateBehaviorTrigger pipelines, including
+    // cross-object side effects (trigger.startObjectId / stopObjectId)
+    // which are full first-class effects of the block — a "click +
+    // stop object X" block has an effect, even with no visual params.
     function has(k) { return Object.prototype.hasOwnProperty.call(p, k); }
     const hasTx = has('translateX'), hasTy = has('translateY');
-    let effect;
-    if (hasTx && hasTy) effect = 'translate';
-    else if (hasTx)     effect = 'translate X';
-    else if (hasTy)     effect = 'translate Y';
-    else if (has('rotate'))       effect = 'rotate';
-    else if (has('fadeOpacity'))  effect = 'fade';
-    else if (has('opacity'))      effect = 'opacity';
-    else if (has('pathFollow') || has('pathFollowGuide')) effect = 'path';
-    else if (has('drawIn'))       effect = 'draw';
-    else if (has('hide'))         effect = 'hide';
-    else if (has('show'))         effect = 'show';
-    else if (has('driftX') || has('driftY')) effect = 'drift';
-    else effect = '(no effect)';
+    const effects = [];
+    // Visual effects (params side).
+    if (hasTx && hasTy) effects.push('translate');
+    else if (hasTx)     effects.push('translate X');
+    else if (hasTy)     effects.push('translate Y');
+    if (has('rotate'))                          effects.push('rotate');
+    if (has('fadeOpacity'))                     effects.push('fade');
+    if (has('opacityFrom') || has('opacityTo')) effects.push('opacity');
+    if (has('pathRef'))                         effects.push('path');
+    if (has('drawIn'))                          effects.push('draw');
+    // Cross-object side effects (trigger side) — every block can
+    // optionally stop or start another object when it fires.
+    if (trigger.stopObjectId)  effects.push('stops other');
+    if (trigger.startObjectId) effects.push('starts other');
+    const effect = effects.length ? effects.join(' + ') : '(no effect)';
     return 'Block ' + n + ' · ' + triggerLabel + ' · ' + effect;
   }
 
@@ -11759,7 +11795,12 @@
     function buildFrame(panelState) {
       const reg = PANEL_REGISTRY[panelState.type];
       const frame = document.createElement('div');
-      frame.className = 'ed-floating-panel' + (panelState.pinned ? ' is-pinned' : '');
+      frame.className = 'ed-floating-panel'
+        + (panelState.pinned ? ' is-pinned' : '')
+        // v0.8.114: child block panels get a distinct outline so
+        // they read as "owned by an object panel" rather than as
+        // another peer-level object panel.
+        + (panelState.type === 'behavior-block' ? ' ed-floating-panel--block' : '');
       frame.style.left   = panelState.x + 'px';
       frame.style.top    = panelState.y + 'px';
       frame.style.width  = panelState.w + 'px';
@@ -11820,20 +11861,34 @@
       });
 
       // Header drag — move the panel.
+      // v0.8.114: hard-stick — dragging any panel in a parent/child
+      // tree moves the whole tree as a unit. We find the root,
+      // snapshot the starting position of every member, and apply
+      // the same delta to all of them on each pointermove.
       header.addEventListener('pointerdown', function (e) {
         // Ignore drags that start on the buttons.
         if (e.target.closest('.ed-floating-panel-btn')) return;
         e.preventDefault();
         const startX = e.clientX, startY = e.clientY;
-        const origX  = panelState.x, origY = panelState.y;
+        const rootId = findRootPanelId(panelState.id);
+        const treeIds = collectTree(rootId);
+        // Snapshot starting positions so each move computes against
+        // the original, not the previous frame (avoids drift).
+        const snap = treeIds.map(function (pid) {
+          const pp = panels[pid];
+          return { id: pid, ox: pp.state.x, oy: pp.state.y, w: pp.state.w };
+        });
         header.setPointerCapture(e.pointerId);
         function onMove(ev) {
-          const c = clampPos(origX + (ev.clientX - startX),
-                             origY + (ev.clientY - startY),
-                             panelState.w);
-          panelState.x = c.x; panelState.y = c.y;
-          frame.style.left = c.x + 'px';
-          frame.style.top  = c.y + 'px';
+          const dx = ev.clientX - startX;
+          const dy = ev.clientY - startY;
+          snap.forEach(function (s) {
+            const pp = panels[s.id]; if (!pp) return;
+            const c = clampPos(s.ox + dx, s.oy + dy, s.w);
+            pp.state.x = c.x; pp.state.y = c.y;
+            pp.frameEl.style.left = c.x + 'px';
+            pp.frameEl.style.top  = c.y + 'px';
+          });
         }
         function onUp() {
           header.removeEventListener('pointermove', onMove);
@@ -11845,6 +11900,8 @@
       });
 
       // Corner resize.
+      // v0.8.114: after resize, slide any children so they stay glued
+      // to the parent's right edge. Width grows → child slides right.
       resize.addEventListener('pointerdown', function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -11857,6 +11914,7 @@
           panelState.w = w; panelState.h = h;
           frame.style.width  = w + 'px';
           frame.style.height = h + 'px';
+          repositionChildrenOf(panelState.id);
         }
         function onUp() {
           resize.removeEventListener('pointermove', onMove);
@@ -12028,6 +12086,43 @@
         return panels[pid].state.parentId === parentId;
       });
       childIds.forEach(function (cid) { close(cid); });
+    }
+
+    // v0.8.114: hard-stick helpers. A child panel is glued to its
+    // parent's right edge (parent.x + parent.w + 8, parent.y). Dragging
+    // either panel moves the whole tree as a unit; resizing the parent
+    // slides the child to track its new right edge.
+    function findRootPanelId(panelId) {
+      let cur = panels[panelId];
+      while (cur && cur.state.parentId && panels[cur.state.parentId]) {
+        cur = panels[cur.state.parentId];
+      }
+      return cur ? cur.state.id : panelId;
+    }
+    function getChildrenOf(parentId) {
+      return Object.keys(panels).filter(function (pid) {
+        return panels[pid].state.parentId === parentId;
+      });
+    }
+    function collectTree(rootId, out) {
+      out = out || [];
+      const p = panels[rootId]; if (!p) return out;
+      out.push(rootId);
+      getChildrenOf(rootId).forEach(function (cid) { collectTree(cid, out); });
+      return out;
+    }
+    // After a parent resize, slide each child to stay glued to the
+    // parent's right edge. Recurses so grand-children follow too.
+    function repositionChildrenOf(parentId) {
+      const parent = panels[parentId]; if (!parent) return;
+      getChildrenOf(parentId).forEach(function (cid) {
+        const ch = panels[cid]; if (!ch) return;
+        ch.state.x = parent.state.x + parent.state.w + 8;
+        ch.state.y = parent.state.y;
+        ch.frameEl.style.left = ch.state.x + 'px';
+        ch.frameEl.style.top  = ch.state.y + 'px';
+        repositionChildrenOf(cid);
+      });
     }
 
     function togglePin(panelId) {
