@@ -8475,6 +8475,30 @@
             //   Plain click     → replace selection with just this row
             //                     (anchor moves to this row).
             // Cmd takes precedence over Shift when both held.
+            //
+            // v0.8.126: opt-click (alt) mirrors the canvas gesture —
+            // toggle the floating panel for this line's object,
+            // selecting it first if it isn't already the sole
+            // selection. Alt takes precedence over cmd/shift here;
+            // it's a panel-management gesture, not a selection one.
+            if (e.altKey) {
+              if (!isSelected(line.id)) {
+                selectOnly(line.id);
+                state.activeGroupId  = g.id;
+                state.openGroupIds[g.id] = true;
+                sidebarAnchorLineId  = line.id;
+                sidebarAnchorGroupId = g.id;
+                updateSelectAllButton();
+                renderGroupsList();
+                renderLines();
+                // suppressScroll: opt-click is panel-management, not
+                // a "show me this object's properties" gesture, so
+                // skip the auto-scroll-to-panel that plain click does.
+                renderSelectionPanel({ suppressScroll: true });
+              }
+              toggleObjectPanelFor(line.id);
+              return;
+            }
             const isCmd   = e.metaKey || e.ctrlKey;
             const isShift = e.shiftKey && !isCmd;
             let isMulti = false;
