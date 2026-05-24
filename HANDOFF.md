@@ -474,8 +474,20 @@ take a stronger warm accent (3px, `#e08a2c`).
   parked it. Child panels skip this — their position is derived
   from the parent via hard-stick.
 
-Next sub-step: Step 2d — multi-select spawns one object panel per
-selected object (with a settings-driven warning threshold).
+**v0.8.119 (Step 2d)** lands the multi-select fan-out: every time the
+selection set grows to 2+ objects, one pinned 'object' panel opens
+per selected object (skipping objects that already have a pinned
+panel). When the new-panel count exceeds
+`state.multiSelectPanelLimit` (Settings → "Multi-select panel limit",
+persisted via `ed-multi-panel-limit`, default 5), a confirm() asks
+the user before fan-out. Dedup memo `lastMultiSpawnKey` (sorted-ids
+joined) prevents re-firing on every render of the same set;
+collapsing to single/empty selection clears the memo. Default
+positions cascade via the existing `open()` +24px-per-same-type
+nudge. Settings dialog grew a new `settingNumberRow` helper for
+the numeric input.
+
+Next sub-step (none locked).
 Subsequent steps: Parameters / Style / Master info as separate
 panel types if the object panel grows unwieldy; per-class Overview;
 final sidebar redesign as a navigator over the launchers.

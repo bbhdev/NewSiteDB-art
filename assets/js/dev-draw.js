@@ -757,6 +757,15 @@
       const raw = parseFloat(localStorage.getItem('ed-nudge-step-mm'));
       return Number.isFinite(raw) && raw > 0 ? raw : 1;
     })(),
+    // v0.8.119: Step 2d — multi-select spawns one floating 'object'
+    // panel per selected object (pinned). To prevent a 50-object
+    // multi-select from blanketing the screen with panels, prompt
+    // for confirmation when the selection size exceeds this limit.
+    // Persisted in localStorage; default 5.
+    multiSelectPanelLimit: (function () {
+      const raw = parseInt(localStorage.getItem('ed-multi-panel-limit'), 10);
+      return Number.isFinite(raw) && raw >= 1 ? raw : 5;
+    })(),
     dirty: false
   };
   // Make sure every useClass has a dims slot + a byClass entry, so
@@ -7063,6 +7072,23 @@
       }
     }));
 
+    // v0.8.119: numeric setting — multi-select object-panel limit.
+    body.appendChild(settingNumberRow({
+      label: 'Multi-select panel limit',
+      help:  'Multi-selecting objects opens one floating object panel ' +
+             'per selected object (each pinned, useful for side-by-side ' +
+             'comparison). When the selection exceeds this limit, you ' +
+             'will be asked to confirm before the panels open. Set to a ' +
+             'small value if you usually want only a quick preview.',
+      value: state.multiSelectPanelLimit,
+      min:   1,
+      onChange: function (v) {
+        if (!Number.isFinite(v) || v < 1) return;
+        state.multiSelectPanelLimit = v | 0;
+        try { localStorage.setItem('ed-multi-panel-limit', String(state.multiSelectPanelLimit)); } catch (e) {}
+      }
+    }));
+
     modal.appendChild(body);
 
     overlay.appendChild(modal);
@@ -7088,6 +7114,37 @@
     const inp = document.createElement('input');
     inp.type = 'checkbox'; inp.checked = !!spec.value;
     inp.addEventListener('change', function () { spec.onChange(inp.checked); });
+    main.appendChild(lbl); main.appendChild(inp);
+    row.appendChild(main);
+    if (spec.help) {
+      const help = document.createElement('p');
+      help.className = 'ed-setting-help';
+      help.textContent = spec.help;
+      row.appendChild(help);
+    }
+    return row;
+  }
+  // v0.8.119: numeric counterpart to settingRow — same layout, but
+  // the control is a small number input. Committed on change/blur.
+  function settingNumberRow(spec) {
+    const row = document.createElement('div');
+    row.className = 'ed-setting-row';
+    const main = document.createElement('div');
+    main.className = 'ed-setting-main';
+    const lbl = document.createElement('label'); lbl.textContent = spec.label;
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.style.width = '5em';
+    if (spec.min != null) inp.min = String(spec.min);
+    if (spec.max != null) inp.max = String(spec.max);
+    if (spec.step != null) inp.step = String(spec.step);
+    inp.value = String(spec.value);
+    function commit() {
+      const v = parseFloat(inp.value);
+      spec.onChange(Number.isFinite(v) ? v : spec.value);
+    }
+    inp.addEventListener('change', commit);
+    inp.addEventListener('blur', commit);
     main.appendChild(lbl); main.appendChild(inp);
     row.appendChild(main);
     if (spec.help) {
@@ -8597,6 +8654,10 @@
 
   function renderSelectionPanel(opts) {
     selectionPanel.innerHTML = '';
+    // v0.8.119: drop the multi-select dedupe memo whenever the
+    // selection collapses, so a later identical multi-select still
+    // re-fires the fan-out.
+    maybeResetMultiSpawnMemo();
     const wasSingleSelect = state.selectedIds.length === 1;
     // Multi-select takes precedence: show a compact bulk-actions panel.
     // Single selection shows the full line params panel (unchanged).
@@ -8673,8 +8734,65 @@
         if (!hasFollower) {
           try { window.PanelManager.open('object'); } catch (e) { console.error(e); }
         }
+      } else if (state.selectedIds.length > 1) {
+        // v0.8.119: Step 2d — multi-select fan-out. Spawn one pinned
+        // 'object' panel per selected object so they can be compared
+        // side by side. Confirmation gate applied when the count
+        // exceeds state.multiSelectPanelLimit.
+        spawnMultiSelectObjectPanels();
       }
     }
+  }
+
+  // v0.8.119: per-multi-select-set memo. Used to dedupe the fan-out
+  // (re-renders fire repeatedly while a selection persists; we only
+  // want to spawn ONCE per distinct multi-select set). Reset when
+  // the selection collapses to single or empty.
+  let lastMultiSpawnKey = null;
+  function spawnMultiSelectObjectPanels() {
+    if (!window.PanelManager) return;
+    const ids = state.selectedIds.slice().sort();
+    const key = ids.join('|');
+    if (key === lastMultiSpawnKey) return;
+    // Reset tracker so a future selection that matches *previous*
+    // would still re-fire after going through single/empty first.
+    // (Drop-through handled by clearing on single-select below.)
+    const open = window.PanelManager.listOpen();
+    // Objects that already have a pinned panel can be skipped.
+    const pinnedObjIds = {};
+    open.forEach(function (p) {
+      if (p.type === 'object' && p.pinned && p.objectId) pinnedObjIds[p.objectId] = true;
+    });
+    const toSpawn = ids.filter(function (id) { return !pinnedObjIds[id]; });
+    if (toSpawn.length === 0) {
+      lastMultiSpawnKey = key;
+      return;
+    }
+    const limit = state.multiSelectPanelLimit | 0;
+    if (toSpawn.length > limit) {
+      const ok = window.confirm(
+        'Open ' + toSpawn.length + ' object panels (one per selected object)?\n\n' +
+        'Your current limit is ' + limit + '. You can change it in Settings ' +
+        '("Multi-select panel limit").'
+      );
+      if (!ok) { lastMultiSpawnKey = key; return; }
+    }
+    // Cascade positions slightly so panels don't stack identically.
+    // open() already does +24px per existing same-type — we just call
+    // it N times and let it handle the cascade.
+    toSpawn.forEach(function (id) {
+      try {
+        window.PanelManager.open('object', { objectId: id, pinned: true });
+      } catch (e) { console.error(e); }
+    });
+    lastMultiSpawnKey = key;
+  }
+  // Hook to clear the multi-spawn memo whenever selection drops out
+  // of multi-select — wired into renderSelectionPanel below by
+  // checking state.selectedIds.length on each call. Centralized
+  // here for clarity.
+  function maybeResetMultiSpawnMemo() {
+    if (state.selectedIds.length <= 1) lastMultiSpawnKey = null;
   }
 
   // v0.8.112: compact sidebar placeholder shown when a single
