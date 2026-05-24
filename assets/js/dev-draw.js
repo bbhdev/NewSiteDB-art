@@ -11935,7 +11935,12 @@
             // close cascades and per-object lifetime work cleanly.
             blockId:  p.blockId  || null,
             parentId: p.parentId || null,
-            pinned: !!p.pinned, x: p.x, y: p.y, w: p.w, h: p.h, z: p.z
+            pinned: !!p.pinned, x: p.x, y: p.y, w: p.w, h: p.h, z: p.z,
+            // v0.8.121: persist userPositioned so the lastPos memory
+            // gate survives a reload. Without this, a user-positioned
+            // panel restored from snapshot would close as
+            // auto-positioned and skip the rememberLastPos call.
+            userPositioned: !!p.userPositioned
           };
         });
         localStorage.setItem(storageKey(), JSON.stringify(snapshot));
@@ -12072,6 +12077,12 @@
         function onUp() {
           header.removeEventListener('pointermove', onMove);
           header.removeEventListener('pointerup', onUp);
+          // v0.8.121: mark the entire tree as user-positioned, since
+          // hard-stick moved them all together. lastPos is now safe
+          // to update on close.
+          collectTree(rootId).forEach(function (pid) {
+            if (panels[pid]) panels[pid].state.userPositioned = true;
+          });
           persist();
         }
         header.addEventListener('pointermove', onMove);
@@ -12098,6 +12109,9 @@
         function onUp() {
           resize.removeEventListener('pointermove', onMove);
           resize.removeEventListener('pointerup', onUp);
+          // v0.8.121: explicit user resize → lastPos may track this
+          // panel's size (and position, if it had also been moved).
+          panelState.userPositioned = true;
           persist();
         }
         resize.addEventListener('pointermove', onMove);
@@ -12234,7 +12248,10 @@
         y:        opts.y != null ? opts.y : fallbackY,
         w:        opts.w        || fallbackW,
         h:        opts.h        || fallbackH,
-        z:        ++zCounter
+        z:        ++zCounter,
+        // v0.8.121: restored from snapshot if previously set; new
+        // panels start false until the user actually drags or resizes.
+        userPositioned: !!opts.userPositioned
       };
       const clamped = clampPos(panelState.x, panelState.y, panelState.w);
       panelState.x = clamped.x; panelState.y = clamped.y;
@@ -12272,7 +12289,15 @@
       // v0.8.118: also remember size for child panels — position
       // stays derived via hard-stick, but the user's chosen w/h
       // should survive a close/reopen cycle.
-      rememberLastPos(p.state.type, p.state);
+      // v0.8.121: gate the memory update on userPositioned so cascade-
+      // offset multi-spawn panels don't drift lastPos by their +24px
+      // offsets when closed. Auto-positioned panels (default / lastPos
+      // restore / multi-spawn cascade) leave the memory untouched on
+      // close; only panels the user actually dragged or resized
+      // overwrite it.
+      if (p.state.userPositioned) {
+        rememberLastPos(p.state.type, p.state);
+      }
       if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
       delete panels[panelId];
       childIds.forEach(function (cid) { close(cid); });
@@ -12401,7 +12426,10 @@
           id: rec.id, objectId: rec.objectId,
           blockId: rec.blockId, parentId: rec.parentId,
           pinned: rec.pinned,
-          x: rec.x, y: rec.y, w: rec.w, h: rec.h
+          x: rec.x, y: rec.y, w: rec.w, h: rec.h,
+          // v0.8.121: preserve userPositioned across reloads so the
+          // lastPos memory gate continues to work.
+          userPositioned: rec.userPositioned
         });
       });
     }

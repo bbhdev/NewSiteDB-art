@@ -487,6 +487,27 @@ positions cascade via the existing `open()` +24px-per-same-type
 nudge. Settings dialog grew a new `settingNumberRow` helper for
 the numeric input.
 
+**v0.8.120 (Step 2d polish)**: cascade restored on top of `lastPos`
+(multi-spawn panels were stacking at the remembered position because
+`lp.x/y` overrode `defPos + dx`); confirm() deferred via
+`requestAnimationFrame` so the selection paint lands before the modal
+blocks the UI. `lastMultiSpawnKey` is set immediately at the top of
+`spawnMultiSelectObjectPanels` so the deferred body can't re-fire.
+
+**v0.8.121 (lastPos drift fix)**: applying `+dx` to `lastPos` (v0.8.120)
+created a subtle drift bug — a cascaded multi-spawn panel closed in
+place would persist `lastPos + 24px`, then the next spawn would cascade
+off the new position, then close → `+48`, etc. Each multi-select cycle
+walked the memory away from where the user actually parked panels.
+Fix: track `userPositioned` per panel state. Set true only in the
+header drag `onUp` (for the entire tree via `collectTree`) and the
+resize `onUp` (single panel). `close()` gates `rememberLastPos`
+behind this flag, so auto-positioned panels (default / lastPos
+restore / multi-spawn cascade) leave the memory untouched on close;
+only panels the user actually dragged or resized overwrite it.
+`userPositioned` is included in the `persist()` snapshot and threaded
+back through `open()` from `restore()` so the flag survives reloads.
+
 Next sub-step (none locked).
 Subsequent steps: Parameters / Style / Master info as separate
 panel types if the object panel grows unwieldy; per-class Overview;
