@@ -8604,8 +8604,13 @@
     if (state.selectedIds.length > 1) {
       renderMultiSelectionPanel();
     } else if (wasSingleSelect) {
+      // v0.8.112: single-select line panel migrated to the floating
+      // 'object' panel. Sidebar shows a compact hint pointing at the
+      // floater so the slot isn't visually empty; the panel itself
+      // gets auto-spawned (if no unpinned object panel already
+      // exists) below, after we've finished updating the sidebar.
       const line = state.lines.find(function (l) { return l.id === primarySelectedId(); });
-      if (line) renderLinePanel(line);
+      if (line) renderLineSidebarHint(line);
     } else if (state.activeGroupId) {
       const g = state.groups.find(function (g) { return g.id === state.activeGroupId; });
       if (g) renderGroupPanel(g);
@@ -8627,7 +8632,13 @@
     // on the next modifier-click.
     const suppress  = !!(opts && opts.suppressScroll);
     const primaryId = wasSingleSelect ? primarySelectedId() : null;
-    if (!suppress && wasSingleSelect && selectionPanel.scrollIntoView
+    // v0.8.112: sidebar slot now holds only a tiny hint for single-
+    // select (the line panel lives in a floating panel). Scrolling
+    // the sidebar to a hint adds nothing, so the scrollIntoView is
+    // gated to non-single-select cases (multi-select still has a
+    // real bulk-actions panel worth scrolling to).
+    if (!suppress && !wasSingleSelect && state.selectedIds.length > 1
+        && selectionPanel.scrollIntoView
         && primaryId !== lastScrolledSelectionId) {
       selectionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -8641,7 +8652,68 @@
     // keep selection-following panels in sync.
     if (window.PanelManager) {
       try { window.PanelManager.notifySelection(); } catch (e) { console.error(e); }
+      // v0.8.112: auto-spawn the 'object' floating panel on single-
+      // select if no unpinned one already exists. Existing unpinned
+      // panels just re-render via notifySelection above. Closing
+      // the panel is a deliberate "done editing for now" signal —
+      // we don't re-spawn until the user closes-then-reselects.
+      if (wasSingleSelect) {
+        const open = window.PanelManager.listOpen();
+        const hasFollower = open.some(function (p) {
+          return p.type === 'object' && !p.pinned;
+        });
+        if (!hasFollower) {
+          try { window.PanelManager.open('object'); } catch (e) { console.error(e); }
+        }
+      }
     }
+  }
+
+  // v0.8.112: compact sidebar placeholder shown when a single
+  // object is selected. The full editor lives in the floating
+  // 'object' panel; this hint keeps the sidebar slot meaningful
+  // (selection acknowledged, quick-reopen affordance) without
+  // duplicating the panel content.
+  function renderLineSidebarHint(line) {
+    const group = state.groups.find(function (g) { return g.id === line.groupId; });
+    const head = document.createElement('header');
+    head.className = 'ed-panel-head';
+    const h3 = document.createElement('h3');
+    h3.textContent = line.name || 'Object';
+    head.appendChild(h3);
+    selectionPanel.appendChild(head);
+
+    const meta = document.createElement('p');
+    meta.style.color = '#888';
+    meta.style.fontSize = '0.85em';
+    meta.style.margin = '0 0 0.5rem';
+    meta.appendChild(document.createTextNode('group '));
+    const grpStrong = document.createElement('strong');
+    grpStrong.textContent = group ? group.name : '?';
+    meta.appendChild(grpStrong);
+    meta.appendChild(document.createTextNode(' · ' + line.kind));
+    selectionPanel.appendChild(meta);
+
+    const hint = document.createElement('p');
+    hint.style.color = '#9c9c9c';
+    hint.style.fontSize = '0.85em';
+    hint.style.margin = '0 0 0.4rem';
+    hint.textContent = 'Editing in floating panel.';
+    selectionPanel.appendChild(hint);
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'ed-mini';
+    openBtn.textContent = '🪟 Open / focus panel';
+    openBtn.title = 'Bring the object panel to the front (or open one if it was closed)';
+    openBtn.addEventListener('click', function () {
+      if (!window.PanelManager) return;
+      const open = window.PanelManager.listOpen();
+      const target = open.find(function (p) { return p.type === 'object' && !p.pinned; });
+      if (target) window.PanelManager.bringToFront(target.id);
+      else window.PanelManager.open('object');
+    });
+    selectionPanel.appendChild(openBtn);
   }
 
   function renderMultiSelectionPanel() {
@@ -8974,7 +9046,12 @@
     deleteGroup(g.id, true);
   }
 
-  function renderLinePanel(line) {
+  function renderLinePanel(line, host) {
+    // v0.8.112: host parameter lets the same renderer paint either
+    // into the sidebar selection slot (legacy callers, host omitted)
+    // or into a floating panel body (PANEL_REGISTRY 'object' type).
+    // Falls back to selectionPanel for backward compat.
+    host = host || selectionPanel;
     // v0.8.32 DIAGNOSTIC: log what the panel is actually reading.
     // If `line` looks intact here but the panel still shows defaults,
     // the bug is downstream (in the field-render code). If `line` is
@@ -9004,7 +9081,7 @@
     countBadge.textContent = bCount + ' behavior' + (bCount === 1 ? '' : 's');
     countBadge.title = 'Behavior blocks on this object';
     head.appendChild(countBadge);
-    selectionPanel.appendChild(head);
+    host.appendChild(head);
 
     const meta = document.createElement('p');
     meta.style.color = '#888';
@@ -9019,7 +9096,7 @@
     grpStrong.textContent = group ? group.name : '?';
     meta.appendChild(grpStrong);
     meta.appendChild(document.createTextNode(' · ' + line.kind));
-    selectionPanel.appendChild(meta);
+    host.appendChild(meta);
 
     // v0.8.101: master chip — visible whenever the line has a master.
     // Shows the master's badge letter (color-coded), master name, and
@@ -9064,7 +9141,7 @@
         chip.addEventListener('click', function () {
           selectSiblingsOfMaster(line.masterId);
         });
-        selectionPanel.appendChild(chip);
+        host.appendChild(chip);
       }
     }
 
@@ -9354,7 +9431,7 @@
     addBlockBtn.addEventListener('click', function () { addBehaviorBlock(line.id); });
     wrap.appendChild(addBlockBtn);
 
-    selectionPanel.appendChild(wrap);
+    host.appendChild(wrap);
 
     const actions = document.createElement('div');
     actions.className = 'ed-actions';
@@ -9393,7 +9470,7 @@
       else removeLinesFromCurrentClass([line.id]);
     });
     actions.appendChild(del);
-    selectionPanel.appendChild(actions);
+    host.appendChild(actions);
   }
 
   // ── Field constructors ────────────────────────────────────────────
@@ -11423,6 +11500,34 @@
   // =========================================================
 
   const PANEL_REGISTRY = {
+    // v0.8.112: real 'object' panel. Replaces the sidebar selection
+    // slot for single-select. Reuses renderLinePanel (refactored to
+    // accept a host) so behavior, validation, and the field set
+    // stay exactly identical to today — the floating shell is the
+    // only thing that changed. Subsequent sub-steps (2b/2c) carve
+    // out behaviors into a dedicated child panel; for now it's the
+    // full line panel content lifted as-is.
+    object: {
+      title: 'Object',
+      defaultSize: { w: 380, h: 560 },
+      defaultPos:  { x: 320, y: 90 },
+      followsSelection: true,
+      render: function (body, ctx) {
+        if (!ctx.primaryLine) {
+          const msg = document.createElement('p');
+          msg.style.color = '#888';
+          msg.style.fontSize = '0.9em';
+          msg.textContent = ctx.panelState.pinned
+            ? 'Pinned object not found in any class.'
+            : 'Select an object to edit its properties.';
+          body.appendChild(msg);
+          return;
+        }
+        // Pass the panel body as the host — renderLinePanel paints
+        // the same DOM it would in the sidebar.
+        renderLinePanel(ctx.primaryLine, body);
+      }
+    },
     // Stub demo panel used to validate the system. Subsequent
     // steps register real panels (Behaviors, Parameters, ...).
     demo: {
@@ -11432,7 +11537,6 @@
       followsSelection: true,
       render: function (bodyEl, ctx) {
         // ctx: { panelState, primarySelectionId, primaryLine, allSelectedIds }
-        bodyEl.innerHTML = '';
         const wrap = document.createElement('div');
         wrap.style.fontFamily = 'ui-monospace, monospace';
         wrap.style.fontSize = '0.85em';
@@ -11676,6 +11780,10 @@
         p.sub.textContent = '';
       }
       try {
+        // v0.8.112: clear body before each render so registry
+        // functions don't all have to repeat the boilerplate.
+        // Demo panel previously did this itself; now it's central.
+        p.body.innerHTML = '';
         reg.render(p.body, buildContext(p.state));
       } catch (e) {
         p.body.innerHTML = '';
