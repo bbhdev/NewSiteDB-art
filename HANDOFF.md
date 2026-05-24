@@ -460,6 +460,19 @@ take a stronger warm accent (3px, `#e08a2c`).
   parentId cycle ever existed in `panels`. Cycles shouldn't be
   reachable today, but defense-in-depth — the recursive close should
   not depend on `parentId` graph correctness.
+- **v0.8.116**: re-clicking an already-selected single object on the
+  canvas now reopens its closed floating panel (canvas click handler
+  short-circuits `renderSelectionPanel` when selection doesn't change,
+  so the auto-spawn check is mirrored inline in the
+  `pressedSelected` branch).
+- **v0.8.117**: per-type "last seen" geometry memory. On close, a
+  parent-less panel's `(x, y, w, h)` is saved under
+  `ed-panel-lastpos-<pageId>-<classId>` (one slot per panel type).
+  On open without explicit geometry, that slot wins over the
+  registry default — so a close-then-reopen (whether for the same
+  object or a different one) lands the panel where the user last
+  parked it. Child panels skip this — their position is derived
+  from the parent via hard-stick.
 
 Next sub-step: Step 2d — multi-select spawns one object panel per
 selected object (with a settings-driven warning threshold).

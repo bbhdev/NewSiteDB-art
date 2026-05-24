@@ -11770,6 +11770,30 @@
     function storageKey() {
       return 'ed-panels-' + state.pageId + '-' + state.classId;
     }
+    // v0.8.117: "last seen" geometry per panel type (per page/class).
+    // When a panel is closed and later reopened — for the same or a
+    // different object — restore the user's last position+size so it
+    // reappears where they put it, not at the registry default. Only
+    // tracked for parent-less panels (hard-sticked children derive
+    // their position from the parent).
+    function lastPosKey() {
+      return 'ed-panel-lastpos-' + state.pageId + '-' + state.classId;
+    }
+    function loadLastPos() {
+      try {
+        const raw = localStorage.getItem(lastPosKey());
+        if (!raw) return {};
+        const obj = JSON.parse(raw);
+        return (obj && typeof obj === 'object') ? obj : {};
+      } catch (e) { return {}; }
+    }
+    function rememberLastPos(type, geom) {
+      try {
+        const all = loadLastPos();
+        all[type] = { x: geom.x, y: geom.y, w: geom.w, h: geom.h };
+        localStorage.setItem(lastPosKey(), JSON.stringify(all));
+      } catch (e) { /* ignore */ }
+    }
 
     function persist() {
       try {
@@ -12046,6 +12070,16 @@
       const dx = existingSameType * 24;
       const defPos = reg.defaultPos  || { x: 100, y: 100 };
       const defSz  = reg.defaultSize || { w: 320, h: 240 };
+      // v0.8.117: if the caller didn't pass explicit geometry and this
+      // isn't a child panel (children derive from parent), reuse the
+      // last-seen geometry for this type so a close-then-reopen lands
+      // where the user left it. opts.id passed → restore from snapshot,
+      // which already has its own x/y/w/h; we still honor those.
+      const lp = (!opts.parentId) ? (loadLastPos()[type] || null) : null;
+      const fallbackX = lp ? lp.x : (defPos.x + dx);
+      const fallbackY = lp ? lp.y : (defPos.y + dx);
+      const fallbackW = lp ? lp.w : defSz.w;
+      const fallbackH = lp ? lp.h : defSz.h;
       const panelState = {
         id:       opts.id       || ('p' + (nextId++)),
         type:     type,
@@ -12057,10 +12091,10 @@
         blockId:  opts.blockId  || null,
         parentId: opts.parentId || null,
         pinned:   !!opts.pinned,
-        x:        opts.x != null ? opts.x : (defPos.x + dx),
-        y:        opts.y != null ? opts.y : (defPos.y + dx),
-        w:        opts.w || defSz.w,
-        h:        opts.h || defSz.h,
+        x:        opts.x != null ? opts.x : fallbackX,
+        y:        opts.y != null ? opts.y : fallbackY,
+        w:        opts.w        || fallbackW,
+        h:        opts.h        || fallbackH,
         z:        ++zCounter
       };
       const clamped = clampPos(panelState.x, panelState.y, panelState.w);
@@ -12094,6 +12128,12 @@
       const childIds = Object.keys(panels).filter(function (pid) {
         return pid !== panelId && panels[pid].state.parentId === panelId;
       });
+      // v0.8.117: remember where parent-less panels were sitting so a
+      // reopen lands in the same spot. Skip children — their position
+      // is derived from the parent via hard-stick.
+      if (!p.state.parentId) {
+        rememberLastPos(p.state.type, p.state);
+      }
       if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
       delete panels[panelId];
       childIds.forEach(function (cid) { close(cid); });
