@@ -12070,14 +12070,18 @@
       const dx = existingSameType * 24;
       const defPos = reg.defaultPos  || { x: 100, y: 100 };
       const defSz  = reg.defaultSize || { w: 320, h: 240 };
-      // v0.8.117: if the caller didn't pass explicit geometry and this
-      // isn't a child panel (children derive from parent), reuse the
-      // last-seen geometry for this type so a close-then-reopen lands
-      // where the user left it. opts.id passed → restore from snapshot,
-      // which already has its own x/y/w/h; we still honor those.
-      const lp = (!opts.parentId) ? (loadLastPos()[type] || null) : null;
-      const fallbackX = lp ? lp.x : (defPos.x + dx);
-      const fallbackY = lp ? lp.y : (defPos.y + dx);
+      // v0.8.117: if the caller didn't pass explicit geometry, reuse
+      // the last-seen geometry for this type so a close-then-reopen
+      // lands where the user left it. opts.id passed → restore from
+      // snapshot, which already has its own x/y/w/h; we still honor
+      // those.
+      // v0.8.118: lastPos size applies to ALL panel types (including
+      // children) — position only applies to non-children (children
+      // derive x/y from parent via hard-stick, and openBehaviorPanel-
+      // ForBlock always passes explicit opts.x/y anyway).
+      const lp = loadLastPos()[type] || null;
+      const fallbackX = (lp && !opts.parentId) ? lp.x : (defPos.x + dx);
+      const fallbackY = (lp && !opts.parentId) ? lp.y : (defPos.y + dx);
       const fallbackW = lp ? lp.w : defSz.w;
       const fallbackH = lp ? lp.h : defSz.h;
       const panelState = {
@@ -12129,11 +12133,11 @@
         return pid !== panelId && panels[pid].state.parentId === panelId;
       });
       // v0.8.117: remember where parent-less panels were sitting so a
-      // reopen lands in the same spot. Skip children — their position
-      // is derived from the parent via hard-stick.
-      if (!p.state.parentId) {
-        rememberLastPos(p.state.type, p.state);
-      }
+      // reopen lands in the same spot.
+      // v0.8.118: also remember size for child panels — position
+      // stays derived via hard-stick, but the user's chosen w/h
+      // should survive a close/reopen cycle.
+      rememberLastPos(p.state.type, p.state);
       if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
       delete panels[panelId];
       childIds.forEach(function (cid) { close(cid); });
