@@ -1866,9 +1866,15 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   position: absolute;
   pointer-events: auto;
   background: #1f1f1f;
+  /* v0.8.113: panels were hard to separate from the dark canvas at
+     a glance. Promote the former pinned blue ring to the BASE style
+     so every floater stands off the canvas clearly; pinned then
+     takes a stronger accent (warmer + thicker) so the pinned/
+     unpinned distinction stays visible. Border kept thin so the
+     ring does the framing. */
   border: 1px solid #3a3a3a;
   border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.3);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 2px #4f8acb;
   display: flex;
   flex-direction: column;
   min-width: 220px;
@@ -1884,7 +1890,9 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   overflow: hidden;
 }
 .ed-floating-panel.is-pinned {
-  box-shadow: 0 6px 24px rgba(0,0,0,0.45), 0 0 0 2px #4f8acb;
+  /* v0.8.113: warm accent + thicker so a pinned panel reads
+     unambiguously against the now-blue base ring. */
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5), 0 0 0 3px #e08a2c;
 }
 .ed-floating-panel-header {
   display: flex;
@@ -1941,6 +1949,54 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   background:
     linear-gradient(135deg, transparent 0 6px, #6a6a6a 6px 7px, transparent 7px 9px, #6a6a6a 9px 10px, transparent 10px);
 }
+/* v0.8.113: block-name list rendered inside the 'object' floating
+   panel. One row per behavior block: a clickable name button
+   spanning the row, plus a tight ✕ delete button on the right.
+   The row itself is styled like a soft button so the affordance
+   is obvious; .is-overlap flags rows whose ranges overlap. */
+.ed-block-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.3rem 0 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ed-block-row {
+  display: flex;
+  align-items: stretch;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ed-block-row.is-overlap {
+  border-color: #c25b3a;
+  box-shadow: inset 0 0 0 1px rgba(194, 91, 58, 0.35);
+}
+.ed-block-name {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  color: #e4e4e4;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  cursor: pointer;
+}
+.ed-block-name:hover { background: #353535; color: #fff; }
+.ed-block-del {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  border-left: 1px solid #3a3a3a;
+  color: #a4a4a4;
+  width: 32px;
+  cursor: pointer;
+  font-size: 0.95em;
+}
+.ed-block-del:hover { background: #5c2424; color: #fff; }
+
 /* Narrow-screen fallback — panels become document-flow blocks
    below the sidebar so they don't fly off a phone screen. Step 1
    wires the bones; future steps can refine. */

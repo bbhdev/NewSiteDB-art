@@ -8650,8 +8650,16 @@
     // selection mutation in the editor already converges on
     // renderSelectionPanel, so this single hook is enough to
     // keep selection-following panels in sync.
+    // v0.8.113: switched from notifySelection to notifyDataChanged.
+    // Block edits inside a 'behavior-block' panel call
+    // updateBehaviorParam → renderSelectionPanel, but that panel
+    // type doesn't followSelection so notifySelection skipped it.
+    // notifyDataChanged re-renders every panel (including pinned
+    // ones — refresh is a no-op when nothing relevant changed)
+    // so block-detail panels stay in sync with deletes / moves /
+    // param edits.
     if (window.PanelManager) {
-      try { window.PanelManager.notifySelection(); } catch (e) { console.error(e); }
+      try { window.PanelManager.notifyDataChanged(); } catch (e) { console.error(e); }
       // v0.8.112: auto-spawn the 'object' floating panel on single-
       // select if no unpinned one already exists. Existing unpinned
       // panels just re-render via notifySelection above. Closing
@@ -9046,11 +9054,14 @@
     deleteGroup(g.id, true);
   }
 
-  function renderLinePanel(line, host) {
+  function renderLinePanel(line, host, panelState) {
     // v0.8.112: host parameter lets the same renderer paint either
     // into the sidebar selection slot (legacy callers, host omitted)
     // or into a floating panel body (PANEL_REGISTRY 'object' type).
     // Falls back to selectionPanel for backward compat.
+    // v0.8.113: panelState (optional) lets the BEHAVIORS block list
+    // know which object-panel owns it, so block-row clicks can
+    // open block-detail children with the correct parentId.
     host = host || selectionPanel;
     // v0.8.32 DIAGNOSTIC: log what the panel is actually reading.
     // If `line` looks intact here but the panel still shows defaults,
@@ -9363,18 +9374,17 @@
         renderLines();
       }), line.masterId, 'linejoin'), noCorners));
 
-    wrap.appendChild(divider('Behavior'));
-    // v0.4.1: behaviors[] authoring. Each block is a card with
-    // its own range (start/end ∈ [0,1] within the trigger window)
-    // and the legacy behavior params.
-    // v0.8.20: corrected the comment / UX. The runtime ADDS every
-    // block's contribution every frame (app.js computeAt) — it does
-    // NOT pick a single block. A block contributes whenever its
-    // progress > 0; that's automatic for scroll-driven blocks
-    // outside their range, but timed runs clamp at 1 and keep
-    // contributing forever once they've completed. The additive
-    // note below makes this visible for multi-block lines.
+    wrap.appendChild(divider('BEHAVIORS'));
+    // v0.8.113: block list — one row per block, click to open the
+    // block-detail floating panel. Replaces the inline cards that
+    // used to fill this section (now relocated to the dedicated
+    // 'behavior-block' panel). Click on the row body opens / re-
+    // binds the child panel; the ✕ button deletes the block.
     const blocks = Array.isArray(line.behaviors) ? line.behaviors : [];
+    const overlaps = findBehaviorOverlaps(blocks);
+
+    // Multi-block additive note (kept — important context for
+    // anyone authoring 2+ blocks).
     if (blocks.length >= 2) {
       const addNote = document.createElement('p');
       addNote.className = 'ed-behavior-additive-note';
@@ -9383,46 +9393,60 @@
         'whose progress has reached 1 keep contributing until the block\'s trigger ends.';
       wrap.appendChild(addNote);
     }
-    // v0.8.66: render the warning paragraph unconditionally and
-    // hide it when there are no overlaps. That gives
-    // refreshBehaviorOverlapMarkers a stable node to update on
-    // every range edit without re-rendering the whole panel.
-    const overlaps = findBehaviorOverlaps(blocks);
-    const warn = document.createElement('p');
-    warn.className = 'ed-behavior-warning' + (overlaps.length ? '' : ' is-hidden');
-    warn.dataset.lineId = line.id;
     if (overlaps.length) {
+      const warn = document.createElement('p');
+      warn.className = 'ed-behavior-warning';
+      warn.dataset.lineId = line.id;
       warn.textContent = 'Overlapping blocks: ' +
         overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
-        '. Overlapping ranges contribute simultaneously — their deltas sum during the overlap. ' +
-        'Sometimes intentional (parallel motion); otherwise space the ranges out.';
+        '. Overlapping ranges contribute simultaneously — their deltas sum during the overlap.';
+      wrap.appendChild(warn);
     }
-    wrap.appendChild(warn);
-    // Mark each overlap-affected card with .is-overlap so the red
-    // border shows from the initial render, not just after the
-    // first range edit.
-    if (overlaps.length) {
-      const inOverlap = {};
-      overlaps.forEach(function (o) { inOverlap[o.a] = true; inOverlap[o.b] = true; });
-      blocks.forEach(function (b, idx) {
-        if (!inOverlap[idx]) return;
-        // The card DOM was appended earlier in this same loop; tag
-        // via querySelectorAll-then-filter to find ours.
-        const sel = '.ed-behavior-block[data-line-id="' + line.id + '"][data-block-idx="' + idx + '"]';
-        const c = wrap.querySelector(sel);
-        if (c) c.classList.add('is-overlap');
-      });
-    }
+
     if (!blocks.length) {
       const ph = document.createElement('p');
       ph.className = 'ed-behavior-empty';
       ph.textContent = 'No behavior blocks yet. Add one to drive scroll animation.';
       wrap.appendChild(ph);
     } else {
+      const list = document.createElement('ul');
+      list.className = 'ed-block-list';
+      // Mark inOverlap blocks so we can flag them in the list.
+      const inOverlap = {};
+      overlaps.forEach(function (o) { inOverlap[o.a] = true; inOverlap[o.b] = true; });
       blocks.forEach(function (block, idx) {
-        wrap.appendChild(renderBehaviorBlock(line, idx, group));
+        const row = document.createElement('li');
+        row.className = 'ed-block-row' + (inOverlap[idx] ? ' is-overlap' : '');
+        row.dataset.lineId = line.id;
+        row.dataset.blockId = block && block.id || '';
+
+        const nameBtn = document.createElement('button');
+        nameBtn.type = 'button';
+        nameBtn.className = 'ed-block-name';
+        nameBtn.textContent = behaviorAutoName(block, idx);
+        nameBtn.title = 'Open block editor in a floating panel';
+        nameBtn.addEventListener('click', function () {
+          if (!block || !block.id) return;
+          openBehaviorPanelForBlock(line.id, block.id,
+            panelState ? panelState.id : null);
+        });
+        row.appendChild(nameBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'ed-block-del';
+        delBtn.textContent = '✕';
+        delBtn.title = 'Delete this block';
+        delBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          removeBehaviorBlock(line.id, idx);
+        });
+        row.appendChild(delBtn);
+        list.appendChild(row);
       });
+      wrap.appendChild(list);
     }
+
     const addBlockBtn = document.createElement('button');
     addBlockBtn.type = 'button';
     addBlockBtn.className = 'ed-mini ed-behavior-add';
@@ -9635,6 +9659,81 @@
     if (!isFinite(n) || n <= 0) return '0 s';
     return n + ' s';
   }
+  // v0.8.113: auto-generated short label for a behavior block, used
+  // by the block-name list inside the object panel. Format:
+  //   "Block N · <trigger> · <main effect>"
+  // Trigger: a compact label for trigger.when (scroll-range collapses
+  // to 'scroll'). Main effect: pick the dominant param actually set
+  // on this block — translate / rotate / fade / path / draw / hide /
+  // show, in that priority. Empty params get '(no effect)'.
+  function behaviorAutoName(block, index) {
+    const n = (index | 0) + 1;
+    const trigger = (block && block.trigger) || {};
+    const when    = trigger.when || 'scroll-range';
+    const triggerLabel = (
+      when === 'scroll-range'    ? 'scroll' :
+      when === 'scroll-stop'     ? 'stop'   :
+      when === 'scroll-start'    ? 'start'  :
+      when === 'scroll-key'      ? 'key'    :
+      when === 'in-view-partial' ? 'in-view' :
+      when === 'in-view-full'    ? 'in-view (full)' :
+      when === 'after-previous'  ? 'after prev' :
+      when === 'page-load'       ? 'load'   :
+      when === 'click'           ? 'click'  :
+      when === 'hover'           ? 'hover'  :
+      when === 'wait'            ? 'wait'   :
+      when
+    );
+    const p = (block && block.params) || {};
+    // Detection: presence is what matters, not magnitude — a 0
+    // translateX is still an authored intent and shows up in the
+    // panel, so let it surface in the name too.
+    function has(k) { return Object.prototype.hasOwnProperty.call(p, k); }
+    const hasTx = has('translateX'), hasTy = has('translateY');
+    let effect;
+    if (hasTx && hasTy) effect = 'translate';
+    else if (hasTx)     effect = 'translate X';
+    else if (hasTy)     effect = 'translate Y';
+    else if (has('rotate'))       effect = 'rotate';
+    else if (has('fadeOpacity'))  effect = 'fade';
+    else if (has('opacity'))      effect = 'opacity';
+    else if (has('pathFollow') || has('pathFollowGuide')) effect = 'path';
+    else if (has('drawIn'))       effect = 'draw';
+    else if (has('hide'))         effect = 'hide';
+    else if (has('show'))         effect = 'show';
+    else if (has('driftX') || has('driftY')) effect = 'drift';
+    else effect = '(no effect)';
+    return 'Block ' + n + ' · ' + triggerLabel + ' · ' + effect;
+  }
+
+  // v0.8.113: open (or re-bind, if one already exists) the block-
+  // detail floating panel for a (lineId, blockId) pair owned by a
+  // given object panel. One child per parent — clicking another
+  // block in the same object panel reuses the existing child.
+  function openBehaviorPanelForBlock(lineId, blockId, parentPanelId) {
+    if (!window.PanelManager) return;
+    const open = window.PanelManager.listOpen();
+    const existing = open.find(function (p) {
+      return p.type === 'behavior-block' && p.parentId === parentPanelId;
+    });
+    if (existing) {
+      window.PanelManager.updatePanel(existing.id, {
+        objectId: lineId, blockId: blockId
+      });
+      window.PanelManager.bringToFront(existing.id);
+      return;
+    }
+    // Stick to the right of the parent if we can find it; otherwise
+    // fall back to the registry's default position.
+    const parent = open.find(function (p) { return p.id === parentPanelId; });
+    const opts = { objectId: lineId, blockId: blockId, parentId: parentPanelId };
+    if (parent) {
+      opts.x = parent.x + parent.w + 8;
+      opts.y = parent.y;
+    }
+    window.PanelManager.open('behavior-block', opts);
+  }
+
   function behaviorSummaryText(block) {
     const trigger  = (block && block.trigger)  ? block.trigger  : { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 };
     const duration = (block && block.duration) ? block.duration : { mode: 'scroll' };
@@ -11523,9 +11622,42 @@
           body.appendChild(msg);
           return;
         }
-        // Pass the panel body as the host — renderLinePanel paints
-        // the same DOM it would in the sidebar.
-        renderLinePanel(ctx.primaryLine, body);
+        // Pass the panel body as the host AND the panel state so
+        // nested affordances (block-list rows) know which panel
+        // owns them — block-detail children carry parentId.
+        renderLinePanel(ctx.primaryLine, body, ctx.panelState);
+      }
+    },
+    // v0.8.113: block-detail panel. Opens to the right of its
+    // parent object panel when a block-name row is clicked; closes
+    // with the parent or when the parent re-binds. Bound by
+    // blockId (not index), so reorders don't strand it.
+    'behavior-block': {
+      title: 'Block',
+      defaultSize: { w: 380, h: 600 },
+      defaultPos:  { x: 720, y: 90 },
+      followsSelection: false,
+      render: function (body, ctx) {
+        function msg(text) {
+          const p = document.createElement('p');
+          p.style.color = '#888'; p.style.fontSize = '0.9em';
+          p.textContent = text;
+          return p;
+        }
+        const line = ctx.primaryLine;
+        if (!line) { body.appendChild(msg('Parent object not found.')); return; }
+        const blocks = Array.isArray(line.behaviors) ? line.behaviors : [];
+        const idx = blocks.findIndex(function (b) {
+          return b && b.id === ctx.panelState.blockId;
+        });
+        if (idx < 0) {
+          body.appendChild(msg(
+            'This block no longer exists (was it deleted?). Close the panel and pick another.'
+          ));
+          return;
+        }
+        const group = state.groups.find(function (g) { return g.id === line.groupId; });
+        body.appendChild(renderBehaviorBlock(line, idx, group));
       }
     },
     // Stub demo panel used to validate the system. Subsequent
@@ -11581,7 +11713,13 @@
         const snapshot = Object.keys(panels).map(function (pid) {
           const p = panels[pid].state;
           return {
-            id: p.id, type: p.type, objectId: p.objectId || null,
+            id: p.id, type: p.type,
+            objectId: p.objectId || null,
+            // v0.8.113: blockId (stable, not index) for 'behavior-block'
+            // panels. parentId chains child panels to their owner so
+            // close cascades and per-object lifetime work cleanly.
+            blockId:  p.blockId  || null,
+            parentId: p.parentId || null,
             pinned: !!p.pinned, x: p.x, y: p.y, w: p.w, h: p.h, z: p.z
           };
         });
@@ -11784,7 +11922,23 @@
         // functions don't all have to repeat the boilerplate.
         // Demo panel previously did this itself; now it's central.
         p.body.innerHTML = '';
-        reg.render(p.body, buildContext(p.state));
+        const ctx = buildContext(p.state);
+        // v0.8.113: binding-change cascade. If THIS unpinned panel
+        // is about to switch to a new object, kill its children
+        // first (they reference the old object's blockIds and would
+        // otherwise show "no longer exists"). Has to live here in
+        // renderPanel so it fires regardless of which fan-out
+        // method (notifySelection / notifyDataChanged) triggered
+        // the re-render.
+        if (p.state.type === 'object' && !p.state.pinned) {
+          const prev = p.lastBoundObjectId || null;
+          const nextId = ctx.primarySelectionId || null;
+          if (prev && nextId && prev !== nextId) {
+            closeChildrenOf(p.state.id);
+          }
+        }
+        p.lastBoundObjectId = ctx.primarySelectionId;
+        reg.render(p.body, ctx);
       } catch (e) {
         p.body.innerHTML = '';
         const err = document.createElement('div');
@@ -11811,6 +11965,12 @@
         id:       opts.id       || ('p' + (nextId++)),
         type:     type,
         objectId: opts.objectId || null,
+        // v0.8.113: child-panel binding fields. blockId locks a
+        // 'behavior-block' panel to a specific block.id (not index —
+        // surviving reorders); parentId chains it to the owning
+        // object panel for close-cascade and per-object lifecycle.
+        blockId:  opts.blockId  || null,
+        parentId: opts.parentId || null,
         pinned:   !!opts.pinned,
         x:        opts.x != null ? opts.x : (defPos.x + dx),
         y:        opts.y != null ? opts.y : (defPos.y + dx),
@@ -11834,9 +11994,40 @@
 
     function close(panelId) {
       const p = panels[panelId]; if (!p) return;
+      // v0.8.113: cascade-close children. Block-detail panels are
+      // owned by their object panel — closing the parent removes
+      // them. Walk a snapshot of ids first so the recursive close
+      // doesn't mutate while iterating.
+      const childIds = Object.keys(panels).filter(function (pid) {
+        return panels[pid].state.parentId === panelId;
+      });
+      childIds.forEach(function (cid) { close(cid); });
       if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
       delete panels[panelId];
       persist();
+    }
+
+    // v0.8.113: external mutation of an existing panel's state
+    // (e.g. clicking a different block in the parent re-binds the
+    // child to the new blockId). Re-renders + persists.
+    function updatePanel(panelId, patch) {
+      const p = panels[panelId]; if (!p) return;
+      Object.keys(patch || {}).forEach(function (k) {
+        p.state[k] = patch[k];
+      });
+      renderPanel(panelId);
+      persist();
+    }
+
+    // v0.8.113: helper — close every panel whose parentId === parentId.
+    // Called when an 'object' panel re-binds to a different selection
+    // so stale block-detail children don't keep showing the wrong
+    // object's blocks.
+    function closeChildrenOf(parentId) {
+      const childIds = Object.keys(panels).filter(function (pid) {
+        return panels[pid].state.parentId === parentId;
+      });
+      childIds.forEach(function (cid) { close(cid); });
     }
 
     function togglePin(panelId) {
@@ -11862,21 +12053,18 @@
     }
 
     // Called by the editor when the selection changes. Unpinned
-    // panels of types that follow selection re-render against the
-    // new primary; pinned panels keep showing their bound object.
+    // panels of types that follow selection re-render; pinned
+    // panels keep their bound object. The binding-change cascade
+    // lives in renderPanel itself (v0.8.113) so it fires for any
+    // re-render trigger.
     function notifySelection() {
       Object.keys(panels).forEach(function (pid) {
         const p = panels[pid];
         const reg = PANEL_REGISTRY[p.state.type];
         if (!reg) return;
-        if (p.state.pinned) {
-          // Pinned panels still need to re-render if their bound
-          // object's data changed elsewhere — but that's covered by
-          // notifyDataChanged (not yet used in step 1). For a pure
-          // selection change a pinned panel stays put.
-          return;
-        }
-        if (reg.followsSelection) renderPanel(pid);
+        if (p.state.pinned) return;
+        if (!reg.followsSelection) return;
+        renderPanel(pid);
       });
     }
 
@@ -11901,7 +12089,9 @@
       snap.forEach(function (rec) {
         if (!PANEL_REGISTRY[rec.type]) return; // stale type
         open(rec.type, {
-          id: rec.id, objectId: rec.objectId, pinned: rec.pinned,
+          id: rec.id, objectId: rec.objectId,
+          blockId: rec.blockId, parentId: rec.parentId,
+          pinned: rec.pinned,
           x: rec.x, y: rec.y, w: rec.w, h: rec.h
         });
       });
@@ -11916,6 +12106,8 @@
     return {
       open: open, close: close, togglePin: togglePin,
       bringToFront: bringToFront,
+      updatePanel: updatePanel,
+      closeChildrenOf: closeChildrenOf,
       notifySelection: notifySelection,
       notifyDataChanged: notifyDataChanged,
       restore: restore,
