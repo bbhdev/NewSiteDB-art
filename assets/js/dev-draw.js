@@ -8762,7 +8762,13 @@
     // (canvas highlights + sidebar bulk panel) is visible BEFORE
     // any confirm() blocks the UI thread. Without this, the user
     // hits the dialog without seeing what they selected.
-    requestAnimationFrame(function () {
+    // v0.8.122: rAF fires BEFORE the next paint, not after — so a
+    // single rAF still blocked pre-paint. Double rAF: the first
+    // callback runs in the pre-paint phase of frame N, the second
+    // runs at the start of frame N+1, which is guaranteed to be
+    // after frame N actually painted. setTimeout(0) would also
+    // work but is less precise about ordering vs other rAF work.
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
       // Re-check: selection may have changed (or class switched)
       // between scheduling and firing.
       const liveIds = state.selectedIds.slice().sort();
@@ -8795,7 +8801,7 @@
           window.PanelManager.open('object', { objectId: id, pinned: true });
         } catch (e) { console.error(e); }
       });
-    });
+    }); });
   }
   // Hook to clear the multi-spawn memo whenever selection drops out
   // of multi-select — wired into renderSelectionPanel below by
