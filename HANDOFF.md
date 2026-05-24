@@ -344,6 +344,71 @@ CSS cache-busting note: `assets/css/dev-draw.css` is included with
 the cache. If a CSS-only change doesn't visually take effect after
 hard-reload, check that `VERSION` was bumped.
 
+### Floating-panel infrastructure (v0.8.110, Step 1)
+
+Side-panel disclosure was getting overloaded — keeping everything open
+forced the user to hold the whole panel layout in their head. Rather
+than redesign the sidebar around progressive disclosure alone, the
+direction taken is **free-floating, draggable, non-modal panels**
+opened on demand. The side panel will eventually become a high-level
+navigator/launcher; topic editors (Behaviors, Parameters, Style,
+Master info, Library/Snapshots, per-class Overview) migrate one at a
+time to the floating system in subsequent steps.
+
+**v0.8.110 ships only the framework + a stub `demo` panel** — no
+existing UI moved — so drag / resize / pin / close / per-class
+persistence got validated end-to-end before any user-visible risk.
+
+Architecture:
+- `<div id="panel-host">` in `draw.php`: fixed full-viewport overlay,
+  `pointer-events: none` itself; individual `.ed-floating-panel`
+  children opt back in. Sits outside `.ed-body` so panels can fly
+  over the toolbar/sidebar/canvas without fighting the grid.
+- `PANEL_REGISTRY` (in `dev-draw.js`): `{ type → { title,
+  defaultSize, defaultPos, followsSelection?, render(body, ctx) } }`.
+  `register(type, def)` allows late additions.
+- `PanelManager`: `open / close / togglePin / bringToFront /
+  notifySelection / notifyDataChanged / restore / listOpen`. New
+  panels of the same type cascade by +24px and are bumped to the top
+  of the z-stack via a monotonically-increasing counter (no actual
+  CSS-managed stack — we own it).
+- Per-panel state: `{ id, type, objectId?, pinned, x, y, w, h, z }`.
+  Persisted as a JSON array under `ed-panels-${pageId}-${classId}` —
+  **scoped per class**, since class switches change what's
+  selectable. Stale persisted types (a removed registry entry) are
+  silently dropped on restore.
+- Drag uses the header with pointer-capture; resize uses a corner
+  grip element (not CSS `resize:` — that's textarea-only and can't
+  coexist with persist). Both persist **on pointerup only**, never
+  on every move. Position is clamped so ≥ 40px of header stays in
+  the viewport (panels can't be dragged unreachable).
+- Pin semantics: clicking 📌 binds the panel to the current primary
+  selection's `objectId` and freezes that binding. Pinned panels
+  ignore selection changes and look the object up across all
+  `byClass` buckets (so a pinned panel survives class switches).
+  Unpinning clears `objectId` and re-follows selection.
+- Selection hook: a single inline `PanelManager.notifySelection()`
+  at the end of `renderSelectionPanel` (already the convergence
+  point of ~20 selection-mutation sites). **Do not** try to hook by
+  reassigning the function — strict mode + function-declaration
+  bindings make that unreliable. Direct inline call is also easier
+  to grep for.
+- Class switch: `switchClass` ends with `PanelManager.restore()` so
+  the new class's persisted panel layout is rebuilt.
+
+Narrow-screen (<768px) fallback: `.ed-panel-host` becomes
+`position: static` and floating panels collapse into document-flow
+blocks (no drag/resize). Untested in practice; the editor isn't
+really usable on a phone anyway.
+
+**v0.8.111** bumped sidebar to 15px and floater base to 15px (from
+0.88em ~12.3px). Both were too small for sustained reading.
+
+Next steps (queued): migrate Behaviors → Parameters → Style →
+Master info → Library/Snapshots into PANEL_REGISTRY entries; build
+the per-class Overview panel; finally redesign the side panel as
+a navigator over the launchers.
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:

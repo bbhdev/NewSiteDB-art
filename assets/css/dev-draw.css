@@ -307,6 +307,10 @@ body.editor {
   display: flex;
   flex-direction: column;
   scrollbar-width: none;
+  /* v0.8.111: bump sidebar base font for readability. Body is 14px;
+     15px gives the dense panel content noticeably more breathing
+     room without forcing a layout reflow. */
+  font-size: 15px;
 }
 .ed-sidebar::-webkit-scrollbar { display: none; }
 .ed-canvas-wrap {
@@ -1870,7 +1874,10 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   min-width: 220px;
   min-height: 120px;
   color: #e4e4e4;
-  font-size: 0.88em;
+  /* v0.8.111: bump from 0.88em (~12.3px) to 15px so floaters match
+     the sidebar's improved readability. Inner buttons / titles use
+     relative em sizes so they scale with this base. */
+  font-size: 15px;
   /* Resize is handled by our own corner grip — the native CSS
      resize handle would only work on textareas and wouldn't
      coexist with our drag/persist code. */
