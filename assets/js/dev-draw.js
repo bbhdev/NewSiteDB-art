@@ -9963,6 +9963,40 @@
     return wrap;
   }
 
+  // v0.8.165: back-arrow button shown next to a locked chip (the
+  // selected trigger / progress mode). The chip itself is no longer
+  // clickable to go back — only this small arrow is. The SVG is sized
+  // to fill ~80% of the button height for clear visibility.
+  function makeBehaviorChipBack(onClick, tooltip) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ed-behavior-chip-back';
+    btn.title = tooltip || 'Back — change this choice';
+    btn.setAttribute('aria-label', tooltip || 'Back');
+    btn.innerHTML =
+      '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<polyline points="15 4 7 12 15 20" stroke="currentColor" stroke-width="3" ' +
+                  'fill="none" stroke-linecap="round" stroke-linejoin="round"></polyline>' +
+      '</svg>';
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  // Build a chip + back-arrow pair, appending both to a behaviorButtonGroup
+  // row. The chip displays the chosen value; the arrow is the single
+  // back affordance. Click on the chip is a no-op.
+  function appendLockedChip(card, value, label, onBack, tooltip) {
+    const chipGroup = behaviorButtonGroup('', value, [{ value: value, label: label }],
+      function () { /* no-op: chip is display only; use arrow to go back */ },
+      null);
+    // Mark the chip as locked (no hover brightness, no pointer cursor)
+    const chipBtn = chipGroup.querySelector('.ed-behavior-group-btn');
+    if (chipBtn) chipBtn.classList.add('is-locked-chip');
+    const chipRow = chipGroup.querySelector('.ed-behavior-group-row');
+    if (chipRow) chipRow.appendChild(makeBehaviorChipBack(onBack, tooltip));
+    card.appendChild(chipGroup);
+  }
+
   // Explainer dialog for greyed-out duration options.
   function explainDurationDisabled(opt) {
     showChoiceDialog({
@@ -10558,20 +10592,20 @@
       { value: 'click',            label: 'Wait for click' },
       { value: 'hover',            label: 'Wait for hover' }
     ];
-    // v0.8.164: trigger collapses to a chip as soon as one is picked.
+    // v0.8.165: trigger collapses to a chip immediately when one is picked.
     // Phase 0: all options shown, none active.
-    // Phase >= 1: chip only (chosen trigger). Clicking the chip returns
-    // to phase 0 — all options re-appear, none active, user picks again.
+    // Phase >= 1: chip only (chosen trigger) + small back-arrow button.
+    // The chip itself is no longer clickable to go back; only the arrow is.
     if (phase >= 1) {
       var lockedTriggerOpt = null;
       for (var _ti = 0; _ti < allTriggerOpts.length; _ti++) {
         if (allTriggerOpts[_ti].value === when) { lockedTriggerOpt = allTriggerOpts[_ti]; break; }
       }
-      if (!lockedTriggerOpt) lockedTriggerOpt = { value: when, label: when };
-      card.appendChild(behaviorButtonGroup('', when, [lockedTriggerOpt], function () {
+      const triggerLabel = lockedTriggerOpt ? lockedTriggerOpt.label : when;
+      appendLockedChip(card, when, triggerLabel, function () {
         setBlockPhase(block.id, 0);
         renderSelectionPanel();
-      }, null));
+      }, 'Back — pick a different trigger');
     } else {
       // Phase 0: all options visible, none active.
       card.appendChild(behaviorButtonGroup('', null, allTriggerOpts,
@@ -10639,23 +10673,13 @@
       }
     }
 
-    // ── Phase === 1: Back + Continue button row ────────────────────────
-    // Back resets to phase 0 (deselects trigger, clears progress section).
-    // Continue advances to phase 2; refused with shake if required field empty.
-    // Phase 1 always means the block is in the map (new block in wizard).
+    // ── Phase === 1: Continue button ───────────────────────────────────
+    // v0.8.165: The labeled "Back" button was removed — the back-arrow
+    // next to the trigger chip is now the single back affordance. Continue
+    // advances to phase 2; refused with shake if a required field is empty.
     if (phase === 1) {
       const btnArea = document.createElement('div');
       btnArea.className = 'ed-behavior-btn-area';
-
-      const backBtn1 = document.createElement('button');
-      backBtn1.type = 'button';
-      backBtn1.className = 'ed-behavior-back';
-      backBtn1.textContent = '← Back';
-      backBtn1.addEventListener('click', function () {
-        setBlockPhase(block.id, 0);
-        renderSelectionPanel();
-      });
-      btnArea.appendChild(backBtn1);
 
       const contBtn = document.createElement('button');
       contBtn.type = 'button';
@@ -10680,20 +10704,9 @@
 
     // ── Phase >= 2: Progress section + cross-object side effects ──────
     if (phase >= 2) {
-      // Phase 2 always means the block is in the map (went through wizard).
-      // Back button goes to phase 1 so user can re-examine trigger options
-      // before the progress section is visible.
-      if (phase === 2) {
-        const backBtn2 = document.createElement('button');
-        backBtn2.type = 'button';
-        backBtn2.className = 'ed-behavior-back ed-behavior-back--standalone';
-        backBtn2.textContent = '← Back';
-        backBtn2.addEventListener('click', function () {
-          setBlockPhase(block.id, 1);
-          renderSelectionPanel();
-        });
-        card.appendChild(backBtn2);
-      }
+      // v0.8.165: standalone "Back" button removed. Back navigation is now
+      // exclusively via the back-arrow next to the trigger chip (resets the
+      // trigger, returning to phase 0). Consistent with progress at phase 3.
 
       // ── Section: Progress ──────────────────────────────────────────────────
       const progressTitle = document.createElement('div');
@@ -10718,19 +10731,19 @@
             'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
             'ping-pong blocks have no fixed start position to anchor to.' }
       ];
-      // v0.8.163: progress picker mirrors the trigger picker pattern.
-      // Phase 2: all options, none active (user must choose explicitly).
-      // Phase >= 3: locked chip showing the chosen mode; clicking → phase 2.
+      // v0.8.165: progress picker mirrors the trigger picker pattern.
+      // Phase 2: all options shown, none active.
+      // Phase >= 3: chip + back-arrow. Chip is display only; arrow is back.
       if (phase >= 3) {
         var lockedDOpt = null;
         for (var _di = 0; _di < durationOpts.length; _di++) {
           if (durationOpts[_di].value === dmode) { lockedDOpt = durationOpts[_di]; break; }
         }
-        if (!lockedDOpt) lockedDOpt = { value: dmode, label: dmode };
-        card.appendChild(behaviorButtonGroup('', dmode, [lockedDOpt], function () {
+        const dmodeLabel = lockedDOpt ? lockedDOpt.label : dmode;
+        appendLockedChip(card, dmode, dmodeLabel, function () {
           setBlockPhase(block.id, 2);
           renderSelectionPanel();
-        }, null));
+        }, 'Back — pick a different progress mode');
       } else {
         // Phase 2: all options visible, none pre-selected
         card.appendChild(behaviorButtonGroup('', null, durationOpts,

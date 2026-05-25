@@ -846,26 +846,9 @@ body.editor {
   border-color: #999;
   color: #fff;
 }
-/* v0.8.161: back button — ghost so it doesn't compete with Continue. */
-.ed-behavior-back {
-  flex: 0 0 auto;
-  padding: 0.3rem 0.6rem;
-  background: transparent;
-  border: 1px solid #444;
-  border-radius: 4px;
-  color: #888;
-  font: inherit;
-  font-size: 0.83em;
-  cursor: pointer;
-}
-.ed-behavior-back:hover { border-color: #686868; color: #bbb; }
-/* Standalone variant — phase 2 back button before the Progress title */
-.ed-behavior-back--standalone {
-  display: block;
-  width: calc(100% - 1.1rem);
-  margin: 0.4rem 0.55rem 0;
-  text-align: left;
-}
+/* v0.8.165: labeled .ed-behavior-back and --standalone variant removed —
+   back navigation is now exclusively via the small back-arrow next to
+   each locked chip (.ed-behavior-chip-back). */
 /* v0.8.158: shake + red tint when Continue is refused (required field empty) */
 @keyframes behaviorContinueShake {
   0%   { transform: translateX(0); }
@@ -1013,10 +996,49 @@ body.editor {
   color: #000;
   border-color: var(--accent, #FF5500);
 }
-/* v0.8.163: locked chip hover — signals the chip is clickable to change.
-   Used when only one button is shown (chosen trigger / progress mode). */
-.ed-behavior-group-btn.is-active:hover {
-  filter: brightness(1.18);
+/* v0.8.165: a chip locked as display-only (used when only one button is
+   shown — the chosen trigger or progress mode). The back-arrow sibling
+   is the only interactive affordance; the chip itself is not clickable
+   for navigation, so we suppress its cursor and hover state. */
+.ed-behavior-group-btn.is-locked-chip {
+  cursor: default;
+}
+.ed-behavior-group-btn.is-locked-chip:hover {
+  filter: none;
+  background: var(--accent, #FF5500);
+  border-color: var(--accent, #FF5500);
+}
+
+/* v0.8.165: small back-arrow button next to a locked chip. About half
+   the width of the Save button (4.5rem) → ~2.25rem. Height stretches
+   to match the chip via the row's default flex align-items: stretch.
+   The SVG fills ~80% of the button height so the icon is clearly
+   visible — not the usual tiny editor-icon size. */
+.ed-behavior-chip-back {
+  background: #2a2a2a;
+  border: 1px solid #585858;
+  border-radius: 3px;
+  padding: 0;
+  width: 2.25rem;
+  cursor: pointer;
+  color: #ccc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  box-sizing: border-box;
+}
+.ed-behavior-chip-back:hover {
+  background: #3a3a3a;
+  border-color: #888;
+  color: #fff;
+}
+.ed-behavior-chip-back svg {
+  display: block;
+  height: 80%;
+  width: auto;
+  /* Cap so the icon doesn't grow absurdly tall in large parent rows */
+  max-height: 1.4rem;
 }
 .ed-behavior-group-btn.is-disabled {
   /* Greyed but still clickable — clicking pops an explainer
