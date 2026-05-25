@@ -10537,15 +10537,11 @@
       { value: 'click',            label: 'Wait for click' },
       { value: 'hover',            label: 'Wait for hover' }
     ], function (v) {
+      // Always advance 0→1 (show trigger options). Never auto-advance
+      // further — user must click "Continue →" to proceed. This prevents
+      // the progress section from appearing before the user expects it
+      // when switching between triggers at phase 1.
       advanceBlockPhase(block.id, 1);
-      // Triggers with no configurable options skip straight to the
-      // progress picker (phase 2) because there is nothing to fill in.
-      const noOptionTriggers = ['page-load', 'scroll-stop', 'scroll-start',
-                                'after-previous', 'wait',
-                                'in-view-partial', 'in-view-full'];
-      if (noOptionTriggers.indexOf(v) !== -1) {
-        advanceBlockPhase(block.id, 2);
-      }
       updateBehaviorTrigger(line.id, blockIdx, 'when', v);
     }, function (opt) { explainDurationDisabled(opt); }));
 
@@ -10556,11 +10552,9 @@
         const rangeRow = document.createElement('div');
         rangeRow.className = 'ed-behavior-range';
         rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
-          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
         }));
         rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
-          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
         }));
         card.appendChild(rangeRow);
@@ -10568,7 +10562,6 @@
 
       if (when === 'scroll-key') {
         card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
-          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
         }));
         const va = trigger.viewportAt || 'middle';
@@ -10578,7 +10571,6 @@
           { value: 'bottom', label: 'Bottom of viewport' },
           { value: 'object', label: 'The object' }
         ], function (v) {
-          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v);
         }, null));
         const rep = trigger.repeat || 'once';
@@ -10586,29 +10578,39 @@
           { value: 'once',  label: 'Once' },
           { value: 'every', label: 'Every crossing' }
         ], function (v) {
-          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'repeat', v);
         }, null));
       }
 
       const delayApplies = !(when === 'scroll-range' && dmode === 'scroll');
       if (delayApplies) {
-        card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
-          advanceBlockPhase(block.id, 2);
+        card.appendChild(numberField('Delay (s)', trigger.delay || 0, function (v) {
           updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
         }));
       }
 
       if (when === 'click' || when === 'hover') {
         card.appendChild(checkboxField(
-          'Treat shape as filled for hit test',
+          'Treat as filled',
           !!trigger.treatAsFilled,
-          function (v) {
-            advanceBlockPhase(block.id, 2);
-            updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v);
-          }
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v); }
         ));
       }
+    }
+
+    // ── Phase === 1: explicit Continue button (phase 1→2) ─────────────
+    // Appears once the trigger is chosen but before the progress section
+    // is unlocked. User clicks it when done with trigger options.
+    if (phase === 1) {
+      const contBtn = document.createElement('button');
+      contBtn.type = 'button';
+      contBtn.className = 'ed-behavior-continue';
+      contBtn.textContent = 'Continue →';
+      contBtn.addEventListener('click', function () {
+        advanceBlockPhase(block.id, 2);
+        renderSelectionPanel();
+      });
+      card.appendChild(contBtn);
     }
 
     // ── Phase >= 2: Progress section + cross-object side effects ──────

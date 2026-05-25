@@ -818,6 +818,29 @@ body.editor {
 .ed-behavior-summary.is-flash {
   animation: behaviorSummaryFlash 1s ease-out forwards;
 }
+/* v0.8.155: explicit step-advance button; appears when phase = 1
+   to move from trigger options → progress picker. Styled as a real
+   action button so it's unmistakably clickable, not data. */
+.ed-behavior-continue {
+  display: block;
+  width: calc(100% - 1.1rem);
+  margin: 0.55rem 0.55rem 0.3rem;
+  padding: 0.3rem 0.7rem;
+  background: #2d2d2d;
+  border: 1px solid #585858;
+  border-radius: 4px;
+  color: #d0d0d0;
+  font: inherit;
+  font-size: 0.83em;
+  text-align: right;
+  cursor: pointer;
+}
+.ed-behavior-continue:hover {
+  background: #3a3a3a;
+  border-color: #999;
+  color: #fff;
+}
+
 .ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
 .ed-behavior-block > .ed-field,
 .ed-behavior-block > .ed-actions {
@@ -2166,12 +2189,11 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   background: transparent;
 }
 .ed-block-row--add .ed-block-name {
-  color: #888;
-  font-style: italic;
+  color: #aaa;
 }
 .ed-block-row--add .ed-block-name:hover {
   background: #2a2a2a;
-  color: #c8c8c8;
+  color: #e0e0e0;
 }
 
 /* Narrow-screen fallback — panels become document-flow blocks
