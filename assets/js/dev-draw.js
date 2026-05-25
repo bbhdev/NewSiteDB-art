@@ -9682,14 +9682,14 @@
     // and rewrite cross-references when applicable.
     const dupNew = document.createElement('button');
     dupNew.type = 'button';
-    dupNew.textContent = 'Duplicate as new master';
+    dupNew.textContent = 'Duplicate from new master';
     dupNew.title = 'Create a fully independent copy. New master record; geometry can evolve separately.';
     dupNew.addEventListener('click', function () { duplicateObject(line.id, { linked: false }); });
     actions.appendChild(dupNew);
 
     const dupLink = document.createElement('button');
     dupLink.type = 'button';
-    dupLink.textContent = 'Duplicate as instance';
+    dupLink.textContent = 'Duplicate from same master';
     dupLink.title = 'Create a copy that shares geometry with this object (same master). Per-instance transforms and behaviors are independent.';
     dupLink.addEventListener('click', function () { duplicateObject(line.id, { linked: true }); });
     actions.appendChild(dupLink);
