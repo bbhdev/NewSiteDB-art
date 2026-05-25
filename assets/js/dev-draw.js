@@ -5178,6 +5178,11 @@
     return Object.prototype.hasOwnProperty.call(behaviorBlockPhases, blockId)
       ? behaviorBlockPhases[blockId] : 3;
   }
+  // Explicitly set phase — used by back buttons to go to a previous step.
+  // Unlike advanceBlockPhase this can decrease the phase.
+  function setBlockPhase(blockId, phase) {
+    behaviorBlockPhases[blockId] = phase;
+  }
   function advanceBlockPhase(blockId, minPhase) {
     // Fallback must match getBlockPhase (3 = fully expanded for existing
     // blocks). Using 0 here caused existing blocks to regress to phase 1
@@ -10615,10 +10620,24 @@
       }
     }
 
-    // ── Phase === 1: explicit Continue button (phase 1→2) ─────────────
-    // Appears once the trigger is chosen but before the progress section
-    // is unlocked. Refused (shake) if a required field is empty.
+    // ── Phase === 1: Back + Continue button row ────────────────────────
+    // Back resets to phase 0 (deselects trigger, clears progress section).
+    // Continue advances to phase 2; refused with shake if required field empty.
+    // Phase 1 always means the block is in the map (new block in wizard).
     if (phase === 1) {
+      const btnArea = document.createElement('div');
+      btnArea.className = 'ed-behavior-btn-area';
+
+      const backBtn1 = document.createElement('button');
+      backBtn1.type = 'button';
+      backBtn1.className = 'ed-behavior-back';
+      backBtn1.textContent = '← Back';
+      backBtn1.addEventListener('click', function () {
+        setBlockPhase(block.id, 0);
+        renderSelectionPanel();
+      });
+      btnArea.appendChild(backBtn1);
+
       const contBtn = document.createElement('button');
       contBtn.type = 'button';
       contBtn.className = 'ed-behavior-continue';
@@ -10630,18 +10649,33 @@
           void contBtn.offsetWidth; // restart animation
           contBtn.classList.add('is-invalid');
           setTimeout(function () { contBtn.classList.remove('is-invalid'); }, 600);
-          // Red border on the empty field points directly at what's needed.
           if (selectorFieldWrap) selectorFieldWrap.classList.add('is-required-empty');
           return;
         }
         advanceBlockPhase(block.id, 2);
         renderSelectionPanel();
       });
-      card.appendChild(contBtn);
+      btnArea.appendChild(contBtn);
+      card.appendChild(btnArea);
     }
 
     // ── Phase >= 2: Progress section + cross-object side effects ──────
     if (phase >= 2) {
+      // Phase 2 always means the block is in the map (went through wizard).
+      // Back button goes to phase 1 so user can re-examine trigger options
+      // before the progress section is visible.
+      if (phase === 2) {
+        const backBtn2 = document.createElement('button');
+        backBtn2.type = 'button';
+        backBtn2.className = 'ed-behavior-back ed-behavior-back--standalone';
+        backBtn2.textContent = '← Back';
+        backBtn2.addEventListener('click', function () {
+          setBlockPhase(block.id, 1);
+          renderSelectionPanel();
+        });
+        card.appendChild(backBtn2);
+      }
+
       // ── Section: Progress ──────────────────────────────────────────────────
       const progressTitle = document.createElement('div');
       progressTitle.className = 'ed-behavior-section-title';

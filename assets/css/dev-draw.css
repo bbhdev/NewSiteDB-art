@@ -818,13 +818,19 @@ body.editor {
 .ed-behavior-summary.is-flash {
   animation: behaviorSummaryFlash 1s ease-out forwards;
 }
-/* v0.8.155: explicit step-advance button; appears when phase = 1
-   to move from trigger options → progress picker. Styled as a real
-   action button so it's unmistakably clickable, not data. */
-.ed-behavior-continue {
-  display: block;
-  width: calc(100% - 1.1rem);
+/* v0.8.161: Back + Continue live in a flex row at phase 1.
+   At phase 2 the back button stands alone before the Progress title.
+   Back is secondary (ghost); Continue is primary. */
+.ed-behavior-btn-area {
+  display: flex;
+  gap: 0.4rem;
   margin: 0.55rem 0.55rem 0.3rem;
+}
+/* v0.8.155: step-advance button.
+   v0.8.158: --invalid shake for required-field refusal.
+   v0.8.161: lives inside .ed-behavior-btn-area; margin moved there. */
+.ed-behavior-continue {
+  flex: 1 1 auto;
   padding: 0.3rem 0.7rem;
   background: #2d2d2d;
   border: 1px solid #585858;
@@ -839,6 +845,26 @@ body.editor {
   background: #3a3a3a;
   border-color: #999;
   color: #fff;
+}
+/* v0.8.161: back button — ghost so it doesn't compete with Continue. */
+.ed-behavior-back {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.6rem;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #888;
+  font: inherit;
+  font-size: 0.83em;
+  cursor: pointer;
+}
+.ed-behavior-back:hover { border-color: #686868; color: #bbb; }
+/* Standalone variant — phase 2 back button before the Progress title */
+.ed-behavior-back--standalone {
+  display: block;
+  width: calc(100% - 1.1rem);
+  margin: 0.4rem 0.55rem 0;
+  text-align: left;
 }
 /* v0.8.158: shake + red tint when Continue is refused (required field empty) */
 @keyframes behaviorContinueShake {
@@ -1731,7 +1757,11 @@ body.editor input[type="range"] {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
-  z-index: 100;
+  /* v0.8.161: must exceed .ed-panel-host (200) so choice dialogs
+     appear on top of floating panels, not behind them. The dark
+     backdrop was also covering the canvas without the dialog being
+     visible — users saw a black canvas with no explanation. */
+  z-index: 300;
   display: flex;
   align-items: center;
   justify-content: center;
