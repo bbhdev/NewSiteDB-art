@@ -5179,8 +5179,14 @@
       ? behaviorBlockPhases[blockId] : 3;
   }
   function advanceBlockPhase(blockId, minPhase) {
+    // Fallback must match getBlockPhase (3 = fully expanded for existing
+    // blocks). Using 0 here caused existing blocks to regress to phase 1
+    // the first time any trigger button was clicked in a session: the
+    // block was absent from the map, hasOwnProperty returned false,
+    // cur defaulted to 0, and advanceBlockPhase(id, 1) wrote 1 into the
+    // map — hiding everything below phase 1 on the next render.
     const cur = Object.prototype.hasOwnProperty.call(behaviorBlockPhases, blockId)
-      ? behaviorBlockPhases[blockId] : 0;
+      ? behaviorBlockPhases[blockId] : 3;
     if (minPhase > cur) behaviorBlockPhases[blockId] = minPhase;
   }
 
