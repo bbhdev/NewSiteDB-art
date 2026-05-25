@@ -848,6 +848,15 @@ body.editor {
 }
 .ed-behavior-block > .ed-field:first-of-type { margin-top: 0.45rem; }
 .ed-behavior-block > .ed-field:last-of-type  { margin-bottom: 0.45rem; }
+/* v0.8.156: inside behavior blocks, number fields get a compact input
+   (5em) so the label can breathe; checkbox fields let the label fill
+   available space and keep the control at its natural size. */
+.ed-behavior-block > .ed-field--number {
+  grid-template-columns: 1fr 5em;
+}
+.ed-behavior-block > .ed-field--checkbox {
+  grid-template-columns: 1fr auto;
+}
 
 /* v0.8.28: drag-to-reorder visuals.
    The behavior-head strip acts as the drag handle (cursor: grab on

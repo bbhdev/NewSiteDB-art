@@ -10846,7 +10846,7 @@
 
   function numberField(label, value, onChange) {
     const wrap = document.createElement('div');
-    wrap.className = 'ed-field';
+    wrap.className = 'ed-field ed-field--number';
     const lbl = document.createElement('label'); lbl.textContent = label;
     const inp = document.createElement('input');
     inp.type = 'number'; inp.value = (value !== undefined && value !== null) ? value : 0;
@@ -10856,7 +10856,7 @@
   }
   function checkboxField(label, value, onChange) {
     const wrap = document.createElement('div');
-    wrap.className = 'ed-field';
+    wrap.className = 'ed-field ed-field--checkbox';
     const lbl = document.createElement('label'); lbl.textContent = label;
     const inp = document.createElement('input');
     inp.type = 'checkbox'; inp.checked = !!value;
@@ -10866,7 +10866,7 @@
   }
   function overrideNumberField(label, ov, fallback, onChange) {
     const wrap = document.createElement('div');
-    wrap.className = 'ed-field';
+    wrap.className = 'ed-field ed-field--number';
     const lbl = document.createElement('label'); lbl.textContent = label;
     const inp = document.createElement('input');
     inp.type = 'number';
@@ -10882,7 +10882,7 @@
   function overrideCheckboxField(label, ov, fallback, onChange) {
     // Tri-state: indeterminate = inherit, checked/unchecked = override.
     const wrap = document.createElement('div');
-    wrap.className = 'ed-field';
+    wrap.className = 'ed-field ed-field--checkbox';
     const lbl = document.createElement('label'); lbl.textContent = label;
     const grp = document.createElement('div');
     grp.style.display = 'flex'; grp.style.gap = '0.5rem'; grp.style.alignItems = 'center';
