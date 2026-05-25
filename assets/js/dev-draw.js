@@ -10324,20 +10324,12 @@
         }
         return btn;
       };
+      // v0.8.130: delete button removed from nav — it's available on
+      // each block-list row in the parent object panel, so having a
+      // second one here just created a second × that looked like a
+      // close button.
       navWrap.appendChild(mkNav('‹', blockIdx - 1, 'Previous block'));
       navWrap.appendChild(mkNav('›', blockIdx + 1, 'Next block'));
-      const spacer = document.createElement('span');
-      spacer.className = 'ed-behavior-nav-spacer';
-      navWrap.appendChild(spacer);
-      // Remove button: stays accessible when in a floating panel
-      // (replaces the old head × button).
-      const rmInNav = document.createElement('button');
-      rmInNav.type = 'button';
-      rmInNav.className = 'ed-behavior-nav-rm';
-      rmInNav.textContent = '✕';
-      rmInNav.title = 'Delete this block';
-      rmInNav.addEventListener('click', function () { removeBehaviorBlock(line.id, blockIdx); });
-      navWrap.appendChild(rmInNav);
       card.appendChild(navWrap);
     }
 
@@ -12341,12 +12333,21 @@
     }
 
     // Build the render context handed to a panel's render(). Folds
-    // in the current selection so panels that don't pin always show
-    // fresh data. Pinned panels look up their bound objectId instead.
+    // in the current selection so panels that follow selection show
+    // fresh data. Pinned panels, and panels that don't follow
+    // selection at all (like behavior-block), use their bound
+    // objectId regardless of pinned state — for these, objectId is
+    // always authoritative, not just when pinned.
     function buildContext(panelState) {
+      const reg = PANEL_REGISTRY[panelState.type];
       const allSel = state.selectedIds.slice();
       let primaryId = null;
-      if (panelState.pinned && panelState.objectId) {
+      // v0.8.130: use objectId when (a) pinned, or (b) the panel
+      // type doesn't follow selection (e.g. behavior-block — always
+      // bound to a specific parent object, pinned or not).
+      const objectIdAuthoritative = panelState.objectId &&
+        (panelState.pinned || (reg && !reg.followsSelection));
+      if (objectIdAuthoritative) {
         primaryId = panelState.objectId;
       } else {
         primaryId = allSel.length ? allSel[allSel.length - 1] : null;
