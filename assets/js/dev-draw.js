@@ -10584,7 +10584,7 @@
 
       const delayApplies = !(when === 'scroll-range' && dmode === 'scroll');
       if (delayApplies) {
-        card.appendChild(numberField('Delay (s)', trigger.delay || 0, function (v) {
+        card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
           updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
         }));
       }
