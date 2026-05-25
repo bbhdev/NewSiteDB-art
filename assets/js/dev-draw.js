@@ -838,7 +838,10 @@
     if (i >= 0) state.selectedIds.splice(i, 1);
     else state.selectedIds.push(id);
   }
-  function clearSelection() { state.selectedIds = []; }
+  function clearSelection() {
+    if (typeof clearBboxOverlay === 'function') clearBboxOverlay();
+    state.selectedIds = [];
+  }
 
   // ── Scope-mode helpers ────────────────────────────────────────────
   // state.mode === 'all' → mutating actions fan out across every
@@ -9435,24 +9438,9 @@
           renderLines();
         }), line.masterId, 'filled'));
       }
-      // v0.8.131: reset button for primitives too (was only in the
-      // non-primitive branch before).
+      // v0.8.132: bounding box before reset button, from live SVG.
+      appendBboxRow(wrap, line);
       if (_resetToMasterBtn) wrap.appendChild(_resetToMasterBtn);
-      // Bounding box from the live SVG element — works for all
-      // primitive kinds without hand-computing per-shape geometry.
-      (function () {
-        var svgEl = linesG && linesG.querySelector('[data-line-id="' + line.id + '"]');
-        if (!svgEl) return;
-        try {
-          var bb = svgEl.getBBox();
-          if (bb && bb.width > 0) {
-            var info = document.createElement('div');
-            info.className = 'ed-params-meta';
-            info.textContent = 'Bounding box ' + bb.width.toFixed(1) + ' × ' + bb.height.toFixed(1) + ' mm';
-            wrap.appendChild(info);
-          }
-        } catch (e) { /* hidden / zero-size — skip */ }
-      })();
     } else {
       // v0.8.95: Parameters fallback for non-primitive kinds (freehand,
       // freehandClosed, manual, bezier, svgImport, line, lineChain, …).
@@ -9512,26 +9500,18 @@
           }
           scheduleSnapshot();
         }));
-        // v0.8.128/129: B4 — reset button goes here, logically grouped
-        // with the position fields it affects.
-        if (_resetToMasterBtn) {
-          wrap.appendChild(_resetToMasterBtn);
-        }
+        // v0.8.132: bbox first (after position XY), then reset.
+        appendBboxRow(wrap, line);
+        if (_resetToMasterBtn) wrap.appendChild(_resetToMasterBtn);
+        // Point/segment count note.
+        const cntNote = document.createElement('div');
+        cntNote.className = 'ed-params-meta';
+        cntNote.textContent = ptCount + (Array.isArray(line.segments) && !Array.isArray(line.points) ? ' segments' : ' points');
+        wrap.appendChild(cntNote);
       } else {
         // Degenerate: no geometry to anchor the position to.
         wrap.appendChild(textField('Position', '— (no geometry)', function () {}, ''));
       }
-      // v0.8.128: B3 — bounding box on its own full-width row, not
-      // squeezed into an ed-field grid cell. Styled as a metadata note.
-      const parts = [];
-      if (hasGeo) {
-        parts.push('Bounding box ' + (maxX - minX).toFixed(1) + ' × ' + (maxY - minY).toFixed(1) + ' mm');
-      }
-      parts.push(ptCount + (Array.isArray(line.segments) && !Array.isArray(line.points) ? ' segments' : ' points'));
-      const info = document.createElement('div');
-      info.className = 'ed-params-meta';
-      info.textContent = parts.join(' · ');
-      wrap.appendChild(info);
     }
 
     wrap.appendChild(divider('Appearance'));
@@ -9675,12 +9655,6 @@
         const updated = state.lines.find(function (l) { return l.id === line.id; });
         const nb = updated && Array.isArray(updated.behaviors) && updated.behaviors.length
           ? updated.behaviors[updated.behaviors.length - 1] : null;
-        console.log('[add-block] line.id:', line.id,
-          'updated:', !!updated,
-          'nb.id:', nb && nb.id,
-          'behaviors count:', updated && updated.behaviors && updated.behaviors.length,
-          'all block ids:', updated && updated.behaviors && updated.behaviors.map(function (b) { return b && b.id; })
-        );
         if (nb && nb.id) {
           openBehaviorPanelForBlock(line.id, nb.id, panelState.id);
         }
@@ -11069,6 +11043,71 @@
     return wrap;
   }
 
+  // v0.8.132: shared helper — appends a bounding-box metadata row
+  // to `container` for `line`. Uses getBBox() on the live SVG element
+  // (works for all kinds). Includes a Show / Hide button that paints
+  // a temporary dotted rectangle on the canvas overlay. The overlay
+  // is cleared automatically on panel close or object deselect — it
+  // is purely ephemeral and never persisted.
+  var _bboxOverlayEl = null; // singleton overlay rect element
+  var _bboxOverlayLineId = null;
+  function clearBboxOverlay() {
+    if (_bboxOverlayEl && _bboxOverlayEl.parentNode) {
+      _bboxOverlayEl.parentNode.removeChild(_bboxOverlayEl);
+    }
+    _bboxOverlayEl = null;
+    _bboxOverlayLineId = null;
+  }
+  function appendBboxRow(container, line) {
+    var svgEl = linesG && linesG.querySelector('[data-line-id="' + line.id + '"]');
+    if (!svgEl) return;
+    var bb;
+    try { bb = svgEl.getBBox(); } catch (e) { return; }
+    if (!bb || bb.width <= 0) return;
+
+    var row = document.createElement('div');
+    row.className = 'ed-params-meta ed-params-meta--bbox';
+
+    var text = document.createElement('span');
+    text.textContent = 'Bounding box ' + bb.width.toFixed(1) + ' × ' + bb.height.toFixed(1) + ' mm';
+    row.appendChild(text);
+
+    var showBtn = document.createElement('button');
+    showBtn.type = 'button';
+    showBtn.className = 'ed-mini ed-bbox-show-btn';
+    var isShowing = _bboxOverlayLineId === line.id && !!_bboxOverlayEl;
+    showBtn.textContent = isShowing ? 'Hide' : 'Show';
+    showBtn.addEventListener('click', function () {
+      var currentlyShowing = _bboxOverlayLineId === line.id && !!_bboxOverlayEl;
+      clearBboxOverlay();
+      if (!currentlyShowing) {
+        // Re-query — geometry may have changed since row was built.
+        var el = linesG && linesG.querySelector('[data-line-id="' + line.id + '"]');
+        var b2;
+        try { b2 = el && el.getBBox(); } catch (e) { return; }
+        if (!b2 || b2.width <= 0) return;
+        var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x',      String(b2.x));
+        rect.setAttribute('y',      String(b2.y));
+        rect.setAttribute('width',  String(b2.width));
+        rect.setAttribute('height', String(b2.height));
+        rect.setAttribute('fill',   'none');
+        rect.setAttribute('stroke', '#5fa8d3');
+        rect.setAttribute('stroke-width', '0.5');
+        rect.setAttribute('stroke-dasharray', '2 2');
+        rect.setAttribute('pointer-events', 'none');
+        svg.appendChild(rect);
+        _bboxOverlayEl = rect;
+        _bboxOverlayLineId = line.id;
+        showBtn.textContent = 'Hide';
+      } else {
+        showBtn.textContent = 'Show';
+      }
+    });
+    row.appendChild(showBtn);
+    container.appendChild(row);
+  }
+
   function divider(label) {
     const el = document.createElement('div');
     el.style.color = '#888';
@@ -12066,14 +12105,6 @@
           return b && b.id === ctx.panelState.blockId;
         });
         if (idx < 0) {
-          // v0.8.131: diagnostic — log what we have vs what we're looking for
-          console.warn('[block-panel] blockId not found',
-            'looking for:', ctx.panelState.blockId,
-            'available ids:', blocks.map(function (b) { return b && b.id; }),
-            'line.id:', line && line.id,
-            'panelState.objectId:', ctx.panelState.objectId,
-            'pinned:', ctx.panelState.pinned
-          );
           body.appendChild(msg(
             'This block no longer exists (was it deleted?). Close the panel and pick another.'
           ));
@@ -12386,15 +12417,29 @@
       }
       let primaryLine = null;
       if (primaryId) {
-        // Search across all classes — pinned objectIds may not be
-        // present in the current class (cross-class browsing).
-        Object.keys(state.byClass).some(function (cid) {
-          const ls = state.byClass[cid] && state.byClass[cid].lines;
-          if (!ls) return false;
-          const found = ls.find(function (l) { return l.id === primaryId; });
-          if (found) { primaryLine = found; return true; }
-          return false;
-        });
+        // v0.8.132: search current class first. In modeIsAll, sibling
+        // lines across classes can share the same l.id (same master),
+        // so iterating all classes in arbitrary insertion order found
+        // a sibling with stale behavior ids instead of the live current-
+        // class line. Preferring state.lines (current class) avoids the
+        // collision. Cross-class fallback still handles pinned-panel
+        // cross-class browsing.
+        const curClassLines = state.byClass[state.classId] && state.byClass[state.classId].lines;
+        if (curClassLines) {
+          primaryLine = curClassLines.find(function (l) { return l.id === primaryId; }) || null;
+        }
+        if (!primaryLine) {
+          // Fallback: search all other classes (pinned objectIds for
+          // objects not in the current class).
+          Object.keys(state.byClass).some(function (cid) {
+            if (cid === state.classId) return false;
+            const ls = state.byClass[cid] && state.byClass[cid].lines;
+            if (!ls) return false;
+            const found = ls.find(function (l) { return l.id === primaryId; });
+            if (found) { primaryLine = found; return true; }
+            return false;
+          });
+        }
       }
       return {
         panelState: panelState,
@@ -12570,6 +12615,8 @@
       if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
       delete panels[panelId];
       childIds.forEach(function (cid) { close(cid); });
+      // v0.8.132: clear bbox overlay when an object or block panel closes.
+      if (typeof clearBboxOverlay === 'function') clearBboxOverlay();
       persist();
     }
 
