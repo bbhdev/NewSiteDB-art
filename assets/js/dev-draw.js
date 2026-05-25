@@ -9435,6 +9435,24 @@
           renderLines();
         }), line.masterId, 'filled'));
       }
+      // v0.8.131: reset button for primitives too (was only in the
+      // non-primitive branch before).
+      if (_resetToMasterBtn) wrap.appendChild(_resetToMasterBtn);
+      // Bounding box from the live SVG element — works for all
+      // primitive kinds without hand-computing per-shape geometry.
+      (function () {
+        var svgEl = linesG && linesG.querySelector('[data-line-id="' + line.id + '"]');
+        if (!svgEl) return;
+        try {
+          var bb = svgEl.getBBox();
+          if (bb && bb.width > 0) {
+            var info = document.createElement('div');
+            info.className = 'ed-params-meta';
+            info.textContent = 'Bounding box ' + bb.width.toFixed(1) + ' × ' + bb.height.toFixed(1) + ' mm';
+            wrap.appendChild(info);
+          }
+        } catch (e) { /* hidden / zero-size — skip */ }
+      })();
     } else {
       // v0.8.95: Parameters fallback for non-primitive kinds (freehand,
       // freehandClosed, manual, bezier, svgImport, line, lineChain, …).
@@ -9657,6 +9675,12 @@
         const updated = state.lines.find(function (l) { return l.id === line.id; });
         const nb = updated && Array.isArray(updated.behaviors) && updated.behaviors.length
           ? updated.behaviors[updated.behaviors.length - 1] : null;
+        console.log('[add-block] line.id:', line.id,
+          'updated:', !!updated,
+          'nb.id:', nb && nb.id,
+          'behaviors count:', updated && updated.behaviors && updated.behaviors.length,
+          'all block ids:', updated && updated.behaviors && updated.behaviors.map(function (b) { return b && b.id; })
+        );
         if (nb && nb.id) {
           openBehaviorPanelForBlock(line.id, nb.id, panelState.id);
         }
@@ -12042,6 +12066,14 @@
           return b && b.id === ctx.panelState.blockId;
         });
         if (idx < 0) {
+          // v0.8.131: diagnostic — log what we have vs what we're looking for
+          console.warn('[block-panel] blockId not found',
+            'looking for:', ctx.panelState.blockId,
+            'available ids:', blocks.map(function (b) { return b && b.id; }),
+            'line.id:', line && line.id,
+            'panelState.objectId:', ctx.panelState.objectId,
+            'pinned:', ctx.panelState.pinned
+          );
           body.appendChild(msg(
             'This block no longer exists (was it deleted?). Close the panel and pick another.'
           ));
