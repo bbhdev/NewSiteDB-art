@@ -1103,6 +1103,7 @@
           <li><strong>Cmd/Shift-click</strong> on the canvas or on a row in the sidebar to add an object to the selection — or remove it if already selected.</li>\
           <li><strong>Drag</strong> any selected object\'s body to move every selected object in lockstep, preserving their spatial relationship.</li>\
           <li><strong>Drag handles</strong> (cyan dots) to reshape — point handles on free-form lines, parameter handles on primitives. Handles only show when exactly one object is selected.</li>\
+          <li><strong>⌥ Option-click</strong> (Alt-click on Windows) on an object to select it <em>and</em> open its detail panel. If the panel is already open for that object, Option-click closes it instead. Option-click on empty canvas deselects and closes any open unpinned panel.</li>\
           <li><strong>Esc</strong> or empty-canvas click to clear the selection.</li>\
           <li><strong>Backspace</strong> / Delete to remove every selected object.</li>\
         </ul>\
@@ -1116,7 +1117,7 @@
         <p>Every object has a floating detail panel that shows its full parameters, style, and behavior blocks without displacing the sidebar. Two ways to open it:</p>\
         <ul>\
           <li><strong>⌥ Option-click</strong> (Alt-click on Windows) on any object on the canvas, or on its row in the sidebar.</li>\
-          <li>The <strong>⊞ button</strong> on the right end of each sidebar row — visible on hover.</li>\
+          <li>The <strong>⊞ button</strong> on the right end of each sidebar row — always visible; red when the panel is open.</li>\
         </ul>\
         <p>Panels can be pinned (📌) to stay open when the selection changes, or left unpinned to follow the current selection. Drag the panel header to reposition.</p>\
         <h4>Behaviors</h4>\
@@ -11596,7 +11597,13 @@
       .filter(function (el) { return el && el.dataset && el.dataset.lineId; })
       .map(function (el) { return el.dataset.lineId; });
     const pressedSelected = linesAtPoint.some(function (id) { return isSelected(id); });
-    const modifier = e.metaKey || e.ctrlKey || e.shiftKey;
+    // v0.8.146: altKey included so opt-click on an unselected object
+    // doesn't trigger the implicit-select path here in pointerdown.
+    // Without this, selectOnly(B) fires in pointerdown, making
+    // isObjectPanelOpenFor(B) return true by the time pointerup runs,
+    // which causes the panel-toggle logic to close the panel instead of
+    // rebinding it. Alt-click selection is handled entirely in pointerup.
+    const modifier = e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
     let armMove = false;
     if (!modifier) {
       if (pressedSelected) {
