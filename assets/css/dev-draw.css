@@ -654,6 +654,31 @@ body.editor {
   cursor: pointer;
 }
 .ed-behavior-remove:hover { color: #f88; background: #2c1818; }
+/* v0.8.127: prev / next block navigation in the block-panel head.
+   Lets the user step through sibling blocks without bouncing back
+   to the parent object panel. Disabled state dims to ~30% and
+   blocks pointer events so click-through can't fire. */
+.ed-behavior-nav {
+  display: inline-flex;
+  gap: 0.15rem;
+  margin-right: 0.15rem;
+}
+.ed-behavior-nav-btn {
+  background: transparent;
+  color: #d8d8d8;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 0.4rem;
+  font-size: 1em;
+  line-height: 1;
+  cursor: pointer;
+}
+.ed-behavior-nav-btn:hover:not(:disabled) {
+  color: #fff; background: #2a3a4a;
+}
+.ed-behavior-nav-btn:disabled {
+  opacity: 0.3; cursor: default; pointer-events: none;
+}
 .ed-behavior-range {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -10210,7 +10210,7 @@
 
   // Render one behavior-block card inside the line panel. Each card
   // owns its block's range + params; ✕ removes the block.
-  function renderBehaviorBlock(line, blockIdx, group) {
+  function renderBehaviorBlock(line, blockIdx, group, panelState) {
     const block = line.behaviors[blockIdx];
     const params = (block && block.params) || {};
     const range = (block && block.range) || { start: 0, end: 1 };
@@ -10243,8 +10243,50 @@
     });
     const title = document.createElement('span');
     title.className = 'ed-behavior-title';
-    title.textContent = 'Block ' + (blockIdx + 1);
+    const totalBlocks = Array.isArray(line.behaviors) ? line.behaviors.length : 0;
+    title.textContent = 'Block ' + (blockIdx + 1) + ' / ' + totalBlocks;
     head.appendChild(title);
+
+    // v0.8.127: prev / next block navigation. Rebinds THIS panel to
+    // the adjacent block instead of opening another panel — keeps
+    // the "one floating panel per block" rule while letting the
+    // user step through the sequence without going back to the
+    // parent object panel. Buttons disable at the ends. Only
+    // active when we know our own panelId (passed from the panel
+    // registry); legacy inline uses of renderBehaviorBlock skip
+    // the nav silently.
+    if (panelState && panelState.id && window.PanelManager && totalBlocks > 1) {
+      const navWrap = document.createElement('span');
+      navWrap.className = 'ed-behavior-nav';
+      const mkNav = function (label, targetIdx, titleStr) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ed-behavior-nav-btn';
+        btn.textContent = label;
+        btn.title = titleStr;
+        const disabled = targetIdx < 0 || targetIdx >= totalBlocks;
+        btn.disabled = disabled;
+        // Same dragstart-swallow trick as the × button.
+        btn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+        if (!disabled) {
+          btn.addEventListener('click', function () {
+            const target = line.behaviors[targetIdx];
+            if (!target || !target.id) return;
+            try {
+              window.PanelManager.updatePanel(panelState.id, {
+                objectId: line.id, blockId: target.id
+              });
+              window.PanelManager.bringToFront(panelState.id);
+            } catch (e) { console.error(e); }
+          });
+        }
+        return btn;
+      };
+      navWrap.appendChild(mkNav('‹', blockIdx - 1, 'Previous block'));
+      navWrap.appendChild(mkNav('›', blockIdx + 1, 'Next block'));
+      head.appendChild(navWrap);
+    }
+
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'ed-behavior-remove';
@@ -10389,56 +10431,62 @@
     ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
        function (opt) { explainDurationDisabled(opt); }));
 
-    // v0.8.19: render every trigger field on every render, so the
-    // user always sees all axes — fields that don't apply to the
-    // current "Activate when" are dimmed and disabled (.is-inactive)
-    // rather than removed. Side effect: values entered before a mode
-    // switch stay visible and are restored the moment the mode flips
-    // back, without a hidden-but-persisted ghost state.
-    const r = trigger.range || { start: 0, end: 1 };
-    const rangeRow = document.createElement('div');
-    rangeRow.className = 'ed-behavior-range';
-    rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
-      updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
-    }));
-    rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
-      updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
-    }));
-    setInactive(rangeRow, when !== 'scroll-range');
-    card.appendChild(rangeRow);
+    // v0.8.127: progressive disclosure — only the trigger fields
+    // that apply to the current "Activate when" are rendered. Values
+    // for hidden axes stay in the data model so flipping back to a
+    // mode restores its inputs exactly as left. Replaces the v0.8.19
+    // setInactive-dim approach, which gave the user every axis at
+    // once even when only one applied.
+    if (when === 'scroll-range') {
+      const r = trigger.range || { start: 0, end: 1 };
+      const rangeRow = document.createElement('div');
+      rangeRow.className = 'ed-behavior-range';
+      rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
+      }));
+      rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
+      }));
+      card.appendChild(rangeRow);
+    }
 
-    card.appendChild(setInactive(triggerField('Trigger key', trigger.selector || '', function (v) {
-      updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
-    }), when !== 'scroll-key'));
-    // v0.8.12: where in the viewport the key has to land for
-    // activation. 'bottom' preserves the v0.8.11 default with a
-    // small inset; 'top' / 'middle' let the user gate activation
-    // until the key has scrolled further up.
-    const va = trigger.viewportAt || 'middle';
-    card.appendChild(setInactive(behaviorButtonGroup('Reaches', va, [
-      { value: 'top',    label: 'Top of viewport' },
-      { value: 'middle', label: 'Middle' },
-      { value: 'bottom', label: 'Bottom of viewport' },
-      { value: 'object', label: 'The object' }
-    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
-       null), when !== 'scroll-key'));
-    // v0.8.15: re-arm on every scroll-back crossing so the
-    // timed/loop/pingpong duration restarts each time the key
-    // re-enters the trigger zone.
-    const rep = trigger.repeat || 'once';
-    card.appendChild(setInactive(behaviorButtonGroup('Repeat', rep, [
-      { value: 'once',  label: 'Once' },
-      { value: 'every', label: 'Every crossing' }
-    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); },
-       null), when !== 'scroll-key'));
+    if (when === 'scroll-key') {
+      card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
+      }));
+      // v0.8.12: where in the viewport the key has to land for
+      // activation. 'bottom' preserves the v0.8.11 default with a
+      // small inset; 'top' / 'middle' let the user gate activation
+      // until the key has scrolled further up.
+      const va = trigger.viewportAt || 'middle';
+      card.appendChild(behaviorButtonGroup('Reaches', va, [
+        { value: 'top',    label: 'Top of viewport' },
+        { value: 'middle', label: 'Middle' },
+        { value: 'bottom', label: 'Bottom of viewport' },
+        { value: 'object', label: 'The object' }
+      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
+         null));
+      // v0.8.15: re-arm on every scroll-back crossing so the
+      // timed/loop/pingpong duration restarts each time the key
+      // re-enters the trigger zone.
+      const rep = trigger.repeat || 'once';
+      card.appendChild(behaviorButtonGroup('Repeat', rep, [
+        { value: 'once',  label: 'Once' },
+        { value: 'every', label: 'Every crossing' }
+      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); },
+         null));
+    }
 
     // Delay is an additional offset (seconds) after the activation
     // event fires. Only meaningless when the block has no time
     // concept at all — that's the scroll-range × scroll-driven
     // combo, where progress is bound directly to scroll position.
-    card.appendChild(setInactive(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
-      updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
-    }), when === 'scroll-range' && dmode === 'scroll'));
+    const delayApplies = !(when === 'scroll-range' && dmode === 'scroll');
+    if (delayApplies) {
+      card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
+        updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
+      }));
+    }
 
     // v0.8.84: pointer-trigger hit-test opt-in. Only for click /
     // hover; lets the author override the SVG-native hit (stroke
@@ -10522,19 +10570,19 @@
       function (v) { updateBehaviorDuration(line.id, blockIdx, 'mode', v); },
       function (opt) { explainDurationDisabled(opt); }));
 
-    // v0.8.19: always render Seconds + Easing, inactive when
-    // Progress = Scroll-driven (which is bound to scroll position
-    // and has no per-block time/easing). Lets the user see the
-    // values they had set under Timed/Loop/Ping-pong even after
-    // switching back to Scroll-driven.
-    const secondsLabel = (dmode === 'loopTo') ? 'Return time (s)' : 'Seconds';
-    card.appendChild(setInactive(numberField(secondsLabel, duration.seconds || 1, function (v) {
-      updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
-    }), dmode === 'scroll'));
-    card.appendChild(setInactive(selectField('Easing', duration.easing || 'linear',
-      EASING_OPTIONS,
-      function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }),
-      dmode === 'scroll'));
+    // v0.8.127: Seconds + Easing only shown when Progress is a time-
+    // based mode. Scroll-driven progress is bound to scroll position
+    // and has no per-block time/easing. Stored values survive a mode
+    // flip — they're just hidden while inapplicable.
+    if (dmode !== 'scroll') {
+      const secondsLabel = (dmode === 'loopTo') ? 'Return time (s)' : 'Seconds';
+      card.appendChild(numberField(secondsLabel, duration.seconds || 1, function (v) {
+        updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
+      }));
+      card.appendChild(selectField('Easing', duration.easing || 'linear',
+        EASING_OPTIONS,
+        function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }));
+    }
 
     // v0.8.23: loopTo-specific fields — target picker (earlier
     // time-mode blocks only) + optional max-iterations cap. When
@@ -10671,25 +10719,28 @@
       }));
     }
     card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
-    // v0.8.19: pivot fields + set-origin button gate on the
-    // RESOLVED rotate (block override OR group default). If neither
-    // produces a non-zero rotation the pivot does nothing visible,
-    // so we dim those rows to point the user at Rotate first — but
-    // keep them rendered so a pre-entered pivot stays visible.
+    // v0.8.127: pivot fields + set-origin button only render when
+    // there's actually a non-zero rotate (block override OR group
+    // default). With no rotation the pivot does nothing visible, so
+    // hiding the rows keeps the panel focused on what's in effect.
+    // Stored pivot values survive — they reappear the moment a
+    // rotate value is entered.
     const resolvedRotate = (params.rotate != null) ? Number(params.rotate)
                          : Number(gd.rotate || 0);
     const noRotate = !Number.isFinite(resolvedRotate) || resolvedRotate === 0;
-    // Per-line rotate-origin: DELTA from this object's natural
-    // center, so the pivot travels with the line instead of
-    // being pinned to a canvas coord. 0,0 = pivot at center.
-    card.appendChild(setInactive(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }), noRotate));
-    card.appendChild(setInactive(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }), noRotate));
-    // Set-origin is per-block — the canvas-click handler reads
-    // settingOrigin.blockIdx so the captured (x,y) lands in the
-    // right block's params.
-    card.appendChild(setInactive(setOriginButton(function () {
-      startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
-    }), noRotate));
+    if (!noRotate) {
+      // Per-line rotate-origin: DELTA from this object's natural
+      // center, so the pivot travels with the line instead of
+      // being pinned to a canvas coord. 0,0 = pivot at center.
+      card.appendChild(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
+      card.appendChild(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
+      // Set-origin is per-block — the canvas-click handler reads
+      // settingOrigin.blockIdx so the captured (x,y) lands in the
+      // right block's params.
+      card.appendChild(setOriginButton(function () {
+        startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
+      }));
+    }
     // v0.8.26: opacity fade is a per-block "mode of change" like
     // translate / rotate, except authored as absolute from→to
     // values instead of progress-weighted deltas. Off by default —
@@ -10702,26 +10753,33 @@
       updateBehaviorParam(line.id, 'fadeOpacity', v ? true : null, blockIdx);
       renderSelectionPanel();
     }));
-    const oFrom = (typeof params.opacityFrom === 'number') ? params.opacityFrom : 1;
-    const oTo   = (typeof params.opacityTo   === 'number') ? params.opacityTo   : 0;
-    card.appendChild(setInactive(numberField('Opacity from (0–1)', oFrom, function (v) {
-      updateBehaviorParam(line.id, 'opacityFrom', v, blockIdx);
-    }), !fadeOn));
-    card.appendChild(setInactive(numberField('Opacity to (0–1)', oTo, function (v) {
-      updateBehaviorParam(line.id, 'opacityTo', v, blockIdx);
-    }), !fadeOn));
-    card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) { updateBehaviorParam(line.id, 'drawIn', v, blockIdx); }));
-    // v0.8.19: Direction gates on resolved drawIn (override OR
-    // group default). drawIn=false → direction is a no-op.
+    // v0.8.127: opacity from/to only render when fade is enabled.
+    if (fadeOn) {
+      const oFrom = (typeof params.opacityFrom === 'number') ? params.opacityFrom : 1;
+      const oTo   = (typeof params.opacityTo   === 'number') ? params.opacityTo   : 0;
+      card.appendChild(numberField('Opacity from (0–1)', oFrom, function (v) {
+        updateBehaviorParam(line.id, 'opacityFrom', v, blockIdx);
+      }));
+      card.appendChild(numberField('Opacity to (0–1)', oTo, function (v) {
+        updateBehaviorParam(line.id, 'opacityTo', v, blockIdx);
+      }));
+    }
+    card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) {
+      updateBehaviorParam(line.id, 'drawIn', v, blockIdx);
+      renderSelectionPanel();
+    }));
+    // v0.8.127: Direction only renders when draw-in resolves true
+    // (override OR group default). Otherwise the option is dead UI.
     const resolvedDrawIn = (params.drawIn != null) ? !!params.drawIn : !!gd.drawIn;
-    card.appendChild(setInactive(overrideSelectField('Direction', params.drawInDirection,
-      gd.drawInDirection || 'forward',
-      [
-        { value: 'forward', label: 'Begin → end' },
-        { value: 'reverse', label: 'End → begin' }
-      ],
-      function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }),
-      !resolvedDrawIn));
+    if (resolvedDrawIn) {
+      card.appendChild(overrideSelectField('Direction', params.drawInDirection,
+        gd.drawInDirection || 'forward',
+        [
+          { value: 'forward', label: 'Begin → end' },
+          { value: 'reverse', label: 'End → begin' }
+        ],
+        function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }));
+    }
 
     return card;
   }
@@ -11957,7 +12015,10 @@
           return;
         }
         const group = state.groups.find(function (g) { return g.id === line.groupId; });
-        body.appendChild(renderBehaviorBlock(line, idx, group));
+        // v0.8.127: pass panelState so the block card can wire prev/next
+        // navigation that rebinds this same panel to a sibling block
+        // (avoids opening a second panel for adjacent blocks).
+        body.appendChild(renderBehaviorBlock(line, idx, group, ctx.panelState));
       }
     },
     // Stub demo panel used to validate the system. Subsequent

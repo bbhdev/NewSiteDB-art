@@ -494,6 +494,38 @@ the numeric input.
 blocks the UI. `lastMultiSpawnKey` is set immediately at the top of
 `spawnMultiSelectObjectPanels` so the deferred body can't re-fire.
 
+**v0.8.127 (behaviors Phase A — progressive disclosure + block nav)**:
+first slice of the behaviors-block redesign (#10).
+
+1. Progressive disclosure inside `renderBehaviorBlock`. Replaces the
+   v0.8.19 `setInactive`-dim approach with conditional rendering:
+   - Range row only when `when === 'scroll-range'`
+   - Trigger-key / Reaches / Repeat only when `when === 'scroll-key'`
+   - Delay only when not the scroll-range × scroll-driven combo
+   - Seconds + Easing only when `dmode !== 'scroll'`
+   - Pivot Δx/Δy + set-origin only when resolved rotate ≠ 0
+   - Opacity from/to only when Fade-opacity is on
+   - Direction only when resolved drawIn is true
+   Values for hidden axes stay in the data model so flipping a mode
+   back restores the inputs intact — same persistence guarantee the
+   dim approach gave, with a cleaner panel.
+
+2. Block prev/next nav in the card head (‹ ›). Rebinds the current
+   block panel to the adjacent block instead of opening a second
+   panel — keeps "one floating panel per block" while letting the
+   user step through the sequence without bouncing back to the
+   parent object panel. Disabled at the ends; only shown when
+   `panelState` is passed and there's more than one block. Title
+   now reads "Block N / M" to make position visible.
+
+   `renderBehaviorBlock(line, blockIdx, group)` gained a 4th arg
+   `panelState`. The 'behavior-block' panel registry render passes
+   `ctx.panelState` through. CSS for `.ed-behavior-nav` /
+   `.ed-behavior-nav-btn` added next to `.ed-behavior-remove`.
+
+Phase B (effects "+ Effect" menu, removable rows, opt-in tracking)
+is the next slice, deferred until A is validated.
+
 **v0.8.125 (no auto fan-out, objectId-aware opt-click)**: two fixes
 to the gesture model:
 
