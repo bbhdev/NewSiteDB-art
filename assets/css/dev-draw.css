@@ -472,31 +472,23 @@ body.editor {
    same position as the other right-side badges. */
 .ed-line-panel-btn {
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid #3a3a3a;
   border-radius: 3px;
-  color: #555;
+  color: #666;
   font-size: 0.82em;
   line-height: 1;
   padding: 0 0.25em;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.1s, color 0.1s;
-}
-.ed-line-row:hover .ed-line-panel-btn {
-  opacity: 1;
-  color: #888;
-  border-color: #3a3a3a;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
 }
 .ed-line-panel-btn:hover {
-  color: #5fa8d3 !important;
-  border-color: #5fa8d3 !important;
-  background: #1e2e38 !important;
+  color: #5fa8d3;
+  border-color: #5fa8d3;
+  background: #1e2e38;
 }
 .ed-line-row.is-selected .ed-line-panel-btn {
-  color: #777;
-}
-.ed-line-row.is-selected:hover .ed-line-panel-btn {
-  opacity: 1;
+  color: #888;
+  border-color: #555;
 }
 
 /* v0.8.101: link badge — a colored circle with a per-master letter
