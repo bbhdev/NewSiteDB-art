@@ -11833,7 +11833,8 @@
           // Opt-click: one-shot panel toggle for the topmost hit
           // object. If the object isn't selected, make it the sole
           // selection first (the follower binds to selectedIds[0]).
-          // Empty-area opt-click is a no-op.
+          // Empty-area opt-click closes any open unpinned panel
+          // (symmetric with plain-click clearing the selection).
           clickCycle = null;
           if (ids.length) {
             const hit = ids[0];
@@ -11847,6 +11848,13 @@
               changed = true;
             }
             togglePanelFor = hit;
+          } else if (window.PanelManager) {
+            // v0.8.143: empty-canvas opt-click — close unpinned panels.
+            window.PanelManager.listOpen()
+              .filter(function (p) { return p.type === 'object' && !p.pinned; })
+              .forEach(function (p) {
+                try { window.PanelManager.close(p.id); } catch (ex) {}
+              });
           }
         } else if (multi) {
           // Shift/Cmd/Ctrl-click toggles the topmost hit object in/
