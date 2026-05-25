@@ -10558,21 +10558,23 @@
       { value: 'click',            label: 'Wait for click' },
       { value: 'hover',            label: 'Wait for hover' }
     ];
-    if (phase >= 2) {
-      // Locked chip: single button showing the chosen trigger in accent style.
-      // Clicking it expands phase 1 (all options visible with current selected).
+    // v0.8.164: trigger collapses to a chip as soon as one is picked.
+    // Phase 0: all options shown, none active.
+    // Phase >= 1: chip only (chosen trigger). Clicking the chip returns
+    // to phase 0 — all options re-appear, none active, user picks again.
+    if (phase >= 1) {
       var lockedTriggerOpt = null;
       for (var _ti = 0; _ti < allTriggerOpts.length; _ti++) {
         if (allTriggerOpts[_ti].value === when) { lockedTriggerOpt = allTriggerOpts[_ti]; break; }
       }
       if (!lockedTriggerOpt) lockedTriggerOpt = { value: when, label: when };
       card.appendChild(behaviorButtonGroup('', when, [lockedTriggerOpt], function () {
-        setBlockPhase(block.id, 1);
+        setBlockPhase(block.id, 0);
         renderSelectionPanel();
       }, null));
     } else {
-      // Phase 0: all options, none active. Phase 1: all options, selected active.
-      card.appendChild(behaviorButtonGroup('', (phase === 0 ? null : when), allTriggerOpts,
+      // Phase 0: all options visible, none active.
+      card.appendChild(behaviorButtonGroup('', null, allTriggerOpts,
         function (v) {
           advanceBlockPhase(block.id, 1);
           updateBehaviorTrigger(line.id, blockIdx, 'when', v);

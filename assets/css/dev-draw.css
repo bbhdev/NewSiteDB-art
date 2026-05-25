@@ -1002,6 +1002,10 @@ body.editor {
   font-size: 0.82em;
   cursor: pointer;
   line-height: 1.2;
+  /* v0.8.164: keep each button label on a single line. The row uses
+     flex-wrap so a button too wide for the remaining space jumps to
+     the next row whole, rather than wrapping its own text. */
+  white-space: nowrap;
 }
 .ed-behavior-group-btn:hover { background: #353535; border-color: #777; }
 .ed-behavior-group-btn.is-active {
