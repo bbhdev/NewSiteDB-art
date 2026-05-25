@@ -623,6 +623,148 @@ Subsequent steps: Parameters / Style / Master info as separate
 panel types if the object panel grows unwieldy; per-class Overview;
 final sidebar redesign as a navigator over the launchers.
 
+### Panel UX polish batch (v0.8.128–v0.8.152)
+
+Follow-ups on the floating-panel system once it carried real
+content. Notable mechanics:
+
+- **Block panel head replaced by nav strip (v0.8.128–v0.8.130).**
+  Inside the floating-panel variant the legacy "Block N / M · ×"
+  head duplicated the panel title bar. Strip it (`.ed-behavior-block--inpanel`
+  zeroes background/border) and render `.ed-behavior-nav` at the
+  top of the body: full-width Previous / Next buttons that rebind
+  the panel to the adjacent block (one panel per block, navigation
+  in place). Buttons stretch with `flex: 1 1 0` so they fill the
+  card width (v0.8.150); labels are full words, not glyphs
+  (v0.8.151).
+- **Per-type "last-seen" geometry (v0.8.117) refined further.**
+  `userPositioned` flag now gates `rememberLastPos` so auto-
+  positioned panels (cascade / default / restore) don't pollute the
+  memory slot — only drag/resize commits a new position.
+  Persisted along with the panel snapshot.
+- **Restore guards (v0.8.152).** `PanelManager.restore()` skips
+  follows-selection panel types when no selection exists on
+  startup — used to spawn an empty object panel every page load.
+- **Opt-click is the panel-toggle modifier (v0.8.123 → v0.8.148).**
+  Iterated map: shift/cmd/ctrl = multi-select extend; alt (opt) =
+  panel toggle. `toggleObjectPanelFor(objectId)` resolves
+  pinned-for-target / unpinned-follower / open-new based on
+  `objectId`, not `selectedIds[0]`, so the click hits the object
+  the user actually pointed at (v0.8.125). Empty-canvas opt-click
+  closes the unpinned object panel (v0.8.143). Opt-click on a
+  different object lets an existing unpinned follower rebind
+  rather than close+reopen — keeps geometry stable (v0.8.145).
+  v0.8.146 fixed the missed-rebind case for already-selected
+  objects.
+- **Sidebar 🪟 button: four-state correctness (v0.8.140–v0.8.142).**
+  No panel / unpinned matching / unpinned other-object / pinned-
+  for-target. Switching objects from a stale rebound unpinned
+  panel needed an explicit close-then-open sequence (v0.8.142)
+  because rebinding an unpinned follower mid-flight would silently
+  cancel the new-target open.
+- **Keyboard nudges split (v0.8.147–v0.8.148).** Arrow keys nudge
+  selected objects (existing behavior); Shift+Arrow pans canvas
+  *and* every floating panel in lockstep (so panels don't drift
+  off-screen relative to objects after a pan); Option+Arrow moves
+  the focused panel only. Arrow-key focus targets the panel, not
+  the canvas, when a panel has focus — avoids the panel-vs-canvas
+  intent ambiguity. Help modal lists Option+Arrow under Panels
+  (v0.8.149).
+
+### Behavior block — progressive disclosure redesign (v0.8.153–v0.8.169)
+
+The largest UX redesign of the block panel since v0.8.127's first
+slice of conditional rendering. The block panel now reads as a
+short guided wizard: pick activation → pick progress → configure
+effects, with previous choices locked behind a back-arrow and the
+options for the current step shown inline.
+
+- **Four-phase model.** `behaviorBlockPhases` (session-only
+  in-memory `Map<blockId, 0|1|2|3>`):
+  - **Phase 0** — trigger picker visible, no chip active.
+  - **Phase 1** — trigger picked → collapsed to a single chip +
+    small back-arrow; trigger-specific options + delay/treatAsFilled
+    visible; a Continue → button advances to phase 2.
+  - **Phase 2** — progress picker visible (all options, none
+    active); chips/back-arrows for trigger remain; "Also" section
+    opt-in row visible.
+  - **Phase 3** — progress collapsed to chip + back-arrow; progress
+    config (Seconds / Easing / loopTo target) visible; "What
+    changes" effects section visible. Default phase for already-
+    saved blocks (`getBlockPhase` defaults to 3) so opening an
+    existing block doesn't replay the wizard.
+  - `setBlockPhase` can decrease (back-arrows do this);
+    `advanceBlockPhase` is monotonic with a fallback to 3 — fixes
+    the v0.8.160 bug where existing blocks regressed to phase 1
+    on edit.
+- **Summary strip + flash (v0.8.153).** `behaviorSummaryText` builds
+  a plain-English description of the (activation × progress)
+  combo, painted in a warm red strip at the top of the card. A
+  separate `behaviorDriftSummaryText` line covers translateMode
+  (drift / path-follow). `refreshBehaviorSummary` updates them in
+  place when a field changes without a full panel re-render, with
+  a 1s flash so the eye notices. Hooked from `updateBehaviorParam`
+  for translateX/Y, translateMode, pathRef, pathRefName,
+  pathAlignToTangent, pathEndMode.
+- **Locked chip + back-arrow pattern (v0.8.163–v0.8.165).** Once
+  the user picks a trigger or progress mode, the picker collapses
+  immediately (not at Continue) to a single highlighted chip. The
+  chip itself is display-only (`.is-locked-chip` — no cursor, no
+  hover effect); the only back affordance is a small arrow button
+  (`makeBehaviorChipBack` → `.ed-behavior-chip-back`) rendered
+  flush right of the chip via `appendLockedChip(card, value,
+  label, onBack, tooltip)`. Single consistent back path at both
+  trigger and progress steps; no double affordance (chip-click +
+  Back button was the v0.8.165 fix).
+- **Continue with validation refusal (v0.8.158–v0.8.159).** Phase 1
+  → 2 advancement is gated. scroll-key requires a non-empty
+  selector; refusal triggers a shake animation on the Continue
+  button (`behaviorContinueShake` keyframes) and a red border on
+  the required input. Once typing begins, the red border clears.
+- **Disabled-with-explainer pattern.** Trigger / progress buttons
+  that don't apply in the current combo are shown
+  `.is-disabled` (dashed grey) instead of hidden; clicking them
+  triggers an `alert()` with a sentence-long reason. Two such
+  rules currently:
+  - "After previous ends" needs a prior block whose progress is
+    Timed.
+  - "Scroll-driven" needs activation = Scroll range.
+  - "Loop back to earlier block" needs a prior Timed block.
+- **"Also control other objects" opt-in (v0.8.158).** The
+  cross-object Start/Stop fields (`startObjectId` / `stopObjectId`)
+  used to occupy permanent panel real estate. Now hidden behind a
+  dashed `+ Also control other objects` button at phase ≥ 2. Once
+  expanded, an SVG × button on the section title row collapses it
+  back and clears both target ids (so the section stays hidden on
+  next render). Backward-compat: if a saved block already has
+  side-effect values, the section auto-opens. Session-only opt-in
+  Set: `behaviorShowSideEffects`.
+- **In-panel spacing + dividers (v0.8.168–v0.8.169).**
+  `.ed-behavior-block--inpanel` becomes a flex column with
+  `gap: 0.5rem` so every child (fields, button groups, chips,
+  section titles) gets the same vertical rhythm as the object
+  panel's `.ed-settings` grid. Within the "What changes" section,
+  unrelated property groups (rotate / opacity / draw-in) are
+  separated by a thin `.ed-behavior-prop-divider` (1px #333 — same
+  hairline as section-title border-tops, so within-section and
+  between-section dividers read as the same separator system).
+- **Other touch-ups in this batch:**
+  - Field-row sizing inside the block panel: number/checkbox fields
+    use `1fr 5em` / `1fr auto` grids; select/text fields use
+    `minmax(5em, max-content) 1fr` so labels like "At end of path"
+    don't wrap (v0.8.156, v0.8.166).
+  - SVG × on "Also" section title row replaces the old 1.1em
+    glyph (was nearly invisible). Sized to match the back-arrow
+    (1.5rem button, 75% SVG fill). Prompted the new global
+    "Icon sizing — never ship microscopic icons" rule (in
+    `~/.claude/CLAUDE.md`, with `.ed-behavior-chip-back` cited as
+    the size benchmark for icon-only buttons).
+  - Trigger button labels use `white-space: nowrap` to prevent
+    multi-word labels (e.g. "Loop back to earlier block") from
+    wrapping mid-button (v0.8.164).
+  - Modal z-index lifted above floating panels — the explainer
+    alerts and confirms were rendering underneath (v0.8.161).
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:
