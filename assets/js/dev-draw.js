@@ -10535,8 +10535,12 @@
     })();
     const afterPrevDisabled = prevTimedIdx < 0;
 
-    // At phase 0 no trigger is active yet — pass null so no button is highlighted.
-    card.appendChild(behaviorButtonGroup('', (phase === 0 ? null : when), [
+    // v0.8.163: trigger picker is shown in full only at phases 0 and 1.
+    // At phase 0 no trigger is active (null → no highlighted button).
+    // At phase 1 all buttons remain visible so the user can change their mind.
+    // At phase >= 2 the trigger is locked; only the chosen option is shown as
+    // a single chip — clicking it returns to phase 1 to re-expand all options.
+    const allTriggerOpts = [
       { value: 'scroll-range',     label: 'Scroll range' },
       { value: 'page-load',        label: 'Page load' },
       { value: 'scroll-key',       label: 'Scroll to key' },
@@ -10553,14 +10557,27 @@
       { value: 'wait',             label: 'Wait for external Start' },
       { value: 'click',            label: 'Wait for click' },
       { value: 'hover',            label: 'Wait for hover' }
-    ], function (v) {
-      // Always advance 0→1 (show trigger options). Never auto-advance
-      // further — user must click "Continue →" to proceed. This prevents
-      // the progress section from appearing before the user expects it
-      // when switching between triggers at phase 1.
-      advanceBlockPhase(block.id, 1);
-      updateBehaviorTrigger(line.id, blockIdx, 'when', v);
-    }, function (opt) { explainDurationDisabled(opt); }));
+    ];
+    if (phase >= 2) {
+      // Locked chip: single button showing the chosen trigger in accent style.
+      // Clicking it expands phase 1 (all options visible with current selected).
+      var lockedTriggerOpt = null;
+      for (var _ti = 0; _ti < allTriggerOpts.length; _ti++) {
+        if (allTriggerOpts[_ti].value === when) { lockedTriggerOpt = allTriggerOpts[_ti]; break; }
+      }
+      if (!lockedTriggerOpt) lockedTriggerOpt = { value: when, label: when };
+      card.appendChild(behaviorButtonGroup('', when, [lockedTriggerOpt], function () {
+        setBlockPhase(block.id, 1);
+        renderSelectionPanel();
+      }, null));
+    } else {
+      // Phase 0: all options, none active. Phase 1: all options, selected active.
+      card.appendChild(behaviorButtonGroup('', (phase === 0 ? null : when), allTriggerOpts,
+        function (v) {
+          advanceBlockPhase(block.id, 1);
+          updateBehaviorTrigger(line.id, blockIdx, 'when', v);
+        }, function (opt) { explainDurationDisabled(opt); }));
+    }
 
     // ── Phase >= 1: trigger-specific options ──────────────────────────
     // selectorFieldWrap is set inside the scroll-key branch so the
@@ -10699,14 +10716,28 @@
             'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
             'ping-pong blocks have no fixed start position to anchor to.' }
       ];
-      // v0.8.162: pass null at phase 2 so no button appears active before
-      // the user has explicitly chosen a progress mode (mirrors trigger picker).
-      card.appendChild(behaviorButtonGroup('', (phase >= 3 ? dmode : null), durationOpts,
-        function (v) {
-          advanceBlockPhase(block.id, 3);
-          updateBehaviorDuration(line.id, blockIdx, 'mode', v);
-        },
-        function (opt) { explainDurationDisabled(opt); }));
+      // v0.8.163: progress picker mirrors the trigger picker pattern.
+      // Phase 2: all options, none active (user must choose explicitly).
+      // Phase >= 3: locked chip showing the chosen mode; clicking → phase 2.
+      if (phase >= 3) {
+        var lockedDOpt = null;
+        for (var _di = 0; _di < durationOpts.length; _di++) {
+          if (durationOpts[_di].value === dmode) { lockedDOpt = durationOpts[_di]; break; }
+        }
+        if (!lockedDOpt) lockedDOpt = { value: dmode, label: dmode };
+        card.appendChild(behaviorButtonGroup('', dmode, [lockedDOpt], function () {
+          setBlockPhase(block.id, 2);
+          renderSelectionPanel();
+        }, null));
+      } else {
+        // Phase 2: all options visible, none pre-selected
+        card.appendChild(behaviorButtonGroup('', null, durationOpts,
+          function (v) {
+            advanceBlockPhase(block.id, 3);
+            updateBehaviorDuration(line.id, blockIdx, 'mode', v);
+          },
+          function (opt) { explainDurationDisabled(opt); }));
+      }
 
       // ── Side effects: "Also control other objects" ─────────────────────
       // Hidden by default — user must opt in. Auto-shown if values are

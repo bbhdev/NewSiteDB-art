@@ -1009,6 +1009,11 @@ body.editor {
   color: #000;
   border-color: var(--accent, #FF5500);
 }
+/* v0.8.163: locked chip hover — signals the chip is clickable to change.
+   Used when only one button is shown (chosen trigger / progress mode). */
+.ed-behavior-group-btn.is-active:hover {
+  filter: brightness(1.18);
+}
 .ed-behavior-group-btn.is-disabled {
   /* Greyed but still clickable — clicking pops an explainer
      dialog (handled by onPickDisabled in dev-draw.js). Cursor
