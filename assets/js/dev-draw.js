@@ -5160,6 +5160,12 @@
   // Add / remove / range-edit. Each goes through scope-mode fan-out
   // for siblings of the same master in 'all' mode.
 
+  // v0.8.158: Session-only set of block IDs where the "Also control
+  // other objects" side-effects section has been deliberately opened.
+  // Auto-shows when startObjectId or stopObjectId is already set so
+  // existing configurations are never hidden.
+  const behaviorShowSideEffects = new Set();
+
   // v0.8.154: Session-only phase map for progressive disclosure.
   // 0 = fresh (trigger picker only, no active button);
   // 1 = trigger chosen (trigger options visible);
@@ -10600,13 +10606,21 @@
 
     // ── Phase === 1: explicit Continue button (phase 1→2) ─────────────
     // Appears once the trigger is chosen but before the progress section
-    // is unlocked. User clicks it when done with trigger options.
+    // is unlocked. Refused (shake) if a required field is empty.
     if (phase === 1) {
       const contBtn = document.createElement('button');
       contBtn.type = 'button';
       contBtn.className = 'ed-behavior-continue';
       contBtn.textContent = 'Continue →';
       contBtn.addEventListener('click', function () {
+        // scroll-key requires a non-empty selector before proceeding.
+        if (when === 'scroll-key' && !(trigger.selector || '').trim()) {
+          contBtn.classList.remove('is-invalid');
+          void contBtn.offsetWidth; // restart animation
+          contBtn.classList.add('is-invalid');
+          setTimeout(function () { contBtn.classList.remove('is-invalid'); }, 600);
+          return;
+        }
         advanceBlockPhase(block.id, 2);
         renderSelectionPanel();
       });
@@ -10645,38 +10659,58 @@
         },
         function (opt) { explainDurationDisabled(opt); }));
 
-      // Cross-object Start / Stop side effects belong here because they
-      // are actions that happen alongside this block's progress, not
-      // properties of the trigger itself.
-      const selfMaster = line.masterId || null;
-      const objectIds = [];
-      const seenObjMasters = {};
-      state.lines.forEach(function (ln) {
-        const m = ln.masterId;
-        if (!m || m === selfMaster) return;
-        if (seenObjMasters[m]) return;
-        seenObjMasters[m] = true;
-        const master = state.masters.find(function (x) { return x.id === m; });
-        const label = (master && master.name) || ln.name || ln.id || m;
-        objectIds.push({ value: m, label: label });
-      });
-      objectIds.sort(function (a, b) { return a.label.localeCompare(b.label); });
-      const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
-      card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
-      card.appendChild(selectField('Stop object', trigger.stopObjectId || '', objOptsWithNone,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopObjectId', v); }));
-      if (trigger.stopObjectId) {
-        card.appendChild(checkboxField('  …fade out to opacity 0', !!trigger.stopFadeOut,
-          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopFadeOut', v); }));
-        card.appendChild(checkboxField('  …return to original position', !!trigger.stopReturnHome,
-          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopReturnHome', v); }));
-        const stopDur = (typeof trigger.stopDurationSec === 'number') ? trigger.stopDurationSec : 0;
-        card.appendChild(numberField('  …cleanup duration (s, 0 = instant)', stopDur,
-          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopDurationSec', v); }));
-        card.appendChild(selectField('  …cleanup easing', trigger.stopEasing || 'linear',
-          EASING_OPTIONS,
-          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopEasing', v); }));
+      // ── Side effects: "Also control other objects" ─────────────────────
+      // Hidden by default — user must opt in. Auto-shown if values are
+      // already set (backward-compat with existing saved blocks).
+      const hasSideEffects = !!(trigger.startObjectId || trigger.stopObjectId);
+      const showSideEffects = hasSideEffects || behaviorShowSideEffects.has(block.id || '');
+
+      if (showSideEffects) {
+        const selfMaster = line.masterId || null;
+        const objectIds = [];
+        const seenObjMasters = {};
+        state.lines.forEach(function (ln) {
+          const m = ln.masterId;
+          if (!m || m === selfMaster) return;
+          if (seenObjMasters[m]) return;
+          seenObjMasters[m] = true;
+          const master = state.masters.find(function (x) { return x.id === m; });
+          const label = (master && master.name) || ln.name || ln.id || m;
+          objectIds.push({ value: m, label: label });
+        });
+        objectIds.sort(function (a, b) { return a.label.localeCompare(b.label); });
+        const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
+
+        const sideTitle = document.createElement('div');
+        sideTitle.className = 'ed-behavior-section-title';
+        sideTitle.textContent = 'Also';
+        card.appendChild(sideTitle);
+        card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
+        card.appendChild(selectField('Stop object', trigger.stopObjectId || '', objOptsWithNone,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopObjectId', v); }));
+        if (trigger.stopObjectId) {
+          card.appendChild(checkboxField('  …fade out to opacity 0', !!trigger.stopFadeOut,
+            function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopFadeOut', v); }));
+          card.appendChild(checkboxField('  …return to original position', !!trigger.stopReturnHome,
+            function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopReturnHome', v); }));
+          const stopDur = (typeof trigger.stopDurationSec === 'number') ? trigger.stopDurationSec : 0;
+          card.appendChild(numberField('  …cleanup duration (s, 0 = instant)', stopDur,
+            function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopDurationSec', v); }));
+          card.appendChild(selectField('  …cleanup easing', trigger.stopEasing || 'linear',
+            EASING_OPTIONS,
+            function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopEasing', v); }));
+        }
+      } else {
+        const alsoBtn = document.createElement('button');
+        alsoBtn.type = 'button';
+        alsoBtn.className = 'ed-behavior-also-btn';
+        alsoBtn.textContent = '+ Also control other objects';
+        alsoBtn.addEventListener('click', function () {
+          behaviorShowSideEffects.add(block.id || '');
+          renderSelectionPanel();
+        });
+        card.appendChild(alsoBtn);
       }
     }
 

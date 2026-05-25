@@ -840,6 +840,41 @@ body.editor {
   border-color: #999;
   color: #fff;
 }
+/* v0.8.158: shake + red tint when Continue is refused (required field empty) */
+@keyframes behaviorContinueShake {
+  0%   { transform: translateX(0); }
+  20%  { transform: translateX(-5px); }
+  40%  { transform: translateX(5px); }
+  60%  { transform: translateX(-4px); }
+  80%  { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+.ed-behavior-continue.is-invalid {
+  border-color: #c25b3a;
+  color: #e07050;
+  animation: behaviorContinueShake 0.35s ease-out;
+}
+
+/* v0.8.158: "Also control other objects" intentional-disclosure button.
+   Collapsed by default at phase 2; dashed border signals optional/add-on. */
+.ed-behavior-also-btn {
+  display: block;
+  width: calc(100% - 1.1rem);
+  margin: 0.5rem 0.55rem 0.3rem;
+  padding: 0.25rem 0.5rem;
+  background: transparent;
+  border: 1px dashed #484848;
+  border-radius: 4px;
+  color: #888;
+  font: inherit;
+  font-size: 0.82em;
+  text-align: left;
+  cursor: pointer;
+}
+.ed-behavior-also-btn:hover {
+  border-color: #686868;
+  color: #bbb;
+}
 
 .ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
 .ed-behavior-block > .ed-field,
@@ -2047,6 +2082,12 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   position: absolute;
   pointer-events: auto;
   background: #1f1f1f;
+  /* v0.8.158: cap height so the body's overflow:auto actually scrolls.
+     Without this the panel grows past the viewport and content below
+     the fold is unreachable. 90vh lets a top-positioned panel use
+     almost the full screen; panels placed near the bottom can still be
+     scrolled or resized by the user. */
+  max-height: 90vh;
   /* v0.8.113: panels were hard to separate from the dark canvas at
      a glance. Promote the former pinned blue ring to the BASE style
      so every floater stands off the canvas clearly; pinned then
