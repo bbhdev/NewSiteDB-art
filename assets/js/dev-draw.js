@@ -11855,17 +11855,16 @@
               // Panel was showing this object — toggle it off.
               togglePanelFor = hit;
             } else {
-              // No panel for this object yet — open one after render.
-              // Close any unpinned panel that rebound to hit via
-              // notifySelection so we don't end up with two panels.
-              if (window.PanelManager) {
-                window.PanelManager.listOpen()
-                  .filter(function (p) { return p.type === 'object' && !p.pinned; })
-                  .forEach(function (p) {
-                    try { window.PanelManager.close(p.id); } catch (ex) {}
-                  });
-              }
-              openPanelAfterRender = true;
+              // No panel was explicitly open for this object.
+              // If an unpinned follower already exists, it will rebind
+              // to the new selection automatically via notifyDataChanged
+              // in renderSelectionPanel — no close/reopen needed.
+              // Only open a fresh panel if no follower exists at all.
+              const hasFollower = window.PanelManager &&
+                window.PanelManager.listOpen().some(function (p) {
+                  return p.type === 'object' && !p.pinned;
+                });
+              if (!hasFollower) openPanelAfterRender = true;
             }
           } else {
             // v0.8.144: empty-canvas opt-click — deselect (same as
