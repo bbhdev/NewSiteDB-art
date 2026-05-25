@@ -8672,42 +8672,75 @@
       groupsListEl.appendChild(li);
     });
 
-    // v0.8.171: post-append name-fit pass. If a group name is long
-    // enough to wrap onto two lines inside its row, try shrinking the
-    // font by up to 2px first; only if that still doesn't fit do we
-    // leave the wrap alone. Implementation: temporarily force
-    // `white-space: nowrap` so `scrollWidth` reports the unwrapped
-    // text width, then compare against `clientWidth` (the slot the
-    // flex layout actually gave us — accounting for siblings: G-pill,
-    // count, eye, delete + gaps). If overflowing, attempt one
-    // 2px-smaller pass; if it now fits, keep nowrap + the smaller
-    // size; if it still overflows, fully restore (allow wrap at
-    // original size). 2px ≈ 1.5pt — within the user-specified
-    // "max 2 pt" budget at the editor's ~15px base font.
-    nameRefsToFit.forEach(function (el) {
-      const cs = getComputedStyle(el);
-      const origSize = parseFloat(cs.fontSize) || 15;
-      // Force single-line measurement.
-      el.style.whiteSpace = 'nowrap';
-      if (el.scrollWidth <= el.clientWidth) {
-        // Fits as-is at the original size — restore default wrapping
-        // behavior (no behavioral change for short names).
-        el.style.whiteSpace = '';
-        return;
-      }
-      // Doesn't fit. Try one shrink step.
-      const smaller = Math.max(9, origSize - 2);
-      el.style.fontSize = smaller + 'px';
-      if (el.scrollWidth <= el.clientWidth) {
-        // Fits at the smaller size — keep nowrap so it stays on one
-        // line. (No need to clear fontSize; we want it to stick.)
-        return;
-      }
-      // Still doesn't fit even shrunk — give up, let it wrap at the
-      // original size.
-      el.style.fontSize = '';
+    // v0.8.171/172: post-append name-fit pass. Run synchronously so the
+    // initial paint is already fitted, AND wire a ResizeObserver below
+    // so any later width change (scrollbar appearance when a group
+    // opens its line-list, sidebar resize, viewport resize) also
+    // triggers a refit.
+    nameRefsToFit.forEach(fitGroupName);
+    ensureGroupNameFitObserver();
+  }
+
+  // v0.8.172: shared fit helper, reused by both the synchronous pass
+  // in renderGroupsList AND the ResizeObserver below. Critically, it
+  // RESETS any prior inline styles before measuring — otherwise a
+  // previously-shrunk-and-nowrapped name would stay shrunk forever
+  // even after the row regains width (e.g. scrollbar disappears).
+  //
+  // Algorithm:
+  //   1. Clear inline fontSize + whiteSpace so getComputedStyle reads
+  //      the stylesheet defaults.
+  //   2. Force `white-space: nowrap`. Combined with `min-width: 0` on
+  //      .ed-group-name (CSS), this lets the name shrink below its
+  //      content size in the flex row, so `scrollWidth` reports the
+  //      un-wrapped text width while `clientWidth` reports the slot
+  //      the flex layout allocated. The comparison is meaningful.
+  //   3. If scrollWidth ≤ clientWidth → fits naturally, restore wrap.
+  //   4. Else try one 2px shrink (≈1.5pt, within the user-specified
+  //      2pt budget). If it now fits → keep nowrap + smaller font.
+  //   5. Else fully restore — let it wrap at the original size.
+  function fitGroupName(el) {
+    // Reset first so we can re-evaluate from the stylesheet baseline.
+    el.style.fontSize = '';
+    el.style.whiteSpace = '';
+    const cs = getComputedStyle(el);
+    const origSize = parseFloat(cs.fontSize) || 15;
+    // Force single-line measurement.
+    el.style.whiteSpace = 'nowrap';
+    if (el.scrollWidth <= el.clientWidth) {
       el.style.whiteSpace = '';
+      return;
+    }
+    el.style.fontSize = Math.max(9, origSize - 2) + 'px';
+    if (el.scrollWidth <= el.clientWidth) return;
+    el.style.fontSize = '';
+    el.style.whiteSpace = '';
+  }
+
+  // v0.8.172: a single ResizeObserver on groupsListEl catches every
+  // layout state the synchronous fit pass can't see on its own —
+  // the canonical case is "user clicks a closed group → line-list
+  // becomes visible → sidebar scroll container grows a vertical
+  // scrollbar → groupsListEl narrows by ~15px → previously-fitting
+  // names now overflow". The observer fires whenever the list's
+  // own size changes, and we re-fit every name currently in the
+  // DOM. A rAF debounce prevents reentrant loops if font shrink
+  // happens to flip the scrollbar state.
+  let _groupNameFitObserver = null;
+  let _groupNameFitPending = false;
+  function ensureGroupNameFitObserver() {
+    if (_groupNameFitObserver || typeof ResizeObserver === 'undefined') return;
+    if (!groupsListEl) return;
+    _groupNameFitObserver = new ResizeObserver(function () {
+      if (_groupNameFitPending) return;
+      _groupNameFitPending = true;
+      requestAnimationFrame(function () {
+        _groupNameFitPending = false;
+        const names = groupsListEl.querySelectorAll('.ed-group-name');
+        for (let i = 0; i < names.length; i++) fitGroupName(names[i]);
+      });
     });
+    _groupNameFitObserver.observe(groupsListEl);
   }
 
   // ── Palette panel ─────────────────────────────────────────────────

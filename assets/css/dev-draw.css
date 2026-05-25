@@ -384,7 +384,15 @@ body.editor {
   background: #523c3c;
   outline: 1px solid var(--accent);
 }
-.ed-group-name { flex: 1; }
+/* v0.8.172: `min-width: 0` is required for the auto-fit measurement
+   (renderGroupsList) to work — without it, a flex item defaults to
+   `min-width: auto` (= its content min size), which means forcing
+   `white-space: nowrap` on the name would push the row's other
+   children rightward instead of letting `scrollWidth > clientWidth`
+   register as an overflow. With `min-width: 0`, the name can shrink
+   below its content, scrollWidth reports the un-wrapped width, and
+   the comparison correctly detects "needs to shrink or wrap". */
+.ed-group-name { flex: 1; min-width: 0; }
 .ed-group-count {
   color: #a8a8a8;
   font-size: 0.8em;
