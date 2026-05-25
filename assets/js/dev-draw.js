@@ -8482,6 +8482,13 @@
           panelBtn.title = 'Open detail panel (⌥ Option-click also works)';
           panelBtn.addEventListener('click', function (e) {
             e.stopPropagation();
+            // v0.8.141: capture intent BEFORE selection change.
+            // If we call toggleObjectPanelFor after selectOnly(), an
+            // unpinned panel has already rebound to this object via
+            // notifySelection, so the toggle sees "panel open for this
+            // object" and closes instead of opens. Snapshot the state
+            // now, then act directly.
+            const alreadyOpen = isObjectPanelOpenFor(line.id);
             if (!isSelected(line.id)) {
               selectOnly(line.id);
               state.activeGroupId  = g.id;
@@ -8493,7 +8500,19 @@
               renderLines();
               renderSelectionPanel({ suppressScroll: true });
             }
-            toggleObjectPanelFor(line.id);
+            if (alreadyOpen) {
+              // Close whichever panel was showing this object.
+              const opn = window.PanelManager
+                ? window.PanelManager.listOpen().filter(function (p) { return p.type === 'object'; })
+                : [];
+              const pinned = opn.find(function (p) { return p.pinned && p.objectId === line.id; });
+              const target = pinned || opn.find(function (p) { return !p.pinned; });
+              if (target) { try { window.PanelManager.close(target.id); } catch (ex) {} }
+            } else {
+              // Open a panel — primary is now this object, so an
+              // unpinned follower panel is the right choice.
+              try { window.PanelManager.open('object'); } catch (ex) { console.error(ex); }
+            }
           });
           rightWrap.appendChild(panelBtn);
           lr.appendChild(idSpan);
