@@ -468,39 +468,40 @@ body.editor {
   background: transparent;
   border-color: transparent;
 }
-/* v0.8.135: panel-open button on sidebar row — hidden until hover,
-   same position as the other right-side badges. */
+/* v0.8.140: panel-open button on sidebar row.
+   Rest:  clearly visible neutral (not invisible like a badge).
+   Hover: bright blue, works on both unselected and selected rows.
+   Open:  bright red (panel live); brighter red on hover.
+   !important on open states beats all specificity races. */
 .ed-line-panel-btn {
   background: transparent;
-  border: 1px solid #3a3a3a;
+  border: 1px solid #606060;
   border-radius: 3px;
-  color: #666;
-  font-size: 0.82em;
+  color: #b0b0b0;
+  font-size: 0.88em;
   line-height: 1;
-  padding: 0 0.25em;
+  padding: 1px 0.4em;
   cursor: pointer;
   transition: color 0.1s, border-color 0.1s, background 0.1s;
 }
-.ed-line-panel-btn:hover {
-  color: #5fa8d3;
-  border-color: #5fa8d3;
-  background: #1e2e38;
+.ed-line-panel-btn:hover,
+.ed-line-row.is-selected .ed-line-panel-btn:hover {
+  color: #a8d8f5;
+  border-color: #6ab2d8;
+  background: #1a2d3a;
 }
 .ed-line-row.is-selected .ed-line-panel-btn {
-  color: #888;
-  border-color: #555;
+  color: #c0c0c0;
+  border-color: #686868;
 }
-/* Panel-open state: bright red at rest, brighter red on hover.
-   !important to beat all row/selection specificity battles.
-   Signals "panel is live; click to close." */
 .ed-line-panel-btn.is-panel-open {
   color: #ff4444 !important;
   border-color: #ff4444 !important;
   background: rgba(255, 60, 60, 0.22) !important;
 }
 .ed-line-panel-btn.is-panel-open:hover {
-  color: #ff8080 !important;
-  border-color: #ff6060 !important;
+  color: #ff8888 !important;
+  border-color: #ff6666 !important;
   background: rgba(255, 60, 60, 0.38) !important;
 }
 
