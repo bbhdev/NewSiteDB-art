@@ -494,14 +494,14 @@ body.editor {
    !important to beat all row/selection specificity battles.
    Signals "panel is live; click to close." */
 .ed-line-panel-btn.is-panel-open {
-  color: #e53e3e !important;
-  border-color: #c53030 !important;
-  background: rgba(200, 40, 40, 0.18) !important;
+  color: #ff4444 !important;
+  border-color: #ff4444 !important;
+  background: rgba(255, 60, 60, 0.22) !important;
 }
 .ed-line-panel-btn.is-panel-open:hover {
-  color: #ff6b6b !important;
-  border-color: #e53e3e !important;
-  background: rgba(200, 40, 40, 0.32) !important;
+  color: #ff8080 !important;
+  border-color: #ff6060 !important;
+  background: rgba(255, 60, 60, 0.38) !important;
 }
 
 /* v0.8.101: link badge — a colored circle with a per-master letter
