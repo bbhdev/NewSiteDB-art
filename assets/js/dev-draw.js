@@ -1112,6 +1112,13 @@
         <p>Groups in the sidebar are labeled <strong>G1, G2, …</strong>; the same prefix appears on canvas labels (toggle <kbd>Labels</kbd>) so you can match them up.</p>\
         <p>Drag a line row onto another row to reorder it; drop position (above / below the target) drives the canvas Z-order — earlier in the list = drawn first = behind. Drop on a group row instead to send the line to the end of that group. Group rows reorder the same way — drag a group above/below another to restack every line inside it; lines stay in the order they had within the group. Behavior blocks in the per-line panel reorder by grabbing their title strip and dropping onto another block.</p>\
         <p><kbd>Cmd/Ctrl + Z</kbd> undoes; <kbd>Cmd/Ctrl + Shift + Z</kbd> redoes; <kbd>Esc</kbd> cancels the current gesture.</p>\
+        <h4>Panels</h4>\
+        <p>Every object has a floating detail panel that shows its full parameters, style, and behavior blocks without displacing the sidebar. Two ways to open it:</p>\
+        <ul>\
+          <li><strong>⌥ Option-click</strong> (Alt-click on Windows) on any object on the canvas, or on its row in the sidebar.</li>\
+          <li>The <strong>⊞ button</strong> on the right end of each sidebar row — visible on hover.</li>\
+        </ul>\
+        <p>Panels can be pinned (📌) to stay open when the selection changes, or left unpinned to follow the current selection. Drag the panel header to reposition.</p>\
         <h4>Behaviors</h4>\
         <p>Every line carries an ordered list of behavior blocks. Each block has two independent axes — <strong>Activate when</strong> (the trigger that turns the block on) and <strong>Progress</strong> (how the block\'s 0→1 advances once active) — plus per-block translate / rotate deltas that get weighted by progress. The side panel summary describes the active combination on the selected block; the table below catalogs every option.</p>\
         <p><strong>Activate when</strong> — picks the trigger:</p>\
@@ -8424,10 +8431,11 @@
           if (line.name) {
             idSpan.className = 'ed-line-name';
             idSpan.textContent = line.name;
-            idSpan.title = line.id;
+            idSpan.title = line.id + ' — ⌥ Option-click to open detail panel';
           } else {
             idSpan.className = 'ed-line-id';
             idSpan.textContent = line.id;
+            idSpan.title = '⌥ Option-click to open detail panel';
           }
           const overrideTag = document.createElement('span');
           overrideTag.style.color = '#888';
@@ -8463,6 +8471,29 @@
             ? bCount + ' behavior block' + (bCount === 1 ? '' : 's')
             : 'No behavior blocks';
           rightWrap.appendChild(bBadge);
+          // v0.8.135: panel-open button — visible on row hover, same
+          // affordance as ⌥ option-click but discoverable.
+          const panelBtn = document.createElement('button');
+          panelBtn.type = 'button';
+          panelBtn.className = 'ed-line-panel-btn';
+          panelBtn.textContent = '⊞';
+          panelBtn.title = 'Open detail panel (⌥ Option-click also works)';
+          panelBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (!isSelected(line.id)) {
+              selectOnly(line.id);
+              state.activeGroupId  = g.id;
+              state.openGroupIds[g.id] = true;
+              sidebarAnchorLineId  = line.id;
+              sidebarAnchorGroupId = g.id;
+              updateSelectAllButton();
+              renderGroupsList();
+              renderLines();
+              renderSelectionPanel({ suppressScroll: true });
+            }
+            toggleObjectPanelFor(line.id);
+          });
+          rightWrap.appendChild(panelBtn);
           lr.appendChild(idSpan);
           lr.appendChild(rightWrap);
           lr.addEventListener('click', function (e) {
