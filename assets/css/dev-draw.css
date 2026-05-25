@@ -490,6 +490,18 @@ body.editor {
   color: #888;
   border-color: #555;
 }
+/* Panel-open state: red, always visible — signals the panel is live
+   and that clicking will close it. No hover dependency. */
+.ed-line-panel-btn.is-panel-open {
+  color: #c0392b;
+  border-color: #c0392b;
+  background: #2a1515;
+}
+.ed-line-panel-btn.is-panel-open:hover {
+  color: #e74c3c;
+  border-color: #e74c3c;
+  background: #381a1a;
+}
 
 /* v0.8.101: link badge — a colored circle with a per-master letter
    inside, appearing on sidebar rows and inside the master chip. The

@@ -8475,7 +8475,9 @@
           // affordance as ⌥ option-click but discoverable.
           const panelBtn = document.createElement('button');
           panelBtn.type = 'button';
-          panelBtn.className = 'ed-line-panel-btn';
+          panelBtn.className = 'ed-line-panel-btn' +
+            (isObjectPanelOpenFor(line.id) ? ' is-panel-open' : '');
+          panelBtn.dataset.lineId = line.id;
           panelBtn.textContent = '⊞';
           panelBtn.title = 'Open detail panel (⌥ Option-click also works)';
           panelBtn.addEventListener('click', function (e) {
@@ -11440,6 +11442,29 @@
   //     non-primary object in a multi-select is rare but we should
   //     show the panel for the object the user actually clicked,
   //     not for whatever happens to be selectedIds[0])
+  // v0.8.137: Returns true when an object panel is currently open and
+  // displaying content for the given lineId — either a pinned panel
+  // explicitly bound to it, or the selection-following unpinned panel
+  // while this object is the primary selection.
+  function isObjectPanelOpenFor(lineId) {
+    if (!window.PanelManager || !lineId) return false;
+    const opn = window.PanelManager.listOpen().filter(function (p) {
+      return p.type === 'object';
+    });
+    if (opn.some(function (p) { return p.pinned && p.objectId === lineId; })) return true;
+    const follower = opn.find(function (p) { return !p.pinned; });
+    return !!(follower && state.selectedIds[0] === lineId);
+  }
+
+  // Refreshes the is-panel-open class on all sidebar panel buttons
+  // without triggering a full renderGroupsList re-build. Called by
+  // PanelManager after open() and close().
+  function syncPanelButtonStates() {
+    document.querySelectorAll('.ed-line-panel-btn[data-line-id]').forEach(function (btn) {
+      btn.classList.toggle('is-panel-open', isObjectPanelOpenFor(btn.dataset.lineId));
+    });
+  }
+
   function toggleObjectPanelFor(objectId) {
     if (!window.PanelManager || !objectId) return;
     const opn = window.PanelManager.listOpen()
@@ -12615,6 +12640,7 @@
       hostEl.appendChild(built.frame);
       renderPanel(panelState.id);
       persist();
+      if (typeof syncPanelButtonStates === 'function') syncPanelButtonStates();
       return panelState.id;
     }
 
@@ -12655,6 +12681,7 @@
       // v0.8.132: clear bbox overlay when an object or block panel closes.
       if (typeof clearBboxOverlay === 'function') clearBboxOverlay();
       persist();
+      if (typeof syncPanelButtonStates === 'function') syncPanelButtonStates();
     }
 
     // v0.8.113: external mutation of an existing panel's state
