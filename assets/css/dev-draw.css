@@ -879,19 +879,35 @@ body.editor {
   align-items: center;
   justify-content: space-between;
 }
+/* v0.8.166: SVG-based × button. Same sizing rationale as
+   .ed-behavior-chip-back — a clearly-visible icon-only button, not
+   a tiny glyph. Slightly smaller than the chip-back since the "Also"
+   title row is rendered at section-title font-size (~0.70em). */
 .ed-behavior-also-close {
   flex: 0 0 auto;
   background: transparent;
-  border: none;
-  color: #555;
-  font-size: 1.1em;
-  line-height: 1;
-  padding: 0 0.1em;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #999;
   cursor: pointer;
-  font-family: inherit;
+  padding: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  box-sizing: border-box;
 }
 .ed-behavior-also-close:hover {
-  color: #c06050;
+  background: #3a2424;
+  border-color: #b06050;
+  color: #e58070;
+}
+.ed-behavior-also-close svg {
+  display: block;
+  width: 75%;
+  height: 75%;
 }
 
 .ed-behavior-also-btn {
@@ -928,6 +944,14 @@ body.editor {
 }
 .ed-behavior-block > .ed-field--checkbox {
   grid-template-columns: 1fr auto;
+}
+/* v0.8.166: select/text fields inside behavior blocks need a wider
+   label column for multi-word labels like "At end of path" (14 chars).
+   Default .ed-field is "5em 1fr" which was squeezing such labels into
+   two lines. minmax(5em, max-content) keeps short labels compact while
+   letting longer ones claim the room they need. */
+.ed-behavior-block > .ed-field:not(.ed-field--number):not(.ed-field--checkbox) {
+  grid-template-columns: minmax(5em, max-content) 1fr;
 }
 
 /* v0.8.28: drag-to-reorder visuals.

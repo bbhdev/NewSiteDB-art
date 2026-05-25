@@ -10183,7 +10183,11 @@
 
     let prog;
     if (dmode === 'time') {
-      prog = 'then runs once over ' + secs + ease;
+      // v0.8.166: was "runs once over X" — but with trigger.repeat='every'
+      // that read as a contradiction ("each crossing… runs once"). The
+      // "once" was meant to convey "non-looping", which is already implied
+      // by dmode='time' (vs 'loop' / 'pingpong'). Drop it.
+      prog = 'then animates over ' + secs + ease;
     } else if (dmode === 'loop') {
       prog = 'then loops every ' + secs + ease;
     } else if (dmode === 'pingpong') {
@@ -10783,11 +10787,21 @@
         const sideTitleText = document.createElement('span');
         sideTitleText.textContent = 'Also';
         sideTitleRow.appendChild(sideTitleText);
+        // v0.8.166: SVG × replaces the old text glyph — the previous
+        // 1.1em "×" character was visually undersized for an action button.
+        // Sized in line with .ed-behavior-chip-back (icon-only button).
         const alsoCloseBtn = document.createElement('button');
         alsoCloseBtn.type = 'button';
         alsoCloseBtn.className = 'ed-behavior-also-close';
         alsoCloseBtn.title = 'Remove "also" controls';
-        alsoCloseBtn.textContent = '×';
+        alsoCloseBtn.setAttribute('aria-label', 'Remove also-controls');
+        alsoCloseBtn.innerHTML =
+          '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+            '<line x1="6"  y1="6"  x2="18" y2="18" stroke="currentColor" ' +
+                  'stroke-width="3" stroke-linecap="round"></line>' +
+            '<line x1="18" y1="6"  x2="6"  y2="18" stroke="currentColor" ' +
+                  'stroke-width="3" stroke-linecap="round"></line>' +
+          '</svg>';
         alsoCloseBtn.addEventListener('click', function () {
           behaviorShowSideEffects.delete(block.id || '');
           // Clear any saved object IDs so hasSideEffects becomes false
