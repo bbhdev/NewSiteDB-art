@@ -654,31 +654,65 @@ body.editor {
   cursor: pointer;
 }
 .ed-behavior-remove:hover { color: #f88; background: #2c1818; }
-/* v0.8.127: prev / next block navigation in the block-panel head.
-   Lets the user step through sibling blocks without bouncing back
-   to the parent object panel. Disabled state dims to ~30% and
-   blocks pointer events so click-through can't fire. */
+/* v0.8.128: block panel nav strip — prev/next + remove. Rendered
+   at the top of the block card body when inside a floating panel
+   (replaces the old inline head that duplicated the panel title).
+   Buttons are large enough to hit comfortably; accent color. */
 .ed-behavior-nav {
-  display: inline-flex;
-  gap: 0.15rem;
-  margin-right: 0.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.5rem 0.3rem;
+  border-bottom: 1px solid #3a3a3a;
+  margin-bottom: 0.15rem;
 }
 .ed-behavior-nav-btn {
   background: transparent;
-  color: #d8d8d8;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  padding: 0 0.4rem;
-  font-size: 1em;
-  line-height: 1;
+  color: #5fa8d3;
+  border: 1px solid #3a5a6a;
+  border-radius: 4px;
+  padding: 0.25rem 0.9rem;
+  min-height: 1.9rem;
+  font-size: 1.05em;
+  font-weight: 700;
   cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
 }
 .ed-behavior-nav-btn:hover:not(:disabled) {
-  color: #fff; background: #2a3a4a;
+  background: #1a3a4a; color: #8cd0f0; border-color: #5fa8d3;
 }
 .ed-behavior-nav-btn:disabled {
-  opacity: 0.3; cursor: default; pointer-events: none;
+  opacity: 0.25; cursor: default; pointer-events: none;
 }
+/* Spacer (span.ed-behavior-nav-spacer) pushes remove to the right */
+.ed-behavior-nav-spacer { flex: 1; }
+.ed-behavior-nav-rm {
+  background: transparent;
+  color: #c06060;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.ed-behavior-nav-rm:hover { color: #f88; background: #2c1818; border-color: #7a2828; }
+
+/* v0.8.128: B3 — bounding box / point-count note below position
+   fields. Full-width, no grid columns. */
+.ed-params-meta {
+  padding: 0.3rem 0;
+  color: #888;
+  font-size: 0.83em;
+  line-height: 1.4;
+}
+
+/* v0.8.128: B5 — stacked action buttons so long labels don't wrap */
+.ed-actions--stack {
+  flex-direction: column;
+  margin-top: 0;
+}
+.ed-actions--stack button { width: 100%; }
 .ed-behavior-range {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -9371,25 +9371,20 @@
       updateLine(line.id, { hidden: !v });
     }));
 
-    // "Reset position" — visible only when this instance has a
-    // non-zero positionOffset. Snaps the instance back to the master's
-    // canonical position. Doesn't touch other classes.
+    // v0.8.128: B4 — Reset to master button is deferred and inserted
+    // into the Parameters section next to Position X/Y (see below)
+    // so the Position label and its reset button are co-located.
     const hasOffset = line.positionOffset
       && (Math.abs(line.positionOffset.dx) > 0.0001 || Math.abs(line.positionOffset.dy) > 0.0001);
+    var _resetToMasterBtn = null;
     if (hasOffset) {
-      const row = document.createElement('div');
-      row.className = 'ed-field';
-      const lbl = document.createElement('label');
-      lbl.textContent = 'Position';
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ed-mini';
       btn.textContent = '↺ Reset to master';
       btn.title = 'Clear this class\'s position offset so the object snaps back to the master\'s canonical placement.';
       btn.addEventListener('click', function () { resetPositionOffset(line.id); });
-      row.appendChild(lbl);
-      row.appendChild(btn);
-      wrap.appendChild(row);
+      _resetToMasterBtn = btn;
     }
 
     // Smoothing toggle is only meaningful for the freehand kinds — for
@@ -9499,20 +9494,27 @@
           }
           scheduleSnapshot();
         }));
+        // v0.8.128: B4 — reset button goes here, logically grouped
+        // with the position fields it affects.
+        if (_resetToMasterBtn) {
+          const resetRow = document.createElement('div');
+          resetRow.className = 'ed-field';
+          resetRow.appendChild(_resetToMasterBtn);
+          wrap.appendChild(resetRow);
+        }
       } else {
         // Degenerate: no geometry to anchor the position to.
         wrap.appendChild(textField('Position', '— (no geometry)', function () {}, ''));
       }
-      const info = document.createElement('div');
-      info.className = 'ed-field';
-      info.style.color = '#888';
-      info.style.fontSize = '0.85em';
-      info.style.padding = '0.25rem 0';
+      // v0.8.128: B3 — bounding box on its own full-width row, not
+      // squeezed into an ed-field grid cell. Styled as a metadata note.
       const parts = [];
       if (hasGeo) {
         parts.push('Bounding box ' + (maxX - minX).toFixed(1) + ' × ' + (maxY - minY).toFixed(1) + ' mm');
       }
       parts.push(ptCount + (Array.isArray(line.segments) && !Array.isArray(line.points) ? ' segments' : ' points'));
+      const info = document.createElement('div');
+      info.className = 'ed-params-meta';
       info.textContent = parts.join(' · ');
       wrap.appendChild(info);
     }
@@ -9585,8 +9587,16 @@
       const warn = document.createElement('p');
       warn.className = 'ed-behavior-warning';
       warn.dataset.lineId = line.id;
+      // v0.8.128: B2 — include the actual range values so it's clear
+      // at a glance which ranges are causing the overlap.
       warn.textContent = 'Overlapping blocks: ' +
-        overlaps.map(function (o) { return (o.a + 1) + ' & ' + (o.b + 1); }).join(', ') +
+        overlaps.map(function (o) {
+          const ba = blocks[o.a], bb = blocks[o.b];
+          const ra = (ba && ba.trigger && ba.trigger.range) || { start: 0, end: 1 };
+          const rb = (bb && bb.trigger && bb.trigger.range) || { start: 0, end: 1 };
+          return (o.a + 1) + ' (' + ra.start + '–' + ra.end + ')'
+               + ' & ' + (o.b + 1) + ' (' + rb.start + '–' + rb.end + ')';
+        }).join(', ') +
         '. Overlapping ranges contribute simultaneously — their deltas sum during the overlap.';
       wrap.appendChild(warn);
     }
@@ -9640,13 +9650,30 @@
     addBlockBtn.className = 'ed-mini ed-behavior-add';
     addBlockBtn.textContent = '+ Add block';
     addBlockBtn.title = 'Append a new behavior block (range 0–1; edit to chain).';
-    addBlockBtn.addEventListener('click', function () { addBehaviorBlock(line.id); });
+    addBlockBtn.addEventListener('click', function () {
+      addBehaviorBlock(line.id);
+      // v0.8.128: B1 — immediately open the block panel for the new
+      // block so the user doesn't have to click a second time. The
+      // new block is always the last one; addBehaviorBlock already
+      // called renderSelectionPanel so state.lines is current.
+      if (panelState && panelState.id) {
+        const updated = state.lines.find(function (l) { return l.id === line.id; });
+        const nb = updated && Array.isArray(updated.behaviors) && updated.behaviors.length
+          ? updated.behaviors[updated.behaviors.length - 1] : null;
+        if (nb && nb.id) {
+          openBehaviorPanelForBlock(line.id, nb.id, panelState.id);
+        }
+      }
+    });
     wrap.appendChild(addBlockBtn);
 
     host.appendChild(wrap);
 
+    // v0.8.128: B5 — actions behind a divider; stacked vertically so
+    // long button labels don't wrap when constrained in a narrow panel.
+    wrap.appendChild(divider(''));
     const actions = document.createElement('div');
-    actions.className = 'ed-actions';
+    actions.className = 'ed-actions ed-actions--stack';
 
     // Duplication (v0.8.92). 'new master' = independent copy; 'linked'
     // = shares the master record (geometry follows the original; per-
@@ -9666,8 +9693,8 @@
     dupLink.addEventListener('click', function () { duplicateObject(line.id, { linked: true }); });
     actions.appendChild(dupLink);
 
-    // Delete — one mode-aware button. 'all' mode cascades site-
-    // wide; 'one' mode drops just THIS class's instance row.
+    // Delete — one mode-aware button. 'all' mode cascades site-wide;
+    // 'one' mode drops just THIS class's instance row.
     const del = document.createElement('button');
     del.className = 'ed-danger';
     if (modeIsAll()) {
@@ -10223,29 +10250,42 @@
     card.dataset.lineId  = line.id;
     card.dataset.blockIdx = String(blockIdx);
 
-    const head = document.createElement('div');
-    head.className = 'ed-behavior-head';
-    // v0.8.28: the head strip is the block's drag handle — only it
-    // is draggable, so number / select inputs further down the card
-    // stay interactive. Block order maps to execution order (and to
-    // loopTo's target index), so reordering rewires the sequence.
-    head.draggable = true;
-    head.title = 'Drag to reorder';
-    head.addEventListener('dragstart', function (e) {
-      if (!e.dataTransfer) return;
-      e.dataTransfer.setData('text/x-behavior-block', String(blockIdx));
-      e.dataTransfer.setData('text/x-behavior-line', line.id);
-      e.dataTransfer.effectAllowed = 'move';
-      card.classList.add('ed-behavior-dragging');
-    });
-    head.addEventListener('dragend', function () {
-      card.classList.remove('ed-behavior-dragging');
-    });
-    const title = document.createElement('span');
-    title.className = 'ed-behavior-title';
+    // v0.8.128: when rendering inside a floating panel the head strip
+    // is skipped — the panel frame's own title bar is the drag handle
+    // and the × close button is in the panel chrome. Showing the head
+    // would duplicate the "Block N" label and create a panel-inside-
+    // panel visual. The head is still built for the legacy inline path
+    // (no panelState), though that path has no current call sites.
     const totalBlocks = Array.isArray(line.behaviors) ? line.behaviors.length : 0;
-    title.textContent = 'Block ' + (blockIdx + 1) + ' / ' + totalBlocks;
-    head.appendChild(title);
+    if (!panelState) {
+      const head = document.createElement('div');
+      head.className = 'ed-behavior-head';
+      head.draggable = true;
+      head.title = 'Drag to reorder';
+      head.addEventListener('dragstart', function (e) {
+        if (!e.dataTransfer) return;
+        e.dataTransfer.setData('text/x-behavior-block', String(blockIdx));
+        e.dataTransfer.setData('text/x-behavior-line', line.id);
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('ed-behavior-dragging');
+      });
+      head.addEventListener('dragend', function () {
+        card.classList.remove('ed-behavior-dragging');
+      });
+      const title = document.createElement('span');
+      title.className = 'ed-behavior-title';
+      title.textContent = 'Block ' + (blockIdx + 1) + ' / ' + totalBlocks;
+      head.appendChild(title);
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'ed-behavior-remove';
+      rm.textContent = '×';
+      rm.title = 'Remove this block';
+      rm.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+      rm.addEventListener('click', function () { removeBehaviorBlock(line.id, blockIdx); });
+      head.appendChild(rm);
+      card.appendChild(head);
+    }
 
     // v0.8.127: prev / next block navigation. Rebinds THIS panel to
     // the adjacent block instead of opening another panel — keeps
@@ -10284,21 +10324,20 @@
       };
       navWrap.appendChild(mkNav('‹', blockIdx - 1, 'Previous block'));
       navWrap.appendChild(mkNav('›', blockIdx + 1, 'Next block'));
-      head.appendChild(navWrap);
+      const spacer = document.createElement('span');
+      spacer.className = 'ed-behavior-nav-spacer';
+      navWrap.appendChild(spacer);
+      // Remove button: stays accessible when in a floating panel
+      // (replaces the old head × button).
+      const rmInNav = document.createElement('button');
+      rmInNav.type = 'button';
+      rmInNav.className = 'ed-behavior-nav-rm';
+      rmInNav.textContent = '✕';
+      rmInNav.title = 'Delete this block';
+      rmInNav.addEventListener('click', function () { removeBehaviorBlock(line.id, blockIdx); });
+      navWrap.appendChild(rmInNav);
+      card.appendChild(navWrap);
     }
-
-    const rm = document.createElement('button');
-    rm.type = 'button';
-    rm.className = 'ed-behavior-remove';
-    rm.textContent = '×';
-    rm.title = 'Remove this block';
-    // The remove button sits inside a draggable head, which on some
-    // browsers swallows click-through. Stopping pointerdown keeps
-    // the click reaching the button without starting a drag.
-    rm.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
-    rm.addEventListener('click', function () { removeBehaviorBlock(line.id, blockIdx); });
-    head.appendChild(rm);
-    card.appendChild(head);
 
     // Drop zone — every card listens for drops of OTHER blocks
     // from the same line. The mouse Y vs midpoint decides insert-
@@ -12015,9 +12054,14 @@
           return;
         }
         const group = state.groups.find(function (g) { return g.id === line.groupId; });
-        // v0.8.127: pass panelState so the block card can wire prev/next
-        // navigation that rebinds this same panel to a sibling block
-        // (avoids opening a second panel for adjacent blocks).
+        // v0.8.128: update the panel chrome title to "Block N / M"
+        // so the floating panel header stays informative without a
+        // duplicate label inside the body.
+        const frame = body.closest('.ed-floating-panel');
+        if (frame) {
+          const titleEl = frame.querySelector('.ed-floating-panel-title');
+          if (titleEl) titleEl.textContent = 'Block ' + (idx + 1) + ' / ' + blocks.length;
+        }
         body.appendChild(renderBehaviorBlock(line, idx, group, ctx.panelState));
       }
     },
