@@ -10398,8 +10398,8 @@
       // each block-list row in the parent object panel, so having a
       // second one here just created a second × that looked like a
       // close button.
-      navWrap.appendChild(mkNav('‹', blockIdx - 1, 'Previous block'));
-      navWrap.appendChild(mkNav('›', blockIdx + 1, 'Next block'));
+      navWrap.appendChild(mkNav('Previous', blockIdx - 1, 'Previous block'));
+      navWrap.appendChild(mkNav('Next', blockIdx + 1, 'Next block'));
       card.appendChild(navWrap);
     }
 
