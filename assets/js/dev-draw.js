@@ -1121,7 +1121,7 @@
           <li><strong>⌥ Option-click</strong> (Alt-click on Windows) on any object on the canvas, or on its row in the sidebar.</li>\
           <li>The <strong>⊞ button</strong> on the right end of each sidebar row — always visible; red when the panel is open.</li>\
         </ul>\
-        <p>Panels can be pinned (📌) to stay open when the selection changes, or left unpinned to follow the current selection. Drag the panel header to reposition.</p>\
+        <p>Panels can be pinned (📌) to stay open when the selection changes, or left unpinned to follow the current selection. Drag the panel header to reposition. A common workflow is to push a panel (and its attached block panel) to the right edge of the window for a clear view of the canvas — <strong>⌥ Option+Arrow keys</strong> then pan the canvas and all open panels together in lockstep, so you can bring them into view to edit, and arrow back out when done. No need to deselect.</p>\
         <h4>Behaviors</h4>\
         <p>Every line carries an ordered list of behavior blocks. Each block has two independent axes — <strong>Activate when</strong> (the trigger that turns the block on) and <strong>Progress</strong> (how the block\'s 0→1 advances once active) — plus per-block translate / rotate deltas that get weighted by progress. The side panel summary describes the active combination on the selected block; the table below catalogs every option.</p>\
         <p><strong>Activate when</strong> — picks the trigger:</p>\
