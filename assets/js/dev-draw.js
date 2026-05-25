@@ -1104,6 +1104,7 @@
           <li><strong>Drag</strong> any selected object\'s body to move every selected object in lockstep, preserving their spatial relationship.</li>\
           <li><strong>Drag handles</strong> (cyan dots) to reshape — point handles on free-form lines, parameter handles on primitives. Handles only show when exactly one object is selected.</li>\
           <li><strong>⌥ Option-click</strong> (Alt-click on Windows) on an object to select it <em>and</em> open its detail panel. If the panel is already open for that object, Option-click closes it instead. Option-click on empty canvas deselects and closes any open unpinned panel.</li>\
+          <li><strong>Shift+Arrow keys</strong> (no selection) scroll the canvas <em>and</em> move all open floating panels in lockstep — useful for temporarily bringing panels that are parked off-screen into view, then shifting everything back.</li>\
           <li><strong>Esc</strong> or empty-canvas click to clear the selection.</li>\
           <li><strong>Backspace</strong> / Delete to remove every selected object.</li>\
         </ul>\
@@ -12007,6 +12008,26 @@
       nudgeSelectionBy(dx, dy);
       return;
     }
+    // v0.8.147: Shift+Arrow with no selection — scroll the canvas AND
+    // shift every open floating panel by the same pixel delta so the
+    // user can bring intentionally off-screen panels into view (or
+    // push them back) without touching them individually.
+    // 80 px / step feels proportional for panel repositioning.
+    if (e.shiftKey &&
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+         e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+        !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const PAN_STEP = 80;
+      let pdx = 0, pdy = 0;
+      if (e.key === 'ArrowLeft')  pdx = -PAN_STEP;
+      if (e.key === 'ArrowRight') pdx =  PAN_STEP;
+      if (e.key === 'ArrowUp')    pdy = -PAN_STEP;
+      if (e.key === 'ArrowDown')  pdy =  PAN_STEP;
+      canvasWrap.scrollBy(pdx, pdy);
+      if (window.PanelManager) window.PanelManager.shiftAllPanels(pdx, pdy);
+      return;
+    }
     // Skip remaining view shortcuts when a modifier is held — let
     // the browser handle Cmd+anything-else natively.
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -12892,6 +12913,24 @@
       });
     }
 
+    // v0.8.147: move every open panel by (dx, dy) screen pixels in
+    // lockstep with a canvas scroll. Used by Shift+Arrow so the user
+    // can pan canvas + panels together without touching individual
+    // panel positions. Applies the same clampPos guard as the drag
+    // handler — prevents panels from going completely out of reach,
+    // and naturally limits Shift+→ so panels park back at the right
+    // edge where they were intentionally placed.
+    function shiftAllPanels(dx, dy) {
+      Object.keys(panels).forEach(function (pid) {
+        const p = panels[pid]; if (!p) return;
+        const c = clampPos(p.state.x + dx, p.state.y + dy, p.state.w);
+        p.state.x = c.x; p.state.y = c.y;
+        p.frameEl.style.left = c.x + 'px';
+        p.frameEl.style.top  = c.y + 'px';
+      });
+      persist();
+    }
+
     return {
       open: open, close: close, togglePin: togglePin,
       bringToFront: bringToFront,
@@ -12901,6 +12940,7 @@
       notifyDataChanged: notifyDataChanged,
       restore: restore,
       listOpen: listOpen,
+      shiftAllPanels: shiftAllPanels,
       // Exposed for late additions of new panel types from outside
       // this IIFE (debug consoles, plugin-style extensions).
       register: function (type, def) { PANEL_REGISTRY[type] = def; },
