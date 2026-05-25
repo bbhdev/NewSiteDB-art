@@ -5160,14 +5160,17 @@
   // Add / remove / range-edit. Each goes through scope-mode fan-out
   // for siblings of the same master in 'all' mode.
 
-  // v0.8.153: Session-only phase map for progressive disclosure.
-  // 0 = fresh (trigger picker only); 1 = trigger chosen; 2 = full.
-  // Existing blocks default to 2 (fully expanded) so saved configs
-  // are unaffected. Keys are block.id strings; values 0/1/2.
+  // v0.8.154: Session-only phase map for progressive disclosure.
+  // 0 = fresh (trigger picker only, no active button);
+  // 1 = trigger chosen (trigger options visible);
+  // 2 = trigger options done (progress picker + start/stop objects visible);
+  // 3 = progress chosen (progress options + effects visible).
+  // Existing blocks default to 3 (fully expanded) so saved configs
+  // are unaffected. Keys are block.id strings; values 0–3.
   const behaviorBlockPhases = {};
   function getBlockPhase(blockId) {
     return Object.prototype.hasOwnProperty.call(behaviorBlockPhases, blockId)
-      ? behaviorBlockPhases[blockId] : 2;
+      ? behaviorBlockPhases[blockId] : 3;
   }
   function advanceBlockPhase(blockId, minPhase) {
     const cur = Object.prototype.hasOwnProperty.call(behaviorBlockPhases, blockId)
@@ -10483,7 +10486,7 @@
     summary.className = 'ed-behavior-summary';
     summary.dataset.lineId   = String(line.id);
     summary.dataset.blockIdx = String(blockIdx);
-    summary.textContent = behaviorSummaryText(block);
+    summary.textContent = (phase === 0) ? 'Select a trigger.' : behaviorSummaryText(block);
     card.appendChild(summary);
 
     const isLastBlock = blockIdx === line.behaviors.length - 1;
@@ -10515,7 +10518,8 @@
     })();
     const afterPrevDisabled = prevTimedIdx < 0;
 
-    card.appendChild(behaviorButtonGroup('', when, [
+    // At phase 0 no trigger is active yet — pass null so no button is highlighted.
+    card.appendChild(behaviorButtonGroup('', (phase === 0 ? null : when), [
       { value: 'scroll-range',     label: 'Scroll range' },
       { value: 'page-load',        label: 'Page load' },
       { value: 'scroll-key',       label: 'Scroll to key' },
@@ -10534,19 +10538,29 @@
       { value: 'hover',            label: 'Wait for hover' }
     ], function (v) {
       advanceBlockPhase(block.id, 1);
+      // Triggers with no configurable options skip straight to the
+      // progress picker (phase 2) because there is nothing to fill in.
+      const noOptionTriggers = ['page-load', 'scroll-stop', 'scroll-start',
+                                'after-previous', 'wait',
+                                'in-view-partial', 'in-view-full'];
+      if (noOptionTriggers.indexOf(v) !== -1) {
+        advanceBlockPhase(block.id, 2);
+      }
       updateBehaviorTrigger(line.id, blockIdx, 'when', v);
     }, function (opt) { explainDurationDisabled(opt); }));
 
-    // ── Phase >= 1: trigger options + Progress section ─────────────────
+    // ── Phase >= 1: trigger-specific options ──────────────────────────
     if (phase >= 1) {
       if (when === 'scroll-range') {
         const r = trigger.range || { start: 0, end: 1 };
         const rangeRow = document.createElement('div');
         rangeRow.className = 'ed-behavior-range';
         rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
+          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
         }));
         rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
+          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
         }));
         card.appendChild(rangeRow);
@@ -10554,6 +10568,7 @@
 
       if (when === 'scroll-key') {
         card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
+          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
         }));
         const va = trigger.viewportAt || 'middle';
@@ -10562,17 +10577,24 @@
           { value: 'middle', label: 'Middle' },
           { value: 'bottom', label: 'Bottom of viewport' },
           { value: 'object', label: 'The object' }
-        ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); }, null));
+        ], function (v) {
+          advanceBlockPhase(block.id, 2);
+          updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v);
+        }, null));
         const rep = trigger.repeat || 'once';
         card.appendChild(behaviorButtonGroup('Repeat', rep, [
           { value: 'once',  label: 'Once' },
           { value: 'every', label: 'Every crossing' }
-        ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); }, null));
+        ], function (v) {
+          advanceBlockPhase(block.id, 2);
+          updateBehaviorTrigger(line.id, blockIdx, 'repeat', v);
+        }, null));
       }
 
       const delayApplies = !(when === 'scroll-range' && dmode === 'scroll');
       if (delayApplies) {
         card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
+          advanceBlockPhase(block.id, 2);
           updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
         }));
       }
@@ -10581,11 +10603,49 @@
         card.appendChild(checkboxField(
           'Treat shape as filled for hit test',
           !!trigger.treatAsFilled,
-          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v); }
+          function (v) {
+            advanceBlockPhase(block.id, 2);
+            updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v);
+          }
         ));
       }
+    }
 
-      // Cross-object Start / Stop side effects
+    // ── Phase >= 2: Progress section + cross-object side effects ──────
+    if (phase >= 2) {
+      // ── Section: Progress ──────────────────────────────────────────────────
+      const progressTitle = document.createElement('div');
+      progressTitle.className = 'ed-behavior-section-title';
+      progressTitle.textContent = 'Progress';
+      card.appendChild(progressTitle);
+
+      const durationOpts = [
+        { value: 'scroll',   label: 'Scroll-driven',
+          disabledIf: when !== 'scroll-range',
+          disabledReason: 'Scroll-driven progress only works when ' +
+            'activation is "Scroll range" — the range defines both ' +
+            'when the block activates AND how its progress advances. ' +
+            'Pick a different activation OR a different progress mode.' },
+        { value: 'time',     label: 'Timed run (seconds)' },
+        { value: 'loop',     label: 'Loop forever' },
+        { value: 'pingpong', label: 'Ping-pong forever' },
+        { value: 'loopTo',   label: 'Loop back to earlier block',
+          disabledIf: prevTimedIdx < 0,
+          disabledReason: 'Loop-back needs an earlier Timed block to ' +
+            'return to. Add at least one block above this one with ' +
+            'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
+            'ping-pong blocks have no fixed start position to anchor to.' }
+      ];
+      card.appendChild(behaviorButtonGroup('', dmode, durationOpts,
+        function (v) {
+          advanceBlockPhase(block.id, 3);
+          updateBehaviorDuration(line.id, blockIdx, 'mode', v);
+        },
+        function (opt) { explainDurationDisabled(opt); }));
+
+      // Cross-object Start / Stop side effects belong here because they
+      // are actions that happen alongside this block's progress, not
+      // properties of the trigger itself.
       const selfMaster = line.masterId || null;
       const objectIds = [];
       const seenObjMasters = {};
@@ -10616,40 +10676,10 @@
           EASING_OPTIONS,
           function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopEasing', v); }));
       }
-
-      // ── Section: Progress ─────────────────────────────────────────────────────
-      const progressTitle = document.createElement('div');
-      progressTitle.className = 'ed-behavior-section-title';
-      progressTitle.textContent = 'Progress';
-      card.appendChild(progressTitle);
-
-      const durationOpts = [
-        { value: 'scroll',   label: 'Scroll-driven',
-          disabledIf: when !== 'scroll-range',
-          disabledReason: 'Scroll-driven progress only works when ' +
-            'activation is "Scroll range" — the range defines both ' +
-            'when the block activates AND how its progress advances. ' +
-            'Pick a different activation OR a different progress mode.' },
-        { value: 'time',     label: 'Timed run (seconds)' },
-        { value: 'loop',     label: 'Loop forever' },
-        { value: 'pingpong', label: 'Ping-pong forever' },
-        { value: 'loopTo',   label: 'Loop back to earlier block',
-          disabledIf: prevTimedIdx < 0,
-          disabledReason: 'Loop-back needs an earlier Timed block to ' +
-            'return to. Add at least one block above this one with ' +
-            'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
-            'ping-pong blocks have no fixed start position to anchor to.' }
-      ];
-      card.appendChild(behaviorButtonGroup('', dmode, durationOpts,
-        function (v) {
-          advanceBlockPhase(block.id, 2);
-          updateBehaviorDuration(line.id, blockIdx, 'mode', v);
-        },
-        function (opt) { explainDurationDisabled(opt); }));
     }
 
-    // ── Phase >= 2: progress options + effects ─────────────────────────
-    if (phase >= 2) {
+    // ── Phase >= 3: progress options + effects ─────────────────────────
+    if (phase >= 3) {
       if (dmode !== 'scroll') {
         const secondsLabel = (dmode === 'loopTo') ? 'Return time (s)' : 'Seconds';
         card.appendChild(numberField(secondsLabel, duration.seconds || 1, function (v) {
