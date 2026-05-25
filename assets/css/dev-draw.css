@@ -663,14 +663,31 @@ body.editor {
   overflow: hidden;
 }
 /* v0.8.129: inside a floating panel the card fills the panel body —
-   strip its own border/background so there's no "panel inside panel". */
+   strip its own border/background so there's no "panel inside panel".
+   v0.8.168: become a flex column with a vertical gap so children get
+   the same breathing room as the object panel's `.ed-settings` grid
+   (which uses gap: 0.5rem). Without this, .ed-field rows touched each
+   other and the panel read as scrunched — only the section titles had
+   any vertical breathing room. Flex gap is robust to mixed children
+   (fields, button-groups, locked chips, section titles, custom rows). */
 .ed-behavior-block--inpanel {
   background: transparent;
   border: none;
   border-radius: 0;
   box-shadow: none;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
+/* v0.8.168: the per-field first/last-of-type margins below (lines ~938)
+   were compensating for the absent gap. With flex-gap now driving the
+   rhythm they would compound — zero them out inside the in-panel card. */
+.ed-behavior-block--inpanel > .ed-field:first-of-type { margin-top: 0; }
+.ed-behavior-block--inpanel > .ed-field:last-of-type  { margin-bottom: 0; }
+/* Section titles already supply their own border-top + padding-top as a
+   logical divider; the flex-gap sits above that padding, producing a
+   clean section break without needing per-section margin tweaks. */
 .ed-behavior-head {
   display: flex;
   align-items: center;
