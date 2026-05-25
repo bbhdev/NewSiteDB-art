@@ -854,6 +854,13 @@ body.editor {
   color: #e07050;
   animation: behaviorContinueShake 0.35s ease-out;
 }
+/* Field-level required-empty feedback — red border on the input,
+   cleared as soon as the user starts typing in that field. */
+.ed-field.is-required-empty input {
+  border-color: #c25b3a !important;
+  box-shadow: 0 0 0 1px #c25b3a;
+  outline: none;
+}
 
 /* v0.8.158: "Also control other objects" intentional-disclosure button.
    Collapsed by default at phase 2; dashed border signals optional/add-on. */

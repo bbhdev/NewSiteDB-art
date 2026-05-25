@@ -10552,6 +10552,9 @@
     }, function (opt) { explainDurationDisabled(opt); }));
 
     // ── Phase >= 1: trigger-specific options ──────────────────────────
+    // selectorFieldWrap is set inside the scroll-key branch so the
+    // Continue handler (below) can mark it invalid without a DOM query.
+    let selectorFieldWrap = null;
     if (phase >= 1) {
       if (when === 'scroll-range') {
         const r = trigger.range || { start: 0, end: 1 };
@@ -10567,9 +10570,11 @@
       }
 
       if (when === 'scroll-key') {
-        card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
+        selectorFieldWrap = triggerField('Trigger key', trigger.selector || '', function (v) {
+          if (selectorFieldWrap) selectorFieldWrap.classList.remove('is-required-empty');
           updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
-        }));
+        });
+        card.appendChild(selectorFieldWrap);
         const va = trigger.viewportAt || 'middle';
         card.appendChild(behaviorButtonGroup('Reaches', va, [
           { value: 'top',    label: 'Top of viewport' },
@@ -10619,6 +10624,8 @@
           void contBtn.offsetWidth; // restart animation
           contBtn.classList.add('is-invalid');
           setTimeout(function () { contBtn.classList.remove('is-invalid'); }, 600);
+          // Red border on the empty field points directly at what's needed.
+          if (selectorFieldWrap) selectorFieldWrap.classList.add('is-required-empty');
           return;
         }
         advanceBlockPhase(block.id, 2);
