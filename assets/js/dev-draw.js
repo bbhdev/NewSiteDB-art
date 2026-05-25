@@ -9384,8 +9384,8 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ed-mini';
-      btn.textContent = '↺ Reset to master';
-      btn.title = 'Clear this class\'s position offset so the object snaps back to the master\'s canonical placement.';
+      btn.textContent = '↺ Reset position to master';
+      btn.title = 'Clear this class\'s position offset — the XY drift from the master\'s canonical placement.';
       btn.addEventListener('click', function () { resetPositionOffset(line.id); });
       _resetToMasterBtn = btn;
     }
@@ -9530,26 +9530,25 @@
     // (the default for primitives), `round` produces the bulgy
     // rounded-tip effect that scales with line width; `miter` keeps
     // sharp geometric points; `bevel` flattens them.
-    // v0.8.65: gray out for kinds that have no corner geometry —
-    // smooth conic primitives (circle / ellipse) and images. The
-    // field stays rendered so a value the user previously set is
-    // still visible; it just doesn't affect anything on these
-    // kinds. Other kinds (rect, polygon, star, chain, loop,
-    // freehand, bezier, svgImport) may have corners and keep the
-    // setting active.
+    // v0.8.133: hide entirely for kinds that have no corner geometry —
+    // smooth conic primitives (circle / ellipse) and images.
+    // Other kinds (rect, polygon, star, chain, loop, freehand, bezier,
+    // svgImport) may have corners and keep the setting active.
     const noCorners = (line.kind === 'circle' || line.kind === 'ellipse'
                     || line.kind === 'image');
-    wrap.appendChild(setInactive(withScope(selectField('Corners', line.linejoin || 'round',
-      [
-        { value: 'round', label: 'Round' },
-        { value: 'miter', label: 'Miter' },
-        { value: 'bevel', label: 'Bevel' }
-      ],
-      function (v) {
-        setVisualProp(line.id, 'linejoin', v);
-        scheduleSnapshot();
-        renderLines();
-      }), line.masterId, 'linejoin'), noCorners));
+    if (!noCorners) {
+      wrap.appendChild(withScope(selectField('Corners', line.linejoin || 'round',
+        [
+          { value: 'round', label: 'Round' },
+          { value: 'miter', label: 'Miter' },
+          { value: 'bevel', label: 'Bevel' }
+        ],
+        function (v) {
+          setVisualProp(line.id, 'linejoin', v);
+          scheduleSnapshot();
+          renderLines();
+        }), line.masterId, 'linejoin'));
+    }
 
     // v0.8.114: BEHAVIORS divider now carries an (i) tooltip for the
     // multi-block additive semantics — used to be an always-on
@@ -9596,14 +9595,17 @@
       wrap.appendChild(warn);
     }
 
+    // v0.8.133: block list always created so the add-block row lives
+    // inside it and inherits the same gap as real block rows.
+    const list = document.createElement('ul');
+    list.className = 'ed-block-list';
     if (!blocks.length) {
-      const ph = document.createElement('p');
+      const ph = document.createElement('li');
       ph.className = 'ed-behavior-empty';
-      ph.textContent = 'No behavior blocks yet. Add one to drive scroll animation.';
-      wrap.appendChild(ph);
+      ph.style.cssText = 'list-style:none;padding:0.15rem 0 0.35rem';
+      ph.textContent = 'No behavior blocks yet.';
+      list.appendChild(ph);
     } else {
-      const list = document.createElement('ul');
-      list.className = 'ed-block-list';
       // Mark inOverlap blocks so we can flag them in the list.
       const inOverlap = {};
       overlaps.forEach(function (o) { inOverlap[o.a] = true; inOverlap[o.b] = true; });
@@ -9637,15 +9639,17 @@
         row.appendChild(delBtn);
         list.appendChild(row);
       });
-      wrap.appendChild(list);
     }
 
-    const addBlockBtn = document.createElement('button');
-    addBlockBtn.type = 'button';
-    addBlockBtn.className = 'ed-mini ed-behavior-add';
-    addBlockBtn.textContent = '+ Add block';
-    addBlockBtn.title = 'Append a new behavior block (range 0–1; edit to chain).';
-    addBlockBtn.addEventListener('click', function () {
+    // Add-block as a ghost row — same position/gap as real rows.
+    const addRow = document.createElement('li');
+    addRow.className = 'ed-block-row ed-block-row--add';
+    const addNameBtn = document.createElement('button');
+    addNameBtn.type = 'button';
+    addNameBtn.className = 'ed-block-name';
+    addNameBtn.textContent = '+ Add block';
+    addNameBtn.title = 'Append a new behavior block (range 0–1; edit to chain).';
+    addNameBtn.addEventListener('click', function () {
       addBehaviorBlock(line.id);
       // v0.8.128: B1 — immediately open the block panel for the new
       // block so the user doesn't have to click a second time. The
@@ -9660,7 +9664,9 @@
         }
       }
     });
-    wrap.appendChild(addBlockBtn);
+    addRow.appendChild(addNameBtn);
+    list.appendChild(addRow);
+    wrap.appendChild(list);
 
     host.appendChild(wrap);
 
@@ -9676,15 +9682,15 @@
     // and rewrite cross-references when applicable.
     const dupNew = document.createElement('button');
     dupNew.type = 'button';
-    dupNew.textContent = 'Duplicate (new master)';
+    dupNew.textContent = 'Duplicate as new master';
     dupNew.title = 'Create a fully independent copy. New master record; geometry can evolve separately.';
     dupNew.addEventListener('click', function () { duplicateObject(line.id, { linked: false }); });
     actions.appendChild(dupNew);
 
     const dupLink = document.createElement('button');
     dupLink.type = 'button';
-    dupLink.textContent = 'Duplicate (linked)';
-    dupLink.title = 'Create a copy that shares geometry with this object. Per-instance transforms/behaviors are independent.';
+    dupLink.textContent = 'Duplicate as instance';
+    dupLink.title = 'Create a copy that shares geometry with this object (same master). Per-instance transforms and behaviors are independent.';
     dupLink.addEventListener('click', function () { duplicateObject(line.id, { linked: true }); });
     actions.appendChild(dupLink);
 
@@ -9693,10 +9699,10 @@
     const del = document.createElement('button');
     del.className = 'ed-danger';
     if (modeIsAll()) {
-      del.textContent = 'Delete object (all classes)';
+      del.textContent = 'Delete object in all classes';
       del.title = 'Delete this object everywhere — every class loses it.';
     } else {
-      del.textContent = 'Remove from this class';
+      del.textContent = 'Delete object in this class only';
       del.title = 'Drop just this class\'s instance; the object stays in other classes.';
     }
     del.addEventListener('click', function () {

@@ -706,6 +706,13 @@ body.editor {
   font-size: 0.83em;
   line-height: 1.4;
 }
+/* v0.8.133: bbox row — flex so Show/Hide button is flush right */
+.ed-params-meta--bbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ed-params-meta--bbox span { flex: 1 1 auto; }
 
 /* v0.8.128: B5 — stacked action buttons so long labels don't wrap */
 .ed-actions--stack {
@@ -2086,6 +2093,21 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   font-size: 0.95em;
 }
 .ed-block-del:hover { background: #5c2424; color: #fff; }
+/* v0.8.133: add-block as a ghost row at the end of the block list —
+   same height/structure as a real row, dashed border to signal "slot". */
+.ed-block-row--add {
+  border-style: dashed;
+  border-color: #444;
+  background: transparent;
+}
+.ed-block-row--add .ed-block-name {
+  color: #888;
+  font-style: italic;
+}
+.ed-block-row--add .ed-block-name:hover {
+  background: #2a2a2a;
+  color: #c8c8c8;
+}
 
 /* Narrow-screen fallback — panels become document-flow blocks
    below the sidebar so they don't fly off a phone screen. Step 1
