@@ -1104,7 +1104,8 @@
           <li><strong>Drag</strong> any selected object\'s body to move every selected object in lockstep, preserving their spatial relationship.</li>\
           <li><strong>Drag handles</strong> (cyan dots) to reshape — point handles on free-form lines, parameter handles on primitives. Handles only show when exactly one object is selected.</li>\
           <li><strong>⌥ Option-click</strong> (Alt-click on Windows) on an object to select it <em>and</em> open its detail panel. If the panel is already open for that object, Option-click closes it instead. Option-click on empty canvas deselects and closes any open unpinned panel.</li>\
-          <li><strong>Shift+Arrow keys</strong> (no selection) scroll the canvas <em>and</em> move all open floating panels in lockstep — useful for temporarily bringing panels that are parked off-screen into view, then shifting everything back.</li>\
+          <li><strong>Arrow keys</strong> scroll the canvas (works immediately after page load, no click needed first). With a selection, arrows nudge selected objects instead; Shift multiplies the nudge step by 10.</li>\
+          <li><strong>⌥ Option+Arrow</strong> scrolls the canvas <em>and</em> shifts all open floating panels in lockstep — use this to bring panels intentionally parked off-screen into view, then Option-arrow back to restore their position. Works with or without a selection.</li>\
           <li><strong>Esc</strong> or empty-canvas click to clear the selection.</li>\
           <li><strong>Backspace</strong> / Delete to remove every selected object.</li>\
         </ul>\
@@ -12008,15 +12009,19 @@
       nudgeSelectionBy(dx, dy);
       return;
     }
-    // v0.8.147: Shift+Arrow with no selection — scroll the canvas AND
-    // shift every open floating panel by the same pixel delta so the
-    // user can bring intentionally off-screen panels into view (or
-    // push them back) without touching them individually.
-    // 80 px / step feels proportional for panel repositioning.
-    if (e.shiftKey &&
+    // v0.8.148: Option/Alt+Arrow — scroll canvas AND shift all open
+    // floating panels in lockstep. Lets the user temporarily bring
+    // intentionally off-screen panels into view without touching them
+    // individually, then Option-arrow back to restore their position.
+    //
+    // Direction: scrollBy(+dx) moves canvas content LEFT in viewport;
+    // shiftAllPanels(-dx) moves panel CSS `left` in the same leftward
+    // direction, so both canvas content and panels travel together.
+    // Must sit before the altKey guard below.
+    if (e.altKey &&
         (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
          e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
-        !e.metaKey && !e.ctrlKey && !e.altKey) {
+        !e.metaKey && !e.ctrlKey && !e.shiftKey) {
       e.preventDefault();
       const PAN_STEP = 80;
       let pdx = 0, pdy = 0;
@@ -12025,7 +12030,27 @@
       if (e.key === 'ArrowUp')    pdy = -PAN_STEP;
       if (e.key === 'ArrowDown')  pdy =  PAN_STEP;
       canvasWrap.scrollBy(pdx, pdy);
-      if (window.PanelManager) window.PanelManager.shiftAllPanels(pdx, pdy);
+      // Negate panel delta: scrollBy(+dx) slides content left, so
+      // panels must also go left → shiftAllPanels(-dx).
+      if (window.PanelManager) window.PanelManager.shiftAllPanels(-pdx, -pdy);
+      return;
+    }
+    // Plain Arrow with no selection — explicitly scroll canvasWrap so
+    // arrow keys work immediately after page load without requiring a
+    // click to focus the canvas first. (Browser-native scroll requires
+    // canvasWrap to have DOM focus; this bypasses that dependency.)
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+         e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+        !state.selectedIds.length &&
+        !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const SCROLL_STEP = 80;
+      let sdx = 0, sdy = 0;
+      if (e.key === 'ArrowLeft')  sdx = -SCROLL_STEP;
+      if (e.key === 'ArrowRight') sdx =  SCROLL_STEP;
+      if (e.key === 'ArrowUp')    sdy = -SCROLL_STEP;
+      if (e.key === 'ArrowDown')  sdy =  SCROLL_STEP;
+      canvasWrap.scrollBy(sdx, sdy);
       return;
     }
     // Skip remaining view shortcuts when a modifier is held — let
