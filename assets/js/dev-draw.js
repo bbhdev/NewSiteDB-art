@@ -5132,7 +5132,14 @@
     // the translateX/Y number fields don't (their onInput keeps focus
     // mid-edit, by design). Refresh the per-block summary so the
     // drift line text stays live as the user types.
-    if (key === 'translateX' || key === 'translateY' || key === 'translateMode') {
+    // v0.8.167: path-follow keys read by the summary too — pathRef
+    // (which guide), pathAlignToTangent, pathEndMode. None of these
+    // controls (selectField / checkboxField) trigger a re-render of
+    // their own, so the summary was stale until something else forced
+    // a re-render. Add them to the refresh list.
+    if (key === 'translateX'   || key === 'translateY'   || key === 'translateMode' ||
+        key === 'pathRef'      || key === 'pathRefName'  ||
+        key === 'pathAlignToTangent' || key === 'pathEndMode') {
       refreshBehaviorSummary(id, blockIdx);
     }
     if (typeof value === 'boolean' || value === null) snapshot();
