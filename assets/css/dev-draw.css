@@ -825,6 +825,18 @@ body.editor {
   padding-top: 0.3rem;
 }
 
+/* v0.8.169: within-section property divider — used between rotate /
+   opacity / draw-in under the "What changes" section. Same hairline
+   color (#333) as .ed-behavior-section-title's border-top so the two
+   read as the same separator system. No label, slim footprint;
+   flex-gap on the parent (.ed-behavior-block--inpanel, 0.5rem) takes
+   care of the breathing room above/below. */
+.ed-behavior-prop-divider {
+  height: 0;
+  border-top: 1px solid #333;
+  margin: 0 0.6rem;
+}
+
 /* v0.8.153: summary flash — fires via refreshBehaviorSummary
    when a field changes without a full panel re-render. */
 @keyframes behaviorSummaryFlash {

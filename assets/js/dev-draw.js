@@ -9992,6 +9992,16 @@
   // Build a chip + back-arrow pair, appending both to a behaviorButtonGroup
   // row. The chip displays the chosen value; the arrow is the single
   // back affordance. Click on the chip is a no-op.
+  // v0.8.169: thin horizontal rule used to separate unrelated property
+  // groups WITHIN a behavior section (e.g. rotate | opacity | draw-in
+  // under "What changes"). Section-titles already supply the BETWEEN-
+  // section dividers; this is the within-section variant — same hairline
+  // color, no label, slimmer vertical footprint.
+  function behaviorPropDivider() {
+    const el = document.createElement('div');
+    el.className = 'ed-behavior-prop-divider';
+    return el;
+  }
   function appendLockedChip(card, value, label, onBack, tooltip) {
     const chipGroup = behaviorButtonGroup('', value, [{ value: value, label: label }],
       function () { /* no-op: chip is display only; use arrow to go back */ },
@@ -10964,6 +10974,11 @@
           startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
         }));
       }
+      // v0.8.169: thin separator between rotate-group and opacity-group
+      // — rotate and opacity are unrelated properties; the divider makes
+      // that grouping obvious. Same idiom as section-title border-top
+      // but without a label since both groups live under "What changes".
+      card.appendChild(behaviorPropDivider());
       const fadeOn = !!params.fadeOpacity;
       card.appendChild(checkboxField('Fade opacity', fadeOn, function (v) {
         updateBehaviorParam(line.id, 'fadeOpacity', v ? true : null, blockIdx);
@@ -10979,6 +10994,8 @@
           updateBehaviorParam(line.id, 'opacityTo', v, blockIdx);
         }));
       }
+      // v0.8.169: thin separator between opacity-group and draw-in group.
+      card.appendChild(behaviorPropDivider());
       card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) {
         updateBehaviorParam(line.id, 'drawIn', v, blockIdx);
         renderSelectionPanel();
