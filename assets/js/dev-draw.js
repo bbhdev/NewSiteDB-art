@@ -8509,8 +8509,19 @@
               const target = pinned || opn.find(function (p) { return !p.pinned; });
               if (target) { try { window.PanelManager.close(target.id); } catch (ex) {} }
             } else {
-              // Open a panel — primary is now this object, so an
-              // unpinned follower panel is the right choice.
+              // Close any existing unpinned object panel first — it
+              // rebound to this object via notifySelection but the user
+              // is explicitly asking for a fresh panel here, not a
+              // leftover follower from the previous selection.
+              if (window.PanelManager) {
+                const opn2 = window.PanelManager.listOpen().filter(function (p) {
+                  return p.type === 'object' && !p.pinned;
+                });
+                opn2.forEach(function (p) {
+                  try { window.PanelManager.close(p.id); } catch (ex) {}
+                });
+              }
+              // Open a fresh panel — primary is now this object.
               try { window.PanelManager.open('object'); } catch (ex) { console.error(ex); }
             }
           });
