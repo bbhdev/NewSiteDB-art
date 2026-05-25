@@ -9494,13 +9494,10 @@
           }
           scheduleSnapshot();
         }));
-        // v0.8.128: B4 — reset button goes here, logically grouped
+        // v0.8.128/129: B4 — reset button goes here, logically grouped
         // with the position fields it affects.
         if (_resetToMasterBtn) {
-          const resetRow = document.createElement('div');
-          resetRow.className = 'ed-field';
-          resetRow.appendChild(_resetToMasterBtn);
-          wrap.appendChild(resetRow);
+          wrap.appendChild(_resetToMasterBtn);
         }
       } else {
         // Degenerate: no geometry to anchor the position to.
@@ -10244,7 +10241,12 @@
     const gd = (group && group.defaults) || {};
 
     const card = document.createElement('div');
-    card.className = 'ed-behavior-block';
+    // v0.8.129: strip the card border/background when inside a floating
+    // panel — the panel chrome already provides the visual container,
+    // and the card's own border created a "panel inside panel" look.
+    card.className = panelState
+      ? 'ed-behavior-block ed-behavior-block--inpanel'
+      : 'ed-behavior-block';
     // v0.8.66: tag the card so refreshBehaviorOverlapMarkers can
     // find it by (lineId, blockIdx) without a full re-render.
     card.dataset.lineId  = line.id;
@@ -12054,13 +12056,16 @@
           return;
         }
         const group = state.groups.find(function (g) { return g.id === line.groupId; });
-        // v0.8.128: update the panel chrome title to "Block N / M"
-        // so the floating panel header stays informative without a
-        // duplicate label inside the body.
+        // v0.8.129: update the panel chrome title to "Block N/M · name"
+        // so the panel stays self-describing even when pinned alone
+        // after the parent object panel is closed.
         const frame = body.closest('.ed-floating-panel');
         if (frame) {
           const titleEl = frame.querySelector('.ed-floating-panel-title');
-          if (titleEl) titleEl.textContent = 'Block ' + (idx + 1) + ' / ' + blocks.length;
+          if (titleEl) {
+            const objName = line.name || String(line.id).slice(0, 8);
+            titleEl.textContent = 'Block ' + (idx + 1) + '/' + blocks.length + ' · ' + objName;
+          }
         }
         body.appendChild(renderBehaviorBlock(line, idx, group, ctx.panelState));
       }
@@ -12373,12 +12378,29 @@
       // Subtitle reflects the binding mode so the user can see at a
       // glance whether the panel is locked to one object or live-
       // following selection.
+      // v0.8.129: show object name + short id. Name is more useful
+      // to the user; short id lets them cross-reference the data
+      // file when needed.
+      function panelLineLabel(lineId) {
+        if (!lineId) return '—';
+        let found = null;
+        Object.keys(state.byClass).some(function (cid) {
+          const ls = state.byClass[cid] && state.byClass[cid].lines;
+          if (!ls) return false;
+          const l = ls.find(function (x) { return x.id === lineId; });
+          if (l) { found = l; return true; }
+          return false;
+        });
+        const name = found && found.name ? found.name : null;
+        const shortId = String(lineId).slice(0, 7);
+        return name ? name + ' (' + shortId + ')' : shortId;
+      }
       if (p.state.pinned && p.state.objectId) {
-        p.sub.textContent = '· 📌 ' + String(p.state.objectId).slice(0, 8);
+        p.sub.textContent = '· 📌 ' + panelLineLabel(p.state.objectId);
       } else if (reg.followsSelection) {
         const sel = state.selectedIds;
         const last = sel.length ? sel[sel.length - 1] : null;
-        p.sub.textContent = last ? '· follows: ' + String(last).slice(0, 8) : '· no selection';
+        p.sub.textContent = last ? '· ' + panelLineLabel(last) : '· no selection';
       } else {
         p.sub.textContent = '';
       }

@@ -626,6 +626,15 @@ body.editor {
   box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
+/* v0.8.129: inside a floating panel the card fills the panel body —
+   strip its own border/background so there's no "panel inside panel". */
+.ed-behavior-block--inpanel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
 .ed-behavior-head {
   display: flex;
   align-items: center;
@@ -698,11 +707,13 @@ body.editor {
 }
 .ed-behavior-nav-rm:hover { color: #f88; background: #2c1818; border-color: #7a2828; }
 
-/* v0.8.128: B3 — bounding box / point-count note below position
-   fields. Full-width, no grid columns. */
+/* v0.8.128/129: B3 — bounding box / point-count note below position
+   fields. Spans the full settings grid (grid-column: 1/-1 in case
+   the parent uses an explicit multi-column grid). */
 .ed-params-meta {
-  padding: 0.3rem 0;
-  color: #888;
+  grid-column: 1 / -1;
+  padding: 0.3rem 0 0.1rem;
+  color: #aaa;
   font-size: 0.83em;
   line-height: 1.4;
 }
