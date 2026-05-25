@@ -12917,6 +12917,16 @@
         if (p.frameEl.parentNode) p.frameEl.parentNode.removeChild(p.frameEl);
         delete panels[pid];
       });
+      // v0.8.152: Don't reopen panels when there is no active selection.
+      // On page load selectedIds is always empty, so this prevents stale
+      // panels from appearing without context and conflicting with panels
+      // opened by the first user interaction. persist() here writes the
+      // now-empty map back to localStorage, clearing any stale entry.
+      // lastPos (position memory) lives in a separate key and is unaffected.
+      if (!state.selectedIds || !state.selectedIds.length) {
+        persist();
+        return;
+      }
       const snap = loadPersisted();
       snap.forEach(function (rec) {
         if (!PANEL_REGISTRY[rec.type]) return; // stale type
