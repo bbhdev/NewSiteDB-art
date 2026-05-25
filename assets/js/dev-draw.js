@@ -8251,6 +8251,10 @@
       if (!l.masterId) return;
       inClassCounts[l.masterId] = (inClassCounts[l.masterId] || 0) + 1;
     });
+    // v0.8.171: collected for the post-append fit pass. We need the rows
+    // to be in the DOM to read scrollWidth/clientWidth, so the fit runs
+    // after the loop, not inline per-row.
+    const nameRefsToFit = [];
     state.groups.forEach(function (g, gIdx) {
       const isOpen = !!state.openGroupIds[g.id];
       const li = document.createElement('li');
@@ -8289,6 +8293,7 @@
       const name = document.createElement('span');
       name.className = 'ed-group-name';
       name.textContent = g.name;
+      nameRefsToFit.push(name);
       const count = document.createElement('span');
       count.className = 'ed-group-count';
       const n = state.lines.filter(function (l) { return l.groupId === g.id; }).length;
@@ -8665,6 +8670,43 @@
       li.appendChild(ll);
 
       groupsListEl.appendChild(li);
+    });
+
+    // v0.8.171: post-append name-fit pass. If a group name is long
+    // enough to wrap onto two lines inside its row, try shrinking the
+    // font by up to 2px first; only if that still doesn't fit do we
+    // leave the wrap alone. Implementation: temporarily force
+    // `white-space: nowrap` so `scrollWidth` reports the unwrapped
+    // text width, then compare against `clientWidth` (the slot the
+    // flex layout actually gave us — accounting for siblings: G-pill,
+    // count, eye, delete + gaps). If overflowing, attempt one
+    // 2px-smaller pass; if it now fits, keep nowrap + the smaller
+    // size; if it still overflows, fully restore (allow wrap at
+    // original size). 2px ≈ 1.5pt — within the user-specified
+    // "max 2 pt" budget at the editor's ~15px base font.
+    nameRefsToFit.forEach(function (el) {
+      const cs = getComputedStyle(el);
+      const origSize = parseFloat(cs.fontSize) || 15;
+      // Force single-line measurement.
+      el.style.whiteSpace = 'nowrap';
+      if (el.scrollWidth <= el.clientWidth) {
+        // Fits as-is at the original size — restore default wrapping
+        // behavior (no behavioral change for short names).
+        el.style.whiteSpace = '';
+        return;
+      }
+      // Doesn't fit. Try one shrink step.
+      const smaller = Math.max(9, origSize - 2);
+      el.style.fontSize = smaller + 'px';
+      if (el.scrollWidth <= el.clientWidth) {
+        // Fits at the smaller size — keep nowrap so it stays on one
+        // line. (No need to clear fontSize; we want it to stick.)
+        return;
+      }
+      // Still doesn't fit even shrunk — give up, let it wrap at the
+      // original size.
+      el.style.fontSize = '';
+      el.style.whiteSpace = '';
     });
   }
 
@@ -9159,24 +9201,31 @@
     // Delete is always available. The confirm dialog (empty vs.
     // non-empty group) lives in confirmAndDeleteGroup so the sidebar
     // group-row ✕ button can reuse the same flow.
+    // v0.8.171: stacked full-width buttons (same idiom as the object
+    // panel's duplicate/delete actions, .ed-actions--stack). The labels
+    // are too long to ride side-by-side without wrapping, and stacked
+    // reads more cleanly anyway.
     const actions = document.createElement('div');
-    actions.className = 'ed-actions';
+    actions.className = 'ed-actions ed-actions--stack';
 
     // Duplication (v0.8.92). Two flavours so users don't have to
-    // answer a prompt: new-masters = fully independent geometry; linked
-    // = shares masters with the source, transforms/behaviors independent.
-    // Both honor ALL/1 mode and rewrite internal cross-refs to point
-    // at the duplicates in new-masters mode.
+    // answer a prompt: new-masters = fully independent geometry;
+    // same-masters (formerly "linked") = shares masters with the source,
+    // transforms/behaviors independent. Both honor ALL/1 mode and rewrite
+    // internal cross-refs to point at the duplicates in new-masters mode.
+    // v0.8.171: label wording aligned with user terminology — "same
+    // masters" reads as a clearer counterpart to "new masters" than
+    // "linked" did.
     const dupNew = document.createElement('button');
     dupNew.type = 'button';
-    dupNew.textContent = 'Duplicate group (new masters)';
+    dupNew.textContent = 'Duplicate group, new masters';
     dupNew.title = 'Duplicate the group with fully independent copies of every object (geometry can evolve separately).';
     dupNew.addEventListener('click', function () { duplicateGroupAction(g.id, { linked: false }); });
     actions.appendChild(dupNew);
 
     const dupLink = document.createElement('button');
     dupLink.type = 'button';
-    dupLink.textContent = 'Duplicate group (linked)';
+    dupLink.textContent = 'Duplicate group, same masters';
     dupLink.title = 'Duplicate the group; copies share geometry with the originals (transforms/behaviors independent).';
     dupLink.addEventListener('click', function () { duplicateGroupAction(g.id, { linked: true }); });
     actions.appendChild(dupLink);

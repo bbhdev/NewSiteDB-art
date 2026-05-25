@@ -765,6 +765,31 @@ options for the current step shown inline.
   - Modal z-index lifted above floating panels — the explainer
     alerts and confirms were rendering underneath (v0.8.161).
 
+### Sidebar group rows + group panel polish (v0.8.171)
+
+Two small ergonomic fixes after the main block-panel batch:
+
+- **Group panel action buttons stacked.** The group's settings
+  panel (sidebar) used the unstacked `.ed-actions` layout — three
+  long labels ("Duplicate group, new masters" /
+  "Duplicate group, same masters" / "Delete group") sitting
+  side-by-side wrapped mid-button. Switched to
+  `.ed-actions ed-actions--stack` (same idiom the object panel
+  uses) for full-width stacked buttons. Renamed the formerly
+  "(linked)" variant to "same masters" to read as a clearer
+  counterpart to "new masters".
+- **Auto-fit group names in the sidebar list.** Long group names
+  ("Group 4 copy 2") used to wrap inside their row. Post-append
+  fit pass in `renderGroupsList`: for each `.ed-group-name`,
+  temporarily force `white-space: nowrap` and read
+  `scrollWidth > clientWidth`; if overflowing, try one font
+  shrink of 2px (≈1.5pt, within the user-specified 2pt budget at
+  the editor's ~15px base) and re-measure. If it fits → keep
+  nowrap + smaller size. If still doesn't fit → fully restore
+  (let it wrap at the original size, same as before). Robust
+  against the row's other children — the available width is
+  measured directly from the flex layout, not estimated.
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:
