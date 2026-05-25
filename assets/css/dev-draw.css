@@ -890,6 +890,27 @@ body.editor {
 
 /* v0.8.158: "Also control other objects" intentional-disclosure button.
    Collapsed by default at phase 2; dashed border signals optional/add-on. */
+/* v0.8.162: "Also" title row with close button */
+.ed-behavior-also-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ed-behavior-also-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: #555;
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 0.1em;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ed-behavior-also-close:hover {
+  color: #c06050;
+}
+
 .ed-behavior-also-btn {
   display: block;
   width: calc(100% - 1.1rem);

@@ -10699,7 +10699,9 @@
             'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
             'ping-pong blocks have no fixed start position to anchor to.' }
       ];
-      card.appendChild(behaviorButtonGroup('', dmode, durationOpts,
+      // v0.8.162: pass null at phase 2 so no button appears active before
+      // the user has explicitly chosen a progress mode (mirrors trigger picker).
+      card.appendChild(behaviorButtonGroup('', (phase >= 3 ? dmode : null), durationOpts,
         function (v) {
           advanceBlockPhase(block.id, 3);
           updateBehaviorDuration(line.id, blockIdx, 'mode', v);
@@ -10728,10 +10730,27 @@
         objectIds.sort(function (a, b) { return a.label.localeCompare(b.label); });
         const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
 
-        const sideTitle = document.createElement('div');
-        sideTitle.className = 'ed-behavior-section-title';
-        sideTitle.textContent = 'Also';
-        card.appendChild(sideTitle);
+        // v0.8.162: "Also" title row with a close [×] button so user can
+        // collapse the section and optionally clear the saved objects.
+        const sideTitleRow = document.createElement('div');
+        sideTitleRow.className = 'ed-behavior-section-title ed-behavior-also-title';
+        const sideTitleText = document.createElement('span');
+        sideTitleText.textContent = 'Also';
+        sideTitleRow.appendChild(sideTitleText);
+        const alsoCloseBtn = document.createElement('button');
+        alsoCloseBtn.type = 'button';
+        alsoCloseBtn.className = 'ed-behavior-also-close';
+        alsoCloseBtn.title = 'Remove "also" controls';
+        alsoCloseBtn.textContent = '×';
+        alsoCloseBtn.addEventListener('click', function () {
+          behaviorShowSideEffects.delete(block.id || '');
+          // Clear any saved object IDs so hasSideEffects becomes false
+          // and the section stays hidden on next render.
+          updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', '');
+          updateBehaviorTrigger(line.id, blockIdx, 'stopObjectId',  '');
+        });
+        sideTitleRow.appendChild(alsoCloseBtn);
+        card.appendChild(sideTitleRow);
         card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
           function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
         card.appendChild(selectField('Stop object', trigger.stopObjectId || '', objOptsWithNone,
