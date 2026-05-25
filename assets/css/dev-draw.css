@@ -789,6 +789,35 @@ body.editor {
   border-top: 1px dashed #6a4a4a;
   font-size: 0.78em;
 }
+
+/* v0.8.153: section titles inside the behavior block panel —
+   "Activate when", "Progress", "What changes". Small caps,
+   muted; a border-top separates each section. */
+.ed-behavior-section-title {
+  font-size: 0.70em;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #777;
+  padding: 0.6rem 0.6rem 0.15rem;
+  border-top: 1px solid #333;
+  margin-top: 0.1rem;
+}
+.ed-behavior-section-title:first-of-type {
+  border-top: none;
+  padding-top: 0.3rem;
+}
+
+/* v0.8.153: summary flash — fires via refreshBehaviorSummary
+   when a field changes without a full panel re-render. */
+@keyframes behaviorSummaryFlash {
+  0%   { background-color: #7a4a2a; }
+  50%  { background-color: #7a4a2a; }
+  100% { background-color: #573737; }
+}
+.ed-behavior-summary.is-flash {
+  animation: behaviorSummaryFlash 1s ease-out forwards;
+}
 .ed-behavior-range .ed-field { grid-template-columns: 3em 1fr; }
 .ed-behavior-block > .ed-field,
 .ed-behavior-block > .ed-actions {

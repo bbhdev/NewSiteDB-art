@@ -5159,10 +5159,34 @@
   // ── Behavior block lifecycle (v0.4.1) ───────────────────────────
   // Add / remove / range-edit. Each goes through scope-mode fan-out
   // for siblings of the same master in 'all' mode.
+
+  // v0.8.153: Session-only phase map for progressive disclosure.
+  // 0 = fresh (trigger picker only); 1 = trigger chosen; 2 = full.
+  // Existing blocks default to 2 (fully expanded) so saved configs
+  // are unaffected. Keys are block.id strings; values 0/1/2.
+  const behaviorBlockPhases = {};
+  function getBlockPhase(blockId) {
+    return Object.prototype.hasOwnProperty.call(behaviorBlockPhases, blockId)
+      ? behaviorBlockPhases[blockId] : 2;
+  }
+  function advanceBlockPhase(blockId, minPhase) {
+    const cur = Object.prototype.hasOwnProperty.call(behaviorBlockPhases, blockId)
+      ? behaviorBlockPhases[blockId] : 0;
+    if (minPhase > cur) behaviorBlockPhases[blockId] = minPhase;
+  }
+
   function addBehaviorBlock(lineId) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
     if (!l) return;
     pushNewBlock(l);
+    // v0.8.153: tag the new block as phase 0 (progressive disclosure
+    // starts at trigger-only). Only the block on `l` — sibling copies
+    // in other classes are already-existing from the user's perspective
+    // and default to phase 2 via getBlockPhase.
+    if (Array.isArray(l.behaviors) && l.behaviors.length) {
+      const nb = l.behaviors[l.behaviors.length - 1];
+      if (nb && nb.id) behaviorBlockPhases[nb.id] = 0;
+    }
     if (modeIsAll() && l.masterId) {
       forSiblingsOf(l.masterId, function (sib) { pushNewBlock(sib); });
     }
@@ -9914,7 +9938,7 @@
       });
       row.appendChild(btn);
     });
-    wrap.appendChild(lbl);
+    if (label) wrap.appendChild(lbl);
     wrap.appendChild(row);
     return wrap;
   }
@@ -10240,6 +10264,10 @@
       } else {
         n.textContent = behaviorSummaryText(block);
       }
+      // v0.8.153: flash to draw attention to the updated text.
+      n.classList.remove('is-flash');
+      void n.offsetWidth; // restart CSS animation
+      n.classList.add('is-flash');
     }
     // v0.8.66: range edits change which blocks overlap; refresh the
     // warning text and the per-block red-border markers so the
@@ -10440,32 +10468,24 @@
       moveBehaviorBlock(line.id, fromIdx, toIdx);
     });
 
-    // v0.8.7: trigger (When) and duration (How) on independent
-    // axes. Each is a button group; invalid combos are greyed and
-    // click-on-greyed pops an explainer dialog.
+    // v0.8.7: trigger (When) and duration (How) on independent axes.
+    // v0.8.153: progressive disclosure via behaviorBlockPhases.
     const trigger  = (block && block.trigger)  ? block.trigger  : { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 };
     const duration = (block && block.duration) ? block.duration : { mode: 'scroll' };
     const when = trigger.when || 'scroll-range';
     const dmode = duration.mode || 'scroll';
+    const phase = getBlockPhase(block.id || '');
 
-    // v0.8.8: fluid post-summary strip — the orthogonal pickers
-    // make the legal combos easy to confuse, so a plain-English
-    // sentence makes the live combo readable at a glance.
-    // v0.8.10: dataset stamps let refreshBehaviorSummary find this
-    // node and update its text in place when a non-mode field
-    // changes (range, delay, seconds, easing, selector) without
-    // re-rendering the panel and stealing input focus.
+    // Summary strip — always visible; flashes in refreshBehaviorSummary
+    // when a non-mode field changes. Positioned first so it reads as
+    // the panel's live "what this block does" headline.
     const summary = document.createElement('div');
     summary.className = 'ed-behavior-summary';
-    summary.dataset.lineId  = String(line.id);
+    summary.dataset.lineId   = String(line.id);
     summary.dataset.blockIdx = String(blockIdx);
     summary.textContent = behaviorSummaryText(block);
     card.appendChild(summary);
 
-    // v0.8.20: drift line (only rendered when translateMode != fixed).
-    // Its own dataset stamps so refreshBehaviorSummary can rewrite it
-    // in place on translate*/translateMode edits without re-rendering
-    // the panel.
     const isLastBlock = blockIdx === line.behaviors.length - 1;
     const driftText = behaviorDriftLineText(block, isLastBlock);
     if (driftText) {
@@ -10478,14 +10498,12 @@
       card.appendChild(driftLine);
     }
 
-    // When (activation) picker
-    // v0.8.22: "After previous ends" trigger — fires when the most
-    // recent preceding TIMED block finishes (activation + delay +
-    // seconds). Scroll-driven / loop / ping-pong blocks are skipped
-    // when walking back, because they don't have a discrete end. The
-    // option is disabled when no prior timed block exists (blockIdx
-    // 0, or all preceding blocks are continuous), with an explainer
-    // dialog on click so the user knows why.
+    // ── Section: Activate when ─────────────────────────────────────────────
+    const triggerTitle = document.createElement('div');
+    triggerTitle.className = 'ed-behavior-section-title';
+    triggerTitle.textContent = 'Activate when';
+    card.appendChild(triggerTitle);
+
     const prevTimedIdx = (function () {
       if (!Array.isArray(line.behaviors)) return -1;
       for (let j = blockIdx - 1; j >= 0; j--) {
@@ -10496,7 +10514,8 @@
       return -1;
     })();
     const afterPrevDisabled = prevTimedIdx < 0;
-    card.appendChild(behaviorButtonGroup('Activate when', when, [
+
+    card.appendChild(behaviorButtonGroup('', when, [
       { value: 'scroll-range',     label: 'Scroll range' },
       { value: 'page-load',        label: 'Page load' },
       { value: 'scroll-key',       label: 'Scroll to key' },
@@ -10508,380 +10527,273 @@
           'Add a block above this one with Progress = "Timed run (seconds)" ' +
           '— scroll-driven / loop / ping-pong blocks are skipped because ' +
           'they have no discrete end.' },
-      // v0.8.77: event-driven triggers fed by a global scroll-
-      // activity watcher (150 ms debounce). Delay is in seconds;
-      // the opposite event before delay elapses cancels the pending
-      // fire (symmetric). Two optional side effects on same-line
-      // blocks: start X (act as if X's trigger fired now; no-op if
-      // X is already running) and stop X (freeze X at its end
-      // state; idle blocks are unaffected).
       { value: 'scroll-stop',      label: 'Scroll stops' },
       { value: 'scroll-start',     label: 'Scroll resumes' },
-      // v0.8.82: explicit "never auto-fires" trigger. Block sits
-      // dormant until another object's Start command targets this
-      // class. Pairs with cross-object Start to build externally-
-      // driven chains. Delay is honored — Start at t fires the
-      // block's contribution starting at t + delay.
       { value: 'wait',             label: 'Wait for external Start' },
-      // v0.8.84: pointer-driven one-shot triggers. The path's
-      // pointer-events flips to 'all' while armed so a click /
-      // hover anywhere inside the shape's geometric bounds counts
-      // as a hit, even on un-filled outlines. On touch devices
-      // mouseenter doesn't fire, so 'hover' also accepts click as
-      // a fallback (no media-query branching).
       { value: 'click',            label: 'Wait for click' },
       { value: 'hover',            label: 'Wait for hover' }
-    ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'when', v); },
-       function (opt) { explainDurationDisabled(opt); }));
-
-    // v0.8.127: progressive disclosure — only the trigger fields
-    // that apply to the current "Activate when" are rendered. Values
-    // for hidden axes stay in the data model so flipping back to a
-    // mode restores its inputs exactly as left. Replaces the v0.8.19
-    // setInactive-dim approach, which gave the user every axis at
-    // once even when only one applied.
-    if (when === 'scroll-range') {
-      const r = trigger.range || { start: 0, end: 1 };
-      const rangeRow = document.createElement('div');
-      rangeRow.className = 'ed-behavior-range';
-      rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
-      }));
-      rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
-      }));
-      card.appendChild(rangeRow);
-    }
-
-    if (when === 'scroll-key') {
-      card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
-      }));
-      // v0.8.12: where in the viewport the key has to land for
-      // activation. 'bottom' preserves the v0.8.11 default with a
-      // small inset; 'top' / 'middle' let the user gate activation
-      // until the key has scrolled further up.
-      const va = trigger.viewportAt || 'middle';
-      card.appendChild(behaviorButtonGroup('Reaches', va, [
-        { value: 'top',    label: 'Top of viewport' },
-        { value: 'middle', label: 'Middle' },
-        { value: 'bottom', label: 'Bottom of viewport' },
-        { value: 'object', label: 'The object' }
-      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); },
-         null));
-      // v0.8.15: re-arm on every scroll-back crossing so the
-      // timed/loop/pingpong duration restarts each time the key
-      // re-enters the trigger zone.
-      const rep = trigger.repeat || 'once';
-      card.appendChild(behaviorButtonGroup('Repeat', rep, [
-        { value: 'once',  label: 'Once' },
-        { value: 'every', label: 'Every crossing' }
-      ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); },
-         null));
-    }
-
-    // Delay is an additional offset (seconds) after the activation
-    // event fires. Only meaningless when the block has no time
-    // concept at all — that's the scroll-range × scroll-driven
-    // combo, where progress is bound directly to scroll position.
-    const delayApplies = !(when === 'scroll-range' && dmode === 'scroll');
-    if (delayApplies) {
-      card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
-        updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
-      }));
-    }
-
-    // v0.8.84: pointer-trigger hit-test opt-in. Only for click /
-    // hover; lets the author override the SVG-native hit (stroke
-    // only on unfilled outlines) with full-shape-as-fill hit,
-    // so a click anywhere inside an outline registers. Default
-    // off — keeps the hit zone honest by default.
-    if (when === 'click' || when === 'hover') {
-      card.appendChild(checkboxField(
-        'Treat shape as filled for hit test',
-        !!trigger.treatAsFilled,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v); }
-      ));
-    }
-
-    // v0.8.79: cross-object Start/Stop side effects. When this
-    // trigger fires, optionally Start (re-arm + fire triggers on) or
-    // Stop (clean-reset to neutral) another object identified by its
-    // class (masterId). Stop additionally offers fade-out and/or
-    // return-to-origin tweens with a shared duration + easing.
-    // Self is excluded from the options. Available on every trigger
-    // type — useful regardless of how this block was activated.
-    const selfMaster = line.masterId || null;
-    const objectIds = [];
-    const seenObjMasters = {};
-    state.lines.forEach(function (ln) {
-      const m = ln.masterId;
-      if (!m || m === selfMaster) return;
-      if (seenObjMasters[m]) return;
-      seenObjMasters[m] = true;
-      // Label by master.name when available (human-readable), else
-      // fall back to line.name, else the line's own id. masterId
-      // itself is an opaque hash and meaningless to the user.
-      const master = state.masters.find(function (x) { return x.id === m; });
-      const label = (master && master.name) || ln.name || ln.id || m;
-      objectIds.push({ value: m, label: label });
-    });
-    objectIds.sort(function (a, b) { return a.label.localeCompare(b.label); });
-    const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
-    card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
-      function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
-    card.appendChild(selectField('Stop object', trigger.stopObjectId || '', objOptsWithNone,
-      function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopObjectId', v); }));
-    if (trigger.stopObjectId) {
-      card.appendChild(checkboxField('  …fade out to opacity 0', !!trigger.stopFadeOut,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopFadeOut', v); }));
-      card.appendChild(checkboxField('  …return to original position', !!trigger.stopReturnHome,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopReturnHome', v); }));
-      const stopDur = (typeof trigger.stopDurationSec === 'number') ? trigger.stopDurationSec : 0;
-      card.appendChild(numberField('  …cleanup duration (s, 0 = instant)', stopDur,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopDurationSec', v); }));
-      card.appendChild(selectField('  …cleanup easing', trigger.stopEasing || 'linear',
-        EASING_OPTIONS,
-        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopEasing', v); }));
-    }
-
-    // Progress (How) picker — 'scroll' is only valid when
-    // when=scroll-range; greyed otherwise and click-explains.
-    const durationOpts = [
-      { value: 'scroll',   label: 'Scroll-driven',
-        disabledIf: when !== 'scroll-range',
-        disabledReason: 'Scroll-driven progress only works when ' +
-          'activation is "Scroll range" — the range defines both ' +
-          'when the block activates AND how its progress advances. ' +
-          'Pick a different activation OR a different progress mode.' },
-      { value: 'time',     label: 'Timed run (seconds)' },
-      { value: 'loop',     label: 'Loop forever' },
-      { value: 'pingpong', label: 'Ping-pong forever' },
-      // v0.8.23: loopTo turns the preceding sequence into a
-      // continuous oscillating loop — over `seconds`, animate back
-      // to where the target block started, then replay the chain.
-      // Reuses the same "earlier timed block exists?" gate as the
-      // after-previous trigger, since both need a finite anchor.
-      { value: 'loopTo',   label: 'Loop back to earlier block',
-        disabledIf: prevTimedIdx < 0,
-        disabledReason: 'Loop-back needs an earlier Timed block to ' +
-          'return to. Add at least one block above this one with ' +
-          'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
-          'ping-pong blocks have no fixed start position to anchor to.' }
-    ];
-    card.appendChild(behaviorButtonGroup('Progress', dmode, durationOpts,
-      function (v) { updateBehaviorDuration(line.id, blockIdx, 'mode', v); },
-      function (opt) { explainDurationDisabled(opt); }));
-
-    // v0.8.127: Seconds + Easing only shown when Progress is a time-
-    // based mode. Scroll-driven progress is bound to scroll position
-    // and has no per-block time/easing. Stored values survive a mode
-    // flip — they're just hidden while inapplicable.
-    if (dmode !== 'scroll') {
-      const secondsLabel = (dmode === 'loopTo') ? 'Return time (s)' : 'Seconds';
-      card.appendChild(numberField(secondsLabel, duration.seconds || 1, function (v) {
-        updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
-      }));
-      card.appendChild(selectField('Easing', duration.easing || 'linear',
-        EASING_OPTIONS,
-        function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }));
-    }
-
-    // v0.8.23: loopTo-specific fields — target picker (earlier
-    // time-mode blocks only) + optional max-iterations cap. When
-    // dmode === 'loopTo' we stop rendering after these because the
-    // per-block tx/ty/rot/drift/draw-in fields don't apply: a loopTo
-    // block's contribution is computed at runtime from the chain it's
-    // returning over, not from authored deltas. Fields stay in the
-    // data model and reappear if the user flips Progress back.
-    if (dmode === 'loopTo') {
-      const targets = [];
-      for (let j = 0; j < blockIdx; j++) {
-        const bj = line.behaviors && line.behaviors[j];
-        const bjm = bj && bj.duration && bj.duration.mode;
-        if (bjm === 'time') {
-          targets.push({ value: String(j), label: 'Block ' + (j + 1) + ' (Timed)' });
-        }
-      }
-      const curTarget = Number.isInteger(duration.target) ? String(duration.target) : '';
-      card.appendChild(selectField('Loop back to', curTarget, targets, function (v) {
-        updateBehaviorDuration(line.id, blockIdx, 'target', parseInt(v, 10));
-      }));
-      const maxIter = (Number.isInteger(duration.maxIterations) && duration.maxIterations > 0)
-                      ? duration.maxIterations : 0;
-      card.appendChild(numberField('Max iterations (0 = forever)', maxIter, function (v) {
-        updateBehaviorDuration(line.id, blockIdx, 'maxIterations', v);
-      }));
-      return card;
-    }
-
-    // v0.8.17: open-ended translate mode. 'Fixed' = current
-    // behavior (translateX/Y are final displacements weighted
-    // by block progress). 'Drift X / Y / Both' = that axis's
-    // value is read as a per-scroll-px multiplier; the rendered
-    // translate accumulates with scroll motion and freezes the
-    // moment block idx+1 activates. Useful for "move object in
-    // from off-canvas indefinitely, then hand off to the next
-    // block" — saves authoring a precise translate value when
-    // the exact distance doesn't matter, only the direction.
-    const tmode = (params.translateMode || gd.translateMode || 'fixed');
-    // v0.8.53: enumerate same-class lines that can serve as path
-    // guides for the new pathFollow translate mode. Restricted to
-    // kinds that produce SVG <path> elements with usable d data;
-    // primitives (circle / rect / polygon / star) don't expose
-    // SVGGeometryElement.getPointAtLength uniformly so they're
-    // excluded for now. Self-reference also excluded.
-    // v0.8.72: any kind that resolves to an SVG <path> at runtime
-    // can serve as a guide — its computed `d` is what
-    // getPointAtLength samples. That includes primitives (their
-    // generateD produces a d attribute, e.g. circle → an arc-pair,
-    // rect → 4 segments + close). Only `image` is excluded (it
-    // renders as <image>, not <path>, and has no path geometry).
-    const NON_PATH_KINDS = ['image'];
-    const guideOpts = state.lines
-      .filter(function (l) {
-        return l.id !== line.id
-            && !!l.masterId
-            && NON_PATH_KINDS.indexOf(l.kind) === -1;
-      })
-      .map(function (l) {
-        return { value: l.masterId, label: (l.name || l.id) + ' (' + l.kind + ')' };
-      });
-    const canPathFollow = guideOpts.length > 0;
-    card.appendChild(behaviorButtonGroup('Translate mode', tmode, [
-      { value: 'fixed',      label: 'Fixed' },
-      { value: 'driftX',     label: 'Drift X' },
-      { value: 'driftY',     label: 'Drift Y' },
-      { value: 'driftBoth',  label: 'Drift both' },
-      { value: 'pathFollow', label: 'Along path',
-        disabledIf: !canPathFollow,
-        disabledReason: 'No other path-bearing lines in this class. '
-          + 'Add at least one freehand, bezier, chain, loop, or imported '
-          + 'SVG line to use as a path guide.' }
     ], function (v) {
-      updateBehaviorParam(line.id, 'translateMode', v === 'fixed' ? null : v, blockIdx);
-      // v0.8.54: seed pathRef with the first available guide when
-      // the user flips into pathFollow. Without this, the editor's
-      // dropdown shows the first option pre-selected visually but
-      // params.pathRef is still null/undefined — the runtime then
-      // can't resolve a guide and the follower never moves. Only
-      // seeds when pathRef isn't already set, so reverting to
-      // pathFollow after switching away preserves the prior choice.
-      if (v === 'pathFollow' && guideOpts.length) {
-        const l2 = state.lines.find(function (l) { return l.id === line.id; });
-        const cur = l2 && Array.isArray(l2.behaviors) && l2.behaviors[blockIdx]
-                       && l2.behaviors[blockIdx].params;
-        if (cur && !cur.pathRef) {
-          updateBehaviorParam(line.id, 'pathRef', guideOpts[0].value, blockIdx);
-          // v0.8.60: seed the cross-class-fallback name too so a
-          // first-time pathFollow setup works in every class even
-          // when masterIds differ per class.
-          const seeded = state.lines.find(function (l) { return l.masterId === guideOpts[0].value; });
-          if (seeded) {
-            updateBehaviorParam(line.id, 'pathRefName', seeded.name || seeded.id, blockIdx);
+      advanceBlockPhase(block.id, 1);
+      updateBehaviorTrigger(line.id, blockIdx, 'when', v);
+    }, function (opt) { explainDurationDisabled(opt); }));
+
+    // ── Phase >= 1: trigger options + Progress section ─────────────────
+    if (phase >= 1) {
+      if (when === 'scroll-range') {
+        const r = trigger.range || { start: 0, end: 1 };
+        const rangeRow = document.createElement('div');
+        rangeRow.className = 'ed-behavior-range';
+        rangeRow.appendChild(rangeNumberField('Start', r.start, function (v) {
+          updateBehaviorTrigger(line.id, blockIdx, 'rangeStart', v);
+        }));
+        rangeRow.appendChild(rangeNumberField('End', r.end, function (v) {
+          updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
+        }));
+        card.appendChild(rangeRow);
+      }
+
+      if (when === 'scroll-key') {
+        card.appendChild(triggerField('Trigger key', trigger.selector || '', function (v) {
+          updateBehaviorTrigger(line.id, blockIdx, 'selector', v);
+        }));
+        const va = trigger.viewportAt || 'middle';
+        card.appendChild(behaviorButtonGroup('Reaches', va, [
+          { value: 'top',    label: 'Top of viewport' },
+          { value: 'middle', label: 'Middle' },
+          { value: 'bottom', label: 'Bottom of viewport' },
+          { value: 'object', label: 'The object' }
+        ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'viewportAt', v); }, null));
+        const rep = trigger.repeat || 'once';
+        card.appendChild(behaviorButtonGroup('Repeat', rep, [
+          { value: 'once',  label: 'Once' },
+          { value: 'every', label: 'Every crossing' }
+        ], function (v) { updateBehaviorTrigger(line.id, blockIdx, 'repeat', v); }, null));
+      }
+
+      const delayApplies = !(when === 'scroll-range' && dmode === 'scroll');
+      if (delayApplies) {
+        card.appendChild(numberField('Delay after activation (s)', trigger.delay || 0, function (v) {
+          updateBehaviorTrigger(line.id, blockIdx, 'delay', v);
+        }));
+      }
+
+      if (when === 'click' || when === 'hover') {
+        card.appendChild(checkboxField(
+          'Treat shape as filled for hit test',
+          !!trigger.treatAsFilled,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'treatAsFilled', v); }
+        ));
+      }
+
+      // Cross-object Start / Stop side effects
+      const selfMaster = line.masterId || null;
+      const objectIds = [];
+      const seenObjMasters = {};
+      state.lines.forEach(function (ln) {
+        const m = ln.masterId;
+        if (!m || m === selfMaster) return;
+        if (seenObjMasters[m]) return;
+        seenObjMasters[m] = true;
+        const master = state.masters.find(function (x) { return x.id === m; });
+        const label = (master && master.name) || ln.name || ln.id || m;
+        objectIds.push({ value: m, label: label });
+      });
+      objectIds.sort(function (a, b) { return a.label.localeCompare(b.label); });
+      const objOptsWithNone = [{ value: '', label: '(none)' }].concat(objectIds);
+      card.appendChild(selectField('Start object', trigger.startObjectId || '', objOptsWithNone,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'startObjectId', v); }));
+      card.appendChild(selectField('Stop object', trigger.stopObjectId || '', objOptsWithNone,
+        function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopObjectId', v); }));
+      if (trigger.stopObjectId) {
+        card.appendChild(checkboxField('  …fade out to opacity 0', !!trigger.stopFadeOut,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopFadeOut', v); }));
+        card.appendChild(checkboxField('  …return to original position', !!trigger.stopReturnHome,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopReturnHome', v); }));
+        const stopDur = (typeof trigger.stopDurationSec === 'number') ? trigger.stopDurationSec : 0;
+        card.appendChild(numberField('  …cleanup duration (s, 0 = instant)', stopDur,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopDurationSec', v); }));
+        card.appendChild(selectField('  …cleanup easing', trigger.stopEasing || 'linear',
+          EASING_OPTIONS,
+          function (v) { updateBehaviorTrigger(line.id, blockIdx, 'stopEasing', v); }));
+      }
+
+      // ── Section: Progress ─────────────────────────────────────────────────────
+      const progressTitle = document.createElement('div');
+      progressTitle.className = 'ed-behavior-section-title';
+      progressTitle.textContent = 'Progress';
+      card.appendChild(progressTitle);
+
+      const durationOpts = [
+        { value: 'scroll',   label: 'Scroll-driven',
+          disabledIf: when !== 'scroll-range',
+          disabledReason: 'Scroll-driven progress only works when ' +
+            'activation is "Scroll range" — the range defines both ' +
+            'when the block activates AND how its progress advances. ' +
+            'Pick a different activation OR a different progress mode.' },
+        { value: 'time',     label: 'Timed run (seconds)' },
+        { value: 'loop',     label: 'Loop forever' },
+        { value: 'pingpong', label: 'Ping-pong forever' },
+        { value: 'loopTo',   label: 'Loop back to earlier block',
+          disabledIf: prevTimedIdx < 0,
+          disabledReason: 'Loop-back needs an earlier Timed block to ' +
+            'return to. Add at least one block above this one with ' +
+            'Progress = "Timed run (seconds)" — scroll-driven / loop / ' +
+            'ping-pong blocks have no fixed start position to anchor to.' }
+      ];
+      card.appendChild(behaviorButtonGroup('', dmode, durationOpts,
+        function (v) {
+          advanceBlockPhase(block.id, 2);
+          updateBehaviorDuration(line.id, blockIdx, 'mode', v);
+        },
+        function (opt) { explainDurationDisabled(opt); }));
+    }
+
+    // ── Phase >= 2: progress options + effects ─────────────────────────
+    if (phase >= 2) {
+      if (dmode !== 'scroll') {
+        const secondsLabel = (dmode === 'loopTo') ? 'Return time (s)' : 'Seconds';
+        card.appendChild(numberField(secondsLabel, duration.seconds || 1, function (v) {
+          updateBehaviorDuration(line.id, blockIdx, 'seconds', v);
+        }));
+        card.appendChild(selectField('Easing', duration.easing || 'linear',
+          EASING_OPTIONS,
+          function (v) { updateBehaviorDuration(line.id, blockIdx, 'easing', v); }));
+      }
+
+      if (dmode === 'loopTo') {
+        const targets = [];
+        for (let j = 0; j < blockIdx; j++) {
+          const bj = line.behaviors && line.behaviors[j];
+          const bjm = bj && bj.duration && bj.duration.mode;
+          if (bjm === 'time') {
+            targets.push({ value: String(j), label: 'Block ' + (j + 1) + ' (Timed)' });
           }
         }
+        const curTarget = Number.isInteger(duration.target) ? String(duration.target) : '';
+        card.appendChild(selectField('Loop back to', curTarget, targets, function (v) {
+          updateBehaviorDuration(line.id, blockIdx, 'target', parseInt(v, 10));
+        }));
+        const maxIter = (Number.isInteger(duration.maxIterations) && duration.maxIterations > 0)
+                        ? duration.maxIterations : 0;
+        card.appendChild(numberField('Max iterations (0 = forever)', maxIter, function (v) {
+          updateBehaviorDuration(line.id, blockIdx, 'maxIterations', v);
+        }));
+        return card;
       }
-      renderSelectionPanel();
-    }, function (opt) {
-      if (opt && opt.disabledReason) alert(opt.disabledReason);
-    }));
-    const xDrift = (tmode === 'driftX' || tmode === 'driftBoth');
-    const yDrift = (tmode === 'driftY' || tmode === 'driftBoth');
-    const isPathFollow = (tmode === 'pathFollow');
-    // v0.8.53: hide translateX / translateY when in pathFollow —
-    // position is driven by the guide path, not authored deltas.
-    // Stay editable in all other modes including drift.
-    if (!isPathFollow) {
-      card.appendChild(overrideNumberField(xDrift ? 'TranslateX (×scroll)' : 'TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
-      card.appendChild(overrideNumberField(yDrift ? 'TranslateY (×scroll)' : 'TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
-    } else {
-      // pathFollow-specific fields. Path guide picker + tangent
-      // toggle + path-end behavior.
-      const currentGuide = (typeof params.pathRef === 'string') ? params.pathRef : '';
-      card.appendChild(selectField('Path guide', currentGuide, guideOpts, function (v) {
-        updateBehaviorParam(line.id, 'pathRef', v || null, blockIdx);
-        // v0.8.60: also save the guide's display name as a fallback
-        // identity. Runtime uses it when the masterId lookup fails
-        // (cross-class data drift cases where each class has its
-        // own master id for the same logical line).
-        const picked = v ? state.lines.find(function (l) { return l.masterId === v; }) : null;
-        const nm = picked ? (picked.name || picked.id) : null;
-        updateBehaviorParam(line.id, 'pathRefName', nm, blockIdx);
-      }));
-      card.appendChild(checkboxField('Align to tangent', !!params.pathAlignToTangent, function (v) {
-        updateBehaviorParam(line.id, 'pathAlignToTangent', v ? true : null, blockIdx);
-      }));
-      const endMode = params.pathEndMode || 'stop';
-      card.appendChild(selectField('At end of path', endMode, [
-        { value: 'stop',     label: 'Stop at end' },
-        { value: 'loop',     label: 'Loop (snap to start)' },
-        { value: 'pingpong', label: 'Ping-pong (reverse direction)' }
+
+      // ── Section: What changes ──────────────────────────────────────────────
+      const effectsTitle = document.createElement('div');
+      effectsTitle.className = 'ed-behavior-section-title';
+      effectsTitle.textContent = 'What changes';
+      card.appendChild(effectsTitle);
+
+      const tmode = (params.translateMode || gd.translateMode || 'fixed');
+      const NON_PATH_KINDS = ['image'];
+      const guideOpts = state.lines
+        .filter(function (l) {
+          return l.id !== line.id
+              && !!l.masterId
+              && NON_PATH_KINDS.indexOf(l.kind) === -1;
+        })
+        .map(function (l) {
+          return { value: l.masterId, label: (l.name || l.id) + ' (' + l.kind + ')' };
+        });
+      const canPathFollow = guideOpts.length > 0;
+      card.appendChild(behaviorButtonGroup('Translate mode', tmode, [
+        { value: 'fixed',      label: 'Fixed' },
+        { value: 'driftX',     label: 'Drift X' },
+        { value: 'driftY',     label: 'Drift Y' },
+        { value: 'driftBoth',  label: 'Drift both' },
+        { value: 'pathFollow', label: 'Along path',
+          disabledIf: !canPathFollow,
+          disabledReason: 'No other path-bearing lines in this class. '
+            + 'Add at least one freehand, bezier, chain, loop, or imported '
+            + 'SVG line to use as a path guide.' }
       ], function (v) {
-        updateBehaviorParam(line.id, 'pathEndMode', (v === 'stop' ? null : v), blockIdx);
+        updateBehaviorParam(line.id, 'translateMode', v === 'fixed' ? null : v, blockIdx);
+        if (v === 'pathFollow' && guideOpts.length) {
+          const l2 = state.lines.find(function (l) { return l.id === line.id; });
+          const cur = l2 && Array.isArray(l2.behaviors) && l2.behaviors[blockIdx]
+                         && l2.behaviors[blockIdx].params;
+          if (cur && !cur.pathRef) {
+            updateBehaviorParam(line.id, 'pathRef', guideOpts[0].value, blockIdx);
+            const seeded = state.lines.find(function (l) { return l.masterId === guideOpts[0].value; });
+            if (seeded) {
+              updateBehaviorParam(line.id, 'pathRefName', seeded.name || seeded.id, blockIdx);
+            }
+          }
+        }
+        renderSelectionPanel();
+      }, function (opt) {
+        if (opt && opt.disabledReason) alert(opt.disabledReason);
       }));
-    }
-    card.appendChild(overrideNumberField('Rotate',     params.rotate,     gd.rotate,     function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
-    // v0.8.127: pivot fields + set-origin button only render when
-    // there's actually a non-zero rotate (block override OR group
-    // default). With no rotation the pivot does nothing visible, so
-    // hiding the rows keeps the panel focused on what's in effect.
-    // Stored pivot values survive — they reappear the moment a
-    // rotate value is entered.
-    const resolvedRotate = (params.rotate != null) ? Number(params.rotate)
-                         : Number(gd.rotate || 0);
-    const noRotate = !Number.isFinite(resolvedRotate) || resolvedRotate === 0;
-    if (!noRotate) {
-      // Per-line rotate-origin: DELTA from this object's natural
-      // center, so the pivot travels with the line instead of
-      // being pinned to a canvas coord. 0,0 = pivot at center.
-      card.appendChild(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
-      card.appendChild(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
-      // Set-origin is per-block — the canvas-click handler reads
-      // settingOrigin.blockIdx so the captured (x,y) lands in the
-      // right block's params.
-      card.appendChild(setOriginButton(function () {
-        startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
+
+      const xDrift = (tmode === 'driftX' || tmode === 'driftBoth');
+      const yDrift = (tmode === 'driftY' || tmode === 'driftBoth');
+      const isPathFollow = (tmode === 'pathFollow');
+      if (!isPathFollow) {
+        card.appendChild(overrideNumberField(xDrift ? 'TranslateX (\xd7scroll)' : 'TranslateX', params.translateX, gd.translateX, function (v) { updateBehaviorParam(line.id, 'translateX', v, blockIdx); }));
+        card.appendChild(overrideNumberField(yDrift ? 'TranslateY (\xd7scroll)' : 'TranslateY', params.translateY, gd.translateY, function (v) { updateBehaviorParam(line.id, 'translateY', v, blockIdx); }));
+      } else {
+        const currentGuide = (typeof params.pathRef === 'string') ? params.pathRef : '';
+        card.appendChild(selectField('Path guide', currentGuide, guideOpts, function (v) {
+          updateBehaviorParam(line.id, 'pathRef', v || null, blockIdx);
+          const picked = v ? state.lines.find(function (l) { return l.masterId === v; }) : null;
+          const nm = picked ? (picked.name || picked.id) : null;
+          updateBehaviorParam(line.id, 'pathRefName', nm, blockIdx);
+        }));
+        card.appendChild(checkboxField('Align to tangent', !!params.pathAlignToTangent, function (v) {
+          updateBehaviorParam(line.id, 'pathAlignToTangent', v ? true : null, blockIdx);
+        }));
+        const endMode = params.pathEndMode || 'stop';
+        card.appendChild(selectField('At end of path', endMode, [
+          { value: 'stop',     label: 'Stop at end' },
+          { value: 'loop',     label: 'Loop (snap to start)' },
+          { value: 'pingpong', label: 'Ping-pong (reverse direction)' }
+        ], function (v) {
+          updateBehaviorParam(line.id, 'pathEndMode', (v === 'stop' ? null : v), blockIdx);
+        }));
+      }
+      card.appendChild(overrideNumberField('Rotate', params.rotate, gd.rotate, function (v) { updateBehaviorParam(line.id, 'rotate', v, blockIdx); }));
+      const resolvedRotate = (params.rotate != null) ? Number(params.rotate)
+                           : Number(gd.rotate || 0);
+      const noRotate = !Number.isFinite(resolvedRotate) || resolvedRotate === 0;
+      if (!noRotate) {
+        card.appendChild(overrideNumberField('Pivot Δx (from center)', params.rotateOriginX, gd.rotateOriginX, function (v) { updateBehaviorParam(line.id, 'rotateOriginX', v, blockIdx); }));
+        card.appendChild(overrideNumberField('Pivot Δy (from center)', params.rotateOriginY, gd.rotateOriginY, function (v) { updateBehaviorParam(line.id, 'rotateOriginY', v, blockIdx); }));
+        card.appendChild(setOriginButton(function () {
+          startSetRotateOrigin({ type: 'line', id: line.id, blockIdx: blockIdx });
+        }));
+      }
+      const fadeOn = !!params.fadeOpacity;
+      card.appendChild(checkboxField('Fade opacity', fadeOn, function (v) {
+        updateBehaviorParam(line.id, 'fadeOpacity', v ? true : null, blockIdx);
+        renderSelectionPanel();
       }));
-    }
-    // v0.8.26: opacity fade is a per-block "mode of change" like
-    // translate / rotate, except authored as absolute from→to
-    // values instead of progress-weighted deltas. Off by default —
-    // when on, the line's opacity is interpolated each frame by
-    // this block's progress; if multiple opacity blocks overlap,
-    // the latest active one (highest index) wins so a chained
-    // sequence reads as a sequence of fades.
-    const fadeOn = !!params.fadeOpacity;
-    card.appendChild(checkboxField('Fade opacity', fadeOn, function (v) {
-      updateBehaviorParam(line.id, 'fadeOpacity', v ? true : null, blockIdx);
-      renderSelectionPanel();
-    }));
-    // v0.8.127: opacity from/to only render when fade is enabled.
-    if (fadeOn) {
-      const oFrom = (typeof params.opacityFrom === 'number') ? params.opacityFrom : 1;
-      const oTo   = (typeof params.opacityTo   === 'number') ? params.opacityTo   : 0;
-      card.appendChild(numberField('Opacity from (0–1)', oFrom, function (v) {
-        updateBehaviorParam(line.id, 'opacityFrom', v, blockIdx);
+      if (fadeOn) {
+        const oFrom = (typeof params.opacityFrom === 'number') ? params.opacityFrom : 1;
+        const oTo   = (typeof params.opacityTo   === 'number') ? params.opacityTo   : 0;
+        card.appendChild(numberField('Opacity from (0–1)', oFrom, function (v) {
+          updateBehaviorParam(line.id, 'opacityFrom', v, blockIdx);
+        }));
+        card.appendChild(numberField('Opacity to (0–1)', oTo, function (v) {
+          updateBehaviorParam(line.id, 'opacityTo', v, blockIdx);
+        }));
+      }
+      card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) {
+        updateBehaviorParam(line.id, 'drawIn', v, blockIdx);
+        renderSelectionPanel();
       }));
-      card.appendChild(numberField('Opacity to (0–1)', oTo, function (v) {
-        updateBehaviorParam(line.id, 'opacityTo', v, blockIdx);
-      }));
-    }
-    card.appendChild(overrideCheckboxField('Draw-in', params.drawIn, gd.drawIn, function (v) {
-      updateBehaviorParam(line.id, 'drawIn', v, blockIdx);
-      renderSelectionPanel();
-    }));
-    // v0.8.127: Direction only renders when draw-in resolves true
-    // (override OR group default). Otherwise the option is dead UI.
-    const resolvedDrawIn = (params.drawIn != null) ? !!params.drawIn : !!gd.drawIn;
-    if (resolvedDrawIn) {
-      card.appendChild(overrideSelectField('Direction', params.drawInDirection,
-        gd.drawInDirection || 'forward',
-        [
-          { value: 'forward', label: 'Begin → end' },
-          { value: 'reverse', label: 'End → begin' }
-        ],
-        function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }));
+      const resolvedDrawIn = (params.drawIn != null) ? !!params.drawIn : !!gd.drawIn;
+      if (resolvedDrawIn) {
+        card.appendChild(overrideSelectField('Direction', params.drawInDirection,
+          gd.drawInDirection || 'forward',
+          [
+            { value: 'forward', label: 'Begin → end' },
+            { value: 'reverse', label: 'End → begin' }
+          ],
+          function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }));
+      }
     }
 
     return card;
