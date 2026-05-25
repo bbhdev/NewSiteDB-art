@@ -11829,15 +11829,19 @@
         // by objectId (including pinned ones), not just look for the
         // global unpinned follower.
         let togglePanelFor = null;
+        let openPanelAfterRender = false;
         if (alt) {
-          // Opt-click: one-shot panel toggle for the topmost hit
-          // object. If the object isn't selected, make it the sole
-          // selection first (the follower binds to selectedIds[0]).
-          // Empty-area opt-click closes any open unpinned panel
-          // (symmetric with plain-click clearing the selection).
+          // Opt-click on an object: select it + open/close its panel.
+          // Opt-click on empty canvas: deselect + close unpinned panel.
+          // v0.8.144: snapshot panel intent BEFORE any selection change
+          // to avoid the rebind-then-misread problem (same fix as the
+          // sidebar ⊞ button in v0.8.141).
           clickCycle = null;
           if (ids.length) {
             const hit = ids[0];
+            // Capture whether a panel is already explicitly open for
+            // this object before we change the selection.
+            const panelAlreadyOpen = isObjectPanelOpenFor(hit);
             if (!isSelected(hit)) {
               selectOnly(hit);
               const sel = state.lines.find(function (l) { return l.id === hit; });
@@ -11847,14 +11851,36 @@
               }
               changed = true;
             }
-            togglePanelFor = hit;
-          } else if (window.PanelManager) {
-            // v0.8.143: empty-canvas opt-click — close unpinned panels.
-            window.PanelManager.listOpen()
-              .filter(function (p) { return p.type === 'object' && !p.pinned; })
-              .forEach(function (p) {
-                try { window.PanelManager.close(p.id); } catch (ex) {}
-              });
+            if (panelAlreadyOpen) {
+              // Panel was showing this object — toggle it off.
+              togglePanelFor = hit;
+            } else {
+              // No panel for this object yet — open one after render.
+              // Close any unpinned panel that rebound to hit via
+              // notifySelection so we don't end up with two panels.
+              if (window.PanelManager) {
+                window.PanelManager.listOpen()
+                  .filter(function (p) { return p.type === 'object' && !p.pinned; })
+                  .forEach(function (p) {
+                    try { window.PanelManager.close(p.id); } catch (ex) {}
+                  });
+              }
+              openPanelAfterRender = true;
+            }
+          } else {
+            // v0.8.144: empty-canvas opt-click — deselect (same as
+            // plain click) AND close any unpinned object panel.
+            const before = state.selectedIds.slice();
+            clearSelection();
+            changed = before.length > 0;
+            clickCycle = null;
+            if (window.PanelManager) {
+              window.PanelManager.listOpen()
+                .filter(function (p) { return p.type === 'object' && !p.pinned; })
+                .forEach(function (p) {
+                  try { window.PanelManager.close(p.id); } catch (ex) {}
+                });
+            }
           }
         } else if (multi) {
           // Shift/Cmd/Ctrl-click toggles the topmost hit object in/
@@ -11914,11 +11940,13 @@
           // works.
           renderSelectionPanel((multi || alt) ? { suppressScroll: true } : undefined);
         }
-        // v0.8.124: fire the panel toggle AFTER any selection render
-        // so the panel sees the post-click selection state when it
-        // opens. close() doesn't depend on selection, so order is
-        // fine for that branch too.
+        // Fire panel actions AFTER any selection render so the panel
+        // sees the post-click selection state. close() doesn't depend
+        // on selection, so order is fine for that branch too.
         if (togglePanelFor) toggleObjectPanelFor(togglePanelFor);
+        if (openPanelAfterRender && window.PanelManager) {
+          try { window.PanelManager.open('object'); } catch (ex) { console.error(ex); }
+        }
       }
     }
     downClient = null;
