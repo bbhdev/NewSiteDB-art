@@ -243,6 +243,121 @@ return [
         );
       }
     ],
+    /*
+     * Google Fonts curation bundle (Slice 2a-1, v0.8.199).
+     *
+     * The font-bundle lives at content/_shared/font-bundle.json and is
+     * a flat list of Google Fonts family names that the site author has
+     * curated as available for text overlays:
+     *   { "fonts": ["Inter", "Roboto", "Playfair Display", ...] }
+     *
+     * Two endpoints:
+     *   GET  dev/draw/font-bundle   → { ok, fonts: [...] }
+     *   POST dev/draw/font-bundle   body { fonts: [...] } → writes file
+     *
+     * The POST endpoint must be reachable from a bookmarklet running on
+     * https://fonts.google.com (Slice 2a-2). Permissive CORS for that
+     * origin only; OPTIONS preflight handled.
+     *
+     * Family-name validation: each entry must be a non-empty string of
+     * letters / digits / spaces / hyphens / apostrophes up to 64 chars
+     * (covers every published Google Fonts family name). Duplicates are
+     * folded; output is sorted alphabetically.
+     */
+    [
+      'pattern' => 'dev/draw/font-bundle',
+      'method'  => 'GET|POST|OPTIONS',
+      'action'  => function () {
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+        $corsOrigin = ($origin === 'https://fonts.google.com') ? $origin : '';
+        $corsHeaders = [];
+        if ($corsOrigin !== '') {
+          $corsHeaders = [
+            'Access-Control-Allow-Origin'  => $corsOrigin,
+            'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type',
+            'Vary'                         => 'Origin',
+          ];
+        }
+
+        // Preflight: respond 204 with CORS headers, no body.
+        if ($method === 'OPTIONS') {
+          return new Kirby\Http\Response('', 'text/plain', 204, $corsHeaders);
+        }
+
+        $sharedDir = kirby()->root('content') . '/_shared';
+        $bundlePath = $sharedDir . '/font-bundle.json';
+
+        if ($method === 'GET') {
+          $fonts = [];
+          if (is_file($bundlePath)) {
+            $j = json_decode(@file_get_contents($bundlePath), true);
+            if (is_array($j) && isset($j['fonts']) && is_array($j['fonts'])) {
+              $fonts = array_values(array_filter($j['fonts'], 'is_string'));
+            }
+          }
+          return new Kirby\Http\Response(
+            json_encode(['ok' => true, 'fonts' => $fonts]),
+            'application/json', 200,
+            array_merge(['Content-Type' => 'application/json'], $corsHeaders)
+          );
+        }
+
+        // POST: write the bundle.
+        $body = kirby()->request()->body()->toArray();
+        $raw = isset($body['fonts']) && is_array($body['fonts']) ? $body['fonts'] : null;
+        if ($raw === null) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Missing or invalid "fonts" array in body.']),
+            'application/json', 400,
+            array_merge(['Content-Type' => 'application/json'], $corsHeaders)
+          );
+        }
+        $clean = [];
+        foreach ($raw as $name) {
+          if (!is_string($name)) continue;
+          $name = trim($name);
+          if ($name === '') continue;
+          // Letters / digits / spaces / hyphens / apostrophes; up to 64.
+          // Covers every published Google Fonts family name (e.g.
+          // "Playfair Display", "Caveat", "M PLUS Rounded 1c").
+          if (!preg_match("/^[A-Za-z0-9 '\\-]{1,64}$/", $name)) continue;
+          $clean[$name] = true;  // dedupe via key
+        }
+        $clean = array_keys($clean);
+        sort($clean, SORT_STRING | SORT_FLAG_CASE);
+
+        if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
+            'application/json', 500,
+            array_merge(['Content-Type' => 'application/json'], $corsHeaders)
+          );
+        }
+        $payload = [
+          'fonts'    => $clean,
+          'savedAt'  => date('c'),
+          'count'    => count($clean),
+        ];
+        $ok = @file_put_contents(
+          $bundlePath,
+          json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
+        );
+        if ($ok === false) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Failed to write font-bundle.json.']),
+            'application/json', 500,
+            array_merge(['Content-Type' => 'application/json'], $corsHeaders)
+          );
+        }
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'fonts' => $clean, 'count' => count($clean)]),
+          'application/json', 200,
+          array_merge(['Content-Type' => 'application/json'], $corsHeaders)
+        );
+      }
+    ],
     [
       'pattern' => 'dev/draw/save',
       'method'  => 'POST',
