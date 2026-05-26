@@ -1872,6 +1872,25 @@ body.editor input[type="range"] {
   color: #d69ed6;
 }
 
+/* v0.8.194: fixed-width left slot for the presence chip — keeps
+   identical/differs/partial chips vertically aligned across group /
+   line / block / disclosure rows so the eye can scan a column of
+   chips instead of hunting for them in mixed positions. min-width
+   sized to fit the common short pills; long ones ("only in wide,
+   medium") expand the slot for that row only — acceptable since
+   such rows are rare. */
+.ed-overview-diff-chipslot {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  display: inline-flex;
+  align-items: center;
+  padding-right: 0.5rem;
+}
+.ed-overview-diff-chipslot > .ed-overview-diff-presence {
+  /* Inside the slot, the chip aligns to the LEFT and doesn't grow. */
+  flex: 0 0 auto;
+}
+
 /* Per-class colored row (used inside diff blocks and presence sections) */
 .ed-overview-diff-row {
   display: grid;
@@ -1983,6 +2002,9 @@ body.editor input[type="range"] {
   padding: 0.25rem 0.1rem;
   text-align: left;
   width: 100%;
+  /* v0.8.194: flex so the chip slot sits in a fixed left column. */
+  display: flex;
+  align-items: center;
 }
 .ed-overview-diff-runhead:hover { color: #ddd; }
 .ed-overview-diff-runlist {

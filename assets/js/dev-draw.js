@@ -6879,13 +6879,17 @@
     const onlyDiffBtn = document.createElement('button');
     onlyDiffBtn.type = 'button';
     onlyDiffBtn.className = 'ed-overview-alldetails-btn ed-overview-onlydiff-btn is-active';
-    onlyDiffBtn.textContent = 'Only differences';
-    onlyDiffBtn.title = 'When on: hide items that match across every class';
+    // v0.8.194: label = ACTION-on-click (matches the "All details"
+    // convention, not "current state"). Default state is
+    // diffOnlyDiffering=true → showing only differences → clicking
+    // would show all items → label "All items".
+    onlyDiffBtn.textContent = 'All items';
+    onlyDiffBtn.title = 'Toggle between only differences / all items';
     onlyDiffBtn.style.display = 'none';
     onlyDiffBtn.addEventListener('click', function () {
       diffOnlyDiffering = !diffOnlyDiffering;
       onlyDiffBtn.classList.toggle('is-active', diffOnlyDiffering);
-      onlyDiffBtn.textContent = diffOnlyDiffering ? 'Only differences' : 'All items';
+      onlyDiffBtn.textContent = diffOnlyDiffering ? 'All items' : 'Only differences';
       renderBody();
     });
 
@@ -7532,6 +7536,20 @@
       div.appendChild(body);
       return div;
     }
+    // v0.8.194: a fixed-width left slot for presence chips. All head
+    // rows (group / line / block / disclosure) put the chip in this
+    // slot as the first child so the chips line up vertically in a
+    // narrow left rail — much easier to scan than chips floating
+    // wherever the natural flex layout puts them. min-width keeps
+    // alignment for short chips ("identical", "differs"); long ones
+    // ("only in wide, medium, narrow") expand the slot for that row
+    // only — acceptable tradeoff vs truncation/clipping.
+    function diffMakeChipSlot(chipNode) {
+      const slot = document.createElement('span');
+      slot.className = 'ed-overview-diff-chipslot';
+      if (chipNode) slot.appendChild(chipNode);
+      return slot;
+    }
     function diffMakeNeutralRow(text, opts) {
       const div = document.createElement('div');
       div.className = 'ed-overview-diff-neutral' + ((opts && opts.dim) ? ' is-dim' : '');
@@ -7620,20 +7638,12 @@
         // differ. Otherwise the group header still matters.
         if (diffOnlyDiffering && !groupItselfDiffers && !visibleLines.length) return;
 
-        // Group header.
+        // Group header — chip slot first (v0.8.194), then toggle + name.
         const section = document.createElement('div');
         section.className = 'ed-overview-group ed-group ed-overview-diff-group';
         const ghead = document.createElement('div');
         ghead.className = 'ed-group-row ed-overview-ghead';
         ghead.style.cursor = 'default';
-        const toggle = document.createElement('span');
-        toggle.className = 'ed-group-toggle';
-        toggle.textContent = 'G';
-        ghead.appendChild(toggle);
-        const nm = document.createElement('span');
-        nm.className = 'ed-group-name';
-        nm.textContent = gname;
-        ghead.appendChild(nm);
         // v0.8.193: groups carry the same three-state presence chip
         // as lines and blocks — partial (some classes missing it),
         // identical (present in all and every child line/block agrees),
@@ -7651,7 +7661,15 @@
           presenceTag.textContent = 'identical';
           presenceTag.classList.add('is-identical');
         }
-        ghead.appendChild(presenceTag);
+        ghead.appendChild(diffMakeChipSlot(presenceTag));
+        const toggle = document.createElement('span');
+        toggle.className = 'ed-group-toggle';
+        toggle.textContent = 'G';
+        ghead.appendChild(toggle);
+        const nm = document.createElement('span');
+        nm.className = 'ed-group-name';
+        nm.textContent = gname;
+        ghead.appendChild(nm);
         section.appendChild(ghead);
 
         // Compaction for identical-runs when showing everything.
@@ -7711,9 +7729,15 @@
       const head = document.createElement('button');
       head.type = 'button';
       head.className = 'ed-overview-diff-runhead';
+      // v0.8.194: chip slot first, then arrow + text. setLabel
+      // rebuilds the whole content so the chip and label stay in sync
+      // when toggling open/closed.
       function setLabel(open) {
-        head.textContent = (open ? '▾ ' : '▸ ') + entries.length + ' ' + label;
-        head.appendChild(makeIdenticalChip());
+        head.innerHTML = '';
+        head.appendChild(diffMakeChipSlot(makeIdenticalChip()));
+        const txt = document.createElement('span');
+        txt.textContent = (open ? '▾ ' : '▸ ') + entries.length + ' ' + label;
+        head.appendChild(txt);
       }
       setLabel(false);
       head.title = 'Click to expand the identical ' + label;
@@ -7737,13 +7761,11 @@
     function renderDiffLine(entry, classIds) {
       const wrap = document.createElement('div');
       wrap.className = 'ed-overview-diff-line' + (entry.differs ? ' is-differs' : '');
-      // Line header: name + presence tag.
+      // Line header — chip slot first (v0.8.194), then name + spacer
+      // + On-canvas button. The spacer absorbs remaining width so
+      // On-canvas anchors to the right.
       const hd = document.createElement('div');
       hd.className = 'ed-overview-diff-linehead';
-      const nameEl = document.createElement('span');
-      nameEl.className = 'ed-overview-diff-linename';
-      nameEl.textContent = diffLineLabel(entry.linesByClass, classIds);
-      hd.appendChild(nameEl);
       const presence = document.createElement('span');
       presence.className = 'ed-overview-diff-presence';
       if (entry.lineAbsent.length > 0) {
@@ -7756,9 +7778,11 @@
         presence.textContent = 'differs';
         presence.classList.add('is-differs');
       }
-      hd.appendChild(presence);
-      // Spacer so "On canvas" stays at the right edge while the
-      // presence chip remains adjacent to the name.
+      hd.appendChild(diffMakeChipSlot(presence));
+      const nameEl = document.createElement('span');
+      nameEl.className = 'ed-overview-diff-linename';
+      nameEl.textContent = diffLineLabel(entry.linesByClass, classIds);
+      hd.appendChild(nameEl);
       const spacer = document.createElement('span');
       spacer.className = 'ed-overview-diff-linehead-spacer';
       hd.appendChild(spacer);
@@ -7849,8 +7873,11 @@
         : ('Blocks ' + (blockEntries[0].index + 1) + '–'
                      + (blockEntries[blockEntries.length - 1].index + 1));
       function setLabel(open) {
-        head.textContent = (open ? '▾ ' : '▸ ') + range + ' ';
-        head.appendChild(makeIdenticalChip());
+        head.innerHTML = '';
+        head.appendChild(diffMakeChipSlot(makeIdenticalChip()));
+        const txt = document.createElement('span');
+        txt.textContent = (open ? '▾ ' : '▸ ') + range;
+        head.appendChild(txt);
       }
       setLabel(false);
       const list = document.createElement('div');
@@ -7883,20 +7910,30 @@
         const b = be.perCB[i];
         if (b) { headLabel = behaviorAutoName(b, be.index); break; }
       }
+      // v0.8.194: chip slot first, then label text. (Was: label set
+      // via textContent then chip appended — leaving chip on the
+      // right edge, breaking the left-rail alignment.)
       const head = document.createElement('div');
       head.className = 'ed-overview-diff-blockhead';
-      head.textContent = headLabel;
+      let blockChip = null;
       if (be.blockAbsent.length > 0) {
-        const pt = document.createElement('span');
-        pt.className = 'ed-overview-diff-presence is-partial';
-        pt.textContent = 'only in ' + be.blockPresent.map(classLabelFor).join(', ');
-        head.appendChild(pt);
+        blockChip = document.createElement('span');
+        blockChip.className = 'ed-overview-diff-presence is-partial';
+        blockChip.textContent = 'only in ' + be.blockPresent.map(classLabelFor).join(', ');
       } else if (!be.differs) {
-        const pt = document.createElement('span');
-        pt.className = 'ed-overview-diff-presence is-identical';
-        pt.textContent = 'identical';
-        head.appendChild(pt);
+        blockChip = document.createElement('span');
+        blockChip.className = 'ed-overview-diff-presence is-identical';
+        blockChip.textContent = 'identical';
+      } else {
+        blockChip = document.createElement('span');
+        blockChip.className = 'ed-overview-diff-presence is-differs';
+        blockChip.textContent = 'differs';
       }
+      head.appendChild(diffMakeChipSlot(blockChip));
+      const headLabelEl = document.createElement('span');
+      headLabelEl.className = 'ed-overview-diff-blocklabel';
+      headLabelEl.textContent = headLabel;
+      head.appendChild(headLabelEl);
       div.appendChild(head);
 
       // Presence rows for absent classes.
