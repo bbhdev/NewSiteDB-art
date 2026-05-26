@@ -11263,6 +11263,11 @@
         const sessionOpen = showTextSection.has(masterRec.id);
         const open = hasText || sessionOpen;
         if (!open) {
+          // Separator before the +Add button so the closed-state TEXT
+          // section is visually demarcated from the preceding property
+          // (Corners). The open-state title row supplies its own border-
+          // top; this matches that visual rhythm. v0.8.198.
+          wrap.appendChild(behaviorPropDivider());
           const addBtn = document.createElement('button');
           addBtn.type = 'button';
           addBtn.className = 'ed-behavior-also-btn';
