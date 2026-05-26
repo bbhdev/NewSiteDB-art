@@ -346,6 +346,10 @@ return [
   .install a.bookmarklet:active { cursor:grabbing; }
   .install a.external { display:inline-block; padding:0.5rem 1rem; background:#fff; color:#ff5500; text-decoration:none; border:2px solid #ff5500; border-radius:4px; font-weight:600; }
   .install a.external:hover { background:#fff7f0; }
+  .install button.copy { padding:0.5rem 1rem; background:#fff; color:#222; border:1px solid #aaa; border-radius:4px; font:inherit; font-weight:600; cursor:pointer; }
+  .install button.copy:hover { background:#f6f6f6; }
+  .install ul.methods { padding-left:1.2rem; margin:0.5rem 0 1rem; }
+  .install ul.methods li { margin:0.25rem 0; }
   ol { padding-left:1.2rem; }
   ol li { margin:0.4rem 0; }
   .bundle { padding:1rem; background:#f7f7f7; border-radius:6px; }
@@ -360,20 +364,58 @@ return [
 <p class="subtitle">Curate Google Fonts available for text overlays on this site.</p>
 
 <div class="install">
-  <p><strong>Two links — handle as your browser allows:</strong></p>
-  <p style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+  <p><strong>Step 1 — get the bookmarklet onto your bookmarks bar.</strong> Try the easiest method your browser allows:</p>
+  <p style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
     <a class="bookmarklet" href="{$bookmarkletAttr}">📚 Font bundle picker</a>
-    <a class="external" href="https://fonts.google.com/" target="_blank" rel="noopener">↗ Open Google Fonts</a>
+    <button class="copy" id="copy-bookmarklet" type="button">📋 Copy bookmarklet URL</button>
+    <span id="copy-status" style="color:#666;font-size:0.85em;"></span>
   </p>
-  <p class="meta">Drag-and-drop of <code>javascript:</code> links is restricted in many browsers. Workarounds: right-click the orange button → <em>Bookmark this link</em> / <em>Add to favorites</em>; or click it (and the bookmarklet runs on this page — useful to confirm it works, but there are no fonts to scan here).</p>
+  <ul class="methods">
+    <li><strong>Drag</strong> the orange button to your bookmarks bar (works in some browsers, not all).</li>
+    <li><strong>Right-click</strong> the orange button → <em>Bookmark this link</em> / <em>Add to favorites</em>.</li>
+    <li><strong>Copy & paste</strong>: click the Copy button above, then in your browser open <em>Bookmark Manager → Add bookmark</em> and paste into the URL field (name it whatever you like).</li>
+  </ul>
+  <p><strong>Step 2 — use it.</strong></p>
+  <p><a class="external" href="https://fonts.google.com/" target="_blank" rel="noopener">↗ Open Google Fonts</a></p>
   <ol>
-    <li>Get the orange button onto your bookmarks bar (drag or right-click).</li>
-    <li>Open Google Fonts (link above) and apply whichever filters you want (category, language, weights, slant…).</li>
-    <li>Click the bookmark on the Google Fonts tab. A floating panel appears with the visible fonts auto-detected.</li>
+    <li>On the Google Fonts tab, apply whichever filters you want (category, language, weights, slant…).</li>
+    <li>Click the bookmark <em>on that tab</em>. A floating panel appears with the visible fonts auto-detected.</li>
     <li>Uncheck any you don't want, add manual entries if needed, then click <strong>Add to bundle</strong> (merge with what's saved) or <strong>Replace bundle</strong>.</li>
   </ol>
+  <p class="meta">Clicking the orange button on <em>this</em> page just runs the bookmarklet here (no fonts to scan — useful only as a sanity check that the panel appears). The bookmark only works while on the Google Fonts tab.</p>
   <p class="meta">The bookmarklet posts to <code>{$endpointShown}</code>. Re-visit this page to reinstall in another browser — the bookmarklet is stable across visits.</p>
 </div>
+<script>
+(function(){
+  var btn = document.getElementById('copy-bookmarklet');
+  var status = document.getElementById('copy-status');
+  var bm = document.querySelector('a.bookmarklet');
+  if (!btn || !status || !bm) return;
+  btn.addEventListener('click', function(){
+    var url = bm.getAttribute('href');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function(){
+        status.textContent = 'Copied — paste into a new bookmark\'s URL field.';
+      }, function(){
+        fallback();
+      });
+    } else {
+      fallback();
+    }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); status.textContent = 'Copied.'; }
+      catch (e) { status.textContent = 'Copy failed — select the URL from the bookmarklet link manually.'; }
+      document.body.removeChild(ta);
+    }
+  });
+})();
+</script>
 
 <div class="bundle">
   <h2>Current bundle <span style="color:#888;font-weight:normal;">({$count} font{$plural})</span></h2>
