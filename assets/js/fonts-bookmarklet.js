@@ -33,6 +33,33 @@
     return;
   }
 
+  // Persist work-in-progress across page navigations on fonts.google.com.
+  // Google's SPA tears down our injected DOM during route changes; once
+  // the user re-clicks the bookmark, panel state is reloaded from here.
+  // Key includes ENDPOINT so the picker remembers per-site state if the
+  // same bookmarklet is somehow reused for two different sites.
+  var STORAGE_KEY = '__nsdbFontPicker_state__' + ENDPOINT;
+  function loadState() {
+    try {
+      var raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      var s = JSON.parse(raw);
+      if (s && typeof s === 'object') return s;
+    } catch (e) {}
+    return null;
+  }
+  function saveState(state, manualText) {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        selected: state.selected,
+        manual:   manualText || ''
+      }));
+    } catch (e) {}
+  }
+  function clearState() {
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  }
+
   function scrapeFonts() {
     var anchors = document.querySelectorAll('a[href^="/specimen/"]');
     var seen = {};
@@ -54,7 +81,7 @@
     return fonts;
   }
 
-  function renderList(fonts, listEl, state) {
+  function renderList(fonts, listEl, state, manualEl) {
     listEl.innerHTML = '';
     if (!fonts.length) {
       var empty = document.createElement('div');
@@ -69,10 +96,13 @@
         row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer;border-bottom:1px solid #f0f0f0;';
         var cb = document.createElement('input');
         cb.type = 'checkbox';
-        cb.checked = state.selected[name] !== false;
+        // Default checked unless sessionStorage explicitly says false.
+        var stored = state.selected[name];
+        cb.checked = stored !== false;
         state.selected[name] = cb.checked;
         cb.addEventListener('change', function () {
           state.selected[name] = cb.checked;
+          saveState(state, manualEl ? manualEl.value : '');
         });
         var span = document.createElement('span');
         span.textContent = name;
@@ -100,6 +130,10 @@
     for (var j = 0; j < manual.length; j++) {
       if (fonts.indexOf(manual[j]) === -1) fonts.push(manual[j]);
     }
+    // After a successful save, the work-in-progress is done — clear
+    // sessionStorage so the next bookmarklet click starts fresh
+    // (no stale ghosts of last week's selection).
+    var onSuccess = function () { clearState(); };
     if (mode === 'merge') {
       // Fetch existing first, then union before posting.
       statusEl.textContent = 'Fetching existing bundle…';
@@ -110,17 +144,17 @@
           for (var k = 0; k < existing.length; k++) {
             if (fonts.indexOf(existing[k]) === -1) fonts.push(existing[k]);
           }
-          postFonts(fonts, statusEl);
+          postFonts(fonts, statusEl, onSuccess);
         })
         .catch(function (err) {
           statusEl.textContent = 'Could not fetch existing: ' + err.message;
         });
       return;
     }
-    postFonts(fonts, statusEl);
+    postFonts(fonts, statusEl, onSuccess);
   }
 
-  function postFonts(fonts, statusEl) {
+  function postFonts(fonts, statusEl, onSuccess) {
     if (!fonts.length) {
       statusEl.textContent = 'Nothing to save.';
       return;
@@ -135,6 +169,7 @@
     }).then(function (res) {
       if (res.ok && res.j.ok) {
         statusEl.textContent = 'Saved — bundle now has ' + (res.j.count || fonts.length) + ' fonts.';
+        if (typeof onSuccess === 'function') onSuccess();
       } else {
         statusEl.textContent = 'Save failed: ' + (res.j.error || 'HTTP ' + (res.j.status || '?'));
       }
@@ -210,24 +245,20 @@
     saveWrap.appendChild(replaceBtn);
     panel.appendChild(saveWrap);
 
-    var state = { selected: {} };
+    // Restore prior session state (selections + manual textarea).
+    var prior = loadState();
+    var state = { selected: (prior && prior.selected) || {} };
+    if (prior && typeof prior.manual === 'string') manual.value = prior.manual;
+    manual.addEventListener('input', function () {
+      saveState(state, manual.value);
+    });
 
     function rescan() {
       var fonts = scrapeFonts();
-      // Preserve checkmarks for fonts that survive a re-scan.
-      var keep = state.selected;
-      state.selected = {};
-      renderList(fonts, list, state);
-      // Re-apply prior selections after render reset defaults
-      var inputs = list.querySelectorAll('input[type="checkbox"]');
-      for (var i = 0; i < inputs.length; i++) {
-        var nameSpan = inputs[i].nextElementSibling;
-        var nm = nameSpan ? nameSpan.textContent : '';
-        if (nm && keep[nm] === false) {
-          inputs[i].checked = false;
-          state.selected[nm] = false;
-        }
-      }
+      // Don't blow away prior selections — renderList honours
+      // state.selected and only overwrites entries it draws.
+      renderList(fonts, list, state, manual);
+      saveState(state, manual.value);
       status.textContent = fonts.length + ' detected';
     }
     scanBtn.onclick = rescan;
@@ -240,8 +271,22 @@
   }
 
   var panel = buildPanel();
+
+  // Self-healing watchdog. Google's SPA tears down injected DOM during
+  // route changes; without this, the panel silently vanishes when the
+  // user clicks a font specimen and navigates back. Cheap to run.
+  var keepalive = setInterval(function () {
+    if (!document.body.contains(panel)) {
+      // The panel was wiped. Rebuild with restored state.
+      panel = buildPanel();
+      window.__nsdbFontPicker.show = function () { panel.style.display = 'flex'; };
+      window.__nsdbFontPicker.hide = function () { panel.style.display = 'none'; };
+    }
+  }, 1000);
+
   window.__nsdbFontPicker = {
     show: function () { panel.style.display = 'flex'; },
-    hide: function () { panel.style.display = 'none'; }
+    hide: function () { panel.style.display = 'none'; },
+    stop: function () { clearInterval(keepalive); panel.remove(); clearState(); }
   };
 })();
