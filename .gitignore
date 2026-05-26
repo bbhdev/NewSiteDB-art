@@ -23,6 +23,7 @@ Thumbs.db
 /content/_shared/classes.json
 /content/_shared/masters.json
 /content/_shared/palette.json
+/content/_shared/font-bundle.json
 
 # v0.8.34: snapshot library — local backups of /content, not source.
 # Each subdir under /library/ is one named snapshot saved via the
