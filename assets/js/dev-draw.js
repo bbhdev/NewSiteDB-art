@@ -11346,6 +11346,14 @@
             ensureMasterText().offsetY = Number.isFinite(v) ? v : 0;
             state.dirty = true; scheduleSnapshot(); renderLines();
           }));
+          // v0.8.197: click-on-canvas convenience — mirrors the
+          // rotate-origin button. Activates a one-shot mode where the
+          // next canvas click sets master.text.offsetX/Y to the click
+          // point's delta from the line's natural center.
+          wrap.appendChild(setOriginButton(function () {
+            ensureMasterText();
+            startSetTextOffset({ masterId: masterRec.id, lineId: line.id });
+          }));
           wrap.appendChild(textField('Font family', t.fontFamily || '', function (v) {
             ensureMasterText().fontFamily = v || TEXT_DEFAULTS.fontFamily;
             state.dirty = true; scheduleSnapshot();
@@ -13339,6 +13347,11 @@
   // panel; the next canvas click writes that point into the active
   // target's rotateOriginX / Y, then mode exits.
   let settingOrigin = null; // { type: 'group'|'line', id: '…' }
+  // v0.8.197: same idea for the text overlay — the next canvas click
+  // becomes the text anchor (offset stored on master.text as a delta
+  // from the line's natural center). { masterId, lineId } so we can
+  // recompute the center via centerOf(line). Exits on click.
+  let settingTextOffset = null;
 
   // v0.8.125: toggle the 'object' panel for a specific objectId.
   // The caller passes the opt-clicked id explicitly so we can
@@ -13421,6 +13434,19 @@
     canvasWrap.classList.remove('ed-set-origin-mode');
     if (setOriginBanner) setOriginBanner.hidden = true;
   }
+  // v0.8.197: text-offset click-to-set. Reuses the same canvasWrap
+  // class + banner the rotate-origin flow already wires up, so the
+  // user sees the same "click anywhere on the canvas" cue.
+  function startSetTextOffset(target) {
+    settingTextOffset = target;
+    canvasWrap.classList.add('ed-set-origin-mode');
+    if (setOriginBanner) setOriginBanner.hidden = false;
+  }
+  function exitSetTextOffset() {
+    settingTextOffset = null;
+    canvasWrap.classList.remove('ed-set-origin-mode');
+    if (setOriginBanner) setOriginBanner.hidden = true;
+  }
 
   svg.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
@@ -13455,6 +13481,52 @@
       exitSetRotateOrigin();
       renderSelectionPanel(); // refresh the input fields with new values
       renderHandles();        // re-render so the pivot marker shows
+      return;
+    }
+
+    // v0.8.197: text-offset placement. The next canvas click becomes
+    // the text anchor for the target master; offset is stored as a
+    // delta from the line's natural center so the text travels with
+    // its object when the object's position changes (same model as
+    // rotate-origin per-line deltas).
+    if (settingTextOffset) {
+      const pt = eventPt(e);
+      const x = Math.round(pt.x * 10) / 10;
+      const y = Math.round(pt.y * 10) / 10;
+      const masterRec = state.masters.find(function (m) {
+        return m.id === settingTextOffset.masterId;
+      });
+      const ln = state.lines.find(function (l) {
+        return l.id === settingTextOffset.lineId;
+      });
+      if (masterRec && ln) {
+        // Ensure the text record exists before writing offsets — a
+        // user could in theory hit this mode through a stale UI state
+        // where master.text was wiped between render and click.
+        if (!masterRec.text || typeof masterRec.text !== 'object') {
+          masterRec.text = Object.assign({}, TEXT_DEFAULTS);
+        }
+        const c = centerOf(ln);
+        const dx = c ? Math.round((x - c.x) * 10) / 10 : x;
+        const dy = c ? Math.round((y - c.y) * 10) / 10 : y;
+        masterRec.text.offsetX = dx;
+        masterRec.text.offsetY = dy;
+        // Mirror master.text onto every resolved line in case any
+        // sibling instance was loaded before master.text existed
+        // (resolveInstanceJS only aliases the field when it's present
+        // at load time).
+        state.pageConfig.useClasses.forEach(function (cid) {
+          const lns = (state.byClass[cid] && state.byClass[cid].lines) || [];
+          lns.forEach(function (l) {
+            if (l.masterId === masterRec.id) l.text = masterRec.text;
+          });
+        });
+        state.dirty = true;
+        scheduleSnapshot();
+      }
+      exitSetTextOffset();
+      renderLines();
+      renderSelectionPanel();
       return;
     }
 
@@ -13946,6 +14018,11 @@
       // Escape cancels the set-rotate-origin gesture before anything
       // else, since it's the most "active" mode the user can be in.
       if (settingOrigin) { exitSetRotateOrigin(); return; }
+      // v0.8.197: same Escape semantics for the text-offset set
+      // gesture. Wired before the wizard / tool / selection cascade
+      // so an in-progress "click anywhere" never leaks into other
+      // Escape handlers.
+      if (settingTextOffset) { exitSetTextOffset(); return; }
       // Wizard takes priority next — if the user has begun a create
       // flow (with or without a drawn draft), Esc tears it down.
       if (state.wizard) { cancelWizard(); return; }
