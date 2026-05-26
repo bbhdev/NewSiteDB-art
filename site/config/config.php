@@ -244,6 +244,143 @@ return [
       }
     ],
     /*
+     * Font-bundle bookmarklet generator page (Slice 2a-2, v0.8.200).
+     *
+     * Returns a small HTML page with:
+     *   • a draggable <a href="javascript:..."> bookmarklet whose
+     *     payload is assets/js/fonts-bookmarklet.js wrapped in an IIFE
+     *     with ENDPOINT baked in (this site's /dev/draw/font-bundle URL,
+     *     derived from the current request so it works for any host:port).
+     *   • a snapshot of the bundle currently on disk (loaded via the
+     *     GET endpoint in the same response — no second round-trip).
+     *   • instructions for the install-once / re-clickable workflow.
+     *
+     * The user can revisit this page any number of times to re-install
+     * the bookmarklet in different browsers / after a reset; it's
+     * stable across visits (the endpoint URL is the only baked-in
+     * value, derived from the request).
+     */
+    [
+      'pattern' => 'dev/draw/fonts-bundle',
+      'method'  => 'GET',
+      'action'  => function () {
+        $src = @file_get_contents(__DIR__ . '/../../assets/js/fonts-bookmarklet.js');
+        if ($src === false) {
+          return new Kirby\Http\Response(
+            '<h1>fonts-bookmarklet.js missing</h1>', 'text/html', 500
+          );
+        }
+        // Derive this site's base URL from the request so the bookmarklet
+        // POSTs back to the exact host:port that served the page.
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        if (!empty($_SERVER['REQUEST_SCHEME'])) $scheme = $_SERVER['REQUEST_SCHEME'];
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $endpoint = $scheme . '://' . $host . '/dev/draw/font-bundle';
+
+        // Wrap the source in a thin outer IIFE so the ENDPOINT var
+        // doesn't pollute fonts.google.com's global namespace. The
+        // source's own inner IIFE picks it up via closure scope.
+        $payload = '(function(){var ENDPOINT=' . json_encode($endpoint) . ';' . $src . '})();';
+        // Bookmarklets must be a single-line javascript: URL. Use
+        // rawurlencode so spaces become %20 (not '+', which a few
+        // browsers misinterpret in javascript: URLs).
+        $bookmarklet = 'javascript:' . rawurlencode($payload);
+
+        // Current bundle (file may not exist yet).
+        $bundlePath = kirby()->root('content') . '/_shared/font-bundle.json';
+        $fonts = [];
+        $savedAt = null;
+        if (is_file($bundlePath)) {
+          $j = json_decode(@file_get_contents($bundlePath), true);
+          if (is_array($j)) {
+            if (isset($j['fonts']) && is_array($j['fonts'])) {
+              $fonts = array_values(array_filter($j['fonts'], 'is_string'));
+            }
+            if (isset($j['savedAt'])) $savedAt = $j['savedAt'];
+          }
+        }
+
+        $h = function ($s) { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); };
+        $rows = '';
+        foreach ($fonts as $f) {
+          $rows .= '<li style="font-family:\'' . $h($f) . '\',sans-serif;font-size:18px;line-height:1.6;">'
+                 . $h($f) . '</li>';
+        }
+        if ($rows === '') {
+          $rows = '<li style="color:#888;font-style:italic;">(empty — no bundle saved yet)</li>';
+        }
+
+        // Inject one Google Fonts <link> for the preview list so the
+        // names render in their actual face. Building the family list
+        // mirrors what app.js does at runtime.
+        $cssFamilies = '';
+        if (!empty($fonts)) {
+          $parts = [];
+          foreach ($fonts as $f) {
+            $parts[] = 'family=' . str_replace(' ', '+', $f);
+          }
+          $cssFamilies = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
+                       . $h(implode('&', $parts)) . '&display=swap">';
+        }
+
+        $bookmarkletAttr = $h($bookmarklet);
+        $endpointShown = $h($endpoint);
+        $savedAtShown = $savedAt ? $h($savedAt) : 'never';
+        $count = count($fonts);
+        $plural = $count === 1 ? '' : 's';
+
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Font bundle curation</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+{$cssFamilies}
+<style>
+  body { font:14px/1.5 system-ui,-apple-system,sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; color:#222; }
+  h1 { font-size:1.5rem; margin-bottom:0.25rem; }
+  .subtitle { color:#666; margin-bottom:1.5rem; }
+  .install { padding:1rem; background:#fff7f0; border:2px dashed #ff5500; border-radius:6px; margin-bottom:1.5rem; }
+  .install a.bookmarklet { display:inline-block; padding:0.5rem 1rem; background:#ff5500; color:#fff; text-decoration:none; border-radius:4px; font-weight:600; cursor:grab; }
+  .install a.bookmarklet:active { cursor:grabbing; }
+  ol { padding-left:1.2rem; }
+  ol li { margin:0.4rem 0; }
+  .bundle { padding:1rem; background:#f7f7f7; border-radius:6px; }
+  .bundle h2 { font-size:1.1rem; margin:0 0 0.5rem 0; }
+  .bundle ul { list-style:disc; padding-left:1.4rem; margin:0; }
+  .meta { color:#666; font-size:0.9em; margin-bottom:0.5rem; }
+  code { background:#eee; padding:0.1em 0.3em; border-radius:3px; font-size:0.9em; }
+</style>
+</head>
+<body>
+<h1>Font bundle curation</h1>
+<p class="subtitle">Curate Google Fonts available for text overlays on this site.</p>
+
+<div class="install">
+  <p><strong>Drag this link to your bookmarks bar:</strong></p>
+  <p><a class="bookmarklet" href="{$bookmarkletAttr}">📚 Font bundle picker</a></p>
+  <ol>
+    <li>Drag the orange button above to your browser's bookmarks bar.</li>
+    <li>Visit <a href="https://fonts.google.com" target="_blank" rel="noopener">fonts.google.com</a> and apply whichever filters you want (category, language, weights, slant…).</li>
+    <li>Click the bookmark. A floating panel appears with the visible fonts auto-detected.</li>
+    <li>Uncheck any you don't want, add manual entries if needed, then click <strong>Add to bundle</strong> (merge with what's saved) or <strong>Replace bundle</strong>.</li>
+  </ol>
+  <p class="meta">The bookmarklet posts to <code>{$endpointShown}</code>. Re-visit this page to reinstall in another browser — the bookmarklet is stable across visits.</p>
+</div>
+
+<div class="bundle">
+  <h2>Current bundle <span style="color:#888;font-weight:normal;">({$count} font{$plural})</span></h2>
+  <p class="meta">Last saved: {$savedAtShown}</p>
+  <ul>{$rows}</ul>
+</div>
+</body>
+</html>
+HTML;
+        return new Kirby\Http\Response($html, 'text/html', 200);
+      }
+    ],
+    /*
      * Google Fonts curation bundle (Slice 2a-1, v0.8.199).
      *
      * The font-bundle lives at content/_shared/font-bundle.json and is
