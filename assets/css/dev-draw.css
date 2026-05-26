@@ -1781,13 +1781,15 @@ body.editor input[type="range"] {
    The per-class color slots are dark, desaturated, and equiluminant
    enough that they remain readable side-by-side. The accent border on
    the left ties the row visually to its class. */
+/* v0.8.193: state-button convention is OUTLINE-always-visible +
+   label-swap (see v0.8.189). Active state must NOT fill with solid
+   accent — the .ed-overview-alldetails-btn base already carries the
+   accent outline; we just keep it. A min-width on the only-diff
+   button prevents geometry shifting when the label flips between
+   "Only differences" and "All items". */
 .ed-overview-diff-btn,
 .ed-overview-onlydiff-btn { margin-left: 0.25rem; }
-.ed-overview-diff-btn.is-active,
-.ed-overview-onlydiff-btn.is-active {
-  background: var(--accent);
-  color: #1a1a1a;
-}
+.ed-overview-onlydiff-btn { min-width: 9.5rem; }
 .ed-overview-diff-legend {
   display: inline-flex;
   align-items: center;
@@ -1838,9 +1840,13 @@ body.editor input[type="range"] {
 }
 .ed-overview-diff-linename {
   font-weight: 600;
-  flex: 1 1 auto;
+  /* v0.8.193: chip stays adjacent to the name (don't push it to the
+     far right). A trailing spacer absorbs the remaining width so the
+     'On canvas' button still anchors to the right edge. */
+  flex: 0 0 auto;
   min-width: 0;
 }
+.ed-overview-diff-linehead-spacer { flex: 1 1 auto; }
 .ed-overview-diff-presence {
   font-size: 0.72rem;
   padding: 0.05rem 0.4rem;

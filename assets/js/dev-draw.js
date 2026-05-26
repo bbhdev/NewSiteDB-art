@@ -6790,12 +6790,20 @@
     const head = document.createElement('div');
     head.className = 'ed-modal-header ed-overview-header';
 
+    // v0.8.193: Back is context-aware. In single-class mode it returns
+    // to the Project hub (closes overview only). In diff mode it
+    // returns to single-class mode (exits diff in place). The Diff
+    // button is hidden while in diff mode — Back IS the exit. Title +
+    // label update to keep the meaning unambiguous.
     const back = document.createElement('button');
     back.type = 'button';
     back.className = 'ed-project-back';
     back.innerHTML = '‹ Back';
     back.title = 'Back to Project hub';
-    back.addEventListener('click', function () { closeOverviewOnly(); });
+    back.addEventListener('click', function () {
+      if (diffMode) { exitDiffMode(); return; }
+      closeOverviewOnly();
+    });
     head.appendChild(back);
 
     const title = document.createElement('h3');
@@ -6923,21 +6931,33 @@
     });
     head.appendChild(allBtn);
 
-    // Diff buttons + legend live in the same toolbar slot as
-    // class chips/all-details; visibility is mutually exclusive
-    // with the per-class controls.
-    diffBtn.addEventListener('click', function () {
-      diffMode = !diffMode;
-      diffBtn.classList.toggle('is-active', diffMode);
-      // Hide the per-class chips and the "All details" button while
-      // in diff mode; show legend + only-diff sub-toggle instead.
-      classRow.style.display      = diffMode ? 'none' : '';
-      allBtn.style.display        = diffMode ? 'none' : '';
-      sep.style.display           = diffMode ? 'none' : '';
-      legend.style.display        = diffMode ? ''     : 'none';
-      onlyDiffBtn.style.display   = diffMode ? ''     : 'none';
+    // v0.8.193: Diff is enter-only. Once on, the Diff button hides
+    // entirely (Back becomes the exit); when off, only-diff toggle
+    // and legend hide and per-class chips return. enterDiffMode /
+    // exitDiffMode are split so Back can call exit directly.
+    function enterDiffMode() {
+      diffMode = true;
+      classRow.style.display    = 'none';
+      allBtn.style.display      = 'none';
+      sep.style.display         = 'none';
+      diffBtn.style.display     = 'none';
+      legend.style.display      = '';
+      onlyDiffBtn.style.display = '';
+      back.title = 'Back to single-class Overview';
       renderBody();
-    });
+    }
+    function exitDiffMode() {
+      diffMode = false;
+      classRow.style.display    = '';
+      allBtn.style.display      = '';
+      sep.style.display         = '';
+      diffBtn.style.display     = '';
+      legend.style.display      = 'none';
+      onlyDiffBtn.style.display = 'none';
+      back.title = 'Back to Project hub';
+      renderBody();
+    }
+    diffBtn.addEventListener('click', enterDiffMode);
     head.appendChild(diffBtn);
     head.appendChild(onlyDiffBtn);
     head.appendChild(legend);
@@ -7614,13 +7634,22 @@
         nm.className = 'ed-group-name';
         nm.textContent = gname;
         ghead.appendChild(nm);
+        // v0.8.193: groups carry the same three-state presence chip
+        // as lines and blocks — partial (some classes missing it),
+        // identical (present in all and every child line/block agrees),
+        // or differs (present in all but at least one child diverges).
+        const anyChildDiffers = lineEntries.some(function (le) { return le.differs; });
         const presenceTag = document.createElement('span');
         presenceTag.className = 'ed-overview-diff-presence';
         if (groupItselfDiffers) {
           presenceTag.textContent = 'only in ' + present.map(classLabelFor).join(', ');
           presenceTag.classList.add('is-partial');
+        } else if (anyChildDiffers) {
+          presenceTag.textContent = 'differs';
+          presenceTag.classList.add('is-differs');
         } else {
-          presenceTag.textContent = 'all classes';
+          presenceTag.textContent = 'identical';
+          presenceTag.classList.add('is-identical');
         }
         ghead.appendChild(presenceTag);
         section.appendChild(ghead);
@@ -7666,13 +7695,27 @@
       }
     }
 
+    // v0.8.193: disclosure heads carry the is-identical chip too —
+    // user wants to be able to scan visually for "identical" markers
+    // without parsing the disclosure label. The chip is appended to
+    // the button after the label text so the arrow + count read first.
+    function makeIdenticalChip() {
+      const c = document.createElement('span');
+      c.className = 'ed-overview-diff-presence is-identical';
+      c.textContent = 'identical';
+      return c;
+    }
     function renderIdenticalRun(entries, classIds, label) {
       const wrap = document.createElement('div');
       wrap.className = 'ed-overview-diff-runwrap';
       const head = document.createElement('button');
       head.type = 'button';
       head.className = 'ed-overview-diff-runhead';
-      head.textContent = '▸ ' + entries.length + ' identical ' + label;
+      function setLabel(open) {
+        head.textContent = (open ? '▾ ' : '▸ ') + entries.length + ' ' + label;
+        head.appendChild(makeIdenticalChip());
+      }
+      setLabel(false);
       head.title = 'Click to expand the identical ' + label;
       const list = document.createElement('div');
       list.className = 'ed-overview-diff-runlist';
@@ -7683,7 +7726,7 @@
       let open = false;
       head.addEventListener('click', function () {
         open = !open;
-        head.textContent = (open ? '▾ ' : '▸ ') + entries.length + ' identical ' + label;
+        setLabel(open);
         list.style.display = open ? '' : 'none';
       });
       wrap.appendChild(head);
@@ -7714,6 +7757,11 @@
         presence.classList.add('is-differs');
       }
       hd.appendChild(presence);
+      // Spacer so "On canvas" stays at the right edge while the
+      // presence chip remains adjacent to the name.
+      const spacer = document.createElement('span');
+      spacer.className = 'ed-overview-diff-linehead-spacer';
+      hd.appendChild(spacer);
       // Jump to canvas (uses the first present line).
       const jumpBtn = document.createElement('button');
       jumpBtn.type = 'button';
@@ -7800,7 +7848,11 @@
         ? ('Block ' + (blockEntries[0].index + 1))
         : ('Blocks ' + (blockEntries[0].index + 1) + '–'
                      + (blockEntries[blockEntries.length - 1].index + 1));
-      head.textContent = '▸ ' + range + ' · identical across classes';
+      function setLabel(open) {
+        head.textContent = (open ? '▾ ' : '▸ ') + range + ' ';
+        head.appendChild(makeIdenticalChip());
+      }
+      setLabel(false);
       const list = document.createElement('div');
       list.className = 'ed-overview-diff-runlist';
       list.style.display = 'none';
@@ -7810,7 +7862,7 @@
       let open = false;
       head.addEventListener('click', function () {
         open = !open;
-        head.textContent = (open ? '▾ ' : '▸ ') + range + ' · identical across classes';
+        setLabel(open);
         list.style.display = open ? '' : 'none';
       });
       wrap.appendChild(head);
