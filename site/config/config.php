@@ -344,6 +344,8 @@ return [
   .install { padding:1rem; background:#fff7f0; border:2px dashed #ff5500; border-radius:6px; margin-bottom:1.5rem; }
   .install a.bookmarklet { display:inline-block; padding:0.5rem 1rem; background:#ff5500; color:#fff; text-decoration:none; border-radius:4px; font-weight:600; cursor:grab; }
   .install a.bookmarklet:active { cursor:grabbing; }
+  .install a.external { display:inline-block; padding:0.5rem 1rem; background:#fff; color:#ff5500; text-decoration:none; border:2px solid #ff5500; border-radius:4px; font-weight:600; }
+  .install a.external:hover { background:#fff7f0; }
   ol { padding-left:1.2rem; }
   ol li { margin:0.4rem 0; }
   .bundle { padding:1rem; background:#f7f7f7; border-radius:6px; }
@@ -358,12 +360,16 @@ return [
 <p class="subtitle">Curate Google Fonts available for text overlays on this site.</p>
 
 <div class="install">
-  <p><strong>Drag this link to your bookmarks bar:</strong></p>
-  <p><a class="bookmarklet" href="{$bookmarkletAttr}">📚 Font bundle picker</a></p>
+  <p><strong>Two links — handle as your browser allows:</strong></p>
+  <p style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+    <a class="bookmarklet" href="{$bookmarkletAttr}">📚 Font bundle picker</a>
+    <a class="external" href="https://fonts.google.com/" target="_blank" rel="noopener">↗ Open Google Fonts</a>
+  </p>
+  <p class="meta">Drag-and-drop of <code>javascript:</code> links is restricted in many browsers. Workarounds: right-click the orange button → <em>Bookmark this link</em> / <em>Add to favorites</em>; or click it (and the bookmarklet runs on this page — useful to confirm it works, but there are no fonts to scan here).</p>
   <ol>
-    <li>Drag the orange button above to your browser's bookmarks bar.</li>
-    <li>Visit <a href="https://fonts.google.com" target="_blank" rel="noopener">fonts.google.com</a> and apply whichever filters you want (category, language, weights, slant…).</li>
-    <li>Click the bookmark. A floating panel appears with the visible fonts auto-detected.</li>
+    <li>Get the orange button onto your bookmarks bar (drag or right-click).</li>
+    <li>Open Google Fonts (link above) and apply whichever filters you want (category, language, weights, slant…).</li>
+    <li>Click the bookmark on the Google Fonts tab. A floating panel appears with the visible fonts auto-detected.</li>
     <li>Uncheck any you don't want, add manual entries if needed, then click <strong>Add to bundle</strong> (merge with what's saved) or <strong>Replace bundle</strong>.</li>
   </ol>
   <p class="meta">The bookmarklet posts to <code>{$endpointShown}</code>. Re-visit this page to reinstall in another browser — the bookmarklet is stable across visits.</p>
