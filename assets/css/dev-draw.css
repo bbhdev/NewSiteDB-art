@@ -1777,6 +1777,215 @@ body.editor input[type="range"] {
   margin: 0 0.5rem 0 0.25rem;
 }
 
+/* v0.8.192 — Diff mode (cross-class stacked diff).
+   The per-class color slots are dark, desaturated, and equiluminant
+   enough that they remain readable side-by-side. The accent border on
+   the left ties the row visually to its class. */
+.ed-overview-diff-btn,
+.ed-overview-onlydiff-btn { margin-left: 0.25rem; }
+.ed-overview-diff-btn.is-active,
+.ed-overview-onlydiff-btn.is-active {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+.ed-overview-diff-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+  font-size: 0.78rem;
+  color: #ccc;
+}
+.ed-overview-diff-swatch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.ed-overview-diff-swatch {
+  display: inline-block;
+  width: 0.9rem; height: 0.9rem;
+  border-radius: 2px;
+}
+.ed-overview-diff-swatch.is-class-wide   { background: rgba( 90, 160, 100, 0.42); }
+.ed-overview-diff-swatch.is-class-medium { background: rgba( 90, 130, 200, 0.42); }
+.ed-overview-diff-swatch.is-class-narrow { background: rgba(200, 170,  70, 0.42); }
+.ed-overview-diff-swatch.is-class-other-1 { background: rgba(180,  90, 160, 0.42); }
+.ed-overview-diff-swatch.is-class-other-2 { background: rgba( 90, 180, 180, 0.42); }
+.ed-overview-diff-swatch.is-class-other-3 { background: rgba(200, 120,  90, 0.42); }
+
+/* Diff group section (reuses .ed-overview-group base look) */
+.ed-overview-diff-group { padding-bottom: 0.5rem; }
+.ed-overview-diff-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem 0.2rem;
+}
+
+/* Line block within diff */
+.ed-overview-diff-line {
+  background: #232323;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem 0.5rem;
+}
+.ed-overview-diff-line.is-differs { border-color: #555; }
+.ed-overview-diff-linehead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.ed-overview-diff-linename {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ed-overview-diff-presence {
+  font-size: 0.72rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 2rem;
+  background: #2e2e2e;
+  border: 1px solid #444;
+  color: #bbb;
+  flex: 0 0 auto;
+}
+.ed-overview-diff-presence.is-partial {
+  background: #3a2a1a;
+  border-color: #b07a3a;
+  color: #f4c98a;
+}
+.ed-overview-diff-presence.is-identical {
+  background: #1f2a1f;
+  border-color: #3a6a3a;
+  color: #9ed6a0;
+}
+.ed-overview-diff-presence.is-differs {
+  background: #2a1f2a;
+  border-color: #6a3a6a;
+  color: #d69ed6;
+}
+
+/* Per-class colored row (used inside diff blocks and presence sections) */
+.ed-overview-diff-row {
+  display: grid;
+  grid-template-columns: 5rem 1fr;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.15rem 0.5rem;
+  border-left: 3px solid transparent;
+  border-radius: 2px;
+  font-size: 0.86rem;
+  margin-top: 0.1rem;
+}
+.ed-overview-diff-row .ed-overview-diff-tag {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #eee;
+  opacity: 0.9;
+}
+.ed-overview-diff-row .ed-overview-diff-rowbody { color: #e8e8e8; }
+.ed-overview-diff-row.is-class-wide {
+  background: rgba( 90, 160, 100, 0.16);
+  border-left-color: rgba( 90, 160, 100, 0.85);
+}
+.ed-overview-diff-row.is-class-medium {
+  background: rgba( 90, 130, 200, 0.16);
+  border-left-color: rgba( 90, 130, 200, 0.85);
+}
+.ed-overview-diff-row.is-class-narrow {
+  background: rgba(200, 170,  70, 0.16);
+  border-left-color: rgba(200, 170,  70, 0.85);
+}
+.ed-overview-diff-row.is-class-other-1 {
+  background: rgba(180,  90, 160, 0.16);
+  border-left-color: rgba(180,  90, 160, 0.85);
+}
+.ed-overview-diff-row.is-class-other-2 {
+  background: rgba( 90, 180, 180, 0.16);
+  border-left-color: rgba( 90, 180, 180, 0.85);
+}
+.ed-overview-diff-row.is-class-other-3 {
+  background: rgba(200, 120,  90, 0.16);
+  border-left-color: rgba(200, 120,  90, 0.85);
+}
+.ed-overview-diff-row.is-absent .ed-overview-diff-rowbody {
+  color: #888;
+  font-style: italic;
+}
+
+/* Diff block (per behaviors[i] entry) */
+.ed-overview-diff-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+.ed-overview-diff-block {
+  background: #1d1d1d;
+  border: 1px solid #2c2c2c;
+  border-radius: 3px;
+  padding: 0.3rem 0.5rem 0.4rem;
+}
+.ed-overview-diff-block.is-differs { border-color: #444; }
+.ed-overview-diff-blockhead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #ddd;
+  margin-bottom: 0.2rem;
+}
+
+.ed-overview-diff-presblock {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.2rem;
+}
+
+.ed-overview-diff-props {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+.ed-overview-diff-propname {
+  font-size: 0.74rem;
+  color: #aaa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.05rem;
+}
+
+/* Compaction disclosure */
+.ed-overview-diff-runwrap {
+  background: #1c1c1c;
+  border: 1px dashed #3a3a3a;
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+}
+.ed-overview-diff-runwrap.is-blocks { padding: 0.1rem 0.3rem; }
+.ed-overview-diff-runhead {
+  background: transparent;
+  border: none;
+  color: #aaa;
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+  padding: 0.25rem 0.1rem;
+  text-align: left;
+  width: 100%;
+}
+.ed-overview-diff-runhead:hover { color: #ddd; }
+.ed-overview-diff-runlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.25rem 0 0.1rem;
+}
+
 /* Resume chip — appears at the bottom of the viewport when both
    overlays are hidden after a jump-to-canvas. */
 /* v0.8.178: resume chip uses the accent color so users actually

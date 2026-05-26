@@ -6804,6 +6804,8 @@
 
     // Class chips — single-class view, one chip per useClass; active
     // chip uses the same is-active style as the library filter.
+    // v0.8.192: also hidden when diff mode is on (diff compares all
+    // classes at once; per-class selection is meaningless).
     let activeClassId = state.classId;
     const classRow = document.createElement('div');
     classRow.className = 'ed-library-filter ed-overview-classes';
@@ -6824,6 +6826,26 @@
     });
     head.appendChild(classRow);
 
+    // v0.8.192: per-class color mapping for diff mode. Names matched
+    // case-insensitively against the conventional wide/medium/narrow
+    // labels (the user's standard breakpoint naming); unmatched classes
+    // fall back to position-based slots (other-1..other-3). The slot
+    // strings become CSS class names below (`.is-class-<slot>`) so the
+    // diff rows pick up the right tint.
+    function diffSlotForClass(cid) {
+      const cls = state.classes.find(function (c) { return c.id === cid; });
+      const nm = ((cls && cls.name) || '').trim().toLowerCase();
+      if (nm === 'wide')   return 'wide';
+      if (nm === 'medium') return 'medium';
+      if (nm === 'narrow') return 'narrow';
+      const i = state.pageConfig.useClasses.indexOf(cid);
+      return 'other-' + ((i % 3) + 1);
+    }
+    function classLabelFor(cid) {
+      const cls = state.classes.find(function (c) { return c.id === cid; });
+      return cls ? cls.name : cid;
+    }
+
     // v0.8.186: vertical separator between the class chips and the
     // global "All details" action — same look as the top-toolbar
     // `.ed-tools` group divider (1px #444 with left padding). Matches
@@ -6831,6 +6853,51 @@
     const sep = document.createElement('span');
     sep.className = 'ed-overview-toolbar-sep';
     head.appendChild(sep);
+
+    // v0.8.192: Diff mode toggle. When active, the per-class chips +
+    // "All details" are hidden, and the body renders a stacked diff
+    // across every class in `useClasses`. A sub-toggle ("Only
+    // differences") sits next to it, default ON. Both follow the
+    // outline-always state-button convention (label swaps with state).
+    let diffMode = false;
+    let diffOnlyDiffering = true;
+
+    const diffBtn = document.createElement('button');
+    diffBtn.type = 'button';
+    diffBtn.className = 'ed-overview-alldetails-btn ed-overview-diff-btn';
+    diffBtn.textContent = 'Diff';
+    diffBtn.title = 'Compare all classes side-by-side (stacked)';
+
+    const onlyDiffBtn = document.createElement('button');
+    onlyDiffBtn.type = 'button';
+    onlyDiffBtn.className = 'ed-overview-alldetails-btn ed-overview-onlydiff-btn is-active';
+    onlyDiffBtn.textContent = 'Only differences';
+    onlyDiffBtn.title = 'When on: hide items that match across every class';
+    onlyDiffBtn.style.display = 'none';
+    onlyDiffBtn.addEventListener('click', function () {
+      diffOnlyDiffering = !diffOnlyDiffering;
+      onlyDiffBtn.classList.toggle('is-active', diffOnlyDiffering);
+      onlyDiffBtn.textContent = diffOnlyDiffering ? 'Only differences' : 'All items';
+      renderBody();
+    });
+
+    // Legend (3 swatches: green/blue/yellow for wide/medium/narrow)
+    // Built once; visibility toggled with diff mode.
+    const legend = document.createElement('span');
+    legend.className = 'ed-overview-diff-legend';
+    legend.style.display = 'none';
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const sw = document.createElement('span');
+      sw.className = 'ed-overview-diff-swatch is-class-' + diffSlotForClass(cid);
+      const lb = document.createElement('span');
+      lb.className = 'ed-overview-diff-swatch-label';
+      lb.textContent = classLabelFor(cid);
+      const wrap = document.createElement('span');
+      wrap.className = 'ed-overview-diff-swatch-wrap';
+      wrap.appendChild(sw);
+      wrap.appendChild(lb);
+      legend.appendChild(wrap);
+    });
 
     // "All details" — state button (accent outline + label swap to
     // "Hide details" when active). Sits on the LEFT, grouped with the
@@ -6855,6 +6922,25 @@
       });
     });
     head.appendChild(allBtn);
+
+    // Diff buttons + legend live in the same toolbar slot as
+    // class chips/all-details; visibility is mutually exclusive
+    // with the per-class controls.
+    diffBtn.addEventListener('click', function () {
+      diffMode = !diffMode;
+      diffBtn.classList.toggle('is-active', diffMode);
+      // Hide the per-class chips and the "All details" button while
+      // in diff mode; show legend + only-diff sub-toggle instead.
+      classRow.style.display      = diffMode ? 'none' : '';
+      allBtn.style.display        = diffMode ? 'none' : '';
+      sep.style.display           = diffMode ? 'none' : '';
+      legend.style.display        = diffMode ? ''     : 'none';
+      onlyDiffBtn.style.display   = diffMode ? ''     : 'none';
+      renderBody();
+    });
+    head.appendChild(diffBtn);
+    head.appendChild(onlyDiffBtn);
+    head.appendChild(legend);
 
     const spacer = document.createElement('span');
     spacer.className = 'ed-overview-toolbar-spacer';
@@ -6982,6 +7068,7 @@
 
     function renderBody() {
       body.innerHTML = '';
+      if (diffMode) { renderDiffBody(); return; }
       const query = search.value.trim().toLowerCase();
       const bucket = state.byClass[activeClassId];
       const lines  = (bucket && Array.isArray(bucket.lines))  ? bucket.lines  : [];
@@ -7206,6 +7293,599 @@
       }
       row.appendChild(main);
       return row;
+    }
+
+    // ============================================================
+    // v0.8.192 — Cross-class diff mode
+    // ============================================================
+    //
+    // Vertically stacked diff: each group / object / behavior block
+    // is walked across every class in `state.pageConfig.useClasses`
+    // and rendered in one column. Identical content collapses to a
+    // single neutral row; differences are shown as per-class
+    // colored rows (wide=green, medium=blue, narrow=yellow). The
+    // "Only differences" toggle hides identical rows entirely.
+    //
+    // Identity rules:
+    //   - groups : matched across classes by `name` (the cross-class
+    //              identity; per-class groups have distinct ids).
+    //   - lines  : matched by `masterId` when present; otherwise by
+    //              `name + kind` as a fallback.
+    //   - blocks : matched 1:1 by index within a line (the runtime
+    //              processes blocks ordinally; mismatch by index is a
+    //              real authoring divergence and should surface).
+    //
+    // Comparison: the canonical key list below is the set of every
+    // authored block field referenced by behaviorAutoName /
+    // behaviorSummaryText / behaviorEffectsText / behaviorDriftLineText
+    // (i.e. everything that visibly affects runtime). Anything outside
+    // this list is treated as not-comparing — keeps the diff focused
+    // on authored intent, not bookkeeping (e.g. block ids).
+    const BLOCK_COMPARE_PATHS = [
+      'trigger.when',
+      'trigger.range.start', 'trigger.range.end',
+      'trigger.delay',
+      'trigger.selector', 'trigger.viewportAt', 'trigger.repeat',
+      'trigger.treatAsFilled',
+      'trigger.startObjectId',
+      'trigger.stopObjectId', 'trigger.stopFadeOut', 'trigger.stopReturnHome',
+      'trigger.stopDurationSec', 'trigger.stopEasing',
+      'duration.mode', 'duration.seconds', 'duration.easing',
+      'duration.target', 'duration.maxIterations',
+      'params.translateX', 'params.translateY', 'params.rotate',
+      'params.translateMode',
+      'params.fadeOpacity', 'params.opacityFrom', 'params.opacityTo',
+      'params.drawIn', 'params.drawInDirection',
+      'params.pathRef', 'params.pathRefName',
+      'params.pathAlignToTangent', 'params.pathEndMode',
+      'params.rotateOriginX', 'params.rotateOriginY',
+    ];
+
+    function diffGetPath(obj, path) {
+      if (!obj) return undefined;
+      const parts = path.split('.');
+      let cur = obj;
+      for (let i = 0; i < parts.length; i++) {
+        if (cur == null) return undefined;
+        cur = cur[parts[i]];
+      }
+      return cur;
+    }
+    // Strict equality with undefined-leniency: two undefined values are
+    // equal; an undefined and a primitive aren't. NaN is not a concern
+    // (no authored params ever produce NaN).
+    function diffValEq(a, b) {
+      if (a === b) return true;
+      if (a == null && b == null) return true;
+      return false;
+    }
+    // Stable display string for a block value. Booleans, numbers,
+    // strings render as-is. masterId-style fields (startObjectId /
+    // stopObjectId / pathRef) get resolved via objectLabel for
+    // readability — IDs alone are useless side-by-side.
+    function diffFormatVal(path, v) {
+      if (v == null) return '∅';
+      if (typeof v === 'boolean') return v ? 'on' : 'off';
+      if (path === 'trigger.startObjectId' || path === 'trigger.stopObjectId' ||
+          path === 'params.pathRef') {
+        const m = state.masters.find(function (x) { return x.id === v; });
+        const nm = m && m.name ? m.name : null;
+        return nm ? (nm + ' (' + v + ')') : v;
+      }
+      return String(v);
+    }
+
+    // True if two blocks are identical across every comparable path.
+    function diffBlocksIdentical(a, b) {
+      if (!a && !b) return true;
+      if (!a || !b) return false;
+      for (let i = 0; i < BLOCK_COMPARE_PATHS.length; i++) {
+        const p = BLOCK_COMPARE_PATHS[i];
+        if (!diffValEq(diffGetPath(a, p), diffGetPath(b, p))) return false;
+      }
+      return true;
+    }
+    // Returns the subset of BLOCK_COMPARE_PATHS that differ when
+    // walking the supplied per-class blocks. A path is "differing" if
+    // any pair of (defined) values disagree, OR if the value is
+    // defined in some classes but undefined in others.
+    function diffPropsDiffer(blocksByClass) {
+      const out = [];
+      for (let i = 0; i < BLOCK_COMPARE_PATHS.length; i++) {
+        const p = BLOCK_COMPARE_PATHS[i];
+        const vals = blocksByClass.map(function (b) {
+          return b ? diffGetPath(b, p) : undefined;
+        });
+        let sample = null, sampled = false, mismatched = false;
+        for (let j = 0; j < vals.length; j++) {
+          // Only compare against classes where the block exists at
+          // all — presence/absence is a separate row, so don't
+          // double-count "absent" as a property diff.
+          if (!blocksByClass[j]) continue;
+          if (!sampled) { sample = vals[j]; sampled = true; continue; }
+          if (!diffValEq(sample, vals[j])) { mismatched = true; break; }
+        }
+        if (mismatched) out.push(p);
+      }
+      return out;
+    }
+
+    // Build the union-ordered list of group names across all classes.
+    // First class's order wins; further classes append their unique
+    // group names at the end (in their own order).
+    function diffBuildGroupOrder(classIds) {
+      const seen = new Set(), out = [];
+      classIds.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        const gs = (bucket && Array.isArray(bucket.groups)) ? bucket.groups : [];
+        gs.forEach(function (g) {
+          if (g.hidden) return;
+          if (seen.has(g.name)) return;
+          seen.add(g.name);
+          out.push(g.name);
+        });
+      });
+      return out;
+    }
+    // Per-group: collect each class's matching group + non-hidden lines.
+    function diffGroupRecord(name, classIds) {
+      const perClass = {};
+      classIds.forEach(function (cid) {
+        const bucket = state.byClass[cid];
+        const g = (bucket && Array.isArray(bucket.groups))
+          ? bucket.groups.find(function (x) { return x.name === name && !x.hidden; })
+          : null;
+        const lines = (g && bucket && Array.isArray(bucket.lines))
+          ? bucket.lines.filter(function (l) { return l.groupId === g.id && !l.hidden; })
+          : [];
+        perClass[cid] = { group: g || null, lines: lines };
+      });
+      return perClass;
+    }
+    // A line's cross-class identity key. masterId wins; falls back to
+    // "name|kind" (per HANDOFF's name-fallback principle) for masterless
+    // lines or per-class master drift edge cases.
+    function diffLineKey(line) {
+      if (!line) return null;
+      if (line.masterId) return 'm:' + line.masterId;
+      const nm = (line.name || '').trim();
+      const kd = line.kind || '';
+      if (nm) return 'n:' + nm + '|' + kd;
+      return 'i:' + line.id;
+    }
+    function diffBuildLineOrder(perClassGroup, classIds) {
+      const seen = new Set(), out = [];
+      classIds.forEach(function (cid) {
+        const rec = perClassGroup[cid];
+        if (!rec) return;
+        rec.lines.forEach(function (l) {
+          const k = diffLineKey(l);
+          if (!k || seen.has(k)) return;
+          seen.add(k);
+          out.push(k);
+        });
+      });
+      return out;
+    }
+    function diffFindLineByKey(perClassGroup, classIds, key) {
+      const out = {};
+      classIds.forEach(function (cid) {
+        const rec = perClassGroup[cid];
+        const found = rec && rec.lines
+          ? rec.lines.find(function (l) { return diffLineKey(l) === key; })
+          : null;
+        out[cid] = found || null;
+      });
+      return out;
+    }
+    // A short label for the line — prefers name (with id appended for
+    // disambiguation, matching the v0.8.179 convention used elsewhere).
+    function diffLineLabel(perClassLines, classIds) {
+      // Use the first defined line's name (or master.name) + id.
+      for (let i = 0; i < classIds.length; i++) {
+        const l = perClassLines[classIds[i]];
+        if (!l) continue;
+        const m = l.masterId
+          ? state.masters.find(function (x) { return x.id === l.masterId; })
+          : null;
+        const nm = l.name || (m && m.name) || '';
+        const idLabel = l.masterId || l.id;
+        return nm ? (nm + ' (' + idLabel + ')') : idLabel;
+      }
+      return '(unknown)';
+    }
+
+    // Build a row that says "[class] something". Used both for
+    // presence-only displays ("absent in narrow") and for per-property
+    // diffs. The slot CSS class drives the background tint.
+    function diffMakeClassRow(cid, content) {
+      const div = document.createElement('div');
+      div.className = 'ed-overview-diff-row is-class-' + diffSlotForClass(cid);
+      const tag = document.createElement('span');
+      tag.className = 'ed-overview-diff-tag';
+      tag.textContent = classLabelFor(cid);
+      div.appendChild(tag);
+      const body = document.createElement('span');
+      body.className = 'ed-overview-diff-rowbody';
+      if (typeof content === 'string') body.textContent = content;
+      else if (content) body.appendChild(content);
+      div.appendChild(body);
+      return div;
+    }
+    function diffMakeNeutralRow(text, opts) {
+      const div = document.createElement('div');
+      div.className = 'ed-overview-diff-neutral' + ((opts && opts.dim) ? ' is-dim' : '');
+      div.textContent = text;
+      return div;
+    }
+
+    function renderDiffBody() {
+      const classIds = state.pageConfig.useClasses.slice();
+      const query = search.value.trim().toLowerCase();
+      const groupNames = diffBuildGroupOrder(classIds);
+      let printedAny = false;
+
+      groupNames.forEach(function (gname) {
+        if (query && gname.toLowerCase().indexOf(query) === -1) {
+          // Group name doesn't itself match — keep it only if some
+          // child line matches; we'll check during line iteration and
+          // skip the whole group if nothing matches.
+        }
+        const perClass = diffGroupRecord(gname, classIds);
+        // Presence: which classes have this group at all?
+        const present = classIds.filter(function (cid) { return !!perClass[cid].group; });
+        const absent  = classIds.filter(function (cid) { return !perClass[cid].group; });
+
+        // Pre-build the line entries so we can decide whether to emit
+        // the group at all (only-differences mode hides groups whose
+        // every line is identical and which itself is present everywhere).
+        const lineKeys = diffBuildLineOrder(perClass, classIds);
+        const lineEntries = lineKeys.map(function (key) {
+          const linesByClass = diffFindLineByKey(perClass, classIds, key);
+          const linePresent  = classIds.filter(function (cid) { return !!linesByClass[cid]; });
+          const lineAbsent   = classIds.filter(function (cid) { return !linesByClass[cid]; });
+          // Max block count among present.
+          let maxBlocks = 0;
+          linePresent.forEach(function (cid) {
+            const bs = linesByClass[cid].behaviors || [];
+            if (bs.length > maxBlocks) maxBlocks = bs.length;
+          });
+          // Per-block diff records.
+          const blockEntries = [];
+          for (let i = 0; i < maxBlocks; i++) {
+            const perCB = classIds.map(function (cid) {
+              const l = linesByClass[cid];
+              return (l && Array.isArray(l.behaviors) && i < l.behaviors.length)
+                ? l.behaviors[i] : null;
+            });
+            const blockPresent = classIds.filter(function (_, j) { return !!perCB[j]; });
+            const blockAbsent  = classIds.filter(function (_, j) { return !perCB[j]; });
+            const diffPaths = diffPropsDiffer(perCB);
+            const differs   = (blockAbsent.length > 0) || diffPaths.length > 0;
+            blockEntries.push({
+              index: i,
+              perCB: perCB,
+              blockPresent: blockPresent,
+              blockAbsent: blockAbsent,
+              diffPaths: diffPaths,
+              differs: differs
+            });
+          }
+          const lineDiffers = (lineAbsent.length > 0) ||
+                              blockEntries.some(function (b) { return b.differs; });
+          return {
+            key: key,
+            linesByClass: linesByClass,
+            linePresent: linePresent,
+            lineAbsent: lineAbsent,
+            blockEntries: blockEntries,
+            differs: lineDiffers
+          };
+        });
+
+        // Apply search filter.
+        const filteredLines = !query ? lineEntries : lineEntries.filter(function (le) {
+          if (gname.toLowerCase().indexOf(query) !== -1) return true;
+          const lbl = diffLineLabel(le.linesByClass, classIds).toLowerCase();
+          return lbl.indexOf(query) !== -1;
+        });
+        if (!filteredLines.length && query) return;
+
+        const groupItselfDiffers = absent.length > 0;
+        const visibleLines = diffOnlyDiffering
+          ? filteredLines.filter(function (le) { return le.differs; })
+          : filteredLines;
+        // Hide a group entirely only when only-diff mode is on AND
+        // both the group itself agrees across classes AND no children
+        // differ. Otherwise the group header still matters.
+        if (diffOnlyDiffering && !groupItselfDiffers && !visibleLines.length) return;
+
+        // Group header.
+        const section = document.createElement('div');
+        section.className = 'ed-overview-group ed-group ed-overview-diff-group';
+        const ghead = document.createElement('div');
+        ghead.className = 'ed-group-row ed-overview-ghead';
+        ghead.style.cursor = 'default';
+        const toggle = document.createElement('span');
+        toggle.className = 'ed-group-toggle';
+        toggle.textContent = 'G';
+        ghead.appendChild(toggle);
+        const nm = document.createElement('span');
+        nm.className = 'ed-group-name';
+        nm.textContent = gname;
+        ghead.appendChild(nm);
+        const presenceTag = document.createElement('span');
+        presenceTag.className = 'ed-overview-diff-presence';
+        if (groupItselfDiffers) {
+          presenceTag.textContent = 'only in ' + present.map(classLabelFor).join(', ');
+          presenceTag.classList.add('is-partial');
+        } else {
+          presenceTag.textContent = 'all classes';
+        }
+        ghead.appendChild(presenceTag);
+        section.appendChild(ghead);
+
+        // Compaction for identical-runs when showing everything.
+        // Walk visibleLines; for each run of consecutive non-differing
+        // lines (only happens when only-differences is OFF), collapse
+        // into a single disclosure.
+        const lineHost = document.createElement('div');
+        lineHost.className = 'ed-overview-diff-lines';
+
+        let run = [];
+        function flushRun() {
+          if (!run.length) return;
+          if (run.length === 1) {
+            lineHost.appendChild(renderDiffLine(run[0], classIds));
+          } else {
+            lineHost.appendChild(renderIdenticalRun(run, classIds, 'objects'));
+          }
+          run = [];
+        }
+        visibleLines.forEach(function (le) {
+          if (!le.differs) { run.push(le); return; }
+          flushRun();
+          lineHost.appendChild(renderDiffLine(le, classIds));
+        });
+        flushRun();
+
+        section.appendChild(lineHost);
+        body.appendChild(section);
+        printedAny = true;
+      });
+
+      if (!printedAny) {
+        const empty = document.createElement('div');
+        empty.className = 'ed-library-empty';
+        empty.textContent = query
+          ? 'No groups or lines match "' + query + '".'
+          : (diffOnlyDiffering
+              ? 'No differences across classes — every visible group, object and behavior block matches.'
+              : 'No visible groups or lines in any class.');
+        body.appendChild(empty);
+      }
+    }
+
+    function renderIdenticalRun(entries, classIds, label) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ed-overview-diff-runwrap';
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'ed-overview-diff-runhead';
+      head.textContent = '▸ ' + entries.length + ' identical ' + label;
+      head.title = 'Click to expand the identical ' + label;
+      const list = document.createElement('div');
+      list.className = 'ed-overview-diff-runlist';
+      list.style.display = 'none';
+      entries.forEach(function (le) {
+        list.appendChild(renderDiffLine(le, classIds));
+      });
+      let open = false;
+      head.addEventListener('click', function () {
+        open = !open;
+        head.textContent = (open ? '▾ ' : '▸ ') + entries.length + ' identical ' + label;
+        list.style.display = open ? '' : 'none';
+      });
+      wrap.appendChild(head);
+      wrap.appendChild(list);
+      return wrap;
+    }
+
+    function renderDiffLine(entry, classIds) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ed-overview-diff-line' + (entry.differs ? ' is-differs' : '');
+      // Line header: name + presence tag.
+      const hd = document.createElement('div');
+      hd.className = 'ed-overview-diff-linehead';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'ed-overview-diff-linename';
+      nameEl.textContent = diffLineLabel(entry.linesByClass, classIds);
+      hd.appendChild(nameEl);
+      const presence = document.createElement('span');
+      presence.className = 'ed-overview-diff-presence';
+      if (entry.lineAbsent.length > 0) {
+        presence.textContent = 'only in ' + entry.linePresent.map(classLabelFor).join(', ');
+        presence.classList.add('is-partial');
+      } else if (!entry.differs) {
+        presence.textContent = 'identical';
+        presence.classList.add('is-identical');
+      } else {
+        presence.textContent = 'differs';
+        presence.classList.add('is-differs');
+      }
+      hd.appendChild(presence);
+      // Jump to canvas (uses the first present line).
+      const jumpBtn = document.createElement('button');
+      jumpBtn.type = 'button';
+      jumpBtn.className = 'ed-overview-details-btn';
+      jumpBtn.textContent = 'On canvas';
+      jumpBtn.title = 'Jump to this object on the canvas (uses the first class where it exists)';
+      jumpBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        for (let i = 0; i < classIds.length; i++) {
+          const l = entry.linesByClass[classIds[i]];
+          if (l) {
+            // Override activeClassId so jumpToLine switches into the
+            // class where the line actually lives.
+            activeClassId = classIds[i];
+            jumpToLine(l);
+            return;
+          }
+        }
+      });
+      hd.appendChild(jumpBtn);
+      wrap.appendChild(hd);
+
+      // If the line is absent in some classes, surface the presence
+      // rows — one colored row per class that HAS it (showing autoName
+      // of block 1 as a quick identifier) and one "absent" row per
+      // class that doesn't.
+      if (entry.lineAbsent.length > 0) {
+        const presBlock = document.createElement('div');
+        presBlock.className = 'ed-overview-diff-presblock';
+        classIds.forEach(function (cid) {
+          const l = entry.linesByClass[cid];
+          if (l) {
+            const bcount = (l.behaviors || []).length;
+            const desc = bcount
+              ? (bcount + ' block' + (bcount === 1 ? '' : 's'))
+              : 'no behaviors';
+            presBlock.appendChild(diffMakeClassRow(cid, 'present · ' + desc));
+          } else {
+            const row = diffMakeClassRow(cid, 'absent');
+            row.classList.add('is-absent');
+            presBlock.appendChild(row);
+          }
+        });
+        wrap.appendChild(presBlock);
+      }
+
+      // Block-level diffs (only rendered for classes that share the
+      // line — absent rows are already covered above).
+      const blocks = entry.blockEntries;
+      if (blocks.length) {
+        const bWrap = document.createElement('div');
+        bWrap.className = 'ed-overview-diff-blocks';
+        // Compact runs of identical blocks when not in only-diff mode.
+        let brun = [];
+        function flushBlockRun() {
+          if (!brun.length) return;
+          if (brun.length === 1) {
+            bWrap.appendChild(renderDiffBlock(brun[0], entry, classIds));
+          } else {
+            bWrap.appendChild(renderIdenticalBlocksRun(brun, entry, classIds));
+          }
+          brun = [];
+        }
+        blocks.forEach(function (be) {
+          const skip = diffOnlyDiffering && !be.differs;
+          if (skip) return;
+          if (!be.differs) { brun.push(be); return; }
+          flushBlockRun();
+          bWrap.appendChild(renderDiffBlock(be, entry, classIds));
+        });
+        flushBlockRun();
+        if (bWrap.childNodes.length) wrap.appendChild(bWrap);
+      }
+      return wrap;
+    }
+
+    function renderIdenticalBlocksRun(blockEntries, lineEntry, classIds) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ed-overview-diff-runwrap is-blocks';
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'ed-overview-diff-runhead';
+      const range = (blockEntries.length === 1)
+        ? ('Block ' + (blockEntries[0].index + 1))
+        : ('Blocks ' + (blockEntries[0].index + 1) + '–'
+                     + (blockEntries[blockEntries.length - 1].index + 1));
+      head.textContent = '▸ ' + range + ' · identical across classes';
+      const list = document.createElement('div');
+      list.className = 'ed-overview-diff-runlist';
+      list.style.display = 'none';
+      blockEntries.forEach(function (be) {
+        list.appendChild(renderDiffBlock(be, lineEntry, classIds));
+      });
+      let open = false;
+      head.addEventListener('click', function () {
+        open = !open;
+        head.textContent = (open ? '▾ ' : '▸ ') + range + ' · identical across classes';
+        list.style.display = open ? '' : 'none';
+      });
+      wrap.appendChild(head);
+      wrap.appendChild(list);
+      return wrap;
+    }
+
+    function renderDiffBlock(be, lineEntry, classIds) {
+      const div = document.createElement('div');
+      div.className = 'ed-overview-diff-block' + (be.differs ? ' is-differs' : '');
+      // Block header — use behaviorAutoName from the first present
+      // block as the heading. If they auto-name differently across
+      // classes (rare — would mean the dominant effect itself differs),
+      // we still pick the first; the per-property rows below carry the
+      // actual diff.
+      let headLabel = 'Block ' + (be.index + 1);
+      for (let i = 0; i < classIds.length; i++) {
+        const b = be.perCB[i];
+        if (b) { headLabel = behaviorAutoName(b, be.index); break; }
+      }
+      const head = document.createElement('div');
+      head.className = 'ed-overview-diff-blockhead';
+      head.textContent = headLabel;
+      if (be.blockAbsent.length > 0) {
+        const pt = document.createElement('span');
+        pt.className = 'ed-overview-diff-presence is-partial';
+        pt.textContent = 'only in ' + be.blockPresent.map(classLabelFor).join(', ');
+        head.appendChild(pt);
+      } else if (!be.differs) {
+        const pt = document.createElement('span');
+        pt.className = 'ed-overview-diff-presence is-identical';
+        pt.textContent = 'identical';
+        head.appendChild(pt);
+      }
+      div.appendChild(head);
+
+      // Presence rows for absent classes.
+      if (be.blockAbsent.length > 0) {
+        const presBlock = document.createElement('div');
+        presBlock.className = 'ed-overview-diff-presblock';
+        classIds.forEach(function (cid, j) {
+          if (be.perCB[j]) {
+            presBlock.appendChild(diffMakeClassRow(
+              cid, behaviorAutoName(be.perCB[j], be.index)));
+          } else {
+            const r = diffMakeClassRow(cid, 'absent (line has fewer blocks)');
+            r.classList.add('is-absent');
+            presBlock.appendChild(r);
+          }
+        });
+        div.appendChild(presBlock);
+      }
+
+      // Per-property diffs (only the differing paths).
+      if (be.diffPaths.length > 0) {
+        const propBlock = document.createElement('div');
+        propBlock.className = 'ed-overview-diff-props';
+        be.diffPaths.forEach(function (path) {
+          const propTitle = document.createElement('div');
+          propTitle.className = 'ed-overview-diff-propname';
+          propTitle.textContent = path;
+          propBlock.appendChild(propTitle);
+          classIds.forEach(function (cid, j) {
+            const b = be.perCB[j];
+            if (!b) return;  // already handled above
+            const v = diffGetPath(b, path);
+            propBlock.appendChild(diffMakeClassRow(cid, diffFormatVal(path, v)));
+          });
+        });
+        div.appendChild(propBlock);
+      }
+
+      // If the block is identical and we're showing everything, render
+      // the autoName line only (already in the head); no extra rows.
+      return div;
     }
 
     // Jump-to-canvas: HIDE (not remove) both layers; show a floating
