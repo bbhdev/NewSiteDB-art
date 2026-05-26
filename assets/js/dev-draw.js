@@ -5275,6 +5275,13 @@
   // existing configurations are never hidden.
   const behaviorShowSideEffects = new Set();
 
+  // v0.8.196: Session-only set of master IDs whose TEXT section has
+  // been deliberately opened. Auto-shows when master.text.value is
+  // non-empty so existing text overlays are never hidden. Closing
+  // (via the [×] button on the section title) wipes master.text and
+  // removes the flag, returning the property to absent.
+  const showTextSection = new Set();
+
   // v0.8.154: Session-only phase map for progressive disclosure.
   // 0 = fresh (trigger picker only, no active button);
   // 1 = trigger chosen (trigger options visible);
@@ -11240,59 +11247,120 @@
 
     // v0.8.195: TEXT section. Slice 1 — master-only edits, propagated
     // to every resolved line by reference (line.text === master.text
-    // after Object.assign in resolveInstanceJS). No scope toggle, no
-    // per-instance override UI yet; that ships in Slice 2.
+    // after Object.assign in resolveInstanceJS).
+    //
+    // v0.8.196: Progressive disclosure — most objects won't have text,
+    // so the section is hidden by default behind a "+ Add text"
+    // button. Auto-opens when master.text.value is non-empty (saved
+    // text on load) or after the user clicks the +Add button this
+    // session. The [×] close button on the open section title wipes
+    // master.text + removes the session flag, so closing reverts the
+    // property to absent (safe escape hatch for an accidental open).
     if (line.masterId) {
       const masterRec = state.masters.find(function (m) { return m.id === line.masterId; });
       if (masterRec) {
-        wrap.appendChild(divider('TEXT'));
-        // Ensure the master has a text object before any field tries
-        // to write through (avoids `master.text.value = …` on null).
-        function ensureMasterText() {
-          if (!masterRec.text || typeof masterRec.text !== 'object') {
-            masterRec.text = Object.assign({}, TEXT_DEFAULTS);
-          }
-          return masterRec.text;
-        }
-        const t = masterRec.text || TEXT_DEFAULTS;
-        wrap.appendChild(textField('Text', t.value || '', function (v) {
-          const rec = ensureMasterText();
-          rec.value = v;
-          // Mirror onto every resolved line.text for this master so
-          // the renderer sees it (resolveInstanceJS aliased line.text
-          // to master.text, but only when text existed at load time).
-          state.pageConfig.useClasses.forEach(function (cid) {
-            const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
-            lines.forEach(function (l) {
-              if (l.masterId === masterRec.id) l.text = rec;
-            });
+        const hasText = !!(masterRec.text && masterRec.text.value);
+        const sessionOpen = showTextSection.has(masterRec.id);
+        const open = hasText || sessionOpen;
+        if (!open) {
+          const addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'ed-behavior-also-btn';
+          addBtn.textContent = '+ Add text';
+          addBtn.title = 'Add a text label to this object.';
+          addBtn.addEventListener('click', function () {
+            showTextSection.add(masterRec.id);
+            renderSelectionPanel();
           });
-          state.dirty = true;
-          scheduleSnapshot();
-          renderLines();
-        }, 'leave empty for no text'));
-        wrap.appendChild(numberField('Offset X', t.offsetX || 0, function (v) {
-          ensureMasterText().offsetX = Number.isFinite(v) ? v : 0;
-          state.dirty = true; scheduleSnapshot(); renderLines();
-        }));
-        wrap.appendChild(numberField('Offset Y', t.offsetY || 0, function (v) {
-          ensureMasterText().offsetY = Number.isFinite(v) ? v : 0;
-          state.dirty = true; scheduleSnapshot(); renderLines();
-        }));
-        wrap.appendChild(textField('Font family', t.fontFamily || '', function (v) {
-          ensureMasterText().fontFamily = v || TEXT_DEFAULTS.fontFamily;
-          state.dirty = true; scheduleSnapshot();
-          renderLines();
-          injectGoogleFontsLink();
-        }, 'e.g. Inter, Playfair Display'));
-        wrap.appendChild(numberField('Font size', t.fontSize || TEXT_DEFAULTS.fontSize, function (v) {
-          ensureMasterText().fontSize = Number.isFinite(v) && v > 0 ? v : TEXT_DEFAULTS.fontSize;
-          state.dirty = true; scheduleSnapshot(); renderLines();
-        }));
-        wrap.appendChild(textField('Text color', t.color || '', function (v) {
-          ensureMasterText().color = v || null;
-          state.dirty = true; scheduleSnapshot(); renderLines();
-        }, 'CSS color or empty = inherit stroke'));
+          wrap.appendChild(addBtn);
+        } else {
+          // Open state — title row with close [×], then fields.
+          const titleRow = document.createElement('div');
+          titleRow.className = 'ed-behavior-section-title ed-behavior-also-title';
+          const titleText = document.createElement('span');
+          titleText.textContent = 'TEXT';
+          titleRow.appendChild(titleText);
+          const closeBtn = document.createElement('button');
+          closeBtn.type = 'button';
+          closeBtn.className = 'ed-behavior-also-close';
+          closeBtn.title = 'Remove text from this object';
+          closeBtn.setAttribute('aria-label', 'Remove text');
+          closeBtn.innerHTML =
+            '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+              '<line x1="6"  y1="6"  x2="18" y2="18" stroke="currentColor" ' +
+                    'stroke-width="3" stroke-linecap="round"></line>' +
+              '<line x1="18" y1="6"  x2="6"  y2="18" stroke="currentColor" ' +
+                    'stroke-width="3" stroke-linecap="round"></line>' +
+            '</svg>';
+          closeBtn.addEventListener('click', function () {
+            // Wipe text from master + every resolved line so the
+            // renderer drops the overlay. hasText becomes false →
+            // next render falls back to the +Add button (modulo
+            // sessionOpen, which we also clear).
+            delete masterRec.text;
+            state.pageConfig.useClasses.forEach(function (cid) {
+              const lns = (state.byClass[cid] && state.byClass[cid].lines) || [];
+              lns.forEach(function (l) {
+                if (l.masterId === masterRec.id) delete l.text;
+              });
+            });
+            showTextSection.delete(masterRec.id);
+            state.dirty = true;
+            scheduleSnapshot();
+            renderLines();
+            renderSelectionPanel();
+          });
+          titleRow.appendChild(closeBtn);
+          wrap.appendChild(titleRow);
+
+          // Ensure the master has a text object before any field tries
+          // to write through (avoids `master.text.value = …` on null).
+          function ensureMasterText() {
+            if (!masterRec.text || typeof masterRec.text !== 'object') {
+              masterRec.text = Object.assign({}, TEXT_DEFAULTS);
+            }
+            return masterRec.text;
+          }
+          const t = masterRec.text || TEXT_DEFAULTS;
+          wrap.appendChild(textField('Text', t.value || '', function (v) {
+            const rec = ensureMasterText();
+            rec.value = v;
+            // Mirror onto every resolved line.text for this master so
+            // the renderer sees it (resolveInstanceJS aliased line.text
+            // to master.text, but only when text existed at load time).
+            state.pageConfig.useClasses.forEach(function (cid) {
+              const lns = (state.byClass[cid] && state.byClass[cid].lines) || [];
+              lns.forEach(function (l) {
+                if (l.masterId === masterRec.id) l.text = rec;
+              });
+            });
+            state.dirty = true;
+            scheduleSnapshot();
+            renderLines();
+          }, 'label this object'));
+          wrap.appendChild(numberField('Offset X', t.offsetX || 0, function (v) {
+            ensureMasterText().offsetX = Number.isFinite(v) ? v : 0;
+            state.dirty = true; scheduleSnapshot(); renderLines();
+          }));
+          wrap.appendChild(numberField('Offset Y', t.offsetY || 0, function (v) {
+            ensureMasterText().offsetY = Number.isFinite(v) ? v : 0;
+            state.dirty = true; scheduleSnapshot(); renderLines();
+          }));
+          wrap.appendChild(textField('Font family', t.fontFamily || '', function (v) {
+            ensureMasterText().fontFamily = v || TEXT_DEFAULTS.fontFamily;
+            state.dirty = true; scheduleSnapshot();
+            renderLines();
+            injectGoogleFontsLink();
+          }, 'e.g. Inter, Playfair Display'));
+          wrap.appendChild(numberField('Font size', t.fontSize || TEXT_DEFAULTS.fontSize, function (v) {
+            ensureMasterText().fontSize = Number.isFinite(v) && v > 0 ? v : TEXT_DEFAULTS.fontSize;
+            state.dirty = true; scheduleSnapshot(); renderLines();
+          }));
+          wrap.appendChild(textField('Text color', t.color || '', function (v) {
+            ensureMasterText().color = v || null;
+            state.dirty = true; scheduleSnapshot(); renderLines();
+          }, 'CSS color or empty = inherit stroke'));
+        }
       }
     }
 

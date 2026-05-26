@@ -31,6 +31,43 @@ high-leverage ones.
   has been validated by the user. Batching commits to reduce effort is a
   false economy — local commits are essentially free.
 
+## Progressive disclosure — UI rule
+
+Optional features that aren't always used must be hidden by default and
+opened on demand. Don't surface a fixed block of fields for a property
+most objects won't carry — it bloats the panel and signals "this is
+required" when it isn't.
+
+Reference pattern: the "Also control other objects" section inside a
+behavior block (`ed-behavior-also-btn` opens, `ed-behavior-also-close`
+[×] removes the section and clears any saved values).
+
+Two states:
+
+1. **Empty / closed** — show a single `+ <Feature>` button that opens
+   the section. No fields visible.
+
+2. **Open** — title row with a [×] close affordance + the feature's
+   fields. Close discards the feature: clears the underlying values
+   AND removes the session-disclosure flag so the section stays hidden
+   on the next render. This makes the close button safe to undo a
+   mistake (vs. the user being stuck with empty fields they can't get
+   rid of).
+
+Auto-open rule: if the underlying values are already populated
+(loaded from disk or a prior session), the section opens automatically
+on render — the user never sees data they can't see the UI for.
+
+Session-only disclosure state lives in a `Set` of identifiers (block
+id, line id, master id, whatever's stable) keyed at the right scope.
+Don't persist it — re-deriving "is anything set?" from the data is the
+source of truth on next load.
+
+This rule applies to every property with this shape: optional, sparse
+across the dataset, multi-field. Examples: text overlay on objects,
+side-effects on behavior blocks. New properties added later should
+follow the same pattern unless every object reliably uses them.
+
 ## SCHEMA_VERSION bump protocol
 
 `SCHEMA_VERSION` (root) is bumped by Claude, not the user — but only with
