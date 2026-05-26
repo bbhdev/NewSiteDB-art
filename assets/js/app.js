@@ -318,6 +318,48 @@
     const paletteById = {};
     palette.forEach(function (c) { paletteById[c.id] = c; });
 
+    // v0.8.195: text overlay helpers (runtime side; mirror of the
+    // editor's resolveText / lineCenterFor in dev-draw.js). Slice 1 —
+    // text lives on the master and is propagated to every resolved
+    // line by the PHP resolver, so line.text is the canonical read.
+    function resolveLineText(line) {
+      const t = line && line.text;
+      if (!t || typeof t !== 'object') return null;
+      const value = (typeof t.value === 'string') ? t.value : '';
+      if (!value) return null;
+      return {
+        value:      value,
+        offsetX:    (typeof t.offsetX === 'number') ? t.offsetX : 0,
+        offsetY:    (typeof t.offsetY === 'number') ? t.offsetY : 0,
+        fontFamily: (typeof t.fontFamily === 'string' && t.fontFamily) ? t.fontFamily : 'Inter',
+        fontSize:   (typeof t.fontSize === 'number' && t.fontSize > 0) ? t.fontSize : 14,
+        color:      (typeof t.color === 'string' && t.color) ? t.color : null
+      };
+    }
+    // Inject a single Google Fonts <link> covering every distinct
+    // fontFamily referenced by any line.text across every class. Done
+    // once at init (font set is content-time fixed; no point watching).
+    (function injectFonts() {
+      const set = {};
+      useClasses.forEach(function (cid) {
+        const c = byClass[cid];
+        if (!c || !Array.isArray(c.lines)) return;
+        c.lines.forEach(function (l) {
+          const t = resolveLineText(l);
+          if (t && t.fontFamily) set[t.fontFamily] = true;
+        });
+      });
+      const families = Object.keys(set).sort();
+      if (!families.length) return;
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      const qs = families.map(function (f) {
+        return 'family=' + encodeURIComponent(f).replace(/%20/g, '+');
+      }).join('&');
+      link.href = 'https://fonts.googleapis.com/css2?' + qs + '&display=swap';
+      document.head.appendChild(link);
+    })();
+
     // ── Class selection ────────────────────────────────────────────
     function pickClassFor(width) {
       // Among the classes this page uses, prefer one whose [min, max]
@@ -620,6 +662,45 @@
         p.style.pointerEvents = 'none';
       }
       layer.appendChild(p);
+
+      // v0.8.195: text overlay. Anchored at the line's natural center
+      // plus authored (offsetX, offsetY). data-text-for is queried by
+      // the writeAt closure below so the same per-frame transform /
+      // opacity that drives the path is mirrored onto the <text>.
+      // Drawn AFTER the path so author labels read on top of the line.
+      const tx = resolveLineText(line);
+      if (tx) {
+        let cxN = 0, cyN = 0;
+        if (line.params) {
+          const pa = line.params;
+          if (Number.isFinite(pa.cx) && Number.isFinite(pa.cy)) {
+            cxN = pa.cx; cyN = pa.cy;
+          } else if (Number.isFinite(pa.x) && Number.isFinite(pa.y)
+                  && Number.isFinite(pa.w) && Number.isFinite(pa.h)) {
+            cxN = pa.x + pa.w / 2;
+            cyN = pa.y + pa.h / 2;
+          }
+        }
+        if (cxN === 0 && cyN === 0) {
+          try {
+            const b = p.getBBox();
+            if (b && b.width > 0) { cxN = b.x + b.width / 2; cyN = b.y + b.height / 2; }
+          } catch (e) { /* getBBox unavailable */ }
+        }
+        const tEl = document.createElementNS(SVG_NS, 'text');
+        tEl.setAttribute('x', String(cxN + tx.offsetX));
+        tEl.setAttribute('y', String(cyN + tx.offsetY));
+        tEl.setAttribute('text-anchor', 'middle');
+        tEl.setAttribute('dominant-baseline', 'central');
+        tEl.setAttribute('font-family', tx.fontFamily);
+        tEl.setAttribute('font-size', String(tx.fontSize));
+        tEl.setAttribute('fill', tx.color || (stroke || 'currentColor'));
+        tEl.style.pointerEvents = 'none';
+        tEl.dataset.textFor = line.id;
+        if (isHidden) tEl.style.visibility = 'hidden';
+        tEl.textContent = tx.value;
+        layer.appendChild(tEl);
+      }
     });
 
     // Render imported SVG files. Extract every <path>; each becomes a
@@ -688,6 +769,13 @@
       if (!group) return;
 
       const lineDef = lines.find(function (l) { return l.id === pathEl.dataset.lineId; }) || {};
+      // v0.8.195: companion text overlay for this line, if any. Lives
+      // as a sibling <text data-text-for="..."> in the same layer.
+      // writeAt mirrors transform+opacity onto it so labels travel with
+      // their object through every scroll-driven motion / fade. NULL
+      // when the line has no text, in which case the mirror calls
+      // below short-circuit on the falsiness check.
+      const textEl = layer.querySelector('[data-text-for="' + pathEl.dataset.lineId + '"]');
       // v0.8.91: drawIn moved into the per-frame computeAt pipeline.
       // Each block carries its own drawIn flag + direction (folded
       // in from group defaults at block-normalize time, ~line 902).
@@ -1873,12 +1961,14 @@
               const fty  = stopState.returnHome ? 0 : fz.ty;
               const frot = stopState.returnHome ? 0 : fz.rot;
               const fop  = stopState.fadeOut    ? 0 : fz.opacity;
-              pathEl.setAttribute(
-                'transform',
-                'translate(' + (offX + ftx) + ' ' + (offY + fty) + ') ' +
-                'rotate(' + frot + ' ' + originX + ' ' + originY + ')'
-              );
+              const finalXform = 'translate(' + (offX + ftx) + ' ' + (offY + fty) + ') ' +
+                'rotate(' + frot + ' ' + originX + ' ' + originY + ')';
+              pathEl.setAttribute('transform', finalXform);
               pathEl.setAttribute('opacity', fop);
+              if (textEl) {
+                textEl.setAttribute('transform', finalXform);
+                textEl.setAttribute('opacity', fop);
+              }
               isStopped = true;
               stopState = null;
               // Clear every per-block runtime variable so a future
@@ -1911,12 +2001,14 @@
             const tyc  = stopState.returnHome ? fz.ty  * inv : fz.ty;
             const rotc = stopState.returnHome ? fz.rot * inv : fz.rot;
             const opc  = stopState.fadeOut    ? fz.opacity * inv : fz.opacity;
-            pathEl.setAttribute(
-              'transform',
-              'translate(' + (offX + txc) + ' ' + (offY + tyc) + ') ' +
-              'rotate(' + rotc + ' ' + originX + ' ' + originY + ')'
-            );
+            const cleanupXform = 'translate(' + (offX + txc) + ' ' + (offY + tyc) + ') ' +
+              'rotate(' + rotc + ' ' + originX + ' ' + originY + ')';
+            pathEl.setAttribute('transform', cleanupXform);
             pathEl.setAttribute('opacity', opc);
+            if (textEl) {
+              textEl.setAttribute('transform', cleanupXform);
+              textEl.setAttribute('opacity', opc);
+            }
             return;
           }
           // v0.8.79: target is in neutral pre-fire state until
@@ -1935,16 +2027,21 @@
           // center) so the follower's center lands on the path.
           const useOffX = t.pathFollowActive ? 0 : offX;
           const useOffY = t.pathFollowActive ? 0 : offY;
-          pathEl.setAttribute(
-            'transform',
-            'translate(' + (useOffX + t.tx) + ' ' + (useOffY + t.ty) + ') ' +
-            'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')'
-          );
+          const liveXform = 'translate(' + (useOffX + t.tx) + ' ' + (useOffY + t.ty) + ') ' +
+            'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')';
+          pathEl.setAttribute('transform', liveXform);
           // v0.8.26: opacity is always written (cheap setAttribute,
           // and a constant 1 from no-fade blocks is the SVG default
           // — net no-op visually). Lets fade blocks just work
           // without an extra "has any fade?" precompute.
           pathEl.setAttribute('opacity', t.opacity);
+          // v0.8.195: keep the text overlay in sync. Skip drawIn —
+          // dashoffset is path-specific and SVG text doesn't paint via
+          // stroke-dash in this app.
+          if (textEl) {
+            textEl.setAttribute('transform', liveXform);
+            textEl.setAttribute('opacity', t.opacity);
+          }
           // v0.8.91: drawIn dashoffset. null = no active drawIn
           // block this frame → leave the attribute alone (a
           // pre-trigger block keeps the initial-paint hidden state;

@@ -92,7 +92,12 @@
   const MASTER_VISUAL_KEYS = [
     'kind', 'points', 'params', 'segments',
     'smoothed', 'closed', 'filled',
-    'd', 'stroke', 'width', 'linejoin', 'name'
+    'd', 'stroke', 'width', 'linejoin', 'name',
+    // v0.8.195: optional text overlay (Slice 1 — master-level only,
+    // canonical by default; no per-instance override UI yet). Shape:
+    //   { value, offsetX, offsetY, fontFamily, fontSize, color }
+    // Absent / empty value → no text rendered.
+    'text'
   ];
   // Position sub-keys live on positionOffset (not in scope). Owning
   // them per-class is structural — scope toggles don't apply.
@@ -500,6 +505,103 @@
       labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
     }
   };
+
+  // v0.8.195: text overlay helpers. The text record is a small
+  // optional object on the master (and propagated to every resolved
+  // line by Object.assign in resolveInstanceJS). Slice 1 is master-
+  // only — no per-instance override surface — so reads can go
+  // straight to line.text without merging an overrides layer.
+  const TEXT_DEFAULTS = {
+    value:      '',
+    offsetX:    0,
+    offsetY:    0,
+    fontFamily: 'Inter',
+    fontSize:   14,
+    color:      null   // null = inherit object stroke color
+  };
+  /**
+   * Return the resolved text record for a line, or null if no text
+   * should be drawn. Falls back to TEXT_DEFAULTS field-by-field so
+   * partial author data still renders sanely.
+   */
+  function resolveText(line) {
+    const t = line && line.text;
+    if (!t || typeof t !== 'object') return null;
+    const value = (typeof t.value === 'string') ? t.value : '';
+    if (!value) return null;
+    return {
+      value:      value,
+      offsetX:    Number.isFinite(t.offsetX)  ? t.offsetX  : 0,
+      offsetY:    Number.isFinite(t.offsetY)  ? t.offsetY  : 0,
+      fontFamily: (typeof t.fontFamily === 'string' && t.fontFamily) ? t.fontFamily : TEXT_DEFAULTS.fontFamily,
+      fontSize:   Number.isFinite(t.fontSize) ? t.fontSize : TEXT_DEFAULTS.fontSize,
+      color:      (typeof t.color === 'string' && t.color) ? t.color : null
+    };
+  }
+  /**
+   * Geometric center of a line in editor / viewBox coordinates.
+   * Mirrors the runtime's center-derivation logic in renderClassContent:
+   * primitive params first, then bbox via the live SVG element when
+   * available, else (0,0). Used to anchor the text overlay so the
+   * user's authored (offsetX, offsetY) is relative to the object's
+   * natural center.
+   */
+  function lineCenterFor(line, svgEl) {
+    if (line && line.params) {
+      const pa = line.params;
+      if (Number.isFinite(pa.cx) && Number.isFinite(pa.cy)) {
+        return { x: pa.cx, y: pa.cy };
+      }
+      if (Number.isFinite(pa.x) && Number.isFinite(pa.y)
+          && Number.isFinite(pa.w) && Number.isFinite(pa.h)) {
+        return { x: pa.x + pa.w / 2, y: pa.y + pa.h / 2 };
+      }
+    }
+    if (svgEl) {
+      try {
+        const b = svgEl.getBBox();
+        if (b && b.width > 0) return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      } catch (e) { /* getBBox can throw on disconnected nodes */ }
+    }
+    return { x: 0, y: 0 };
+  }
+
+  /**
+   * Collect every distinct fontFamily referenced by any master.text,
+   * and inject a single Google Fonts <link> for them. Idempotent —
+   * called from renderAll on every redraw; only adds the link once,
+   * and only refreshes when the set of families changes.
+   */
+  let _fontsLinkEl = null;
+  let _fontsLastKey = '';
+  function injectGoogleFontsLink() {
+    if (!Array.isArray(state.masters)) return;
+    const set = {};
+    state.masters.forEach(function (m) {
+      if (!m || !m.text || typeof m.text.fontFamily !== 'string') return;
+      const fam = m.text.fontFamily.trim();
+      if (fam) set[fam] = true;
+    });
+    const families = Object.keys(set).sort();
+    if (!families.length) {
+      if (_fontsLinkEl && _fontsLinkEl.parentNode) _fontsLinkEl.parentNode.removeChild(_fontsLinkEl);
+      _fontsLinkEl = null;
+      _fontsLastKey = '';
+      return;
+    }
+    const key = families.join('|');
+    if (key === _fontsLastKey) return;
+    _fontsLastKey = key;
+    if (!_fontsLinkEl) {
+      _fontsLinkEl = document.createElement('link');
+      _fontsLinkEl.rel = 'stylesheet';
+      document.head.appendChild(_fontsLinkEl);
+    }
+    const qs = families.map(function (f) {
+      return 'family=' + encodeURIComponent(f).replace(/%20/g, '+');
+    }).join('&');
+    _fontsLinkEl.href = 'https://fonts.googleapis.com/css2?' + qs + '&display=swap';
+  }
 
   /**
    * Compose a flat line record from an instance + the master library
@@ -8664,6 +8766,33 @@
       p.dataset.lineId = line.id;
       linesG.appendChild(p);
 
+      // v0.8.195: text overlay. Anchored at the line's geometric
+      // center (params or bbox) plus authored (offsetX, offsetY).
+      // text-anchor=middle + dominant-baseline=central centers the
+      // glyph extent on the anchor point. Color falls back to the
+      // line's stroke color so author-set null = "inherit object
+      // color". data-text-for ties the <text> to its line so the
+      // runtime's writeAt closure can mirror transform/opacity onto
+      // it (mirrored in app.js); in the editor we re-render on every
+      // edit so no live mutation is needed here.
+      const tx = resolveText(line);
+      if (tx) {
+        const c = lineCenterFor(line, p);
+        const tEl = document.createElementNS(SVG_NS, 'text');
+        tEl.setAttribute('x', String(c.x + tx.offsetX));
+        tEl.setAttribute('y', String(c.y + tx.offsetY));
+        tEl.setAttribute('text-anchor', 'middle');
+        tEl.setAttribute('dominant-baseline', 'central');
+        tEl.setAttribute('font-family', tx.fontFamily);
+        tEl.setAttribute('font-size', String(tx.fontSize));
+        tEl.setAttribute('fill', tx.color || stroke || '#888');
+        tEl.style.pointerEvents = 'none';
+        tEl.dataset.textFor = line.id;
+        if (line.hidden || (group && group.hidden)) tEl.style.opacity = '0.18';
+        tEl.textContent = tx.value;
+        linesG.appendChild(tEl);
+      }
+
       // Image overlay — emitted only when a src is set. The bitmap
       // sits on top of the bbox path; if it loads, the dashed
       // outline behind it is invisible anyway because the image
@@ -11109,6 +11238,64 @@
         }), line.masterId, 'linejoin'));
     }
 
+    // v0.8.195: TEXT section. Slice 1 — master-only edits, propagated
+    // to every resolved line by reference (line.text === master.text
+    // after Object.assign in resolveInstanceJS). No scope toggle, no
+    // per-instance override UI yet; that ships in Slice 2.
+    if (line.masterId) {
+      const masterRec = state.masters.find(function (m) { return m.id === line.masterId; });
+      if (masterRec) {
+        wrap.appendChild(divider('TEXT'));
+        // Ensure the master has a text object before any field tries
+        // to write through (avoids `master.text.value = …` on null).
+        function ensureMasterText() {
+          if (!masterRec.text || typeof masterRec.text !== 'object') {
+            masterRec.text = Object.assign({}, TEXT_DEFAULTS);
+          }
+          return masterRec.text;
+        }
+        const t = masterRec.text || TEXT_DEFAULTS;
+        wrap.appendChild(textField('Text', t.value || '', function (v) {
+          const rec = ensureMasterText();
+          rec.value = v;
+          // Mirror onto every resolved line.text for this master so
+          // the renderer sees it (resolveInstanceJS aliased line.text
+          // to master.text, but only when text existed at load time).
+          state.pageConfig.useClasses.forEach(function (cid) {
+            const lines = (state.byClass[cid] && state.byClass[cid].lines) || [];
+            lines.forEach(function (l) {
+              if (l.masterId === masterRec.id) l.text = rec;
+            });
+          });
+          state.dirty = true;
+          scheduleSnapshot();
+          renderLines();
+        }, 'leave empty for no text'));
+        wrap.appendChild(numberField('Offset X', t.offsetX || 0, function (v) {
+          ensureMasterText().offsetX = Number.isFinite(v) ? v : 0;
+          state.dirty = true; scheduleSnapshot(); renderLines();
+        }));
+        wrap.appendChild(numberField('Offset Y', t.offsetY || 0, function (v) {
+          ensureMasterText().offsetY = Number.isFinite(v) ? v : 0;
+          state.dirty = true; scheduleSnapshot(); renderLines();
+        }));
+        wrap.appendChild(textField('Font family', t.fontFamily || '', function (v) {
+          ensureMasterText().fontFamily = v || TEXT_DEFAULTS.fontFamily;
+          state.dirty = true; scheduleSnapshot();
+          renderLines();
+          injectGoogleFontsLink();
+        }, 'e.g. Inter, Playfair Display'));
+        wrap.appendChild(numberField('Font size', t.fontSize || TEXT_DEFAULTS.fontSize, function (v) {
+          ensureMasterText().fontSize = Number.isFinite(v) && v > 0 ? v : TEXT_DEFAULTS.fontSize;
+          state.dirty = true; scheduleSnapshot(); renderLines();
+        }));
+        wrap.appendChild(textField('Text color', t.color || '', function (v) {
+          ensureMasterText().color = v || null;
+          state.dirty = true; scheduleSnapshot(); renderLines();
+        }, 'CSS color or empty = inherit stroke'));
+      }
+    }
+
     // v0.8.114: BEHAVIORS divider now carries an (i) tooltip for the
     // multi-block additive semantics — used to be an always-on
     // paragraph that ate vertical space on every render. The text
@@ -12823,6 +13010,10 @@
     renderGroupsList();
     renderLines();
     renderSelectionPanel();
+    // v0.8.195: keep the Google Fonts <link> in sync with whatever
+    // font families the masters reference. Cheap (no-op when the
+    // family set hasn't changed).
+    injectGoogleFontsLink();
   }
 
   // ── Save ──────────────────────────────────────────────────────────
