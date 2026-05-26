@@ -1452,6 +1452,373 @@ body.editor input[type="range"] {
 /* Create-object modal. */
 .ed-create-modal { min-width: 28rem; }
 
+/* v0.8.173: Project hub modal — same width as the legacy library
+   modal (the Master library sub-section inherits its rows). The home
+   view shows 4 tiles; sub-section views (Master library, Overview)
+   reuse the same overlay/header/body. */
+.ed-project-modal {
+  min-width: 44rem;
+  max-width: 64rem;
+  width: 90vw;
+  max-height: 80vh;
+}
+.ed-project-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ed-project-header h3 { flex: 0 0 auto; }
+.ed-project-header .ed-modal-close { margin-left: auto; }
+.ed-project-back {
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
+  cursor: pointer;
+}
+.ed-project-back:hover { background: #2a2a2a; color: #fff; }
+
+/* Home view: 2×2 grid of large clickable tiles. */
+.ed-project-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+.ed-project-tile {
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 1rem 1.1rem;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 5.5rem;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.ed-project-tile:hover {
+  background: #242424;
+  border-color: #666;
+}
+.ed-project-tile-label {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #fff;
+}
+.ed-project-tile-hint {
+  font-size: 0.82rem;
+  color: #a8a8a8;
+  line-height: 1.35;
+}
+.ed-project-stub {
+  padding: 1.5rem 0.5rem;
+  color: #888;
+  font-style: italic;
+  text-align: center;
+}
+
+/* v0.8.176: Overview panel — stacks above the Project hub. Higher
+   z-index than the standard modal overlay so it visually overlays
+   the hub; sized wider/taller because dense behavior listings need
+   room. The hub stays interactive only via the Back chip in the
+   overview header — its overlay is non-clickable behind. */
+/* v0.8.178: base `.ed-modal-overlay` is z-index 300 (above the
+   panel-host). Overview must stack ABOVE the Project hub overlay,
+   so bump to 400. The resume chip uses 9999 since it appears after
+   both overlays are hidden and must clear anything else floating.
+   v0.8.179: disable flex-centering on this overlay — the panel is
+   absolutely positioned and managed by the drag/resize wiring. */
+.ed-modal-overlay.ed-overview-overlay {
+  z-index: 400;
+  display: block;
+}
+/* v0.8.178: doubled selector specificity — `.ed-modal.ed-overview-panel`
+   beats the base `.ed-modal` rule (which lives further down the cascade
+   at line ~2172 with `max-width: 30rem; max-height: 80vh`).
+   v0.8.179: width/height/top/left are now driven by inline styles set
+   by initGeometry + drag/resize handlers. Keep only the structural
+   bits here (flex column for header/body). */
+.ed-modal.ed-overview-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* v0.8.179: bottom-right resize grip. ~18×18 affordance with a
+   diagonal stripe rendered via two background gradients (Mac-style
+   corner grip). Lives inside the panel so it scrolls with it. */
+.ed-overview-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 50%, #777 50% 60%, transparent 60% 75%, #777 75% 85%, transparent 85% 100%);
+  border-bottom-right-radius: 6px;
+  z-index: 2;
+}
+.ed-overview-resize:hover {
+  background:
+    linear-gradient(135deg, transparent 0 50%, #aaa 50% 60%, transparent 60% 75%, #aaa 75% 85%, transparent 85% 100%);
+}
+.ed-overview-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ed-overview-header h3 { flex: 0 0 auto; }
+/* v0.8.188: doubled-specificity selector — the element carries both
+   `ed-library-filter` AND `ed-overview-classes`. The library-filter
+   rule (`flex: 1 1 auto`) lives later in source than this one, so a
+   single-class selector loses to it on source order. `.ed-library-filter.ed-overview-classes`
+   wins on specificity. The previous attempt (single class) silently
+   did nothing. */
+.ed-library-filter.ed-overview-classes {
+  flex: 0 0 auto;
+  border-left: 1px solid #444;
+  padding-left: 0.8rem;
+  margin-left: 0.5rem;
+}
+.ed-overview-searchrow {
+  padding: 0.5rem 0.8rem 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+.ed-overview-searchrow .ed-library-search {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+.ed-overview-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.5rem 0.8rem 0.8rem;
+}
+/* v0.8.177: groups use the same `.ed-group` / `.ed-group-row` styles
+   as the sidebar. The overview-specific tweak: make the header
+   sticky so the group context stays visible while scrolling its
+   lines, and override the sidebar's pointer cursor since the group
+   row isn't clickable here. */
+.ed-overview-group {
+  margin-bottom: 0.9rem;
+}
+.ed-overview-ghead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 0.4rem;
+}
+.ed-overview-ghead:hover { background: #443232; }
+.ed-overview-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+/* v0.8.177: line row is now two columns — vignette + main. */
+.ed-overview-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 0.45rem 0.6rem;
+  transition: background 0.1s ease, border-color 0.1s ease;
+  flex-wrap: wrap;
+}
+.ed-overview-row:hover {
+  background: #1f1f1f;
+  border-color: #555;
+}
+.ed-overview-vignette {
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ed-overview-vignette svg {
+  width: 100%;
+  height: 100%;
+}
+.ed-overview-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ed-overview-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+.ed-overview-row-name {
+  color: #fff;
+  font-weight: 500;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ed-overview-row-chip {
+  background: #222;
+  color: #bbb;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.75rem;
+  flex: 0 0 auto;
+}
+.ed-overview-row-chip.is-empty {
+  color: #666;
+  border-color: #2a2a2a;
+}
+/* v0.8.178: state-button styling matching the top toolbar's
+   "↖ Select" pattern. Default = neutral; .is-active = accent outline. */
+.ed-overview-details-btn {
+  background: #3a3a3a;
+  color: #e4e4e4;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 0.15rem 0.6rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  flex: 0 0 auto;
+  height: auto;
+  min-width: 0;
+}
+.ed-overview-details-btn:hover { background: #4a4a4a; color: #fff; }
+.ed-overview-details-btn.is-active {
+  background: #2a2a2a;
+  color: #fff;
+  border-color: var(--accent);
+}
+.ed-overview-noblocks {
+  color: #666;
+  font-style: italic;
+  font-size: 0.82rem;
+  padding-left: 0.2rem;
+}
+.ed-overview-blocks {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 0.2rem;
+}
+.ed-overview-block {
+  padding: 0.1rem 0;
+}
+.ed-overview-block-head {
+  color: #bbb;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+/* v0.8.178: per-block details rendered INLINE under each block's
+   summary line. Hidden until the row's Details toggle is active. */
+.ed-overview-block-detail {
+  display: none;
+  color: #aaa;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 0.15rem 0 0.4rem 0.6rem;
+  padding: 0.25rem 0.5rem;
+  background: #0e0e0e;
+  border-left: 2px solid #3a3a3a;
+  border-radius: 0 3px 3px 0;
+}
+.ed-overview-row.is-details-open .ed-overview-block-detail {
+  display: block;
+}
+.ed-overview-block-detail-line + .ed-overview-block-detail-line {
+  margin-top: 0.2rem;
+}
+
+/* v0.8.185: wide flex spacer between the left-aligned overview
+   controls (class chips, All details) and the close × on the right.
+   Replaces the v0.8.184 thin separator (the wrong layout — buttons
+   belonged on the left, not next to ×). */
+.ed-overview-toolbar-spacer {
+  flex: 1 1 auto;
+}
+/* v0.8.189: "All details" state button. Accent outline visible in
+   BOTH states — the outline is the signal that this is a toggleable
+   state button; the label is the signal for which state it's in.
+   Inactive: "All details" (the action it'll perform on click).
+   Active:   "Hide details" (same outline, label flipped). */
+.ed-overview-alldetails-btn {
+  background: #2a2a2a;
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.15rem 0.6rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.ed-overview-alldetails-btn:hover { background: #3a3a3a; }
+
+/* v0.8.186: vertical separator between the class-chip group and the
+   "All details" action button. Matches the `.ed-tools` divider
+   convention from the top toolbar (1px #444 + 0.5rem of breathing
+   room on the right side). */
+.ed-overview-toolbar-sep {
+  display: inline-block;
+  width: 1px;
+  align-self: stretch;
+  background: #444;
+  margin: 0 0.5rem 0 0.25rem;
+}
+
+/* Resume chip — appears at the bottom of the viewport when both
+   overlays are hidden after a jump-to-canvas. */
+/* v0.8.178: resume chip uses the accent color so users actually
+   notice it — the previous dark-grey version was too discreet against
+   the canvas. The dismiss × on the right has a darker tinted bg so it
+   doesn't disappear into the orange but still reads as part of the chip. */
+.ed-overview-resume-chip {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: stretch;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+.ed-overview-resume-btn {
+  background: transparent;
+  color: #1a1a1a;
+  border: none;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ed-overview-resume-btn:hover { filter: brightness(1.1); }
+.ed-overview-resume-close {
+  background: rgba(0, 0, 0, 0.25);
+  color: #1a1a1a;
+  border: none;
+  border-left: 1px solid rgba(0, 0, 0, 0.35);
+  padding: 0 0.85rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ed-overview-resume-close:hover { background: rgba(0, 0, 0, 0.45); color: #fff; }
+
 /* Master library overlay — wider than the standard modal so the
    per-master row (preview + meta + chips + actions) fits
    comfortably. Scroll lives inside the list, not the modal. */

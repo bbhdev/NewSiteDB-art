@@ -790,6 +790,191 @@ Two small ergonomic fixes after the main block-panel batch:
   against the row's other children — the available width is
   measured directly from the flex layout, not estimated.
 
+### Project hub modal — slice 1 (v0.8.173)
+
+The toolbar's "▦ Library" button was renamed to "▦ Project" and now
+opens a new hub modal (`showProjectDialog`) that supersedes
+`showLibraryDialog`. The previous library modal had been accreting
+unrelated affordances (Snapshots, Orphans) because there was no
+better home for them — the rename and refactor address that drift.
+
+Architecture:
+
+- **Home view** — 2×2 tile grid: **Master library**, **Overview**,
+  **Orphans**, **Snapshots**. Each tile shows a label + one-line
+  hint and routes via `setView(view)`.
+- **Sub-section view** — header swaps title + reveals a Back chip
+  (`‹ Back`) returning to home. Top-right `×` always cleans up the
+  whole overlay regardless of depth.
+- **Master library** sub-section reuses the original library body
+  (search input + class-filter chips in the header + master rows
+  with preview/meta/chips/actions). Class-filter row is created
+  once in the header and shown/hidden per view. `renderRows()`
+  guards against being invoked before the masters body is mounted.
+- **Overview** sub-section: stub message — its dedicated panel
+  (stacked *above* the Project modal) ships in slice 2.
+- **Orphans / Snapshots** tiles currently close the Project hub and
+  launch their existing sibling overlays (`showOrphansDialog`,
+  `showSnapshotsDialog`). Folding them into proper inline
+  sub-sections is a later slice — the existing overlays already work
+  and have their own state machines; absorbing them now would bloat
+  this slice.
+
+HTML id `library-btn` is kept for backward compat; only the
+`textContent` and click handler changed. Existing CSS for
+`.ed-library-*` (rows, search, filters, etc.) is untouched and
+inherited by the Master library sub-section — new CSS is scoped to
+`.ed-project-*` (modal width, header, back chip, tile grid, stub).
+
+### Overview panel — slice 2 (v0.8.176–v0.8.191)
+
+The Overview tile on the Project hub opens a dedicated panel that
+stacks **above** the hub overlay (z-index 60 vs the standard
+modal's 50). Both overlays stay in the DOM simultaneously, so
+**Back** removes only the overview and the hub is immediately
+interactive again — no rebuild, no lost state.
+
+Layout (v0.8.177 settled sizing):
+
+- Panel sizes to `98vw × 95vh` (no min/max) — Overview is the
+  primary thing on screen while open; small breathing margin only.
+- Header: Back chip · "Overview" title · class chips
+  (defaults to `state.classId`) · close × (closes BOTH layers).
+- Search row directly under the header (above the scrolling body)
+  so filters stay visible while scrolling.
+
+Per-class body (single-class default — diff mode is slice 3):
+
+- Iterates `state.groups` order. Group rows reuse the editor's
+  `.ed-group` / `.ed-group-row` / `.ed-group-toggle` / `.ed-group-name`
+  / `.ed-group-count` classes — same visual language as the
+  sidebar. Read-only: eye / delete buttons aren't rendered.
+  Group head is `position: sticky` so its context stays visible.
+- Hidden groups and hidden lines are excluded.
+- Each line row is two columns:
+  - **Vignette** — left, reuses the Master library's
+    `buildPreview(master|line)` helper (hoisted to module scope in
+    v0.8.177 specifically for this reuse). Visual continuity
+    between Master library and Overview rows. Falls back to using
+    the line itself when there's no master link.
+  - **Main** — object name (jumps on click) · `N block(s)` chip ·
+    `Details ▾` toggle (only when blocks present) · one-line per
+    behavior via `behaviorAutoName(block, idx)`.
+
+Details toggle: clicking expands an inline detail panel under the
+row showing, per block, `behaviorAutoName` as a sub-header and
+`behaviorSummaryText(block)` as a prose paragraph (same content the
+sidebar's behavior block summary uses). Toggling re-collapses.
+Centralizing through these two formatters means future block-
+semantics changes flow into the overview automatically — no
+parallel change list to maintain.
+
+Jump-to-canvas hide-and-resume:
+
+- Clicking the vignette OR the object name calls `jumpToLine(line)`:
+  switches class if needed (`switchClass`), opens the line's group,
+  `selectOnly(line.id)`, `renderAll()`, then sets `display: none`
+  on both the overview overlay and the hub overlay.
+- A floating "Resume overview" chip appears centered at the bottom
+  of the viewport (`z-index: 70`). `↩ Resume overview` re-shows
+  both layers and removes the chip; the `×` closes both layers for
+  good.
+- Because layers are hidden (not removed), search query, class
+  selection, scroll position and any expanded Details panels are
+  all preserved across the jump.
+
+Helper hoist (v0.8.177): `buildPreview(master)` and
+`previewViewBox(line)` moved from `showProjectDialog`'s closure to
+module scope. Both depend only on module-level helpers
+(`computeLineD`, `resolveStroke`, `SVG_NS`), so the hoist was
+mechanical — no API change. The inner duplicates in
+`showProjectDialog` were removed.
+
+Drag + resize (v0.8.179): the overview is movable (drag the header
+row anywhere except buttons/inputs) and resizable (bottom-right grip
+handle). Implemented inline in `showOverviewPanel` — lightweight,
+not registered with `PanelManager`, no per-page persistence. The
+overlay's flex-centering is disabled so the panel can be absolutely
+positioned (`initGeometry` centers it at 98vw × 95vh on open).
+Header `cursor: move`; clicks on `button/input/select/a` inside the
+header don't initiate a drag. Mouse listeners are removed on close.
+
+Click mapping (v0.8.180 → v0.8.181): the row's two affordances were
+swapped from the slice-2 default. The button to the right is now
+**On canvas** and calls `jumpToLine(line)` (rendered on every row,
+since jumping is useful even when there are no behaviors). Toggling
+details is the row's own click — the WHOLE row is the click target
+(v0.8.181 widened this from "object + name only" because aiming at
+the small name was fiddly). The "On canvas" button's handler calls
+`e.stopPropagation()` so clicking it does not also toggle details.
+Rows with zero blocks are non-clickable for toggling (cursor stays
+default). v0.8.183: row no longer carries a `title=` tooltip — it
+fired on every hover and was intrusive; the pointer cursor + the
+adjacent "On canvas" button already communicate the affordance.
+
+Per-class data rendering (v0.8.190–191): groups are stored
+per-class (`state.byClass[cid].groups`, each with a distinct id —
+the addGroup fanout assigns a fresh id per class even when names
+match). The overview's renderBody reads from
+`state.byClass[activeClassId]` for both lines AND groups; the
+earlier `state.groups` getter pointed at the EDITOR's currently-
+selected class, which produced wrong (or absent) groups when the
+user switched class chips in the overview. Empty groups now render
+(sidebar parity) — the prior "skip if no lines" rule made distinct
+class group lists visually identical when their extra groups
+happened to be empty. Search-filter still drops groups that match
+neither by name nor by any line. Group names and object names now
+include "(id)" — same disambiguation rule as the behavior side-
+effect labels.
+
+Header toolbar state-button convention (v0.8.189): the "All details"
+button uses an outline-always-visible style — accent border is shown
+in both states; only the label changes ("All details" ↔ "Hide
+details"). This differs from the per-row `.ed-overview-details-btn`
+(neutral border off / accent on) and the top-toolbar `.ed-tool`
+(same neutral-off/accent-on). The user's explicit convention call:
+outline = "this is a toggle", label = "current state". Dedicated
+class `.ed-overview-alldetails-btn` keeps it from drifting into the
+per-row toggles.
+
+Header toolbar (v0.8.184–185): "All details" state-button sits on
+the LEFT, grouped with the class chips — the toolbar reads left-to-
+right (navigation chips → global action → close × at the far right).
+A flex-grow `ed-overview-toolbar-spacer` between the button and ×
+pushes the close to the edge. Button follows the app-wide state-
+button convention: accent outline when active + label swap ("All
+details" ↔ "Hide details"). Clicking toggles `is-details-open` on
+every existing row; `allDetailsOpen` flag also seeds rows freshly
+built by search-filter re-renders.
+
+Detail body composition (v0.8.182): the block's detail box renders
+up to three lines — `behaviorSummaryText` (trigger × duration +
+cross-object side effects), `behaviorEffectsText` (per-effect
+values: translate / rotate / fade / opacity / draw-in), and
+`behaviorDriftLineText` (drift or path-follow, when applicable).
+The translate part of effects is suppressed when `translateMode`
+is a drift, since the drift line covers it. behaviorEffectsText
+returns null when there are no animated params, so the line is
+skipped instead of rendering an empty placeholder. All three
+helpers are reused by the sidebar block-summary too — single
+source of truth.
+
+ID display in detail prose (v0.8.179): `behaviorSummaryText` and
+`behaviorAutoName` both resolve `startObjectId` / `stopObjectId` to
+`name (id)` rather than either bare. Earlier code emitted the raw
+masterId for stops (`stops "m-bnpe9wzv"`). Decision rationale: the
+ID is useless on its own but indispensable as a disambiguator when
+multiple objects share a name, so neither pole works alone — combined
+format is the rule everywhere these labels are formatted.
+
+Project hub button labels for Orphans / Snapshots now route through
+those dialogs' optional `onBack` callback (v0.8.174), which prepends
+a `‹ Back` chip to the dialog header. Because `.ed-modal-header`
+uses `justify-content: space-between` with no gap (unlike
+`.ed-project-header` which has `gap: 0.5rem`), the inline back chip
+is given `marginRight: 0.5rem` to match the visual rhythm of the
+hub's own header (v0.8.175).
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:

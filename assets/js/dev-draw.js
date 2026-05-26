@@ -5717,7 +5717,9 @@
   // content/. Load refuses on schemaVersion mismatch — the bump
   // signal that the on-disk shape has changed and the snapshot is
   // no longer structurally compatible.
-  function showSnapshotsDialog() {
+  // v0.8.174: optional onBack callback — when launched from the Project
+  // hub, a Back chip in the header re-opens the hub on cleanup.
+  function showSnapshotsDialog(onBack) {
     const overlay = document.createElement('div');
     overlay.className = 'ed-modal-overlay';
     const modal = document.createElement('div');
@@ -5725,11 +5727,24 @@
 
     const head = document.createElement('div');
     head.className = 'ed-modal-header';
+    if (typeof onBack === 'function') {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'ed-project-back';
+      back.innerHTML = '‹ Back';
+      back.title = 'Back to Project hub';
+      // .ed-modal-header has no gap (unlike .ed-project-header), so
+      // the chip would sit flush against the title — add inline spacing.
+      back.style.marginRight = '0.5rem';
+      back.addEventListener('click', function () { cleanup(); onBack(); });
+      head.appendChild(back);
+    }
     const title = document.createElement('h3');
     title.textContent = 'Snapshots';
     head.appendChild(title);
     const x = document.createElement('button');
     x.className = 'ed-modal-close'; x.textContent = '×';
+    x.style.marginLeft = 'auto';
     x.addEventListener('click', cleanup);
     head.appendChild(x);
     modal.appendChild(head);
@@ -5968,7 +5983,9 @@
     };
   }
 
-  function showOrphansDialog() {
+  // v0.8.174: optional onBack callback — when launched from the Project
+  // hub, a Back chip in the header re-opens the hub on cleanup.
+  function showOrphansDialog(onBack) {
     const overlay = document.createElement('div');
     overlay.className = 'ed-modal-overlay';
     const modal = document.createElement('div');
@@ -5976,11 +5993,24 @@
 
     const head = document.createElement('div');
     head.className = 'ed-modal-header';
+    if (typeof onBack === 'function') {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'ed-project-back';
+      back.innerHTML = '‹ Back';
+      back.title = 'Back to Project hub';
+      // .ed-modal-header has no gap (unlike .ed-project-header), so
+      // the chip would sit flush against the title — add inline spacing.
+      back.style.marginRight = '0.5rem';
+      back.addEventListener('click', function () { cleanup(); onBack(); });
+      head.appendChild(back);
+    }
     const title = document.createElement('h3');
     title.textContent = 'Find orphans';
     head.appendChild(title);
     const x = document.createElement('button');
     x.className = 'ed-modal-close'; x.textContent = '×';
+    x.style.marginLeft = 'auto';
     x.addEventListener('click', cleanup);
     head.appendChild(x);
     modal.appendChild(head);
@@ -6281,58 +6311,115 @@
     render();
   }
 
-  function showLibraryDialog() {
+  // v0.8.177: hoisted out of the Project hub closure so the Overview
+  // panel can reuse the same per-master vignette (visual continuity
+  // between Master library and Overview rows). Inputs: a master-like
+  // object with `kind`, optional `params`/`points`/`segments`, `stroke`,
+  // `filled`, `linejoin`. Output: a `.ed-library-preview` wrapper div
+  // containing either an SVG path fit-scaled into a viewBox, or a
+  // placeholder glyph for image/empty cases.
+  function buildPreview(master) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-library-preview';
+    if (master.kind === 'image') {
+      wrap.classList.add('is-placeholder');
+      wrap.textContent = '🖼';
+      return wrap;
+    }
+    const tmp = Object.assign({ d: '' }, master);
+    try { computeLineD(tmp); } catch (e) { /* let d stay empty */ }
+    if (!tmp.d) {
+      wrap.classList.add('is-placeholder');
+      wrap.textContent = '·';
+      return wrap;
+    }
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', previewViewBox(tmp));
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', tmp.d);
+    const stroke = resolveStroke(master.stroke || 'text') || 'currentColor';
+    p.setAttribute('stroke', stroke);
+    p.setAttribute('stroke-width', '2');
+    p.setAttribute('vector-effect', 'non-scaling-stroke');
+    p.setAttribute('fill', master.filled ? stroke : 'none');
+    p.setAttribute('stroke-linejoin', master.linejoin || 'round');
+    p.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(p);
+    wrap.appendChild(svg);
+    return wrap;
+  }
+
+  function previewViewBox(line) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const eat = function (x, y) {
+      if (x < minX) minX = x; if (y < minY) minY = y;
+      if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+    };
+    if (line.params) {
+      const p = line.params;
+      if ('cx' in p && 'cy' in p) {
+        const r = p.r || Math.max(p.rx || 0, p.ry || 0) || 1;
+        eat(p.cx - r, p.cy - r); eat(p.cx + r, p.cy + r);
+      } else if ('x' in p && 'y' in p && 'w' in p && 'h' in p) {
+        eat(p.x, p.y); eat(p.x + p.w, p.y + p.h);
+      }
+    }
+    if (Array.isArray(line.points)) {
+      line.points.forEach(function (pt) { eat(pt.x, pt.y); });
+    }
+    if (Array.isArray(line.segments)) {
+      line.segments.forEach(function (s) {
+        if (s.endpoint) eat(s.endpoint.x, s.endpoint.y);
+      });
+    }
+    if (!Number.isFinite(minX)) { minX = 0; minY = 0; maxX = 100; maxY = 100; }
+    const w = Math.max(1, maxX - minX);
+    const h = Math.max(1, maxY - minY);
+    const pad = Math.max(w, h) * 0.1;
+    return (minX - pad) + ' ' + (minY - pad) + ' ' +
+           (w + pad * 2) + ' ' + (h + pad * 2);
+  }
+
+  // v0.8.173: Project hub modal (formerly the Library modal). Provides
+  // a 4-tile home view that routes to: Master library, Overview,
+  // Orphans, Snapshots. Master library is rendered inline as a level-2
+  // sub-section with a Back button; Overview is stubbed pending its
+  // dedicated panel build (slice 2). Orphans and Snapshots tiles still
+  // launch their existing sibling overlays for now — folding them in as
+  // inline sub-sections is a later slice. The top-right × always closes
+  // the whole project modal regardless of which view is active.
+  function showProjectDialog() {
     const overlay = document.createElement('div');
     overlay.className = 'ed-modal-overlay';
     const modal = document.createElement('div');
-    modal.className = 'ed-modal ed-library-modal';
+    modal.className = 'ed-modal ed-project-modal';
 
-    // Filter state: classFilter === null → show every master.
-    // Set to a class id → show only masters with ≥1 instance in
-    // that class. Toggled via the per-class buttons in the header.
-    let classFilter = null;
-
+    // Header — title swaps between "Project" (home) and the active
+    // sub-section title; a Back button appears in sub-section views.
     const head = document.createElement('div');
-    head.className = 'ed-modal-header ed-library-header';
+    head.className = 'ed-modal-header ed-project-header';
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'ed-project-back';
+    backBtn.innerHTML = '‹ Back';
+    backBtn.title = 'Back to Project hub';
+    backBtn.style.display = 'none';
+    backBtn.addEventListener('click', function () { setView('home'); });
+    head.appendChild(backBtn);
+
     const title = document.createElement('h3');
-    title.textContent = 'Master library';
+    title.textContent = 'Project';
     head.appendChild(title);
 
-    // v0.8.34: snapshots affordance. Opens the snapshots dialog as a
-    // sibling overlay (this library modal stays open underneath so
-    // the user can dismiss snapshots and come back to filter/search
-    // without losing their place).
-    const snapBtn = document.createElement('button');
-    snapBtn.type = 'button';
-    snapBtn.className = 'ed-library-snapshots-btn';
-    // v0.8.40: see ARROW_SVG_* — inline SVG so this arrow and the
-    // Import button's arrow render identically across platforms.
-    snapBtn.innerHTML = ARROW_SVG_UP_HTML + ' Snapshots';
-    snapBtn.title = 'Save / load named copies of every content file';
-    snapBtn.addEventListener('click', function () { showSnapshotsDialog(); });
-    head.appendChild(snapBtn);
-
-    // v0.8.43: orphans cleanup affordance, same idiom as Snapshots.
-    // Opens a sibling overlay listing orphan masters, unused colors,
-    // empty groups, and dangling-ref instances.
-    // v0.8.45: monochrome magnifying-glass SVG instead of the 🧹
-    // emoji — colored emoji break the editor's white-on-dark icon
-    // vocabulary, and the broom had a dark segment that vanished
-    // against the button background.
-    const orphBtn = document.createElement('button');
-    orphBtn.type = 'button';
-    orphBtn.className = 'ed-library-snapshots-btn';
-    orphBtn.innerHTML = FIND_ICON_SVG_HTML + ' Orphans';
-    orphBtn.title = 'Detect masters with no instances, unused palette colors, empty groups, and instances with broken master/group refs — remove them piecemeal or in bulk.';
-    orphBtn.addEventListener('click', function () { showOrphansDialog(); });
-    head.appendChild(orphBtn);
-
-    // Class filter buttons — one per screen class, plus an "All"
-    // reset. Active button shows accent border like the class
-    // tabs do, so the visual language is consistent.
+    // Master-library sub-section needs class-filter buttons in the
+    // header — created once and shown/hidden on view change.
+    let classFilter = null;
+    const filterButtons = [];
     const filterRow = document.createElement('div');
     filterRow.className = 'ed-library-filter';
-    const filterButtons = [];
+    filterRow.style.display = 'none';
     const addFilterBtn = function (label, cid) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -6365,26 +6452,103 @@
     modal.appendChild(head);
 
     const body = document.createElement('div');
-    body.className = 'ed-modal-body ed-library-body';
-
-    const search = document.createElement('input');
-    search.type = 'search';
-    search.placeholder = 'Filter by name…';
-    search.className = 'ed-library-search';
-    search.addEventListener('input', renderRows);
-    body.appendChild(search);
-
-    const list = document.createElement('div');
-    list.className = 'ed-library-list';
-    body.appendChild(list);
-
+    body.className = 'ed-modal-body ed-project-body';
     modal.appendChild(body);
+
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
-    renderRows();
-    search.focus();
+
+    // Sub-section refs used by Master library renderer (created lazily
+    // when the masters view mounts; kept as closure locals so renderRows
+    // can target them).
+    let search = null;
+    let list = null;
+
+    setView('home');
+
+    function setView(view) {
+      body.innerHTML = '';
+      if (view === 'home') {
+        title.textContent = 'Project';
+        backBtn.style.display = 'none';
+        filterRow.style.display = 'none';
+        mountHomeView();
+        return;
+      }
+      backBtn.style.display = '';
+      if (view === 'masters') {
+        title.textContent = 'Master library';
+        filterRow.style.display = '';
+        mountMastersView();
+      }
+      // v0.8.176: 'overview' is no longer a Project-hub sub-section —
+      // it opens as a separate panel above the hub via showOverviewPanel.
+    }
+
+    function mountHomeView() {
+      const grid = document.createElement('div');
+      grid.className = 'ed-project-tiles';
+
+      const addTile = function (label, hint, onClick) {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'ed-project-tile';
+        const lab = document.createElement('div');
+        lab.className = 'ed-project-tile-label';
+        lab.textContent = label;
+        tile.appendChild(lab);
+        const sub = document.createElement('div');
+        sub.className = 'ed-project-tile-hint';
+        sub.textContent = hint;
+        tile.appendChild(sub);
+        tile.addEventListener('click', onClick);
+        grid.appendChild(tile);
+        return tile;
+      };
+
+      addTile('Master library',
+        'Browse every master across the site — usage chips per class, scope summary, delete canonical objects.',
+        function () { setView('masters'); });
+      addTile('Overview',
+        'Read-only behaviors review across the whole design (single-class default, diff mode opt-in).',
+        // v0.8.176: Overview lives in its OWN panel stacked above the
+        // Project hub (not as a sub-section inside it). The hub stays
+        // in the DOM behind it so Back returns to the hub without
+        // rebuilding state. The hub's overlay reference is passed in
+        // so the panel can hide-and-resume both layers on jump-to-canvas.
+        function () { showOverviewPanel(overlay); });
+      addTile('Orphans',
+        'Detect masters with no instances, unused palette colors, empty groups, and dangling refs.',
+        function () { cleanup(); showOrphansDialog(showProjectDialog); });
+      addTile('Snapshots',
+        'Save / load named copies of every content file.',
+        function () { cleanup(); showSnapshotsDialog(showProjectDialog); });
+
+      body.appendChild(grid);
+    }
+
+    function mountMastersView() {
+      body.classList.add('ed-library-body');
+      search = document.createElement('input');
+      search.type = 'search';
+      search.placeholder = 'Filter by name…';
+      search.className = 'ed-library-search';
+      search.addEventListener('input', renderRows);
+      body.appendChild(search);
+
+      list = document.createElement('div');
+      list.className = 'ed-library-list';
+      body.appendChild(list);
+
+      renderRows();
+      search.focus();
+    }
 
     function renderRows() {
+      // Filter-button clicks can fire renderRows before the masters
+      // sub-section has been mounted (or after switching back to home).
+      // Bail safely in those cases.
+      if (!list || !search) return;
       list.innerHTML = '';
       const query = search.value.trim().toLowerCase();
       const masters = state.masters
@@ -6564,74 +6728,8 @@
       return row;
     }
 
-    function buildPreview(master) {
-      const wrap = document.createElement('div');
-      wrap.className = 'ed-library-preview';
-      // Bake a transient line to compute its d, then fit-scale into
-      // a 48×48 SVG. For image kind we show a 🖼 placeholder since
-      // <image> elements require URL fetches in the modal.
-      if (master.kind === 'image') {
-        wrap.classList.add('is-placeholder');
-        wrap.textContent = '🖼';
-        return wrap;
-      }
-      const tmp = Object.assign({ d: '' }, master);
-      try { computeLineD(tmp); } catch (e) { /* let d stay empty */ }
-      if (!tmp.d) {
-        wrap.classList.add('is-placeholder');
-        wrap.textContent = '·';
-        return wrap;
-      }
-      const svg = document.createElementNS(SVG_NS, 'svg');
-      svg.setAttribute('viewBox', previewViewBox(tmp));
-      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-      const p = document.createElementNS(SVG_NS, 'path');
-      p.setAttribute('d', tmp.d);
-      const stroke = resolveStroke(master.stroke || 'text') || 'currentColor';
-      p.setAttribute('stroke', stroke);
-      p.setAttribute('stroke-width', '2');
-      p.setAttribute('vector-effect', 'non-scaling-stroke');
-      p.setAttribute('fill', master.filled ? stroke : 'none');
-      p.setAttribute('stroke-linejoin', master.linejoin || 'round');
-      p.setAttribute('stroke-linecap', 'round');
-      svg.appendChild(p);
-      wrap.appendChild(svg);
-      return wrap;
-    }
-
-    function previewViewBox(line) {
-      // Derive a viewBox from the line's bbox by inspecting params
-      // or points. Falls back to a wide default so badly-formed
-      // entries still render something.
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      const eat = function (x, y) {
-        if (x < minX) minX = x; if (y < minY) minY = y;
-        if (x > maxX) maxX = x; if (y > maxY) maxY = y;
-      };
-      if (line.params) {
-        const p = line.params;
-        if ('cx' in p && 'cy' in p) {
-          const r = p.r || Math.max(p.rx || 0, p.ry || 0) || 1;
-          eat(p.cx - r, p.cy - r); eat(p.cx + r, p.cy + r);
-        } else if ('x' in p && 'y' in p && 'w' in p && 'h' in p) {
-          eat(p.x, p.y); eat(p.x + p.w, p.y + p.h);
-        }
-      }
-      if (Array.isArray(line.points)) {
-        line.points.forEach(function (pt) { eat(pt.x, pt.y); });
-      }
-      if (Array.isArray(line.segments)) {
-        line.segments.forEach(function (s) {
-          if (s.endpoint) eat(s.endpoint.x, s.endpoint.y);
-        });
-      }
-      if (!Number.isFinite(minX)) { minX = 0; minY = 0; maxX = 100; maxY = 100; }
-      const w = Math.max(1, maxX - minX);
-      const h = Math.max(1, maxY - minY);
-      const pad = Math.max(w, h) * 0.1;
-      return (minX - pad) + ' ' + (minY - pad) + ' ' +
-             (w + pad * 2) + ' ' + (h + pad * 2);
-    }
+    // v0.8.177: buildPreview / previewViewBox hoisted to module scope
+    // so showOverviewPanel can reuse them. See module-level definitions.
 
     function countMasterUsage(masterId) {
       const counts = {};
@@ -6671,6 +6769,499 @@
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) cleanup();
     });
+  }
+
+  // v0.8.176: Overview panel (slice 2). Stacks ABOVE the Project hub —
+  // both overlays stay in the DOM simultaneously so Back returns to the
+  // hub without rebuilding it. Single-class view (current active class
+  // by default; user can switch via class chips). Diff mode is opt-in
+  // and ships in slice 3. Jump-to-canvas HIDES both overlays and shows
+  // a floating "Resume overview" chip — the user can fix a problem on
+  // canvas and resume reviewing without losing position. The chip's ×
+  // closes both overlays for good.
+  function showOverviewPanel(hubOverlay) {
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay ed-overview-overlay';
+
+    const panel = document.createElement('div');
+    panel.className = 'ed-modal ed-overview-panel';
+
+    // Header.
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header ed-overview-header';
+
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'ed-project-back';
+    back.innerHTML = '‹ Back';
+    back.title = 'Back to Project hub';
+    back.addEventListener('click', function () { closeOverviewOnly(); });
+    head.appendChild(back);
+
+    const title = document.createElement('h3');
+    title.textContent = 'Overview';
+    head.appendChild(title);
+
+    // Class chips — single-class view, one chip per useClass; active
+    // chip uses the same is-active style as the library filter.
+    let activeClassId = state.classId;
+    const classRow = document.createElement('div');
+    classRow.className = 'ed-library-filter ed-overview-classes';
+    const classButtons = [];
+    state.pageConfig.useClasses.forEach(function (cid) {
+      const cls = state.classes.find(function (c) { return c.id === cid; });
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ed-library-filter-btn' + (cid === activeClassId ? ' is-active' : '');
+      b.textContent = cls ? cls.name : cid;
+      b.addEventListener('click', function () {
+        activeClassId = cid;
+        classButtons.forEach(function (e) { e.el.classList.toggle('is-active', e.cid === cid); });
+        renderBody();
+      });
+      classButtons.push({ el: b, cid: cid });
+      classRow.appendChild(b);
+    });
+    head.appendChild(classRow);
+
+    // v0.8.186: vertical separator between the class chips and the
+    // global "All details" action — same look as the top-toolbar
+    // `.ed-tools` group divider (1px #444 with left padding). Matches
+    // the visual grouping pattern the rest of the app uses.
+    const sep = document.createElement('span');
+    sep.className = 'ed-overview-toolbar-sep';
+    head.appendChild(sep);
+
+    // "All details" — state button (accent outline + label swap to
+    // "Hide details" when active). Sits on the LEFT, grouped with the
+    // class chips; a flex spacer after it pushes × to the right edge.
+    let allDetailsOpen = false;
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    // v0.8.189: distinct class — this button follows the
+    // "outline-always-visible, label-swap on state" convention the
+    // user described. The per-row `.ed-overview-details-btn` follows
+    // a different one (neutral off / accent on), so we can't reuse it.
+    allBtn.className = 'ed-overview-alldetails-btn';
+    allBtn.textContent = 'All details';
+    allBtn.title = 'Open every block detail at once';
+    allBtn.addEventListener('click', function () {
+      allDetailsOpen = !allDetailsOpen;
+      allBtn.classList.toggle('is-active', allDetailsOpen);
+      allBtn.textContent = allDetailsOpen ? 'Hide details' : 'All details';
+      const rows = body.querySelectorAll('.ed-overview-row');
+      rows.forEach(function (r) {
+        r.classList.toggle('is-details-open', allDetailsOpen);
+      });
+    });
+    head.appendChild(allBtn);
+
+    const spacer = document.createElement('span');
+    spacer.className = 'ed-overview-toolbar-spacer';
+    head.appendChild(spacer);
+
+    const close = document.createElement('button');
+    close.className = 'ed-modal-close'; close.textContent = '×';
+    close.title = 'Close Overview and Project hub';
+    close.addEventListener('click', function () { closeEverything(); });
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    // Search row (above the body so it stays visible while scrolling).
+    const searchRow = document.createElement('div');
+    searchRow.className = 'ed-overview-searchrow';
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.placeholder = 'Filter by object or group name…';
+    search.className = 'ed-library-search';
+    search.addEventListener('input', renderBody);
+    searchRow.appendChild(search);
+    panel.appendChild(searchRow);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body ed-overview-body';
+    panel.appendChild(body);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    // v0.8.179: drag (header) + resize (bottom-right grip), like the
+    // object panels. The panel is absolutely positioned inside the
+    // overlay; initial geometry centers it occupying most of the
+    // viewport. Drag and resize manipulate panel.style.{left,top,w,h}
+    // directly — lightweight, no PanelManager integration (overview
+    // is transient, no persistence across reopens).
+    (function initGeometry() {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const w  = Math.round(vw * 0.98);
+      const h  = Math.round(vh * 0.95);
+      panel.style.position = 'absolute';
+      panel.style.width  = w + 'px';
+      panel.style.height = h + 'px';
+      panel.style.left   = Math.round((vw - w) / 2) + 'px';
+      panel.style.top    = Math.round((vh - h) / 2) + 'px';
+      panel.style.maxWidth  = 'none';
+      panel.style.maxHeight = 'none';
+    })();
+
+    // Add the resize grip in the bottom-right corner.
+    const grip = document.createElement('div');
+    grip.className = 'ed-overview-resize';
+    grip.title = 'Drag to resize';
+    panel.appendChild(grip);
+
+    // Drag state — module-private to this panel instance.
+    let dragRef = null, rzRef = null;
+    function onMouseMove(e) {
+      if (dragRef) {
+        const dx = e.clientX - dragRef.x, dy = e.clientY - dragRef.y;
+        // Keep at least 60px of the header visible inside the viewport
+        // on each side so the user can always grab it back.
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const w  = panel.offsetWidth;
+        let nx = dragRef.px + dx, ny = dragRef.py + dy;
+        nx = Math.max(60 - w, Math.min(vw - 60, nx));
+        ny = Math.max(0,      Math.min(vh - 28, ny));
+        panel.style.left = nx + 'px';
+        panel.style.top  = ny + 'px';
+      } else if (rzRef) {
+        const dx = e.clientX - rzRef.x, dy = e.clientY - rzRef.y;
+        const w = Math.max(420, rzRef.w + dx);
+        const h = Math.max(280, rzRef.h + dy);
+        panel.style.width  = w + 'px';
+        panel.style.height = h + 'px';
+      }
+    }
+    function onMouseUp() {
+      dragRef = null;
+      rzRef = null;
+      document.body.style.userSelect = '';
+    }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup',   onMouseUp);
+
+    head.addEventListener('mousedown', function (e) {
+      // Don't start a drag when the user is clicking a control inside
+      // the header (Back, class chips, ×, etc.) or selecting text.
+      if (e.target.closest('button, input, select, a')) return;
+      dragRef = { x: e.clientX, y: e.clientY,
+                  px: panel.offsetLeft, py: panel.offsetTop };
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    head.style.cursor = 'move';
+
+    grip.addEventListener('mousedown', function (e) {
+      rzRef = { x: e.clientX, y: e.clientY,
+                w: panel.offsetWidth, h: panel.offsetHeight };
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    renderBody();
+    search.focus();
+
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeOverviewOnly();
+    });
+
+    function onKey(e) { if (e.key === 'Escape') closeOverviewOnly(); }
+
+    function closeOverviewOnly() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup',   onMouseUp);
+    }
+    function closeEverything() {
+      closeOverviewOnly();
+      if (hubOverlay && hubOverlay.parentNode) hubOverlay.remove();
+    }
+
+    function renderBody() {
+      body.innerHTML = '';
+      const query = search.value.trim().toLowerCase();
+      const bucket = state.byClass[activeClassId];
+      const lines  = (bucket && Array.isArray(bucket.lines))  ? bucket.lines  : [];
+      // v0.8.190: groups are PER-CLASS — `state.byClass[cid].groups`
+      // is the source of truth. The previous code used `state.groups`,
+      // which is a getter for `state.byClass[state.classId].groups`
+      // (the EDITOR's currently-selected class, not the overview's).
+      // Result: when the user clicked a different class chip in the
+      // overview header, the loop iterated the editor-class's groups
+      // and filtered lines by `l.groupId === g.id` — virtually no
+      // matches, since group IDs differ per class. Only stray matches
+      // (or the very first group, if IDs happened to collide) rendered.
+      const groups = (bucket && Array.isArray(bucket.groups)) ? bucket.groups : [];
+
+      // Iterate the active class's groups order — same as the sidebar
+      // would show if the editor were on that class. Hidden groups and
+      // hidden lines are excluded per spec.
+      let printedAny = false;
+      groups.forEach(function (g) {
+        if (g.hidden) return;
+        const groupLines = lines.filter(function (l) {
+          return l.groupId === g.id && !l.hidden;
+        });
+        // v0.8.191: empty groups now render (parity with the sidebar
+        // group list, which shows "0 lines" entries). Without this,
+        // narrow/medium looked indistinguishable from wide whenever
+        // their extra groups happened to be empty — confusing data
+        // mismatch with the sidebar.
+
+        // Group-level filter pass: if a search query is set, keep
+        // group rows whose name matches OR which contain ≥1 matching
+        // line; otherwise the whole group renders.
+        const groupNameMatch = !query || (g.name || '').toLowerCase().indexOf(query) !== -1;
+        const matchingLines = query
+          ? groupLines.filter(function (l) {
+              const nm = (l.name || (l.masterId
+                ? (state.masters.find(function (m) { return m.id === l.masterId; }) || {}).name
+                : '') || l.id || '').toLowerCase();
+              return groupNameMatch || nm.indexOf(query) !== -1;
+            })
+          : groupLines;
+        // Under a search query, drop the group only when it has no
+        // matching lines AND its own name doesn't match — otherwise
+        // we'd show empty groups that don't match the query.
+        if (query && !matchingLines.length && !groupNameMatch) return;
+
+        // v0.8.177: reuse sidebar group styling so the overview reads
+        // as the same visual language as the editor. Wrapped in an
+        // `.ed-overview-group` for layout, but the head itself is a
+        // real `.ed-group` > `.ed-group-row` — same pill, same colors.
+        // Read-only: no eye / delete buttons.
+        const section = document.createElement('div');
+        section.className = 'ed-overview-group ed-group';
+
+        const ghead = document.createElement('div');
+        ghead.className = 'ed-group-row ed-overview-ghead';
+        ghead.style.cursor = 'default';
+        const toggle = document.createElement('span');
+        toggle.className = 'ed-group-toggle';
+        toggle.textContent = 'G' + (groups.indexOf(g) + 1);
+        ghead.appendChild(toggle);
+        const gname = document.createElement('span');
+        gname.className = 'ed-group-name';
+        // v0.8.191: append (ID) — sibling classes carry same-named
+        // groups with distinct IDs (the cross-class fanout assigns a
+        // fresh id per class). Showing the id lets the user actually
+        // verify whether "Group 4" in narrow and "Group 4" in wide
+        // are the matching peers or accidentally similar names.
+        gname.textContent = g.name + ' (' + g.id + ')';
+        ghead.appendChild(gname);
+        const gcount = document.createElement('span');
+        gcount.className = 'ed-group-count';
+        gcount.textContent = matchingLines.length + ' line' + (matchingLines.length === 1 ? '' : 's');
+        ghead.appendChild(gcount);
+        section.appendChild(ghead);
+
+        const list = document.createElement('div');
+        list.className = 'ed-overview-lines';
+        matchingLines.forEach(function (line) {
+          list.appendChild(buildLineRow(line));
+        });
+        section.appendChild(list);
+        body.appendChild(section);
+        printedAny = true;
+      });
+
+      if (!printedAny) {
+        const empty = document.createElement('div');
+        empty.className = 'ed-library-empty';
+        empty.textContent = query
+          ? 'No groups or lines match "' + query + '".'
+          : 'No visible groups or lines in this class.';
+        body.appendChild(empty);
+      }
+    }
+
+    function buildLineRow(line) {
+      const row = document.createElement('div');
+      row.className = 'ed-overview-row';
+      // v0.8.184: rows created after the toolbar's "All details"
+      // toggle is on must inherit the open state (search-filter
+      // re-renders re-create rows from scratch).
+      if (allDetailsOpen) row.classList.add('is-details-open');
+
+      // Two columns: vignette (left, reuses Master library preview)
+      // and main column (right) with name+chip+block list.
+      const master = line.masterId
+        ? (state.masters.find(function (m) { return m.id === line.masterId; }) || null)
+        : null;
+      // The vignette helper accepts any object exposing the master-
+      // shape fields. If a line lacks a master link, pass the line
+      // itself — it still has kind/params/points/stroke. The wrapper
+      // also doubles as the jump-to-canvas affordance so users can
+      // click the picture, not just the text.
+      const vignette = buildPreview(master || line);
+      vignette.classList.add('ed-overview-vignette');
+      const blocks = Array.isArray(line.behaviors) ? line.behaviors : [];
+      // v0.8.181: the WHOLE row is the click target for toggling
+      // details — aiming at a small name was fiddly. The "On canvas"
+      // button stops propagation so it still does its own job.
+      const toggleDetails = function () {
+        if (!blocks.length) return;
+        row.classList.toggle('is-details-open');
+      };
+      if (blocks.length) {
+        row.style.cursor = 'pointer';
+        // v0.8.183: no tooltip — it fired on every hover and became
+        // intrusive. The pointer cursor + the explicit "On canvas"
+        // button next to it already communicate that the rest of the
+        // row is its own click target.
+        row.addEventListener('click', function () { toggleDetails(); });
+      }
+      row.appendChild(vignette);
+
+      const main = document.createElement('div');
+      main.className = 'ed-overview-row-main';
+
+      const top = document.createElement('div');
+      top.className = 'ed-overview-row-top';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'ed-overview-row-name';
+      // v0.8.191: show "name (id)" — instances share names across
+      // classes (and with the master); the id is the only reliable
+      // disambiguator when something looks off. line.id is the
+      // instance id; for shared-master objects, the master id is also
+      // worth surfacing but instance id is what jump/select uses.
+      {
+        const nm = line.name || (master && master.name) || '';
+        nameEl.textContent = nm ? (nm + ' (' + line.id + ')') : line.id;
+      }
+      top.appendChild(nameEl);
+
+      const chip = document.createElement('span');
+      chip.className = 'ed-overview-row-chip';
+      chip.textContent = blocks.length + ' block' + (blocks.length === 1 ? '' : 's');
+      if (!blocks.length) chip.classList.add('is-empty');
+      top.appendChild(chip);
+
+      // v0.8.180: "On canvas" button replaces the previous "Details"
+      // toggle. It is the explicit jump-to-canvas action (was on the
+      // object click). Kept on every row, regardless of block count —
+      // jumping is useful even for objects with no behaviors.
+      const jumpBtn = document.createElement('button');
+      jumpBtn.type = 'button';
+      jumpBtn.className = 'ed-overview-details-btn';
+      jumpBtn.textContent = 'On canvas';
+      jumpBtn.title = 'Jump to this object on the canvas';
+      jumpBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        jumpToLine(line);
+      });
+      top.appendChild(jumpBtn);
+      main.appendChild(top);
+
+      if (!blocks.length) {
+        const none = document.createElement('div');
+        none.className = 'ed-overview-noblocks';
+        none.textContent = '(no behaviors)';
+        main.appendChild(none);
+      } else {
+        const bl = document.createElement('ul');
+        bl.className = 'ed-overview-blocks';
+        blocks.forEach(function (block, idx) {
+          const li = document.createElement('li');
+          li.className = 'ed-overview-block';
+          // Summary line — always visible.
+          const head = document.createElement('div');
+          head.className = 'ed-overview-block-head';
+          // Centralized formatter — future block-semantics changes
+          // flow through behaviorAutoName so the overview never
+          // drifts from the sidebar panel labels.
+          head.textContent = behaviorAutoName(block, idx);
+          li.appendChild(head);
+          // Details — pre-rendered hidden, revealed by the Details
+          // toggle on the row. behaviorSummaryText is the same prose
+          // the sidebar's behavior block summary uses (single source
+          // of truth for option descriptions).
+          // v0.8.182: detail = trigger/duration sentence
+          // (behaviorSummaryText) + per-effect values
+          // (behaviorEffectsText) + drift line (behaviorDriftLineText
+          // when applicable). Each goes on its own row so the user
+          // sees the same three slices the sidebar reveals.
+          const det = document.createElement('div');
+          det.className = 'ed-overview-block-detail';
+          const detLines = [];
+          detLines.push(behaviorSummaryText(block));
+          const fx = behaviorEffectsText(block);
+          if (fx) detLines.push(fx);
+          const isLast = idx === blocks.length - 1;
+          const drift = behaviorDriftLineText(block, isLast);
+          if (drift) detLines.push(drift);
+          detLines.forEach(function (txt, i) {
+            const p = document.createElement('div');
+            p.className = 'ed-overview-block-detail-line';
+            p.textContent = txt;
+            det.appendChild(p);
+          });
+          li.appendChild(det);
+          bl.appendChild(li);
+        });
+        main.appendChild(bl);
+      }
+      row.appendChild(main);
+      return row;
+    }
+
+    // Jump-to-canvas: HIDE (not remove) both layers; show a floating
+    // "Resume overview" chip. User can edit on canvas and resume
+    // reviewing without losing scroll position, class selection, or
+    // search query.
+    function jumpToLine(line) {
+      // Switch class if the line lives in a different class than the
+      // editor's current one.
+      if (activeClassId !== state.classId) {
+        switchClass(activeClassId);
+      }
+      // Open the line's group so the line panel renders.
+      if (line.groupId) {
+        state.activeGroupId = line.groupId;
+        state.openGroupIds[line.groupId] = true;
+      }
+      selectOnly(line.id);
+      renderAll();
+
+      // Hide both layers (preserve state).
+      overlay.style.display = 'none';
+      if (hubOverlay) hubOverlay.style.display = 'none';
+
+      const chip = document.createElement('div');
+      chip.className = 'ed-overview-resume-chip';
+      const resume = document.createElement('button');
+      resume.type = 'button';
+      resume.className = 'ed-overview-resume-btn';
+      resume.textContent = '↩ Resume overview';
+      resume.title = 'Re-show the Overview panel and the Project hub';
+      resume.addEventListener('click', function (e) {
+        e.stopPropagation();
+        overlay.style.display = '';
+        if (hubOverlay) hubOverlay.style.display = '';
+        chip.remove();
+      });
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'ed-overview-resume-close';
+      dismiss.textContent = '×';
+      dismiss.title = 'Close Overview (and Project hub) without resuming';
+      dismiss.addEventListener('click', function (e) {
+        // v0.8.178: belt-and-suspenders close — stop propagation so
+        // nothing else captures the click, remove the chip first, then
+        // tear down both hidden overlays via closeEverything (which
+        // also unhooks the mousemove/mouseup listeners installed by
+        // the drag/resize wiring in v0.8.179).
+        e.stopPropagation();
+        if (chip.parentNode) chip.remove();
+        closeEverything();
+      });
+      chip.appendChild(resume);
+      chip.appendChild(dismiss);
+      document.body.appendChild(chip);
+    }
   }
 
   function showCloneDialog() {
@@ -10170,13 +10761,17 @@
     // says "stops Brown dotty" instead of an opaque "stops other".
     // Falls back to the masterId itself if name lookup misses (e.g.
     // stale id pointing at a deleted master).
+    // v0.8.179: format is "name (id)" — id retained as disambiguator.
     function objLabelFor(masterId) {
       if (!masterId) return '';
+      let nm = null;
       const m = state.masters && state.masters.find(function (x) { return x.id === masterId; });
-      if (m && m.name) return m.name;
-      const ln = state.lines && state.lines.find(function (l) { return l.masterId === masterId; });
-      if (ln && ln.name) return ln.name;
-      return masterId;
+      if (m && m.name) nm = m.name;
+      if (!nm) {
+        const ln = state.lines && state.lines.find(function (l) { return l.masterId === masterId; });
+        if (ln && ln.name) nm = ln.name;
+      }
+      return nm ? (nm + ' (' + masterId + ')') : masterId;
     }
     if (trigger.stopObjectId)  effects.push('stops ' + objLabelFor(trigger.stopObjectId));
     if (trigger.startObjectId) effects.push('starts ' + objLabelFor(trigger.startObjectId));
@@ -10305,16 +10900,20 @@
     }
     let summary = act + ', ' + prog + '.';
     // v0.8.79: cross-object side effects on trigger fire. Resolve
-    // the opaque masterId to a human-readable label (master.name,
-    // else any instance's line.name, else the line.id, else the
-    // masterId itself as last resort).
+    // the opaque masterId to a human-readable label.
+    // v0.8.179: format is "name (id)" — name first for readability,
+    // id in parens so the user can still grep / disambiguate. Falls
+    // back to just the id when no name can be resolved.
     const labelForMasterId = function (mid) {
       if (!mid) return '';
       const master = state.masters.find(function (x) { return x.id === mid; });
-      if (master && master.name) return master.name;
-      const inst = state.lines.find(function (l) { return l.masterId === mid; });
-      if (inst && (inst.name || inst.id)) return inst.name || inst.id;
-      return mid;
+      let nm = null;
+      if (master && master.name) nm = master.name;
+      if (!nm) {
+        const inst = state.lines.find(function (l) { return l.masterId === mid; });
+        if (inst && inst.name) nm = inst.name;
+      }
+      return nm ? (nm + ' (' + mid + ')') : mid;
     };
     const sideParts = [];
     if (trigger.startObjectId) {
@@ -10328,7 +10927,8 @@
         ? ' over ' + formatSeconds(trigger.stopDurationSec) : '';
       const ez  = (trigger.stopEasing && trigger.stopEasing !== 'linear')
         ? ' (eased: ' + trigger.stopEasing + ')' : '';
-      let stopTxt = 'stops "' + trigger.stopObjectId + '"';
+      // v0.8.179: route through labelForMasterId (was leaking raw id).
+      let stopTxt = 'stops "' + labelForMasterId(trigger.stopObjectId) + '"';
       if (cleanups.length) stopTxt += ' with ' + cleanups.join(' + ') + dur + ez;
       sideParts.push(stopTxt);
     }
@@ -10336,6 +10936,52 @@
       summary += ' On fire: ' + sideParts.join('; ') + '.';
     }
     return summary;
+  }
+
+  // v0.8.182: per-effect prose. behaviorSummaryText covers the
+  // trigger × duration sentence and cross-object side effects;
+  // behaviorDriftLineText covers drift / path-follow. This helper
+  // covers everything else the block actually animates — the values
+  // implied by the effect tags in behaviorAutoName (translate X +
+  // fade + opacity + draw, etc.). Returns null when there are no
+  // animated params worth describing, so callers can skip a line.
+  function behaviorEffectsText(block) {
+    const p = (block && block.params) || {};
+    function has(k) { return Object.prototype.hasOwnProperty.call(p, k); }
+    const parts = [];
+    // Translate — only the "fixed" mode is a delta. drift / pathFollow
+    // are described by behaviorDriftLineText, so skip the translate
+    // line when translateMode says it's a drift.
+    const tmode = p.translateMode;
+    const isDrift = tmode && tmode !== 'fixed';
+    if (!isDrift) {
+      const hasTx = has('translateX'), hasTy = has('translateY');
+      const tx = Number(p.translateX) || 0;
+      const ty = Number(p.translateY) || 0;
+      if (hasTx && hasTy)      parts.push('translates by (' + tx + ', ' + ty + ') px');
+      else if (hasTx)          parts.push('translates X by ' + tx + ' px');
+      else if (hasTy)          parts.push('translates Y by ' + ty + ' px');
+    }
+    if (has('rotate')) {
+      parts.push('rotates by ' + (Number(p.rotate) || 0) + '°');
+    }
+    if (has('fadeOpacity')) {
+      // fadeOpacity is a boolean toggle that uses opacityFrom/To when
+      // present, otherwise the implicit 1 → 0 fade.
+      const oFrom = (typeof p.opacityFrom === 'number') ? p.opacityFrom : 1;
+      const oTo   = (typeof p.opacityTo   === 'number') ? p.opacityTo   : 0;
+      parts.push('fades opacity ' + oFrom + ' → ' + oTo);
+    } else if (has('opacityFrom') || has('opacityTo')) {
+      const oFrom = (typeof p.opacityFrom === 'number') ? p.opacityFrom : 1;
+      const oTo   = (typeof p.opacityTo   === 'number') ? p.opacityTo   : 1;
+      parts.push('opacity ' + oFrom + ' → ' + oTo);
+    }
+    if (has('drawIn') && p.drawIn) {
+      const dir = p.drawInDirection || 'forward';
+      parts.push('draws in (' + dir + ')');
+    }
+    if (!parts.length) return null;
+    return 'Effects: ' + parts.join('; ') + '.';
   }
 
   // v0.8.20: drift behavior is independent of trigger × duration and
@@ -11505,8 +12151,10 @@
   // Create-object wizard wiring.
   if (createObjectBtn) createObjectBtn.addEventListener('click', showCreateModal);
 
+  // v0.8.173: button id kept as `library-btn` for backward compat but
+  // now opens the Project hub modal (Master library is one of its tiles).
   const libraryBtn = document.getElementById('library-btn');
-  if (libraryBtn) libraryBtn.addEventListener('click', showLibraryDialog);
+  if (libraryBtn) libraryBtn.addEventListener('click', showProjectDialog);
 
   // SVG import — file picker wiring. The input is hidden at page
   // scope so the change handler stays bound for the lifetime of

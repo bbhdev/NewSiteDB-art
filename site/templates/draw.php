@@ -217,7 +217,7 @@ $payload = json_encode([
          just triggers .click() on it. -->
     <input type="file" id="import-svg-input" accept=".svg,image/svg+xml" multiple hidden>
     <button type="button" id="library-btn" class="ed-create-btn"
-            title="Browse every master across the site — see usage chips per class, scope summary, and delete the canonical object across all classes.">▦ Library</button>
+            title="Project hub: Master library, Overview, Orphans, Snapshots.">▦ Project</button>
   </div>
 
   <div class="ed-tool-settings" id="tool-settings"></div>
