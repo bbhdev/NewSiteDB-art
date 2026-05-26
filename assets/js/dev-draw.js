@@ -8622,6 +8622,12 @@
       }
     }));
 
+    // v0.8.205: Font bundle — list of Google Fonts available for text
+    // overlays. One family per line; Save normalizes (trim, dedupe,
+    // alpha-sort) and persists via /dev/draw/font-bundle. The TEXT
+    // section's font picker (Slice 2a-3b) reads from the same bundle.
+    body.appendChild(settingFontBundleRow());
+
     modal.appendChild(body);
 
     overlay.appendChild(modal);
@@ -8686,6 +8692,114 @@
       help.textContent = spec.help;
       row.appendChild(help);
     }
+    return row;
+  }
+
+  /**
+   * Font-bundle row (v0.8.205). Lists the Google Fonts available for
+   * text overlays as a textarea, one family per line. Loads the
+   * current bundle async via GET /dev/draw/font-bundle on open; the
+   * Save button POSTs the normalised list back. Server dedupes,
+   * trims, alpha-sorts, and echoes the canonical list — we mirror its
+   * response into the textarea so the user sees exactly what was
+   * persisted.
+   */
+  function settingFontBundleRow() {
+    const row = document.createElement('div');
+    row.className = 'ed-setting-row';
+
+    const main = document.createElement('div');
+    main.className = 'ed-setting-main';
+    const lbl = document.createElement('label');
+    lbl.textContent = 'Font bundle';
+    main.appendChild(lbl);
+    row.appendChild(main);
+
+    const help = document.createElement('p');
+    help.className = 'ed-setting-help';
+    help.textContent =
+      'Google Fonts available for text overlays. One family per line ' +
+      '(e.g. "Inter", "Playfair Display", "Caveat"). Save normalises ' +
+      '(trim, dedupe, alpha-sort) and persists; the TEXT section\'s ' +
+      'font picker reads from this list. The fonts are loaded on the ' +
+      'editor and the live site via Google Fonts CSS.';
+    row.appendChild(help);
+
+    const ta = document.createElement('textarea');
+    ta.style.cssText =
+      'width:100%;min-height:160px;margin-top:0.4rem;' +
+      'font:13px/1.4 system-ui,sans-serif;padding:6px;box-sizing:border-box;';
+    ta.placeholder = 'Loading current bundle…';
+    ta.disabled = true;
+    row.appendChild(ta);
+
+    const ctrls = document.createElement('div');
+    ctrls.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:6px;';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save bundle';
+    saveBtn.disabled = true;
+    const status = document.createElement('span');
+    status.style.cssText = 'flex:1;font-size:0.85em;color:#888;';
+    status.textContent = '';
+    ctrls.appendChild(saveBtn);
+    ctrls.appendChild(status);
+    row.appendChild(ctrls);
+
+    function setFromList(list) {
+      ta.value = (list || []).join('\n');
+    }
+
+    // Load current bundle.
+    fetch('/dev/draw/font-bundle', { method: 'GET' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.ok) {
+          setFromList(j.fonts || []);
+          status.textContent = (j.fonts || []).length + ' in bundle';
+        } else {
+          status.textContent = 'Could not load bundle.';
+        }
+      })
+      .catch(function (err) {
+        status.textContent = 'Load failed: ' + err.message;
+      })
+      .then(function () {
+        ta.disabled = false;
+        saveBtn.disabled = false;
+        ta.placeholder = 'One font family per line…';
+      });
+
+    saveBtn.addEventListener('click', function () {
+      const lines = ta.value.split(/\r?\n/).map(function (s) {
+        return s.trim();
+      }).filter(function (s) { return s.length > 0; });
+      saveBtn.disabled = true;
+      status.textContent = 'Saving…';
+      fetch('/dev/draw/font-bundle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fonts: lines })
+      })
+        .then(function (r) {
+          return r.json().then(function (j) { return { ok: r.ok, j: j || {} }; });
+        })
+        .then(function (res) {
+          if (res.ok && res.j.ok) {
+            setFromList(res.j.fonts || []);
+            status.textContent = 'Saved — ' + (res.j.count || 0) + ' fonts.';
+          } else {
+            status.textContent = 'Save failed: ' + (res.j.error || 'unknown error');
+          }
+        })
+        .catch(function (err) {
+          status.textContent = 'Save failed: ' + err.message;
+        })
+        .then(function () {
+          saveBtn.disabled = false;
+        });
+    });
+
     return row;
   }
 
