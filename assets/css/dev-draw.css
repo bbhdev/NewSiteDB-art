@@ -533,6 +533,30 @@ body.editor {
   user-select: none;
 }
 
+/* v0.8.220: inline info (i) icon for panel hints. Replaces multi-line
+   prose hint text — the tooltip carries the full explanation. */
+.ed-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: 50%;
+  border: 1px solid #888;
+  color: #aaa;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 0.85em;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  user-select: none;
+}
+.ed-info-icon:hover {
+  color: #ddd;
+  border-color: #bbb;
+}
+
 /* v0.8.101: link badge — a colored circle with a per-master letter
    inside, appearing on sidebar rows and inside the master chip. The
    background color is set inline (hue hashed from master.id) so the

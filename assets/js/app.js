@@ -822,6 +822,54 @@
       if (!group) return;
 
       const lineDef = lines.find(function (l) { return l.id === pathEl.dataset.lineId; }) || {};
+      // v0.8.220: group behavior template. When the group designates a
+      // member object as its template, the template's behaviors[] is
+      // applied to every member ON TOP OF the member's own behaviors[]
+      // (they compound, not replace). Group defaults are ignored when
+      // a template is active. Geometry stays each member's own — only
+      // the behaviors compound.
+      //
+      // Composition rule: for non-template members, the effective
+      // behavior list is templateBehaviors ⧺ memberBehaviors. The
+      // template object itself uses just its own behaviors (skipping
+      // the prepend avoids doubling its blocks). The prepend order
+      // doesn't matter for last-active-wins effects (opacity) because
+      // each block carries its own trigger/duration; for additive
+      // effects (translate, rotate) the sum is order-independent too.
+      //
+      // See dev-draw.js renderGroupPanel → "Behavior template" section.
+      let groupTemplateActive = false;
+      let compoundedBehaviors = lineDef.behaviors || [];
+      if (group.behaviorTemplateObjectId) {
+        const tplLine = lines.find(function (l) {
+          return l.id === group.behaviorTemplateObjectId;
+        });
+        if (tplLine) {
+          groupTemplateActive = true;
+          if (tplLine.id === lineDef.id) {
+            // The template object itself: use only its own behaviors,
+            // no prepend (otherwise its blocks would run twice).
+            compoundedBehaviors = lineDef.behaviors || [];
+          } else {
+            // pathFollow option (c): if the member has its own
+            // pathFollow block, suppress template's pathFollow
+            // blocks. Two pathFollow contributions would otherwise
+            // sum-of-positions, which is geometrically nonsense
+            // ("follow A AND follow B at the same time"). Member
+            // intent wins; member-less-pathFollow members still
+            // inherit the template's pathFollow.
+            const memberBeh = lineDef.behaviors || [];
+            const memberHasPathFollow = memberBeh.some(function (b) {
+              return b && b.params && b.params.translateMode === 'pathFollow';
+            });
+            const templateBeh = (tplLine.behaviors || []).filter(function (b) {
+              if (!memberHasPathFollow) return true;
+              return !(b && b.params && b.params.translateMode === 'pathFollow');
+            });
+            compoundedBehaviors = templateBeh.concat(memberBeh);
+          }
+        }
+      }
       // v0.8.195: companion text overlay for this line, if any. Lives
       // as a sibling <text data-text-for="..."> in the same layer.
       // writeAt mirrors transform+opacity onto it so labels travel with
@@ -898,24 +946,27 @@
         };
       }
 
-      // ── Rotation pivot ──────────────────────────────────────────
-      // SVG's native `rotate(angle, cx, cy)` syntax has a built-in
-      // origin parameter, so we use the SVG `transform` attribute
-      // directly. Sidesteps the GSAP svgOrigin / CSS transform-box
-      // route that didn't take effect for custom origins.
+      // ── Natural center & rotation pivot ────────────────────────
+      // v0.8.220: rotation pivot is one-per-object (NOT per-block).
+      // All blocks' rot contributions sum into a single angle, applied
+      // around a single pivot. The pivot is expressed as a DELTA from
+      // the object's natural center (so (0,0) = pivot AT center).
       //
-      // Priority:
-      //   1. Per-line rotateOriginX/Y on behaviors[0].params —
-      //      treated as a DELTA from the line's natural center
-      //      (v0.4.6+). So (0,0) = pivot at center; (50, 0) puts
-      //      the pivot 50 to the right of center, traveling with
-      //      the object instead of being pinned to a canvas spot.
-      //   2. Group default rotateOriginX/Y — absolute canvas
-      //      coord. Groups don't have a single natural center
-      //      to subtract from; the group-level pivot is a shared
-      //      anchor.
-      //   3. Otherwise the line's natural center (primitive
-      //      params, falling back to bbox).
+      // Resolution priority:
+      //   1. Object's own pivot — the first block of THIS line whose
+      //      params has both rotateOriginX and rotateOriginY as finite
+      //      numbers.
+      //   2. Template's pivot — same scan over the template object's
+      //      behaviors[], applied as a delta from the MEMBER's
+      //      natural center (the template's pivot offset is inherited
+      //      as a pattern, not anchored to the template's coords).
+      //   3. Default — delta (0,0), i.e. pivot at the member's
+      //      natural center.
+      //
+      // "Empty / not set" means the block's params lacks finite
+      // rotateOriginX/Y. An explicit (0,0) is distinct — it pins the
+      // pivot to the natural center on purpose, and stops further
+      // inheritance from the template.
       let centerX = 0, centerY = 0;
       if (lineDef.params) {
         const pa = lineDef.params;
@@ -938,29 +989,28 @@
           centerY = b.y + b.height / 2;
         } catch (e) { /* bbox unavailable */ }
       }
-      let originX = centerX, originY = centerY;
-      // v0.8.70: re-derive block0params here (v0.8.68 removed the
-      // top-level variable when it lifted drawIn out of the
-      // "block 0 only" assumption, but the rotate-pivot lookup
-      // below still uses block 0's params, and the missing
-      // variable threw a ReferenceError per frame). Multi-block
-      // pivot is a separate refactor — for now keep block 0 as
-      // the pivot source so the runtime matches v0.8.67's
-      // rendering exactly.
-      const block0params = (Array.isArray(lineDef.behaviors)
-                             && lineDef.behaviors[0]
-                             && lineDef.behaviors[0].params)
-        ? lineDef.behaviors[0].params : {};
-      const linePivotX = block0params.rotateOriginX;
-      const linePivotY = block0params.rotateOriginY;
-      if (Number.isFinite(linePivotX) && Number.isFinite(linePivotY)) {
-        originX = centerX + linePivotX;
-        originY = centerY + linePivotY;
-      } else if (Number.isFinite(group.defaults.rotateOriginX) &&
-                 Number.isFinite(group.defaults.rotateOriginY)) {
-        originX = group.defaults.rotateOriginX;
-        originY = group.defaults.rotateOriginY;
+      // Resolve single object pivot per the priority above.
+      const findPivotDelta = function (behArr) {
+        if (!Array.isArray(behArr)) return null;
+        for (let i = 0; i < behArr.length; i++) {
+          const p = behArr[i] && behArr[i].params;
+          if (!p) continue;
+          if (Number.isFinite(p.rotateOriginX) && Number.isFinite(p.rotateOriginY)) {
+            return { dx: p.rotateOriginX, dy: p.rotateOriginY };
+          }
+        }
+        return null;
+      };
+      let pivotDelta = findPivotDelta(lineDef.behaviors);
+      if (!pivotDelta && groupTemplateActive) {
+        const tplLine = lines.find(function (l) {
+          return l.id === group.behaviorTemplateObjectId;
+        });
+        if (tplLine) pivotDelta = findPivotDelta(tplLine.behaviors);
       }
+      if (!pivotDelta) pivotDelta = { dx: 0, dy: 0 };
+      const originX = centerX + pivotDelta.dx;
+      const originY = centerY + pivotDelta.dy;
 
       // v0.4.1: multi-block composition. Walk lineDef.behaviors[];
       // each block carries its own trigger + duration + params.
@@ -975,10 +1025,14 @@
       // Activation timestamp per block (activationState[i]) is the
       // moment the block crossed its trigger; time-based durations
       // measure elapsed from there + trigger.delay.
-      const rawBlocks = (Array.isArray(lineDef.behaviors) && lineDef.behaviors.length)
-        ? lineDef.behaviors
+      const rawBlocks = (compoundedBehaviors.length)
+        ? compoundedBehaviors
         : [{ id: '__default', trigger: { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 }, duration: { mode: 'scroll' }, kind: 'transform', params: {} }];
-      const gd = group.defaults || {};
+      // When a group behavior template is active, group.defaults is
+      // intentionally ignored — the template object's behaviors[] is
+      // the sole source of behavior params. (Group.defaults will be
+      // removed entirely in Slice 3 / SCHEMA_VERSION 11.)
+      const gd = groupTemplateActive ? {} : (group.defaults || {});
       const blocks = rawBlocks.map(function (b) {
         const p = b.params || {};
         const num = function (k) {
@@ -1668,16 +1722,15 @@
           // v0.8.53: pathFollow blocks don't contribute the usual
           // tx/ty/rot deltas — their position is computed in the
           // reverse pass below (last-active-wins so chained guides
-          // hand off cleanly). bp itself still drives the path
-          // fraction; pathLastBp tracking happens once per frame
-          // regardless of whether the block is the dominant
-          // pathFollow this frame.
+          // hand off cleanly).
           if (b.pathFollow) {
             pathLastBp[i] = bp;
             continue;
           }
           tx  += b.driftX ? blockDrift[i].x : bp * b.tx;
           ty  += b.driftY ? blockDrift[i].y : bp * b.ty;
+          // v0.8.220: rot is summed; the single object pivot
+          // (resolved once above) is applied at emit time.
           rot += bp * b.rot;
         }
         // v0.8.26: opacity composition — last active fade-opacity

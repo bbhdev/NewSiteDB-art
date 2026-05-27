@@ -11183,7 +11183,26 @@
     // behaviors + render params (everything except geometry) for every
     // member object. Picker stays compact: a select dropdown rather
     // than a search combobox — group membership is usually small.
-    wrap.appendChild(divider('Behavior template'));
+    {
+      // Custom divider with an (i) tooltip aligned right on the title row.
+      const div = divider('Behavior template');
+      div.style.display = 'flex';
+      div.style.alignItems = 'center';
+      div.style.justifyContent = 'space-between';
+      const info = document.createElement('span');
+      info.className = 'ed-info-icon';
+      info.textContent = 'i';
+      const members = state.lines.filter(function (l) { return l.groupId === g.id; });
+      info.title = members.length === 0
+        ? 'Add objects to this group to enable a template.'
+        : 'When set, every object in the group adopts the template '
+          + 'object’s behaviors (geometry stays each object’s own). '
+          + 'Template behaviors COMPOUND with each member’s own '
+          + 'behaviors — they don’t replace them. The template object '
+          + 'can still render normally.';
+      div.appendChild(info);
+      wrap.appendChild(div);
+    }
     {
       const members = state.lines.filter(function (l) { return l.groupId === g.id; });
       const options = [{ value: '__none__', label: '(none — group is static)' }]
@@ -11210,18 +11229,6 @@
       wrap.appendChild(selectField('Template object', currentVal, options, function (v) {
         updateGroupBehaviorTemplate(g.id, v === '__none__' ? null : v);
       }));
-      const hint = document.createElement('p');
-      hint.className = 'ed-hint';
-      hint.style.margin = '0.25rem 0 0.5rem';
-      hint.style.fontSize = '0.82em';
-      hint.style.color = '#9a9a9a';
-      hint.style.lineHeight = '1.35';
-      hint.textContent = members.length === 0
-        ? 'Add objects to this group to enable a template.'
-        : 'When set, every object in the group adopts the template object’s '
-          + 'behaviors and render params (except geometry). The template '
-          + 'object can still render normally.';
-      wrap.appendChild(hint);
     }
 
     wrap.appendChild(divider('Behavior defaults'));
