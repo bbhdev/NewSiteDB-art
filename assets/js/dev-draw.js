@@ -97,7 +97,13 @@
     // canonical by default; no per-instance override UI yet). Shape:
     //   { value, offsetX, offsetY, fontFamily, fontSize, color }
     // Absent / empty value → no text rendered.
-    'text'
+    'text',
+    // v0.8.228 (textBlock Slice 1a): independent fill color. Today
+    // only the textBlock kind reads this (everything else uses
+    // line.stroke as its fill when `filled`). Stored as a palette
+    // color id (resolved at render time) so palette renames
+    // propagate, same as `stroke`.
+    'fill'
   ];
   // Position sub-keys live on positionOffset (not in scope). Owning
   // them per-class is structural — scope toggles don't apply.
@@ -500,6 +506,56 @@
           { value: 'slice', label: 'Cover (crop)' },
           { value: 'fill',  label: 'Stretch' }
         ]]
+      ],
+      positionKeys: ['x', 'y'],
+      labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
+    },
+
+    // v0.8.228 (textBlock Slice 1a): rect-like primitive that
+    // represents a future HTML text container (phase 2 web page
+    // generator). Slice 1a renders only the rect outline + fill;
+    // text/font/htmlKey fields land in 1b/1c. Geometry handling
+    // mirrors `rect` / `image` since they share the same (x, y,
+    // w, h) shape.
+    textBlock: {
+      label: 'Text block',
+      paramsFromDrag: function (s, e) {
+        return {
+          x: Math.min(s.x, e.x),
+          y: Math.min(s.y, e.y),
+          w: Math.max(1, Math.abs(e.x - s.x)),
+          h: Math.max(1, Math.abs(e.y - s.y))
+        };
+      },
+      // Slice 1a: the d-path is just the rect outline. Used for
+      // the hit-target and as the visible rect (with line.fill
+      // + line.stroke applied at render time, NOT through the
+      // standard `filled → fill = stroke` shortcut).
+      generateD: function (p) { return rectPathD(p.x, p.y, p.w, p.h, 0); },
+      handles: function (p) {
+        return [
+          { id: 'tl', x: p.x,       y: p.y },
+          { id: 'tr', x: p.x + p.w, y: p.y },
+          { id: 'br', x: p.x + p.w, y: p.y + p.h },
+          { id: 'bl', x: p.x,       y: p.y + p.h }
+        ];
+      },
+      updateFromHandle: function (p, id, pos) {
+        let x1 = p.x, y1 = p.y, x2 = p.x + p.w, y2 = p.y + p.h;
+        if      (id === 'tl') { x1 = pos.x; y1 = pos.y; }
+        else if (id === 'tr') { x2 = pos.x; y1 = pos.y; }
+        else if (id === 'br') { x2 = pos.x; y2 = pos.y; }
+        else if (id === 'bl') { x1 = pos.x; y2 = pos.y; }
+        const nx = Math.min(x1, x2), ny = Math.min(y1, y2);
+        return Object.assign({}, p, {
+          x: nx, y: ny,
+          w: Math.max(1, Math.abs(x2 - x1)),
+          h: Math.max(1, Math.abs(y2 - y1))
+        });
+      },
+      paramFields: [
+        ['x', 'X'], ['y', 'Y'],
+        ['w', 'Width'], ['h', 'Height']
       ],
       positionKeys: ['x', 'y'],
       labelPosition: function (p) { return { x: p.x + p.w / 2 + 6, y: p.y + p.h / 2 + 6 }; }
@@ -3824,6 +3880,7 @@
     polygon: makePrimitiveTool('polygon'),
     star:    makePrimitiveTool('star'),
     image:   makePrimitiveTool('image'),
+    textBlock: makePrimitiveTool('textBlock'),
 
     line: {
       label: 'Line',
@@ -4086,7 +4143,8 @@
     { id: 'rect',    label: 'Rect',    hint: 'click corner, drag size' },
     { id: 'polygon', label: 'Polygon', hint: 'triangle/N-gon (set Sides)' },
     { id: 'star',    label: 'Star',    hint: 'N-pointed' },
-    { id: 'image',   label: 'Image',   hint: 'click corner, drag bbox · set URL in panel' }
+    { id: 'image',   label: 'Image',   hint: 'click corner, drag bbox · set URL in panel' },
+    { id: 'textBlock', label: 'Text block', hint: 'click corner, drag bbox · holds HTML text for phase-2 page gen' }
   ];
   const CREATE_TYPES = CREATE_TYPES_LINES.concat(CREATE_TYPES_PRIMITIVES);
 
@@ -9082,6 +9140,10 @@
     state.lines.forEach(function (line) {
       const group = state.groups.find(function (g) { return g.id === line.groupId; });
       const isImage = line.kind === 'image';
+      // v0.8.228: textBlock has its own fill (line.fill, distinct
+      // from line.stroke). Slice 1a renders just the rect with
+      // both colors; Slice 1b will layer wrapped text on top.
+      const isTextBlock = line.kind === 'textBlock';
 
       // Invisible wide hit-target so the line is easy to click for
       // selection — picking a 1.5px stroke pixel-perfectly is awful.
@@ -9104,20 +9166,36 @@
       if (width)  p.style.strokeWidth = width;
       if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
       // Fill rules:
-      //   - `filled` is the source of truth when set explicitly
+      //   - textBlock uses line.fill (independent of stroke);
+      //     unset → fill="none" (transparent block, still selectable
+      //     via the hit-target).
+      //   - `filled` is the source of truth for other kinds when set
       //     (true for primitives, true for closed-loop freehand, etc.)
       //   - falls back to `closed` for legacy data without `filled`
       //   - image kind never gets the fill — the bitmap covers it.
-      const wantsFill = !isImage
-        && (line.filled !== undefined ? !!line.filled : !!line.closed);
-      if (wantsFill && stroke) p.style.fill = stroke;
-      if (isImage) {
-        p.style.fill = 'none';
-        // Dashed outline when no source yet, so the empty bbox still
-        // reads as "an image is here" rather than just a thin rect.
-        if (!line.params || !line.params.src) {
+      if (isTextBlock) {
+        const fill = resolveStroke(line.fill);
+        p.style.fill = fill || 'none';
+        // Empty / no-content textBlock: dashed outline so the bbox
+        // still reads as "a textBlock lives here" before the author
+        // sets fill or stroke. Mirrors the image-kind affordance.
+        const blank = !line.fill && !line.stroke;
+        if (blank) {
           p.style.strokeDasharray = '4 4';
           if (!stroke) p.style.stroke = '#888';
+        }
+      } else {
+        const wantsFill = !isImage
+          && (line.filled !== undefined ? !!line.filled : !!line.closed);
+        if (wantsFill && stroke) p.style.fill = stroke;
+        if (isImage) {
+          p.style.fill = 'none';
+          // Dashed outline when no source yet, so the empty bbox still
+          // reads as "an image is here" rather than just a thin rect.
+          if (!line.params || !line.params.src) {
+            p.style.strokeDasharray = '4 4';
+            if (!stroke) p.style.stroke = '#888';
+          }
         }
       }
       // Primitives rotate around their geometric center, not their
@@ -11637,8 +11715,11 @@
         wrap.appendChild(withScope(field, line.masterId, 'params.' + key));
       });
       // "Filled" only makes sense for filled-shape primitives. Image
-      // kind ignores fill (the bitmap covers the box).
-      if (line.kind !== 'image') {
+      // kind ignores fill (the bitmap covers the box). textBlock has
+      // an independent fill color (in the Appearance section below)
+      // so the boolean toggle is meaningless there — empty fill = no
+      // fill.
+      if (line.kind !== 'image' && line.kind !== 'textBlock') {
         wrap.appendChild(withScope(checkboxField('Filled', !!line.filled, function (v) {
           setVisualProp(line.id, 'filled', v);
           scheduleSnapshot();
@@ -11722,17 +11803,35 @@
     }
 
     wrap.appendChild(divider('Appearance'));
-    wrap.appendChild(withScope(strokeField('Color', line.stroke, function (v) {
-      setVisualProp(line.id, 'stroke', v);
-      scheduleSnapshot();
-      renderLines();
-      renderGroupsList();
-    }), line.masterId, 'stroke'));
-    wrap.appendChild(withScope(overrideNumberField('Line width', line.width, group && group.defaults.width, function (v) {
-      setVisualProp(line.id, 'width', v);
-      scheduleSnapshot();
-      renderLines();
-    }), line.masterId, 'width'));
+    // v0.8.228: textBlock carries an independent fill (line.fill);
+    // for every other kind the legacy "Color" field is the single
+    // stroke-and-fill picker (fill follows stroke when `filled`).
+    if (line.kind === 'textBlock') {
+      wrap.appendChild(withScope(strokeField('Fill color', line.fill, function (v) {
+        setVisualProp(line.id, 'fill', v);
+        scheduleSnapshot();
+        renderLines();
+        renderGroupsList();
+      }), line.masterId, 'fill'));
+    }
+    wrap.appendChild(withScope(strokeField(
+      line.kind === 'textBlock' ? 'Stroke color' : 'Color',
+      line.stroke,
+      function (v) {
+        setVisualProp(line.id, 'stroke', v);
+        scheduleSnapshot();
+        renderLines();
+        renderGroupsList();
+      }
+    ), line.masterId, 'stroke'));
+    wrap.appendChild(withScope(overrideNumberField(
+      line.kind === 'textBlock' ? 'Stroke width' : 'Line width',
+      line.width, group && group.defaults.width, function (v) {
+        setVisualProp(line.id, 'width', v);
+        scheduleSnapshot();
+        renderLines();
+      }
+    ), line.masterId, 'width'));
     // Stroke corner style. On a filled shape with a same-color stroke
     // (the default for primitives), `round` produces the bulgy
     // rounded-tip effect that scales with line width; `miter` keeps

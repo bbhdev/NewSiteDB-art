@@ -695,11 +695,21 @@
       if (stroke) p.style.stroke = stroke;
       if (width)  p.style.strokeWidth = width;
       if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
-      // Fill: `filled` is authoritative when set (true for primitives,
-      // closed-loop freehand, and any explicit author choice); falls
-      // back to `closed` for legacy data without `filled`.
-      const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
-      if (wantsFill && stroke) p.style.fill = stroke;
+      // Fill:
+      //   - textBlock (v0.8.228) reads line.fill (independent of
+      //     stroke). Unset → fill="none". The fill picker writes
+      //     a palette color id resolved via resolveStroke.
+      //   - everything else: `filled` is authoritative when set
+      //     (true for primitives, closed-loop freehand, any
+      //     explicit author choice); falls back to `closed` for
+      //     legacy data without `filled`. Fill follows stroke.
+      if (line.kind === 'textBlock') {
+        const fill = resolveStroke(line.fill);
+        p.style.fill = fill || 'none';
+      } else {
+        const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
+        if (wantsFill && stroke) p.style.fill = stroke;
+      }
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
       // v0.8.57: master id on the DOM lets pathFollow resolve a
