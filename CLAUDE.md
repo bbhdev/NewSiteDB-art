@@ -68,30 +68,59 @@ across the dataset, multi-field. Examples: text overlay on objects,
 side-effects on behavior blocks. New properties added later should
 follow the same pattern unless every object reliably uses them.
 
-## SCHEMA_VERSION bump protocol
+## Schema versioning — two-tier model
 
-`SCHEMA_VERSION` (root) is bumped by Claude, not the user — but only with
-explicit per-bump authorization. The user is not best equipped to detect when
-a data-structure change is backwards-incompatible; Claude is.
+There are **two separate schema version axes**; do not confuse them:
+
+### Axis 1 — `CONTENT_SCHEMA_VERSION` (in `scripts/migrate-content.php`)
+
+Versions the **per-page content shape** — the structure inside each
+`content/<page>/page.json` (groups, lines, behaviors, master refs, etc.).
+Each page.json carries a `_schemaVersion` marker; the migrate runner walks
+the chain of v(N) → v(N+1) callables and stamps the marker as it goes.
+
+Bumped on **every breaking content-shape change**: field rename, removal,
+type change, semantic redefinition. Additive changes (new optional field
+with a safe default) do NOT require a bump.
+
+This is the axis that bumps frequently — currently at v10, and most data-
+shape work in this project moves it forward.
+
+### Axis 2 — `SCHEMA_VERSION` file at repo root
+
+Versions the **library / snapshot envelope** — the `meta.json` under
+`library/<name>/` and the snapshot loader gate in `site/config/config.php`
+(refuses to load a snapshot whose envelope schema doesn't match). Currently
+at **1**; bumped only when the *container shape* (not the inner content
+shape) changes. Rare.
+
+### Bump protocol — applies to either axis
+
+Both axes are bumped by Claude, not the user, and only with explicit
+per-bump authorization. The user is not best equipped to detect when a
+data-structure change is backwards-incompatible; Claude is.
 
 1. **When making any data structure change**, evaluate whether it is
-   backwards-incompatible. The bar: older snapshot JSON, loaded by the new
-   code, would fail to parse, silently lose data, or produce wrong runtime
-   behavior. Additive changes (new optional field with a safe default) do
-   NOT require a bump; renames, removals, type changes, or semantic
-   redefinitions DO.
+   backwards-incompatible. The bar: older JSON, loaded by the new code,
+   would fail to parse, silently lose data, or produce wrong runtime
+   behavior. Decide WHICH axis is affected:
+   - inner content shape → `CONTENT_SCHEMA_VERSION`
+   - snapshot envelope / loader contract → `SCHEMA_VERSION`
 
 2. **If a bump is needed**, propose it to the user with:
+   - which axis is bumping (and from / to what)
    - description of the structural change
    - why it's not backwards-compatible
    - whether a migration in `scripts/migrate-content.php` is needed
+     (content-axis bumps almost always need one; envelope-axis bumps may
+     need separate library-side handling)
 
-3. **If a migration is needed**, list the names of the snapshots in
-   `library/` that would need migrating, and ask the user to choose per
-   snapshot (or in bulk):
+3. **If a content migration is needed**, list the snapshots in `library/`
+   that would need migrating, plus the live `content/`, and ask the user
+   to choose per snapshot (or in bulk):
    - **delete** the snapshot (it becomes unloadable under the new schema), or
-   - **migrate** it — in which case Claude writes the migration code in
-     `scripts/migrate-content.php` and runs it.
+   - **migrate** it — in which case Claude adds the v(N)→v(N+1) callable
+     in `scripts/migrate-content.php` and runs it.
 
-4. **Only after user authorization** does Claude bump `SCHEMA_VERSION` and
-   apply any migration.
+4. **Only after user authorization** does Claude bump the chosen version
+   constant and apply any migration.
