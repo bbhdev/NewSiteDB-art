@@ -614,14 +614,20 @@
   }
 
   /*
-   * Font-bundle cache (v0.8.206). Loaded once at editor start and
-   * refreshed by the Settings → Font bundle Save flow. Drives:
+   * Font-bundle cache (v0.8.206). Loaded once at editor start (called
+   * after `state` is declared, near renderAll) and refreshed by the
+   * Settings → Font bundle Save flow. Drives:
    *   • injectGoogleFontsLink (above) — ensures all bundled families
    *     are loaded for preview.
    *   • The TEXT section's font-family field (fontFamilyField below)
    *     surfaces the bundle as <datalist> suggestions.
+   *
+   * state.fontBundle is left undefined here on purpose — `state` is
+   * const-declared further down (the editor is one big closure), so
+   * touching it at this point would hit the temporal dead zone. All
+   * readers guard with Array.isArray so undefined is harmless until
+   * loadFontBundle() populates it.
    */
-  state.fontBundle = Array.isArray(state.fontBundle) ? state.fontBundle : [];
   let _fontBundleDatalist = null;
   function rebuildFontBundleDatalist() {
     if (!_fontBundleDatalist) {
