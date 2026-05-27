@@ -11797,35 +11797,98 @@
     return wrap;
   }
   /**
-   * Font-family field (v0.8.206) — text input wired to the shared
-   * <datalist id="ed-font-bundle-list">, so the browser surfaces the
-   * curated bundle as autocomplete suggestions. Free-text fallback
-   * preserved: the user can type any family name; bundle membership
-   * is a suggestion, not a constraint. The input's value is shown
-   * in the typed family's own face when the font is loaded (which
-   * injectGoogleFontsLink ensures for every bundled family).
+   * Font-family field (v0.8.208) — combobox: free-text input + an
+   * explicit ▾ button that opens a popup listing the curated bundle.
+   *
+   * Why not a bare <datalist>? Datalist UX is inconsistent across
+   * browsers — Safari shows nothing until the user types a letter,
+   * Chrome surfaces only a faint marker, and there's no programmatic
+   * way to force-open it. Users couldn't discover the bundle. The
+   * custom popup makes the affordance obvious and lets us render each
+   * option in its own face for in-place preview.
+   *
+   * Free-text typing is preserved: bundle membership is a suggestion,
+   * not a constraint. The input's value is shown in the typed family's
+   * own face when the font is loaded (injectGoogleFontsLink ensures
+   * this for every bundled family).
    */
   function fontFamilyField(label, value, onChange, placeholder) {
     const wrap = document.createElement('div');
     wrap.className = 'ed-field';
     const lbl = document.createElement('label'); lbl.textContent = label;
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:4px; align-items:stretch; position:relative;';
+
     const inp = document.createElement('input');
     inp.type = 'text'; inp.value = value || '';
-    inp.setAttribute('list', 'ed-font-bundle-list');
+    inp.style.flex = '1 1 auto';
     if (placeholder) inp.placeholder = placeholder;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '▾';
+    btn.title = 'Pick from font bundle';
+    btn.style.cssText = 'flex:0 0 auto; padding:0 8px; cursor:pointer;';
+
+    const pop = document.createElement('div');
+    pop.style.cssText = [
+      'position:absolute', 'top:100%', 'left:0', 'right:0',
+      'max-height:260px', 'overflow-y:auto',
+      'background:#2a2a2a', 'color:#e8e8e8', 'border:1px solid #444',
+      'box-shadow:0 4px 12px rgba(0,0,0,0.5)',
+      'z-index:1000', 'display:none', 'margin-top:2px'
+    ].join(';');
+
     function reflectFace() {
-      // Render the input itself in the chosen font, when typed value
-      // is a real family. Falls back to system-ui if blank.
       inp.style.fontFamily = inp.value
         ? '"' + inp.value.replace(/"/g, '') + '", system-ui, sans-serif'
         : '';
     }
+    function closePop() { pop.style.display = 'none'; }
+    function openPop() {
+      pop.innerHTML = '';
+      const fonts = Array.isArray(state.fontBundle) ? state.fontBundle : [];
+      if (!fonts.length) {
+        const empty = document.createElement('div');
+        empty.textContent = 'Bundle is empty — add fonts in Settings → Font bundle.';
+        empty.style.cssText = 'padding:8px 10px; color:#aaa; font-style:italic;';
+        pop.appendChild(empty);
+      } else {
+        fonts.forEach(function (name) {
+          const opt = document.createElement('div');
+          opt.textContent = name;
+          opt.style.cssText = 'padding:6px 10px; cursor:pointer; font-family:"'
+            + name.replace(/"/g, '') + '", system-ui, sans-serif;';
+          opt.addEventListener('mouseenter', function () { opt.style.background = '#3a3a55'; });
+          opt.addEventListener('mouseleave', function () { opt.style.background = ''; });
+          opt.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            inp.value = name;
+            onChange(name);
+            reflectFace();
+            closePop();
+          });
+          pop.appendChild(opt);
+        });
+      }
+      pop.style.display = 'block';
+    }
+    btn.addEventListener('click', function () {
+      if (pop.style.display === 'block') closePop(); else openPop();
+    });
     inp.addEventListener('input', function () {
       onChange(inp.value);
       reflectFace();
     });
+    // Dismiss popup when clicking elsewhere
+    document.addEventListener('mousedown', function (e) {
+      if (!row.contains(e.target)) closePop();
+    });
+
     reflectFace();
-    wrap.appendChild(lbl); wrap.appendChild(inp);
+    row.appendChild(inp); row.appendChild(btn); row.appendChild(pop);
+    wrap.appendChild(lbl); wrap.appendChild(row);
     return wrap;
   }
   // Numeric range field — same shape as numberField but clamped

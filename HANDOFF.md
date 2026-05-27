@@ -975,6 +975,70 @@ uses `justify-content: space-between` with no gap (unlike
 is given `marginRight: 0.5rem` to match the visual rhythm of the
 hub's own header (v0.8.175).
 
+### Text overlays + Google Fonts bundle (v0.8.180–v0.8.209)
+
+**Slice 1 (text overlay):** masters can carry an optional `text` property
+(string + fontFamily + fontSize + fill + offsetX/Y). When set, the editor
+and runtime both render an SVG `<text>` anchored at the line's natural
+center (centroid for paths, geometric center for primitives), offset by
+the master's offsetX/Y. Side-effects (translate/rotate/fade) inherited
+from the parent group; text is a child of the line's `<g>`, not a
+sibling.
+
+Disclosure pattern (per the "progressive disclosure" rule in CLAUDE.md):
+TEXT section in the object panel is hidden by default; `+ Add text`
+button discloses it; the `[×]` close button clears the text object and
+hides the section again. Section auto-opens if `master.text` exists on
+load.
+
+**Slice 2 (Google Fonts bundle) — basic flow shipped at v0.8.207–v0.8.209:**
+
+The runtime/editor need to know which Google Fonts to load (preview in
+editor; render at runtime). Initial design explored a bookmarklet
+running on fonts.google.com (curate → POST to local endpoint) — the
+code still ships (`assets/js/fonts-bookmarklet.js` + `dev/draw/fonts-bundle`
+generator page) but the flow is fragile due to mixed-content blocking
+when the dev server is HTTP and Google Fonts is HTTPS.
+
+**Pivoted to a basic flow:** Settings modal has a "Font bundle" textarea
+where the user pastes family names (one per line). Save POSTs to
+`/dev/draw/font-bundle`, which validates each name against
+`^[A-Za-z0-9 '\-]{1,64}$`, dedupes, sorts, and writes
+`content/_shared/font-bundle.json` (gitignored).
+
+- Editor loads the bundle once at startup via `loadFontBundle()` →
+  populates `state.fontBundle` array.
+- `injectGoogleFontsLink()` unions the bundle with content-used
+  families when building the `<link rel="stylesheet">` for editor
+  preview.
+- The TEXT section's "Font family" field is a combobox
+  (`fontFamilyField` in dev-draw.js, v0.8.208/209): free-text input
+  + explicit `▾` button opening a custom popup. Each option is
+  rendered in its own face so the user previews the typography
+  in-place. Dark-themed (`#2a2a2a` bg, `#e8e8e8` text) to match the
+  editor.
+- A bare `<datalist>` was tried first and rejected — discoverability
+  is too poor across browsers (Safari requires typing; Chrome shows a
+  faint marker; no way to force-open programmatically).
+
+**Endpoint contract** (`site/config/config.php`):
+- `GET  /dev/draw/font-bundle` → `{ok, fonts: [...]}`
+- `POST /dev/draw/font-bundle` (body: `{fonts: [...]}`) → validates,
+  writes, returns `{ok, fonts, count}`.
+- CORS: only `https://fonts.google.com` is allowed as cross-origin
+  (legacy bookmarklet path).
+
+**Pending Slice 2a-4:** runtime (`app.js`) needs to fetch / be served
+the same font-bundle.json so its `<link>` includes bundled families
+even when no content master currently uses them. Currently the editor
+side is the only beneficiary; the runtime only loads families actually
+referenced by content masters.
+
+**Deferred:** server-side validation against the Google Fonts
+Developer API (would catch typos, return richer metadata). The current
+regex validation just protects against malformed input; a typo silently
+passes.
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:
