@@ -1,5 +1,103 @@
 <?php
 
+/**
+ * Read the OpenType `name` table from a TTF/OTF file and return the
+ * Typographic Family name (nameID 16) or, failing that, the Family
+ * name (nameID 1). Returns null on parse failure.
+ *
+ * Minimal parser — reads the SFNT directory, locates the `name` table,
+ * iterates its records, and prefers Windows-Unicode-English (3/1/0x409)
+ * then Macintosh-Roman-English (1/0/0). UTF-16BE strings are decoded
+ * to UTF-8; ASCII (Mac Roman) is returned as-is.
+ *
+ * Spec refs: OpenType `name` table — Apple TT spec & OpenType 1.9.
+ * Used by dev/draw/local-fonts to surface real family names in the
+ * font picker.
+ */
+function parseOpenTypeFamilyName(string $path): ?string {
+  $fh = @fopen($path, 'rb');
+  if (!$fh) return null;
+  try {
+    $head = fread($fh, 12);
+    if (strlen($head) < 12) return null;
+    $sfnt = substr($head, 0, 4);
+    // 0x00010000 (TTF), 'OTTO' (OTF), 'true' (legacy TTF), 'typ1' (legacy).
+    $okSig = ($sfnt === "\x00\x01\x00\x00" || $sfnt === 'OTTO'
+              || $sfnt === 'true' || $sfnt === 'typ1');
+    if (!$okSig) return null;
+    $u = unpack('nnumTables', substr($head, 4, 2));
+    $numTables = $u['numTables'];
+
+    // Locate `name` table in the SFNT directory.
+    $nameOffset = null;
+    for ($i = 0; $i < $numTables; $i++) {
+      $rec = fread($fh, 16);
+      if (strlen($rec) < 16) return null;
+      $tag = substr($rec, 0, 4);
+      if ($tag === 'name') {
+        $p = unpack('Nchecksum/Noffset/Nlength', substr($rec, 4, 12));
+        $nameOffset = $p['offset'];
+        $nameLength = $p['length'];
+        break;
+      }
+    }
+    if ($nameOffset === null) return null;
+
+    if (fseek($fh, $nameOffset) !== 0) return null;
+    $hdr = fread($fh, 6);
+    if (strlen($hdr) < 6) return null;
+    $p = unpack('nformat/ncount/nstringOffset', $hdr);
+    $count = $p['count'];
+    $stringStorage = $nameOffset + $p['stringOffset'];
+
+    // Read all records; pick the best candidate by (nameID, platform).
+    // Preference: nameID 16 (Typographic Family) > nameID 1 (Family);
+    // within each, Windows-Unicode-English > Mac-Roman-English > first.
+    $candidates = [];  // [nameID => [platformKey => entry]]
+    for ($i = 0; $i < $count; $i++) {
+      $rec = fread($fh, 12);
+      if (strlen($rec) < 12) return null;
+      $r = unpack(
+        'nplatformID/nencodingID/nlanguageID/nnameID/nlength/noffset', $rec
+      );
+      if ($r['nameID'] !== 1 && $r['nameID'] !== 16) continue;
+      // Platform priority key (lower is better).
+      $key = 99;
+      if ($r['platformID'] === 3 && $r['encodingID'] === 1
+          && $r['languageID'] === 0x0409) $key = 0;  // Win, Unicode BMP, en-US
+      elseif ($r['platformID'] === 3 && $r['encodingID'] === 1) $key = 1;  // Win, Unicode BMP
+      elseif ($r['platformID'] === 1 && $r['encodingID'] === 0
+              && $r['languageID'] === 0)  $key = 2;  // Mac, Roman, en
+      elseif ($r['platformID'] === 0)     $key = 3;  // Unicode
+      $candidates[$r['nameID']][$key] = $r;
+    }
+    if (empty($candidates)) return null;
+
+    $order = isset($candidates[16]) ? [16, 1] : [1];
+    foreach ($order as $nid) {
+      if (!isset($candidates[$nid])) continue;
+      ksort($candidates[$nid]);
+      foreach ($candidates[$nid] as $key => $r) {
+        if (fseek($fh, $stringStorage + $r['offset']) !== 0) continue;
+        $raw = fread($fh, $r['length']);
+        if ($raw === false || $raw === '') continue;
+        // Decode: Windows + Unicode = UTF-16BE; Mac Roman ~ ASCII for
+        // Latin family names; Unicode platform = UTF-16BE.
+        if ($r['platformID'] === 3 || $r['platformID'] === 0) {
+          $s = @mb_convert_encoding($raw, 'UTF-8', 'UTF-16BE');
+        } else {
+          $s = $raw;  // Mac Roman; ASCII subset is fine for our use
+        }
+        $s = trim((string)$s);
+        if ($s !== '') return $s;
+      }
+    }
+    return null;
+  } finally {
+    fclose($fh);
+  }
+}
+
 return [
   /*
    * App version (semver). Read from the /VERSION file at the repo
@@ -540,6 +638,94 @@ HTML;
           json_encode(['ok' => true, 'fonts' => $clean, 'count' => count($clean)]),
           'application/json', 200,
           array_merge(['Content-Type' => 'application/json'], $corsHeaders)
+        );
+      }
+    ],
+    /*
+     * Local fonts directory scan (Slice 3-1, v0.8.214).
+     *
+     * Companion to font-bundle.json (which lists Google Fonts families).
+     * This endpoint scans assets/fonts/local/*.{otf,ttf,woff,woff2} and
+     * returns, for each file, the embedded family name read from the
+     * OpenType `name` table — so the editor / runtime can emit @font-face
+     * declarations and surface the family in the same picker the bundle
+     * populates.
+     *
+     *   GET dev/draw/local-fonts → { ok, fonts: [{file, family, format}] }
+     *
+     * Parser scope: native TTF (0x00010000) and OTF ('OTTO') are parsed
+     * directly. WOFF and WOFF2 fall back to a filename-derived family
+     * name with a warning flag — parsing those requires zlib/brotli
+     * decompression that isn't justified for an internal dev tool.
+     * If the family name in the OTF/TTF is wrong, rename the file or
+     * use the regenerated OTF; we don't expose a manual-name override
+     * because the file is the source of truth.
+     */
+    [
+      'pattern' => 'dev/draw/local-fonts',
+      'method'  => 'GET',
+      'action'  => function () {
+        $dir = kirby()->root('index') . '/assets/fonts/local';
+        $hdrs = ['Content-Type' => 'application/json'];
+        if (!is_dir($dir)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => true, 'fonts' => []]),
+            'application/json', 200, $hdrs
+          );
+        }
+        $exts = ['otf', 'ttf', 'woff', 'woff2'];
+        $out = [];
+        foreach (scandir($dir) as $name) {
+          if ($name === '.' || $name === '..' || $name[0] === '.') continue;
+          $path = $dir . '/' . $name;
+          if (!is_file($path)) continue;
+          $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+          if (!in_array($ext, $exts, true)) continue;
+
+          $family = null;
+          $parsed = false;
+          if ($ext === 'otf' || $ext === 'ttf') {
+            $family = parseOpenTypeFamilyName($path);
+            $parsed = $family !== null;
+          }
+          if ($family === null) {
+            // Filename fallback: strip extension, normalize separators.
+            $base = pathinfo($name, PATHINFO_FILENAME);
+            $family = trim(preg_replace('/[-_]+/', ' ', $base));
+          }
+          $out[] = [
+            'file'   => $name,
+            'family' => $family,
+            'format' => $ext,
+            'parsed' => $parsed,
+          ];
+        }
+        // Stable order by family name (case-insensitive).
+        usort($out, function ($a, $b) {
+          return strcasecmp($a['family'], $b['family']);
+        });
+
+        // v0.8.218: also persist the result as a static manifest.json
+        // in the same directory. The runtime (app.js) reads this file
+        // directly so deployed/static hosts without the /dev/draw/*
+        // routes still resolve local fonts. Atomic write via tmp+rename
+        // so a concurrent GET never sees a half-written file. Failures
+        // are non-fatal — the endpoint still returns the live list.
+        $manifest = [
+          'fonts'      => $out,
+          'generatedAt'=> date('c'),
+          'count'      => count($out),
+        ];
+        $manifestPath = $dir . '/manifest.json';
+        $tmpPath = $manifestPath . '.tmp';
+        $bytes = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+        if (@file_put_contents($tmpPath, $bytes) !== false) {
+          @rename($tmpPath, $manifestPath);
+        }
+
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'fonts' => $out]),
+          'application/json', 200, $hdrs
         );
       }
     ],

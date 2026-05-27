@@ -567,6 +567,31 @@
   }
 
   /**
+   * v0.8.216: live-drag helper. The text overlay is rendered as a
+   * sibling <text data-text-for="<lineId>"> in linesG (see
+   * renderLines). During drag-translate / vertex-drag the code mutates
+   * the line's <path d=...> attribute in place to keep things smooth,
+   * but the <text> element was left at its old position — so the text
+   * stayed put while the object moved. (A full renderLines on pointer-
+   * up reconciled it, hence "save & reload restores the right place".)
+   *
+   * Call this after any in-place geometry mutation that doesn't trigger
+   * a full re-render. Reads the line's resolved text and re-anchors
+   * the <text> at (lineCenter + offset). No-op if the line has no
+   * text overlay.
+   */
+  function syncTextOverlayPosition(line) {
+    const tEl = linesG.querySelector('[data-text-for="' + line.id + '"]');
+    if (!tEl) return;
+    const tx = resolveText(line);
+    if (!tx) return;
+    const pathEl = linesG.querySelector('[data-line-id="' + line.id + '"]');
+    const c = lineCenterFor(line, pathEl);
+    tEl.setAttribute('x', String(c.x + tx.offsetX));
+    tEl.setAttribute('y', String(c.y + tx.offsetY));
+  }
+
+  /**
    * Collect every distinct fontFamily referenced by any master.text
    * AND every family in the curated bundle (state.fontBundle), and
    * inject a single Google Fonts <link> for the union. Bundled fonts
@@ -590,6 +615,15 @@
       state.fontBundle.forEach(function (f) {
         const fam = (f || '').trim();
         if (fam) set[fam] = true;
+      });
+    }
+    // v0.8.215: local fonts are served by @font-face from /assets/fonts/local/
+    // and must NOT be requested from Google (they'd 404). Subtract any local
+    // family from the set before building the Google Fonts URL.
+    if (Array.isArray(state.localFonts)) {
+      state.localFonts.forEach(function (f) {
+        const fam = (f && f.family || '').trim();
+        if (fam) delete set[fam];
       });
     }
     const families = Object.keys(set).sort();
@@ -636,7 +670,19 @@
       document.body.appendChild(_fontBundleDatalist);
     }
     _fontBundleDatalist.innerHTML = '';
-    state.fontBundle.forEach(function (name) {
+    // v0.8.215: union Google bundle + local families. The datalist is
+    // mostly dead code now that the picker uses a custom popup, but
+    // keep it in sync so any input still using `list="ed-font-bundle-list"`
+    // (legacy or third-party) sees the right values.
+    const bundle = Array.isArray(state.fontBundle) ? state.fontBundle : [];
+    const local  = Array.isArray(state.localFonts)
+      ? state.localFonts.map(function (f) { return f.family; }).filter(Boolean)
+      : [];
+    const seen = {};
+    bundle.concat(local).forEach(function (name) {
+      const k = (name || '').toLowerCase();
+      if (!k || seen[k]) return;
+      seen[k] = true;
       const opt = document.createElement('option');
       opt.value = name;
       _fontBundleDatalist.appendChild(opt);
@@ -658,6 +704,60 @@
         // Editor stays usable without the bundle — free-text font
         // field still works, just without suggestions.
         state.fontBundle = [];
+        rebuildFontBundleDatalist();
+      });
+  }
+
+  /*
+   * Local fonts (Slice 3-2, v0.8.215). Companion to the Google Fonts
+   * bundle: assets/fonts/local/ holds OTF/TTF/WOFF files served at
+   * /assets/fonts/local/<file>. The /dev/draw/local-fonts endpoint
+   * returns the family name read from each file's name table.
+   *
+   * On editor startup we:
+   *   1. Fetch the list into state.localFonts.
+   *   2. Emit a <style id="ed-local-fontfaces"> block with one
+   *      @font-face per entry so the family is usable by name.
+   *   3. Rebuild the font-bundle datalist (which now unions Google
+   *      + local families) and re-inject the Google link.
+   *
+   * The picker (fontFamilyField, Settings textarea, anywhere that
+   * surfaces fonts) treats local families exactly like Google ones —
+   * once @font-face resolves the family name, the browser doesn't
+   * care where the bytes came from.
+   */
+  let _localFontFaceStyleEl = null;
+  function injectLocalFontFaces() {
+    if (!_localFontFaceStyleEl) {
+      _localFontFaceStyleEl = document.createElement('style');
+      _localFontFaceStyleEl.id = 'ed-local-fontfaces';
+      document.head.appendChild(_localFontFaceStyleEl);
+    }
+    const list = Array.isArray(state.localFonts) ? state.localFonts : [];
+    const css = list.map(function (f) {
+      // Map file extension to the CSS @font-face format() hint.
+      const fmtMap = { otf: 'opentype', ttf: 'truetype', woff: 'woff', woff2: 'woff2' };
+      const fmt = fmtMap[f.format] || '';
+      const url = '/assets/fonts/local/' + encodeURIComponent(f.file);
+      const fam = (f.family || '').replace(/"/g, '');
+      return '@font-face { font-family: "' + fam + '"; '
+           + 'src: url("' + url + '")'
+           + (fmt ? ' format("' + fmt + '")' : '') + '; '
+           + 'font-display: swap; }';
+    }).join('\n');
+    _localFontFaceStyleEl.textContent = css;
+  }
+  function loadLocalFonts() {
+    return fetch('/dev/draw/local-fonts', { method: 'GET' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        state.localFonts = (j && j.ok && Array.isArray(j.fonts)) ? j.fonts.slice() : [];
+        injectLocalFontFaces();
+        rebuildFontBundleDatalist();
+      })
+      .catch(function () {
+        state.localFonts = [];
+        injectLocalFontFaces();
         rebuildFontBundleDatalist();
       });
   }
@@ -9207,11 +9307,13 @@
     const z = state.zoom || 1;
     const selectedSet = {};
     state.selectedIds.forEach(function (id) { selectedSet[id] = true; });
-    // v0.8.108: per-class instance counts to match the sidebar's
-    // in-class gating semantics. Singletons (in-class count < 2)
-    // get a hollow neutral ring instead of nothing — same "nothing
-    // to say here" treatment as the sidebar, keeps the canvas
-    // visually consistent.
+    // v0.8.210: canvas only renders badges for instances that actually
+    // have linked siblings in this class. The previous behavior drew a
+    // hollow neutral ring for singletons (mirroring the sidebar's
+    // "nothing to say here" placeholder), but the canvas doesn't need
+    // a column-alignment placeholder — empty rings just added visual
+    // noise around every standalone object. Sidebar still renders the
+    // neutral placeholder for layout consistency.
     const inClassCounts = {};
     state.lines.forEach(function (l) {
       if (!l.masterId) return;
@@ -9228,6 +9330,8 @@
       if (!hasGeo) return;
       const inClassCount = inClassCounts[line.masterId] || 0;
       const linked = entry && entry.badge && inClassCount >= 2;
+      // v0.8.210: skip non-linked instances entirely on the canvas.
+      if (!linked) return;
       const pos = labelPositionFor(line);
       const cx = pos.x - (14 / z);
       const cy = pos.y - (24 / z);
@@ -9240,35 +9344,24 @@
       circ.setAttribute('cx', cx);
       circ.setAttribute('cy', cy);
       circ.setAttribute('r',  r);
-      if (linked) {
-        circ.setAttribute('fill',   'hsl(' + entry.hue + ', 70%, 32%)');
-        circ.setAttribute('stroke', '#fff');
-        circ.setAttribute('stroke-width', (1.4 / z));
-      } else {
-        // Hollow neutral ring — transparent fill, mid-gray stroke.
-        circ.setAttribute('fill',   'none');
-        circ.setAttribute('stroke', '#7a7a7a');
-        circ.setAttribute('stroke-width', (1.4 / z));
-      }
+      circ.setAttribute('fill',   'hsl(' + entry.hue + ', 70%, 32%)');
+      circ.setAttribute('stroke', '#fff');
+      circ.setAttribute('stroke-width', (1.4 / z));
       g.appendChild(circ);
-      if (linked) {
-        const letter = document.createElementNS(SVG_NS, 'text');
-        letter.setAttribute('x', cx);
-        letter.setAttribute('y', cy);
-        letter.setAttribute('text-anchor', 'middle');
-        letter.setAttribute('dominant-baseline', 'central');
-        letter.setAttribute('fill', '#fff');
-        letter.setAttribute('font-weight', '700');
-        letter.setAttribute('font-size', (17 / z));
-        letter.setAttribute('font-family', 'system-ui, sans-serif');
-        letter.textContent = entry.badge;
-        g.appendChild(letter);
-      }
+      const letter = document.createElementNS(SVG_NS, 'text');
+      letter.setAttribute('x', cx);
+      letter.setAttribute('y', cy);
+      letter.setAttribute('text-anchor', 'middle');
+      letter.setAttribute('dominant-baseline', 'central');
+      letter.setAttribute('fill', '#fff');
+      letter.setAttribute('font-weight', '700');
+      letter.setAttribute('font-size', (17 / z));
+      letter.setAttribute('font-family', 'system-ui, sans-serif');
+      letter.textContent = entry.badge;
+      g.appendChild(letter);
       const ttl = document.createElementNS(SVG_NS, 'title');
-      ttl.textContent = linked
-        ? ((master && master.name ? master.name : line.masterId) +
-           ' · ' + inClassCount + ' linked')
-        : 'No linked siblings in this class';
+      ttl.textContent = (master && master.name ? master.name : line.masterId) +
+                        ' · ' + inClassCount + ' linked';
       g.appendChild(ttl);
       labelsG.appendChild(g);
     });
@@ -9431,6 +9524,7 @@
         c.setAttribute('cy', pos.y);
         linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
           .forEach(function (el) { el.setAttribute('d', line.d); });
+        syncTextOverlayPosition(line);
         // Labels read their coords from line.points / line.params, so
         // they need to refresh as the drag moves a point — otherwise
         // the label is stuck at the pre-drag position and shows stale
@@ -9633,6 +9727,7 @@
         // Update the path's two DOM elements (hit target + visible).
         linesG.querySelectorAll('[data-line-id="' + line.id + '"]')
           .forEach(function (el) { el.setAttribute('d', line.d); });
+        syncTextOverlayPosition(line);
         // Reposition every handle so dependents track the dragged one
         // (e.g. rect corners share x/y with neighbors).
         applyHandles(line.params);
@@ -9856,6 +9951,7 @@
               el.setAttribute('d', l.d);
             }
           });
+        syncTextOverlayPosition(l);
       });
       // Slide the grip itself so it stays anchored to the moving bbox.
       const newX = parseFloat(rect.getAttribute('x')) + dx;
@@ -11797,6 +11893,48 @@
     return wrap;
   }
   /**
+   * v0.8.213: scale a popup option's font-size so its rendered cap-
+   * height lands near `targetPx`, regardless of the face's intrinsic
+   * proportions. Script faces (e.g. Allison) have tiny x-heights and
+   * read as illegible at the same nominal size as a serif/sans face;
+   * measuring actualBoundingBoxAscent via the Canvas API and back-
+   * solving for font-size equalizes the visual weight of every
+   * option in the picker.
+   *
+   * Async — uses document.fonts.load to ensure the face is in memory
+   * before measurement. Falls back gracefully when the API isn't
+   * available or the load fails (option keeps its default size).
+   * Clamped to [12, 36] px to keep outliers from disrupting layout.
+   */
+  function fitOptionToTargetCapHeight(opt, fontFamily, targetPx) {
+    const BASE = 24;
+    const MIN = 12;
+    const MAX = 36;
+    function measureAndApply() {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.font = BASE + 'px "' + fontFamily.replace(/"/g, '') + '", system-ui';
+        const m = ctx.measureText(fontFamily);
+        const ascent = m.actualBoundingBoxAscent || (BASE * 0.7);
+        if (!ascent || !isFinite(ascent)) return;
+        const scale = targetPx / ascent;
+        const px = Math.min(MAX, Math.max(MIN, BASE * scale));
+        opt.style.fontSize = px.toFixed(1) + 'px';
+      } catch (e) { /* keep default size on failure */ }
+    }
+    if (document.fonts && document.fonts.load) {
+      document.fonts
+        .load(BASE + 'px "' + fontFamily.replace(/"/g, '') + '"')
+        .then(measureAndApply, function () { /* ignore */ });
+    } else {
+      // No FontFaceSet API — measure immediately; will reflect fallback
+      // metrics if the face hasn't loaded yet, but better than nothing.
+      measureAndApply();
+    }
+  }
+
+  /**
    * Font-family field (v0.8.208) — combobox: free-text input + an
    * explicit ▾ button that opens a popup listing the curated bundle.
    *
@@ -11848,18 +11986,32 @@
     function closePop() { pop.style.display = 'none'; }
     function openPop() {
       pop.innerHTML = '';
-      const fonts = Array.isArray(state.fontBundle) ? state.fontBundle : [];
+      // v0.8.215: union Google-bundled families and local-fonts families.
+      // Dedup case-insensitively, sort case-insensitively. The browser
+      // doesn't distinguish at render time (the @font-face block makes
+      // local families resolvable by name), so we don't tag the source
+      // visually — they're all just "available families".
+      const bundle = Array.isArray(state.fontBundle) ? state.fontBundle : [];
+      const local  = Array.isArray(state.localFonts)
+        ? state.localFonts.map(function (f) { return f.family; }).filter(Boolean)
+        : [];
+      const seen = {};
+      const fonts = bundle.concat(local).filter(function (n) {
+        const k = (n || '').toLowerCase();
+        if (!k || seen[k]) return false;
+        seen[k] = true; return true;
+      }).sort(function (a, b) { return a.localeCompare(b, undefined, {sensitivity:'base'}); });
       if (!fonts.length) {
         const empty = document.createElement('div');
-        empty.textContent = 'Bundle is empty — add fonts in Settings → Font bundle.';
+        empty.textContent = 'No fonts available — add Google families in Settings → Font bundle, or drop OTF/TTF files into assets/fonts/local/.';
         empty.style.cssText = 'padding:8px 10px; color:#aaa; font-style:italic;';
         pop.appendChild(empty);
       } else {
         fonts.forEach(function (name) {
           const opt = document.createElement('div');
           opt.textContent = name;
-          opt.style.cssText = 'padding:6px 10px; cursor:pointer; font-family:"'
-            + name.replace(/"/g, '') + '", system-ui, sans-serif;';
+          opt.style.cssText = 'padding:6px 10px; cursor:pointer; line-height:1.4; '
+            + 'font-family:"' + name.replace(/"/g, '') + '", system-ui, sans-serif;';
           opt.addEventListener('mouseenter', function () { opt.style.background = '#3a3a55'; });
           opt.addEventListener('mouseleave', function () { opt.style.background = ''; });
           opt.addEventListener('mousedown', function (e) {
@@ -11870,6 +12022,15 @@
             closePop();
           });
           pop.appendChild(opt);
+          // v0.8.213: equalize visual size across faces. Script fonts
+          // (Allison, Allura) have a small x-height at the same font-
+          // size as serif/sans (Bodoni), so a flat font-size makes
+          // them unreadable. Measure each face's actual bounding-box
+          // ascent via the Canvas API after the font loads, then
+          // scale font-size so every option lands near a target
+          // cap-height (~16 px). Clamped to a sensible range to keep
+          // outliers from blowing up the popup.
+          fitOptionToTargetCapHeight(opt, name, 16);
         });
       }
       pop.style.display = 'block';
@@ -13375,6 +13536,7 @@
   // and bundled families are preloaded for face-accurate preview.
   // Fire-and-forget — the editor stays usable while it resolves.
   loadFontBundle();
+  loadLocalFonts();
 
   // ── Save ──────────────────────────────────────────────────────────
   async function save() {
@@ -13790,7 +13952,17 @@
         if (!masterRec.text || typeof masterRec.text !== 'object') {
           masterRec.text = Object.assign({}, TEXT_DEFAULTS);
         }
-        const c = centerOf(ln);
+        // v0.8.212: must use lineCenterFor — the same anchor the
+        // renderer uses at draw time — not centerOf. Previously click-
+        // set used centerOf (middle vertex of the points array for
+        // free-form lines), while the renderer anchors text at the
+        // SVG bbox center. For primitives the two agree, but for a
+        // drawing whose middle vertex is far from the bbox center
+        // (curvy / asymmetric path), the text landed 50–100 px off
+        // the click point. Looking up the rendered SVG element by
+        // data-line-id gives the renderer its own bbox-based center.
+        const svgEl = linesG.querySelector('[data-line-id="' + ln.id + '"]');
+        const c = lineCenterFor(ln, svgEl);
         const dx = c ? Math.round((x - c.x) * 10) / 10 : x;
         const dy = c ? Math.round((y - c.y) * 10) / 10 : y;
         masterRec.text.offsetX = dx;
@@ -13981,6 +14153,7 @@
               el.setAttribute('d', line.d);
             }
           });
+        syncTextOverlayPosition(line);
       });
       // In 'all' mode, mirror the same Δ onto every sibling-class
       // instance of the dragged masters. No DOM updates needed
@@ -14089,7 +14262,15 @@
           // sidebar ⊞ button in v0.8.141).
           clickCycle = null;
           if (ids.length) {
-            const hit = ids[0];
+            // v0.8.211: when several objects are stacked at the click
+            // point, prefer one that's already selected — opt-click is
+            // "open the panel for THIS object", not "switch to topmost
+            // and open it". Previously a user who'd cycled selection
+            // to a lower-z object and then opt-clicked saw the topmost
+            // sibling steal the selection. Fall back to ids[0] only
+            // when none of the stacked hits is currently selected.
+            const preselected = ids.find(function (id) { return isSelected(id); });
+            const hit = preselected || ids[0];
             // Capture whether a panel is already explicitly open for
             // this object before we change the selection.
             const panelAlreadyOpen = isObjectPanelOpenFor(hit);

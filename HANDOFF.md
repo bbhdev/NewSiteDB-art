@@ -1049,6 +1049,99 @@ passes.
 
 Plus an in-place "0 instances" badge on master library rows.
 
+## Roadmap — the larger plan beyond the current editor
+
+The /dev/draw editor is the first of three project phases. Calling
+them out here so future sessions (and future me) read the work in
+context — individual decisions in the editor make more sense once
+you know what comes next.
+
+### Phase 1 — Geometric / animating object editor (current, nearing completion)
+
+Everything in `/dev/draw` so far: masters + instances, groups, layers,
+behaviors (translate/rotate/drift/drawIn/fadeOpacity/pathFollow),
+text overlays, font bundles (Google + local). The output is a set of
+JSON files in `content/` that the runtime (`app.js`) replays as
+scroll-driven SVG animations.
+
+**Important framing**: the objects this editor manipulates are
+conceptually **decoration**, not first-class content. They're moving
+graphic elements that frame or animate around the real content —
+the real content is text and images on actual Kirby pages.
+
+### Phase 2 — Actual Kirby pages: structure + content authoring
+
+Once Phase 1 is stable, the second arm of the project is building
+the real site: Kirby page blueprints, templates, the navigation and
+layout of pages, the structural skeleton that visitors actually
+read. Plain Kirby work — `site/blueprints/`, `site/templates/`,
+`site/snippets/`.
+
+The crossover with Phase 1: actual first-class content (text +
+images) gets authored through the tools we're building in Phase 1.
+The font bundle, the text overlay system, the eventual image
+pipeline — these don't stay confined to "decoration on a canvas";
+they're the authoring surface for the real content of the real
+pages too. Phase 2 wires Kirby pages to consume that content. The
+content model layered onto the editor needs to be designed with
+this consumption in mind — JSON shapes friendly to Kirby
+templates, asset paths that resolve under both `/dev/draw` and
+public URLs, etc.
+
+This is also where any "geometric object as part of a page" gets
+done — embedding the SVG animation as a block within a Kirby page
+template, alongside text blocks, image blocks, etc.
+
+### Phase 3 — Safety: auth for the web-hosted editing tools
+
+Both Phases 1 and 2 currently assume a local development model.
+The /dev/draw editor and the entire `dev/draw/*` route namespace
+have no authentication — fine on `localhost`, unacceptable on a
+public host. Once the site is deployed and the user wants to edit
+**on the live server** (the natural workflow for site tweaks,
+especially in the first year), all of this needs an auth gate.
+
+Concretely:
+- Every `dev/draw/*` route needs a `kirby()->user()` check (or
+  equivalent) refusing access to anonymous requests.
+- The editor page itself needs the same gate.
+- File-upload endpoints (font uploads, image uploads, snapshot
+  saves) need both auth AND MIME/extension validation to prevent
+  writing executable files into web-served directories.
+- Existing endpoints to audit: `dev/draw/save`, `dev/draw/library/*`,
+  `dev/draw/font-bundle` (POST), `dev/draw/local-fonts` (currently
+  read-only — safe-ish, but will gain upload/delete in the on-
+  server-editing milestone).
+
+**Recommended sequencing**: do Phase 3 (or at least the auth gate)
+as a single cohesive slice rather than per-feature. Building auth
+incrementally as each feature graduates to "needs upload UI" leads
+to inconsistent gating and easy mistakes. One audit pass over the
+whole route namespace + one editor-page check + a session-aware
+upload helper used everywhere is cleaner.
+
+Until Phase 3 lands, the operational rule is: **never expose a
+public host with the `dev/draw/*` routes reachable**. Deploy with
+either the routes stripped from `config.php`, or with an
+htaccess/server-config rule blocking the namespace.
+
+### On-server editing pre-requisites (small running list)
+
+Things that need building when Phase 3 happens — captured here so
+they're not lost:
+
+- Font upload UI in Settings → "Local fonts" section: file input
+  POSTing to `dev/draw/local-fonts/upload`, which writes into
+  `assets/fonts/local/` after MIME validation and regenerates
+  `manifest.json`.
+- Font delete UI: list with × buttons, calls
+  `dev/draw/local-fonts/delete` (auth required, validates the
+  filename is inside the directory — no path traversal).
+- Similar upload/delete affordances for images (whenever images
+  become first-class content in Phase 2).
+- The Google Fonts bundle Settings textarea (already exists) needs
+  no UI change but its endpoint needs the same auth gate.
+
 ## Known limitations to be aware of
 
 ### Multi-block restrictions still in the runtime

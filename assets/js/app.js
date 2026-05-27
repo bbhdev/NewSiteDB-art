@@ -336,28 +336,81 @@
         color:      (typeof t.color === 'string' && t.color) ? t.color : null
       };
     }
-    // Inject a single Google Fonts <link> covering every distinct
-    // fontFamily referenced by any line.text across every class. Done
-    // once at init (font set is content-time fixed; no point watching).
+    // Inject font references for every distinct fontFamily referenced
+    // by any line.text across every class. Two sources:
+    //   1. Local fonts: served by @font-face from /assets/fonts/local/.
+    //      Fetched from /dev/draw/local-fonts; emitted as a <style>
+    //      block. Local families are excluded from the Google URL
+    //      because they'd 404 there.
+    //   2. Google Fonts: every remaining family is included in a single
+    //      <link rel="stylesheet"> pointing at fonts.googleapis.com.
+    //
+    // v0.8.216: added local-font support, mirroring the editor's
+    // injectLocalFontFaces + injectGoogleFontsLink subtraction logic.
     (function injectFonts() {
-      const set = {};
+      const usedSet = {};
       useClasses.forEach(function (cid) {
         const c = byClass[cid];
         if (!c || !Array.isArray(c.lines)) return;
         c.lines.forEach(function (l) {
           const t = resolveLineText(l);
-          if (t && t.fontFamily) set[t.fontFamily] = true;
+          if (t && t.fontFamily) usedSet[t.fontFamily] = true;
         });
       });
-      const families = Object.keys(set).sort();
-      if (!families.length) return;
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      const qs = families.map(function (f) {
-        return 'family=' + encodeURIComponent(f).replace(/%20/g, '+');
-      }).join('&');
-      link.href = 'https://fonts.googleapis.com/css2?' + qs + '&display=swap';
-      document.head.appendChild(link);
+      // No text at all → no work.
+      if (!Object.keys(usedSet).length) return;
+
+      function injectGoogleLink(excludeSet) {
+        const families = Object.keys(usedSet).filter(function (f) {
+          return !excludeSet[f];
+        }).sort();
+        if (!families.length) return;
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        const qs = families.map(function (f) {
+          return 'family=' + encodeURIComponent(f).replace(/%20/g, '+');
+        }).join('&');
+        link.href = 'https://fonts.googleapis.com/css2?' + qs + '&display=swap';
+        document.head.appendChild(link);
+      }
+
+      // v0.8.218: read the static manifest committed alongside the
+      // font files at assets/fonts/local/manifest.json. The editor's
+      // /dev/draw/local-fonts endpoint regenerates this file on every
+      // scan, so it stays in sync without the runtime needing the
+      // PHP route — works on static deploys / hosts where /dev/draw/*
+      // is locked down or absent. Manifest format mirrors the endpoint
+      // response: { fonts: [...], generatedAt, count }.
+      fetch('/assets/fonts/local/manifest.json', { cache: 'no-cache' })
+        .then(function (r) { return r.ok ? r.json() : { fonts: [] }; })
+        .then(function (j) {
+          const local = (j && Array.isArray(j.fonts)) ? j.fonts : [];
+          const localSet = {};
+          if (local.length) {
+            const fmtMap = { otf: 'opentype', ttf: 'truetype', woff: 'woff', woff2: 'woff2' };
+            const css = local.map(function (f) {
+              const fmt = fmtMap[f.format] || '';
+              const url = '/assets/fonts/local/' + encodeURIComponent(f.file);
+              const fam = (f.family || '').replace(/"/g, '');
+              localSet[f.family] = true;
+              return '@font-face { font-family: "' + fam + '"; '
+                   + 'src: url("' + url + '")'
+                   + (fmt ? ' format("' + fmt + '")' : '') + '; '
+                   + 'font-display: swap; }';
+            }).join('\n');
+            const style = document.createElement('style');
+            style.id = 'rt-local-fontfaces';
+            style.textContent = css;
+            document.head.appendChild(style);
+          }
+          injectGoogleLink(localSet);
+        })
+        .catch(function () {
+          // Endpoint absent (e.g. static deploy with no PHP runtime) —
+          // proceed with Google-only injection so the page still renders
+          // its text overlays in whatever Google families are referenced.
+          injectGoogleLink({});
+        });
     })();
 
     // ── Class selection ────────────────────────────────────────────
@@ -1885,10 +1938,19 @@
                    ? lineDef.positionOffset.dy : 0;
 
       // Initial state: static positionOffset only (no animation yet).
-      pathEl.setAttribute(
-        'transform',
-        'translate(' + offX + ' ' + offY + ') rotate(0 ' + originX + ' ' + originY + ')'
-      );
+      const initialXform = 'translate(' + offX + ' ' + offY + ') rotate(0 ' + originX + ' ' + originY + ')';
+      pathEl.setAttribute('transform', initialXform);
+      // v0.8.217: mirror the initial transform onto the text overlay
+      // too. Previously textEl only got a transform once writeAt fired
+      // (per-frame), so on first paint — and forever for lines with
+      // no behaviors at all — the text sat at canonical (pre-offset)
+      // coordinates while the path was already translated by
+      // positionOffset. Symptom: edit the object in the editor (which
+      // updates positionOffset, not the master geometry the runtime
+      // reads), reload runtime → object visually moved, text stuck at
+      // its old place. Setting the same initialXform on textEl pulls
+      // it along.
+      if (textEl) textEl.setAttribute('transform', initialXform);
 
       // v0.8.91: drawIn initial-paint. If any block has drawIn:true,
       // set up the dash machinery once. pathLength="1" normalizes
