@@ -1000,30 +1000,58 @@ function main(array $argv): int
     $opts = parseArgs(array_slice($argv, 1));
     if ($opts === null) return 2;
 
+    // Resolve --root into one or more concrete content-directory
+    // paths. A bare path → one root; a glob pattern (contains *, ?,
+    // or [) → every matching directory. No --root → default content/.
+    $roots = [];
     if ($opts['root'] !== null) {
-        $contentDir = realpath($opts['root']);
-        if ($contentDir === false || !is_dir($contentDir)) {
-            fwrite(STDERR, "error: --root path not found or not a directory: " . $opts['root'] . "\n");
-            return 1;
+        $raw = $opts['root'];
+        $hasGlob = (strpbrk($raw, '*?[') !== false);
+        if ($hasGlob) {
+            $matches = glob($raw, GLOB_ONLYDIR) ?: [];
+            if (!$matches) {
+                fwrite(STDERR, "error: --root pattern matched no directories: $raw\n");
+                return 1;
+            }
+            sort($matches);
+            foreach ($matches as $m) {
+                $rp = realpath($m);
+                if ($rp !== false && is_dir($rp)) $roots[] = $rp;
+            }
+        } else {
+            $rp = realpath($raw);
+            if ($rp === false || !is_dir($rp)) {
+                fwrite(STDERR, "error: --root path not found or not a directory: $raw\n");
+                return 1;
+            }
+            $roots[] = $rp;
         }
     } else {
-        $contentDir = realpath(__DIR__ . '/../content');
-        if ($contentDir === false || !is_dir($contentDir)) {
+        $rp = realpath(__DIR__ . '/../content');
+        if ($rp === false || !is_dir($rp)) {
             fwrite(STDERR, "error: content/ not found (looked in " . __DIR__ . "/../content)\n");
             return 1;
         }
-    }
-    echo "Content root: $contentDir\n";
-
-    $pages = findPages($contentDir);
-    if (!$pages) {
-        echo "no pages found under $contentDir\n";
-        return 0;
+        $roots[] = $rp;
     }
 
-    if ($opts['status']) return printStatus($pages);
-    if ($opts['repair-names']) return repairNames($contentDir, $opts);
-    return runMigrations($pages, $opts);
+    $finalRc = 0;
+    foreach ($roots as $i => $contentDir) {
+        if (count($roots) > 1) {
+            echo ($i > 0 ? "\n" : "") . str_repeat('═', 60) . "\n";
+        }
+        echo "Content root: $contentDir\n";
+        $pages = findPages($contentDir);
+        if (!$pages) {
+            echo "no pages found under $contentDir\n";
+            continue;
+        }
+        if ($opts['status'])             { printStatus($pages); continue; }
+        if ($opts['repair-names'])       { $rc = repairNames($contentDir, $opts); if ($rc) $finalRc = $rc; continue; }
+        $rc = runMigrations($pages, $opts);
+        if ($rc) $finalRc = $rc;
+    }
+    return $finalRc;
 }
 
 /**
@@ -1062,9 +1090,13 @@ function parseArgs(array $args): ?array
         }
         elseif  ($a === '--help' || $a === '-h') {
             echo "Usage: php scripts/migrate-content.php "
-               . "[--status | --dry-run | --repair-names] [--root <path>]\n"
+               . "[--status | --dry-run | --repair-names] [--root <path-or-glob>]\n"
                . "  --root <path>   Override the default content/ directory.\n"
-               . "                  Use to migrate snapshots under library/<name>/content.\n";
+               . "                  Accepts a glob pattern (quote it to defer\n"
+               . "                  shell expansion) — every matching directory\n"
+               . "                  is processed in turn. Examples:\n"
+               . "                    --root \"library/clean slate/content\"\n"
+               . "                    --root \"library/*/content\"\n";
             return null;
         } else {
             fwrite(STDERR, "unknown arg: $a (try --help)\n");
