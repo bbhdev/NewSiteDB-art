@@ -513,6 +513,26 @@ body.editor {
   background: rgba(255, 60, 60, 0.38) !important;
 }
 
+/* v0.8.219: behavior-template badge — appears on the sidebar row of
+   the object designated as its group's behavior template. Amber/gold
+   color picks up the same hue as the canvas badge so the two read as
+   the same affordance. ▶ glyph telegraphs "this drives the group". */
+.ed-template-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 50%;
+  background: #d09418;
+  color: #fff;
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
 /* v0.8.101: link badge — a colored circle with a per-master letter
    inside, appearing on sidebar rows and inside the master chip. The
    background color is set inline (hue hashed from master.id) so the

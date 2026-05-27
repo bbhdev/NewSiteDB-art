@@ -1083,6 +1083,12 @@
       id: uid('g'),
       name: 'Default',
       trigger: null,
+      // v0.8.219: when set to a lineId of a member object, the group
+      // adopts that object's behaviors + render params (everything
+      // except geometry) at runtime. Picker only allows objects that
+      // are themselves in the group. Cleared automatically when the
+      // referenced object is deleted or moved out.
+      behaviorTemplateObjectId: null,
       defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
     };
   }
@@ -2703,6 +2709,7 @@
         id: uid('g'),
         name: name,
         trigger: null,
+        behaviorTemplateObjectId: null, // v0.8.219
         defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
       });
     });
@@ -4461,6 +4468,8 @@
     lineIds.forEach(function (id) { idSet[id] = true; });
     state.lines = state.lines.filter(function (l) { return !idSet[l.id]; });
     state.selectedIds = state.selectedIds.filter(function (x) { return !idSet[x]; });
+    // v0.8.219: clear template refs that now point at removed instances.
+    pruneGroupTemplateRefs();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -4506,6 +4515,8 @@
       return !targetMasterIds.has(m.id);
     });
     state.selectedIds = state.selectedIds.filter(function (x) { return lineIds.indexOf(x) < 0; });
+    // v0.8.219: clear any group template refs pointing at deleted lines.
+    pruneGroupTemplateRefs();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -4558,6 +4569,9 @@
     // run in state.lines, matching where the sidebar shows it.
     rebuildLinesInGroupOrder();
     fanOutZReorder({ groupIdChanges: groupIdChanges });
+    // v0.8.219: lines that just changed groupId may have been the
+    // template of their old group — clear those stale refs.
+    pruneGroupTemplateRefs();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -4678,6 +4692,9 @@
       sibsForMaster: _dbgFirstMid ? _dbgSibs(_dbgFirstMid) : null,
       currentDraggedSnap: _dbgSnap(state.lines.find(function (l) { return l.id === _dbgFirstId; }))
     });
+    // v0.8.219: same rationale as moveLinesToGroup — dragged lines
+    // may have just left a group whose template referenced them.
+    pruneGroupTemplateRefs();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -5202,6 +5219,7 @@
     const tmpl = {
       name: name,
       trigger: null,
+      behaviorTemplateObjectId: null, // v0.8.219
       defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
     };
     let activeIdForCurrentClass = null;
@@ -5284,6 +5302,9 @@
     state.openGroupIds = {};
     state.openGroupIds[state.activeGroupId] = true;
     clearSelection();
+    // v0.8.219: re-home and group-replacement above may leave template
+    // refs pointing at lines now in a different group. Clear stale ones.
+    pruneGroupTemplateRefs();
     state.dirty = true;
     snapshot();
     renderAll();
@@ -5340,6 +5361,78 @@
     // fields coalesce so undo doesn't step through every keystroke.
     if (typeof patch[Object.keys(patch)[0]] === 'boolean') snapshot();
     else scheduleSnapshot();
+  }
+
+  // v0.8.219: set/clear the behavior-template object for a group.
+  // The picker only allows objects that are themselves in the group,
+  // so the caller is expected to validate lineId belongs to g.id (or
+  // pass null to clear). In ALL mode, the intent fans out to same-
+  // name peer groups: each peer adopts the masterId-matching sibling
+  // line in its own class, if one exists in that peer group. Peers
+  // without a matching member leave their template untouched (we
+  // don't auto-clear — the user may have set a different valid
+  // template there, and overwriting silently is worse than leaving
+  // a divergence).
+  function updateGroupBehaviorTemplate(groupId, lineId) {
+    const g = state.groups.find(function (gr) { return gr.id === groupId; });
+    if (!g) return;
+    // Local validation: lineId must be null OR a member of this group.
+    if (lineId) {
+      const ln = state.lines.find(function (l) { return l.id === lineId; });
+      if (!ln || ln.groupId !== g.id) return;
+    }
+    g.behaviorTemplateObjectId = lineId || null;
+    if (modeIsAll()) {
+      const srcLine = lineId
+        ? state.lines.find(function (l) { return l.id === lineId; })
+        : null;
+      const srcMid = srcLine && srcLine.masterId;
+      const peerName = g.name;
+      forSiblingGroupsByName(peerName, function (peer, peerClassId) {
+        if (!lineId) {
+          peer.behaviorTemplateObjectId = null;
+          return;
+        }
+        if (!srcMid) return; // can't resolve sibling without a master link
+        const peerBucket = state.byClass[peerClassId];
+        if (!peerBucket || !Array.isArray(peerBucket.lines)) return;
+        const peerLine = peerBucket.lines.find(function (l) {
+          return l.masterId === srcMid && l.groupId === peer.id;
+        });
+        if (peerLine) peer.behaviorTemplateObjectId = peerLine.id;
+        // else: leave the peer's existing template alone (see comment).
+      });
+    }
+    state.dirty = true;
+    snapshot();
+    renderGroupsList();
+    renderLines();
+  }
+
+  // v0.8.219: drop any group.behaviorTemplateObjectId references that
+  // point at a line which (a) no longer exists in this class or (b)
+  // is no longer a member of the referring group. Called after any
+  // mutation that could leave a stale reference: line delete, line
+  // group-reassignment, group delete (re-home).
+  function pruneGroupTemplateRefs() {
+    const useClasses = (state.pageConfig && state.pageConfig.useClasses) || [];
+    let touched = false;
+    useClasses.forEach(function (cid) {
+      const bucket = state.byClass[cid];
+      if (!bucket || !Array.isArray(bucket.groups)) return;
+      const lineById = {};
+      (bucket.lines || []).forEach(function (l) { lineById[l.id] = l; });
+      bucket.groups.forEach(function (g) {
+        const tid = g.behaviorTemplateObjectId;
+        if (!tid) return;
+        const ln = lineById[tid];
+        if (!ln || ln.groupId !== g.id) {
+          g.behaviorTemplateObjectId = null;
+          touched = true;
+        }
+      });
+    });
+    return touched;
   }
 
   function updateLine(id, patch) {
@@ -9307,6 +9400,14 @@
     const z = state.zoom || 1;
     const selectedSet = {};
     state.selectedIds.forEach(function (id) { selectedSet[id] = true; });
+    // v0.8.219: precompute groupId → template lineId so the per-line
+    // pass below can also paint a "template" badge in O(1).
+    const templateLineByGroup = {};
+    state.groups.forEach(function (gr) {
+      if (gr.behaviorTemplateObjectId) {
+        templateLineByGroup[gr.id] = gr.behaviorTemplateObjectId;
+      }
+    });
     // v0.8.210: canvas only renders badges for instances that actually
     // have linked siblings in this class. The previous behavior drew a
     // hollow neutral ring for singletons (mirroring the sidebar's
@@ -9362,6 +9463,92 @@
       const ttl = document.createElementNS(SVG_NS, 'title');
       ttl.textContent = (master && master.name ? master.name : line.masterId) +
                         ' · ' + inClassCount + ' linked';
+      g.appendChild(ttl);
+      labelsG.appendChild(g);
+    });
+
+    // v0.8.219: template-object canvas badge. Independent of the
+    // link badge above (a template object need not be linked, and a
+    // linked object need not be a template). Same visibility gating:
+    // when labels are off, draw only for selected lines so the
+    // canvas stays clean.
+    //
+    // Placement: just above the top-left corner of the rendered
+    // bounding box. labelPositionFor() (used by link badges) is
+    // inconsistent across primitive vs free-form geometries and lands
+    // unpredictably for arcs, stars, etc. — bbox top-left works
+    // uniformly because getBBox() reads the actual on-screen geometry.
+    state.lines.forEach(function (line) {
+      if (templateLineByGroup[line.groupId] !== line.id) return;
+      if (!state.showLabels && !selectedSet[line.id]) return;
+      const hasGeo = (Array.isArray(line.points) && line.points.length) ||
+                     (PRIMITIVES[line.kind] && line.params);
+      if (!hasGeo) return;
+      // For alignment with the position "+" crosshair: that marker
+      // anchors to currentBboxTopLeft() (minX/minY over the line's
+      // points/segments), not to getBBox() — the two differ when the
+      // rendered path has curve overshoot. Use the same source as the
+      // crosshair so our cx lines up exactly with the handle column.
+      // currentBboxTopLeft returns null for primitives (no points
+      // array), in which case fall back to getBBox().
+      let anchorX, anchorY;
+      const tl = currentBboxTopLeft(line);
+      if (tl) {
+        anchorX = tl.minX;
+        anchorY = tl.minY;
+      } else {
+        const svgEl = linesG.querySelector('[data-line-id="' + line.id + '"]');
+        if (!svgEl) return;
+        let bb;
+        try { bb = svgEl.getBBox(); }
+        catch (e) { return; }
+        if (!bb || !Number.isFinite(bb.x) || !Number.isFinite(bb.y)) return;
+        anchorX = bb.x;
+        anchorY = bb.y;
+      }
+      const r  = 14 / z;
+      // Align the badge over the bbox-move-grip (the small amber
+      // square that sits OUTSIDE the bbox top-left corner) for an
+      // edge-of-object reading. Grip geometry (when selected):
+      //   x0 = anchorX - 16/z, y0 = anchorY - 16/z
+      //   side = 14/z → center = (anchorX - 9/z, anchorY - 9/z)
+      // Badge sits directly above the grip with a small gap.
+      // For primitives there's no grip (renderBboxMoveHandle skips
+      // them), so fall back to the bbox top-left column (anchorX).
+      const hasGrip = !PRIMITIVES[line.kind];
+      const gripCenterX = hasGrip ? (anchorX - 9 / z) : anchorX;
+      const gripTopY    = hasGrip ? (anchorY - 16 / z) : anchorY;
+      const gap = 6 / z;
+      const cx = gripCenterX;
+      const cy = gripTopY - gap - r;
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'ed-template-canvas-badge');
+      g.style.pointerEvents = 'none';
+      const circ = document.createElementNS(SVG_NS, 'circle');
+      circ.setAttribute('cx', cx);
+      circ.setAttribute('cy', cy);
+      circ.setAttribute('r',  r);
+      // Distinct yellow/amber so it reads as "drives the group",
+      // separable from the link badge's hue-per-master scheme.
+      circ.setAttribute('fill',   '#d09418');
+      circ.setAttribute('stroke', '#fff');
+      circ.setAttribute('stroke-width', (1.4 / z));
+      g.appendChild(circ);
+      const glyph = document.createElementNS(SVG_NS, 'text');
+      glyph.setAttribute('x', cx);
+      // Triangle reads optically high at central baseline — nudge down.
+      glyph.setAttribute('y', cy + (1 / z));
+      glyph.setAttribute('text-anchor', 'middle');
+      glyph.setAttribute('dominant-baseline', 'central');
+      glyph.setAttribute('fill', '#fff');
+      glyph.setAttribute('font-weight', '700');
+      glyph.setAttribute('font-size', (15 / z));
+      glyph.setAttribute('font-family', 'system-ui, sans-serif');
+      glyph.textContent = '▶';
+      g.appendChild(glyph);
+      const grp = state.groups.find(function (gr) { return gr.id === line.groupId; });
+      const ttl = document.createElementNS(SVG_NS, 'title');
+      ttl.textContent = 'Behavior template for "' + (grp ? grp.name : line.groupId) + '"';
       g.appendChild(ttl);
       labelsG.appendChild(g);
     });
@@ -10279,6 +10466,16 @@
           const bCount = Array.isArray(line.behaviors) ? line.behaviors.length : 0;
           const rightWrap = document.createElement('span');
           rightWrap.className = 'ed-line-row-right';
+          // v0.8.219: template badge — this object is the group's
+          // behavior template. Small chip with a "▶" play glyph,
+          // distinct color so it doesn't blur with the link badge.
+          if (g.behaviorTemplateObjectId === line.id) {
+            const tplBadge = document.createElement('span');
+            tplBadge.className = 'ed-template-badge';
+            tplBadge.textContent = '▶';
+            tplBadge.title = 'Behavior template for "' + g.name + '" — every member adopts this object’s behaviors.';
+            rightWrap.appendChild(tplBadge);
+          }
           // v0.8.101: link badge — colored circle with a per-master
           // letter. Only present when this line's master has ≥2
           // instances (linked); single-instance objects stay
@@ -10979,6 +11176,53 @@
     wrap.appendChild(numberField('Line width', g.defaults.width != null ? g.defaults.width : 1, function (v) {
       updateGroupDefaults(g.id, { width: v });
     }));
+
+    // v0.8.219: Behavior template picker.
+    // Lists only objects that are themselves members of this group.
+    // When set, the runtime/preview will adopt the template object's
+    // behaviors + render params (everything except geometry) for every
+    // member object. Picker stays compact: a select dropdown rather
+    // than a search combobox — group membership is usually small.
+    wrap.appendChild(divider('Behavior template'));
+    {
+      const members = state.lines.filter(function (l) { return l.groupId === g.id; });
+      const options = [{ value: '__none__', label: '(none — group is static)' }]
+        .concat(members.map(function (l) {
+          const master = l.masterId
+            ? state.masters.find(function (m) { return m.id === l.masterId; })
+            : null;
+          const displayName = (l.name && l.name.trim())
+            || (master && master.name)
+            || l.id;
+          return { value: l.id, label: displayName };
+        }));
+      const currentVal = g.behaviorTemplateObjectId || '__none__';
+      // If the stored template id isn't in the members list any more
+      // (shouldn't happen with pruneGroupTemplateRefs, but defensive),
+      // surface it as a missing entry so the user can clear it.
+      if (g.behaviorTemplateObjectId
+          && !members.find(function (l) { return l.id === g.behaviorTemplateObjectId; })) {
+        options.push({
+          value: g.behaviorTemplateObjectId,
+          label: '⚠ ' + g.behaviorTemplateObjectId + ' (not in group)'
+        });
+      }
+      wrap.appendChild(selectField('Template object', currentVal, options, function (v) {
+        updateGroupBehaviorTemplate(g.id, v === '__none__' ? null : v);
+      }));
+      const hint = document.createElement('p');
+      hint.className = 'ed-hint';
+      hint.style.margin = '0.25rem 0 0.5rem';
+      hint.style.fontSize = '0.82em';
+      hint.style.color = '#9a9a9a';
+      hint.style.lineHeight = '1.35';
+      hint.textContent = members.length === 0
+        ? 'Add objects to this group to enable a template.'
+        : 'When set, every object in the group adopts the template object’s '
+          + 'behaviors and render params (except geometry). The template '
+          + 'object can still render normally.';
+      wrap.appendChild(hint);
+    }
 
     wrap.appendChild(divider('Behavior defaults'));
     wrap.appendChild(numberField('TranslateX', g.defaults.translateX, function (v) { updateGroupDefaults(g.id, { translateX: v }); }));
