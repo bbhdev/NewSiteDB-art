@@ -567,10 +567,12 @@
   }
 
   /**
-   * Collect every distinct fontFamily referenced by any master.text,
-   * and inject a single Google Fonts <link> for them. Idempotent —
-   * called from renderAll on every redraw; only adds the link once,
-   * and only refreshes when the set of families changes.
+   * Collect every distinct fontFamily referenced by any master.text
+   * AND every family in the curated bundle (state.fontBundle), and
+   * inject a single Google Fonts <link> for the union. Bundled fonts
+   * are included so they're available for preview in the font picker
+   * before they're applied to any object. Idempotent — only refreshes
+   * when the family set changes.
    */
   let _fontsLinkEl = null;
   let _fontsLastKey = '';
@@ -582,6 +584,14 @@
       const fam = m.text.fontFamily.trim();
       if (fam) set[fam] = true;
     });
+    // v0.8.206: include curated bundle so picker previews render in
+    // their actual face even before the font is applied to anything.
+    if (Array.isArray(state.fontBundle)) {
+      state.fontBundle.forEach(function (f) {
+        const fam = (f || '').trim();
+        if (fam) set[fam] = true;
+      });
+    }
     const families = Object.keys(set).sort();
     if (!families.length) {
       if (_fontsLinkEl && _fontsLinkEl.parentNode) _fontsLinkEl.parentNode.removeChild(_fontsLinkEl);
@@ -601,6 +611,49 @@
       return 'family=' + encodeURIComponent(f).replace(/%20/g, '+');
     }).join('&');
     _fontsLinkEl.href = 'https://fonts.googleapis.com/css2?' + qs + '&display=swap';
+  }
+
+  /*
+   * Font-bundle cache (v0.8.206). Loaded once at editor start and
+   * refreshed by the Settings → Font bundle Save flow. Drives:
+   *   • injectGoogleFontsLink (above) — ensures all bundled families
+   *     are loaded for preview.
+   *   • The TEXT section's font-family field (fontFamilyField below)
+   *     surfaces the bundle as <datalist> suggestions.
+   */
+  state.fontBundle = Array.isArray(state.fontBundle) ? state.fontBundle : [];
+  let _fontBundleDatalist = null;
+  function rebuildFontBundleDatalist() {
+    if (!_fontBundleDatalist) {
+      _fontBundleDatalist = document.createElement('datalist');
+      _fontBundleDatalist.id = 'ed-font-bundle-list';
+      document.body.appendChild(_fontBundleDatalist);
+    }
+    _fontBundleDatalist.innerHTML = '';
+    state.fontBundle.forEach(function (name) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      _fontBundleDatalist.appendChild(opt);
+    });
+  }
+  function loadFontBundle() {
+    return fetch('/dev/draw/font-bundle', { method: 'GET' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.ok && Array.isArray(j.fonts)) {
+          state.fontBundle = j.fonts.slice();
+        } else {
+          state.fontBundle = [];
+        }
+        rebuildFontBundleDatalist();
+        injectGoogleFontsLink();
+      })
+      .catch(function () {
+        // Editor stays usable without the bundle — free-text font
+        // field still works, just without suggestions.
+        state.fontBundle = [];
+        rebuildFontBundleDatalist();
+      });
   }
 
   /**
@@ -8788,6 +8841,11 @@
           if (res.ok && res.j.ok) {
             setFromList(res.j.fonts || []);
             status.textContent = 'Saved — ' + (res.j.count || 0) + ' fonts.';
+            // Refresh in-editor cache + datalist + Google Fonts link
+            // so the TEXT picker reflects the new bundle immediately.
+            state.fontBundle = (res.j.fonts || []).slice();
+            rebuildFontBundleDatalist();
+            injectGoogleFontsLink();
           } else {
             status.textContent = 'Save failed: ' + (res.j.error || 'unknown error');
           }
@@ -11473,12 +11531,12 @@
             ensureMasterText();
             startSetTextOffset({ masterId: masterRec.id, lineId: line.id });
           }));
-          wrap.appendChild(textField('Font family', t.fontFamily || '', function (v) {
+          wrap.appendChild(fontFamilyField('Font family', t.fontFamily || '', function (v) {
             ensureMasterText().fontFamily = v || TEXT_DEFAULTS.fontFamily;
             state.dirty = true; scheduleSnapshot();
             renderLines();
             injectGoogleFontsLink();
-          }, 'e.g. Inter, Playfair Display'));
+          }, 'Pick from bundle or type any name'));
           wrap.appendChild(numberField('Font size', t.fontSize || TEXT_DEFAULTS.fontSize, function (v) {
             ensureMasterText().fontSize = Number.isFinite(v) && v > 0 ? v : TEXT_DEFAULTS.fontSize;
             state.dirty = true; scheduleSnapshot(); renderLines();
@@ -11729,6 +11787,38 @@
     inp.type = 'text'; inp.value = value || '';
     if (placeholder) inp.placeholder = placeholder;
     inp.addEventListener('input', function () { onChange(inp.value); });
+    wrap.appendChild(lbl); wrap.appendChild(inp);
+    return wrap;
+  }
+  /**
+   * Font-family field (v0.8.206) — text input wired to the shared
+   * <datalist id="ed-font-bundle-list">, so the browser surfaces the
+   * curated bundle as autocomplete suggestions. Free-text fallback
+   * preserved: the user can type any family name; bundle membership
+   * is a suggestion, not a constraint. The input's value is shown
+   * in the typed family's own face when the font is loaded (which
+   * injectGoogleFontsLink ensures for every bundled family).
+   */
+  function fontFamilyField(label, value, onChange, placeholder) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = value || '';
+    inp.setAttribute('list', 'ed-font-bundle-list');
+    if (placeholder) inp.placeholder = placeholder;
+    function reflectFace() {
+      // Render the input itself in the chosen font, when typed value
+      // is a real family. Falls back to system-ui if blank.
+      inp.style.fontFamily = inp.value
+        ? '"' + inp.value.replace(/"/g, '') + '", system-ui, sans-serif'
+        : '';
+    }
+    inp.addEventListener('input', function () {
+      onChange(inp.value);
+      reflectFace();
+    });
+    reflectFace();
     wrap.appendChild(lbl); wrap.appendChild(inp);
     return wrap;
   }
@@ -13210,6 +13300,12 @@
     // family set hasn't changed).
     injectGoogleFontsLink();
   }
+
+  // v0.8.206: load the curated font bundle once at editor start so the
+  // TEXT section's font picker has its <datalist> suggestions ready
+  // and bundled families are preloaded for face-accurate preview.
+  // Fire-and-forget — the editor stays usable while it resolves.
+  loadFontBundle();
 
   // ── Save ──────────────────────────────────────────────────────────
   async function save() {
