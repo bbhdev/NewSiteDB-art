@@ -1089,7 +1089,7 @@
       // are themselves in the group. Cleared automatically when the
       // referenced object is deleted or moved out.
       behaviorTemplateObjectId: null,
-      defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
+      defaults: {}
     };
   }
 
@@ -2710,7 +2710,7 @@
         name: name,
         trigger: null,
         behaviorTemplateObjectId: null, // v0.8.219
-        defaults: { translateX: 0, translateY: 0, rotate: 0, drawIn: false }
+        defaults: {}                    // v0.8.226: behavior fallbacks removed
       });
     });
   }
@@ -5220,7 +5220,7 @@
       name: name,
       trigger: null,
       behaviorTemplateObjectId: null, // v0.8.219
-      defaults: { translateX: 0, translateY: -60, rotate: 0, drawIn: false }
+      defaults: {}                    // v0.8.226: behavior fallbacks removed
     };
     let activeIdForCurrentClass = null;
     const fanout = modeIsAll() ? state.pageConfig.useClasses : [state.classId];
@@ -11231,24 +11231,11 @@
       }));
     }
 
-    wrap.appendChild(divider('Behavior defaults'));
-    wrap.appendChild(numberField('TranslateX', g.defaults.translateX, function (v) { updateGroupDefaults(g.id, { translateX: v }); }));
-    wrap.appendChild(numberField('TranslateY', g.defaults.translateY, function (v) { updateGroupDefaults(g.id, { translateY: v }); }));
-    wrap.appendChild(numberField('Rotate',     g.defaults.rotate,     function (v) { updateGroupDefaults(g.id, { rotate: v }); }));
-    // Rotation pivot — leave blank for "use the shape's natural center"
-    // (geometric center for primitives, bbox center for free-form).
-    // Fill with explicit X/Y for off-center rotations; or click
-    // "Set on canvas" then click anywhere on the surface to drop the
-    // pivot visually.
-    wrap.appendChild(numberField('Rotate origin X', g.defaults.rotateOriginX, function (v) { updateGroupDefaults(g.id, { rotateOriginX: v }); }));
-    wrap.appendChild(numberField('Rotate origin Y', g.defaults.rotateOriginY, function (v) { updateGroupDefaults(g.id, { rotateOriginY: v }); }));
-    wrap.appendChild(setOriginButton(function () { startSetRotateOrigin({ type: 'group', id: g.id }); }));
-
-    wrap.appendChild(checkboxField('Draw-in', !!g.defaults.drawIn, function (v) { updateGroupDefaults(g.id, { drawIn: v }); }));
-    wrap.appendChild(selectField('Direction', g.defaults.drawInDirection || 'forward', [
-      { value: 'forward', label: 'Begin → end' },
-      { value: 'reverse', label: 'End → begin' }
-    ], function (v) { updateGroupDefaults(g.id, { drawInDirection: v }); }));
+    // v0.8.226 (CONTENT_SCHEMA_VERSION 11): the legacy "Behavior defaults"
+    // panel was removed. Group-level fallbacks for translateX/Y, rotate,
+    // rotateOriginX/Y, drawIn, drawInDirection, translateMode are no longer
+    // part of the schema — behaviors live entirely on objects (or on the
+    // group's behavior-template object, compounded onto members at runtime).
 
     selectionPanel.appendChild(wrap);
 

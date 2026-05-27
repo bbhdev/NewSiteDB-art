@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 10;
+const CONTENT_SCHEMA_VERSION = 11;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -102,6 +102,17 @@ $SCHEMA_HISTORY = [
        . ' duration → trigger.delay / duration.seconds. block.range'
        . ' moves into trigger.range (scroll-range only); top-level'
        . ' block.range removed.',
+    11 => 'Group.defaults loses every behavior-fallback key: translateX,'
+       . ' translateY, rotate, rotateOriginX, rotateOriginY, drawIn,'
+       . ' drawInDirection, translateMode. The runtime\'s "group default'
+       . ' as fallback for missing block params" path is gone — behavior'
+       . ' params now live exclusively on each line\'s behaviors[] blocks.'
+       . ' A group with no animation intent simply has no behaviors on'
+       . ' its members; a group whose members should share an animation'
+       . ' uses the v0.8.219 behaviorTemplateObjectId (one member object'
+       . ' designated as template, every member adopts its behaviors[]).'
+       . ' Non-behavior keys in defaults (stroke, width, font, etc.)'
+       . ' survive untouched.',
 ];
 
 /**
@@ -114,6 +125,54 @@ $SCHEMA_HISTORY = [
  * @var array<int, callable(string $pageRoot, bool $dryRun): bool>
  */
 $MIGRATIONS = [
+    10 => function (string $pageRoot, bool $dryRun): bool {
+        // v10 → v11: strip behavior-fallback keys from every group's
+        // `defaults` map across all classes. Behavior params now live
+        // exclusively on each line's behaviors[]; the group-level
+        // fallback is dead. Non-behavior keys (stroke, width, font…)
+        // are preserved untouched.
+        $REMOVE = [
+            'translateX', 'translateY',
+            'rotate', 'rotateOriginX', 'rotateOriginY',
+            'drawIn', 'drawInDirection',
+            'translateMode',
+        ];
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+        foreach ($useClasses as $cid) {
+            $gpPath = $pageRoot . '/' . $cid . '/groups.json';
+            if (!is_file($gpPath)) continue;
+            $groups = json_decode(file_get_contents($gpPath), true);
+            if (!is_array($groups)) continue;
+            $changed = false;
+            $strippedCount = 0;
+            foreach ($groups as &$g) {
+                if (!is_array($g)) continue;
+                if (!isset($g['defaults']) || !is_array($g['defaults'])) continue;
+                foreach ($REMOVE as $k) {
+                    if (array_key_exists($k, $g['defaults'])) {
+                        unset($g['defaults'][$k]);
+                        $changed = true;
+                        $strippedCount++;
+                    }
+                }
+            }
+            unset($g);
+            if ($changed) {
+                if ($dryRun) {
+                    echo "    would strip $strippedCount behavior-key(s) from groups in $gpPath\n";
+                } else {
+                    file_put_contents($gpPath,
+                        json_encode($groups, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                }
+            }
+        }
+        return true;
+    },
+
     1 => function (string $pageRoot, bool $dryRun): bool {
         // v1 → v2: write page.json with the dimensions the hardcoded
         // viewBox previously used (1200×800 page, 2400×1600 canvas).
@@ -941,11 +1000,20 @@ function main(array $argv): int
     $opts = parseArgs(array_slice($argv, 1));
     if ($opts === null) return 2;
 
-    $contentDir = realpath(__DIR__ . '/../content');
-    if ($contentDir === false || !is_dir($contentDir)) {
-        fwrite(STDERR, "error: content/ not found (looked in " . __DIR__ . "/../content)\n");
-        return 1;
+    if ($opts['root'] !== null) {
+        $contentDir = realpath($opts['root']);
+        if ($contentDir === false || !is_dir($contentDir)) {
+            fwrite(STDERR, "error: --root path not found or not a directory: " . $opts['root'] . "\n");
+            return 1;
+        }
+    } else {
+        $contentDir = realpath(__DIR__ . '/../content');
+        if ($contentDir === false || !is_dir($contentDir)) {
+            fwrite(STDERR, "error: content/ not found (looked in " . __DIR__ . "/../content)\n");
+            return 1;
+        }
     }
+    echo "Content root: $contentDir\n";
 
     $pages = findPages($contentDir);
     if (!$pages) {
@@ -978,14 +1046,25 @@ function repairNames(string $contentDir, array $opts): int
 
 function parseArgs(array $args): ?array
 {
-    $opts = ['dry-run' => false, 'status' => false, 'repair-names' => false];
-    foreach ($args as $a) {
+    $opts = ['dry-run' => false, 'status' => false, 'repair-names' => false, 'root' => null];
+    $n = count($args);
+    for ($i = 0; $i < $n; $i++) {
+        $a = $args[$i];
         if      ($a === '--dry-run')     $opts['dry-run']      = true;
         elseif  ($a === '--status')      $opts['status']       = true;
         elseif  ($a === '--repair-names')$opts['repair-names'] = true;
+        elseif  ($a === '--root') {
+            if ($i + 1 >= $n) {
+                fwrite(STDERR, "--root requires a path argument\n");
+                return null;
+            }
+            $opts['root'] = $args[++$i];
+        }
         elseif  ($a === '--help' || $a === '-h') {
             echo "Usage: php scripts/migrate-content.php "
-               . "[--status | --dry-run | --repair-names]\n";
+               . "[--status | --dry-run | --repair-names] [--root <path>]\n"
+               . "  --root <path>   Override the default content/ directory.\n"
+               . "                  Use to migrate snapshots under library/<name>/content.\n";
             return null;
         } else {
             fwrite(STDERR, "unknown arg: $a (try --help)\n");

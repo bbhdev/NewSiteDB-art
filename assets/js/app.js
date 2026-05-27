@@ -1014,8 +1014,8 @@
 
       // v0.4.1: multi-block composition. Walk lineDef.behaviors[];
       // each block carries its own trigger + duration + params.
-      // Empty behaviors[] falls back to one synthetic block from
-      // group defaults so legacy / unmigrated data still animates.
+      // Empty behaviors[] falls back to one synthetic no-op block so
+      // the rest of the pipeline always has at least one entry.
       //
       // v0.8.7: trigger / duration split into orthogonal axes.
       //   trigger.when  ∈ scroll-range | page-load | scroll-key |
@@ -1025,19 +1025,19 @@
       // Activation timestamp per block (activationState[i]) is the
       // moment the block crossed its trigger; time-based durations
       // measure elapsed from there + trigger.delay.
+      //
+      // v0.8.226 (CONTENT_SCHEMA_VERSION 11): group.defaults no
+      // longer carries behavior fallbacks (translateX/Y, rotate,
+      // rotateOriginX/Y, drawIn, drawInDirection, translateMode).
+      // All behavior params live on block.params; missing values
+      // default to 0 / false / 'fixed' / 'forward'.
       const rawBlocks = (compoundedBehaviors.length)
         ? compoundedBehaviors
         : [{ id: '__default', trigger: { when: 'scroll-range', range: { start: 0, end: 1 }, delay: 0 }, duration: { mode: 'scroll' }, kind: 'transform', params: {} }];
-      // When a group behavior template is active, group.defaults is
-      // intentionally ignored — the template object's behaviors[] is
-      // the sole source of behavior params. (Group.defaults will be
-      // removed entirely in Slice 3 / SCHEMA_VERSION 11.)
-      const gd = groupTemplateActive ? {} : (group.defaults || {});
       const blocks = rawBlocks.map(function (b) {
         const p = b.params || {};
         const num = function (k) {
-          return (typeof p[k] === 'number') ? p[k]
-               : (typeof gd[k] === 'number') ? gd[k] : 0;
+          return (typeof p[k] === 'number') ? p[k] : 0;
         };
         // Heal legacy shapes here so the runtime never has to
         // branch on two versions. Same logic as editor's
@@ -1049,7 +1049,7 @@
         // per-scroll-px multiplier instead of a target
         // displacement — accumulated drift is added on top of
         // the fixed contribution from the other axis.
-        const tmode = p.translateMode || gd.translateMode || 'fixed';
+        const tmode = p.translateMode || 'fixed';
         // v0.8.26: per-block opacity fade. Authored as absolute
         // from→to values (not progress-weighted deltas like
         // tx/ty/rot), so blocks compose by "last active wins"
@@ -1083,8 +1083,8 @@
           fadeOpacity: fadeOpacity,
           opacityFrom: opacityFrom,
           opacityTo:   opacityTo,
-          drawIn:   typeof p.drawIn === 'boolean' ? p.drawIn : !!gd.drawIn,
-          drawInDirection: p.drawInDirection || gd.drawInDirection || 'forward'
+          drawIn:   !!p.drawIn,
+          drawInDirection: p.drawInDirection || 'forward'
         };
       });
       // Per-block easing fn (evaluated once; identity when GSAP
