@@ -958,6 +958,10 @@
     // params/points/segments since master.d was last derived, and a
     // zero positionOffset wouldn't otherwise trigger a refresh.
     computeLineD(line);
+    // v0.8.231 / schema v12: scrollMode per-instance ('flow' | 'static').
+    // Pass through so the editor can display and persist it correctly.
+    // Absent field = 'flow' (the runtime and editor both read undefined as flow).
+    if (inst.scrollMode) line.scrollMode = inst.scrollMode;
     return line;
   }
 
@@ -2017,7 +2021,7 @@
           ? line.positionOffset.dx : 0;
         const offDy = (line.positionOffset && Number.isFinite(line.positionOffset.dy))
           ? line.positionOffset.dy : 0;
-        return {
+        const instRecord = {
           id:        line.id,
           // Denormalized name for human readability of instances.json.
           // The resolver doesn't read it; kept fresh on every save.
@@ -2035,6 +2039,17 @@
             : [],
           overrides: cleanOverrides
         };
+        // v0.8.231 / schema v12: scrollMode is per-instance. Omit the
+        // field when it's 'flow' and wasn't explicitly set — keeps JSON
+        // tidy (absence = flow, the runtime default). Always write it
+        // when it's 'static' so the static intent is explicit on disk.
+        if (line.scrollMode === 'static') {
+          instRecord.scrollMode = 'static';
+        } else if (line.scrollMode === 'flow') {
+          instRecord.scrollMode = 'flow';
+        }
+        // (absent = flow — no field needed for the default)
+        return instRecord;
       });
       byClass[cid] = {
         instances: instances,
@@ -12112,6 +12127,23 @@
     wrap.appendChild(list);
 
     host.appendChild(wrap);
+
+    // v0.8.231: scrollMode selector — controls whether this object scrolls
+    // with the page ('flow', the default) or stays viewport-pinned ('static',
+    // the pre-v12 behavior). Absent field = 'flow'. Per-object, not per-group.
+    // Lives in the behaviors area since it governs page-level motion.
+    wrap.appendChild(divider('Page scroll'));
+    wrap.appendChild(selectField(
+      'Scroll mode',
+      line.scrollMode || 'flow',
+      [
+        { value: 'flow',   label: 'Flow with page (default)' },
+        { value: 'static', label: 'Static — viewport-pinned' }
+      ],
+      function (v) {
+        updateLine(line.id, { scrollMode: v });
+      }
+    ));
 
     // v0.8.128: B5 — actions behind a divider; stacked vertically so
     // long button labels don't wrap when constrained in a narrow panel.

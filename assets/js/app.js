@@ -457,6 +457,24 @@
     // on class-boundary re-render, and the (target, type, fn) shape
     // of ownListeners doesn't fit.
     const ownCleanups = [];
+
+    // v0.8.231: convert window.scrollY (CSS pixels) to SVG coordinate
+    // units for the flow-mode scroll translation. The SVG layer is
+    // position:fixed and its viewBox maps a known number of SVG units
+    // to the element's CSS height. getBoundingClientRect().height gives
+    // the live CSS height (accounts for zoom, viewport resize, etc).
+    // Called every frame inside writeAt so the ratio stays current.
+    function scrollToSvgY() {
+      var h = layer.getBoundingClientRect().height;
+      if (h <= 0) return 0;
+      var vb = layer.viewBox.baseVal;
+      return window.scrollY * vb.height / h;
+    }
+    // Returns true when the instance should scroll with the page.
+    // Absent scrollMode = 'flow' (the new default as of schema v12).
+    function isFlowMode(lineDef) {
+      return !lineDef.scrollMode || lineDef.scrollMode === 'flow';
+    }
     let currentClassId = null;
 
     // v0.8.77: shared scroll-activity watcher for scroll-stop /
@@ -2000,8 +2018,19 @@
       const offY = (lineDef.positionOffset && Number.isFinite(lineDef.positionOffset.dy))
                    ? lineDef.positionOffset.dy : 0;
 
+      // v0.8.231: flow-mode helper scoped to this line. Computes the
+      // transform string for the given scrollY-in-SVG value. For static
+      // objects the flow offset is always 0, so the result matches the
+      // old initialXform every time.
+      const xformFor = function (flowOffY) {
+        return 'translate(' + offX + ' ' + (offY - flowOffY) + ') rotate(0 ' + originX + ' ' + originY + ')';
+      };
       // Initial state: static positionOffset only (no animation yet).
-      const initialXform = 'translate(' + offX + ' ' + offY + ') rotate(0 ' + originX + ' ' + originY + ')';
+      // For flow-mode lines, also account for the current scrollY so
+      // the object appears at its correct document position on first paint
+      // (important when the page loads partway down, e.g. via a hash link).
+      const initialFlowY = (!diagMode && isFlowMode(lineDef)) ? scrollToSvgY() : 0;
+      const initialXform = xformFor(initialFlowY);
       pathEl.setAttribute('transform', initialXform);
       // v0.8.217: mirror the initial transform onto the text overlay
       // too. Previously textEl only got a transform once writeAt fired
@@ -2014,6 +2043,21 @@
       // its old place. Setting the same initialXform on textEl pulls
       // it along.
       if (textEl) textEl.setAttribute('transform', initialXform);
+
+      // v0.8.231: for flow-mode objects that have NO behaviors (hasMotion
+      // = false, so writeAt is never installed), wire up a dedicated
+      // passive scroll listener to keep the transform current. For lines
+      // with behaviors, writeAt already calls scrollToSvgY() on every
+      // frame — no separate listener needed there.
+      if (!diagMode && isFlowMode(lineDef) && !hasMotion) {
+        const onScrollFlow = function () {
+          const xf = xformFor(scrollToSvgY());
+          pathEl.setAttribute('transform', xf);
+          if (textEl) textEl.setAttribute('transform', xf);
+        };
+        window.addEventListener('scroll', onScrollFlow, { passive: true });
+        ownListeners.push({ target: window, type: 'scroll', fn: onScrollFlow });
+      }
 
       // v0.8.91: drawIn initial-paint. If any block has drawIn:true,
       // set up the dash machinery once. pathLength="1" normalizes
@@ -2054,9 +2098,10 @@
         // effects) just to capture a still frame.
         let lastContribution = null;
         const paintNeutral = function () {
+          const _pFlowY = isFlowMode(lineDef) ? scrollToSvgY() : 0;
           pathEl.setAttribute(
             'transform',
-            'translate(' + offX + ' ' + offY + ') ' +
+            'translate(' + offX + ' ' + (offY - _pFlowY) + ') ' +
             'rotate(0 ' + originX + ' ' + originY + ')'
           );
           pathEl.setAttribute('opacity', '1');
@@ -2086,7 +2131,8 @@
               const fty  = stopState.returnHome ? 0 : fz.ty;
               const frot = stopState.returnHome ? 0 : fz.rot;
               const fop  = stopState.fadeOut    ? 0 : fz.opacity;
-              const finalXform = 'translate(' + (offX + ftx) + ' ' + (offY + fty) + ') ' +
+              const _sFlowY = isFlowMode(lineDef) ? scrollToSvgY() : 0;
+              const finalXform = 'translate(' + (offX + ftx) + ' ' + (offY + fty - _sFlowY) + ') ' +
                 'rotate(' + frot + ' ' + originX + ' ' + originY + ')';
               pathEl.setAttribute('transform', finalXform);
               pathEl.setAttribute('opacity', fop);
@@ -2126,7 +2172,8 @@
             const tyc  = stopState.returnHome ? fz.ty  * inv : fz.ty;
             const rotc = stopState.returnHome ? fz.rot * inv : fz.rot;
             const opc  = stopState.fadeOut    ? fz.opacity * inv : fz.opacity;
-            const cleanupXform = 'translate(' + (offX + txc) + ' ' + (offY + tyc) + ') ' +
+            const _cFlowY = isFlowMode(lineDef) ? scrollToSvgY() : 0;
+            const cleanupXform = 'translate(' + (offX + txc) + ' ' + (offY + tyc - _cFlowY) + ') ' +
               'rotate(' + rotc + ' ' + originX + ' ' + originY + ')';
             pathEl.setAttribute('transform', cleanupXform);
             pathEl.setAttribute('opacity', opc);
@@ -2152,7 +2199,12 @@
           // center) so the follower's center lands on the path.
           const useOffX = t.pathFollowActive ? 0 : offX;
           const useOffY = t.pathFollowActive ? 0 : offY;
-          const liveXform = 'translate(' + (useOffX + t.tx) + ' ' + (useOffY + t.ty) + ') ' +
+          // v0.8.231: flow-mode lines scroll with the page. The SVG
+          // layer is position:fixed so we compensate by subtracting
+          // scrollY (in SVG units) from the Y component every frame.
+          // Static-mode objects use flowOffY = 0 (prior behavior).
+          const flowOffY = isFlowMode(lineDef) ? scrollToSvgY() : 0;
+          const liveXform = 'translate(' + (useOffX + t.tx) + ' ' + (useOffY + t.ty - flowOffY) + ') ' +
             'rotate(' + t.rot + ' ' + originX + ' ' + originY + ')';
           pathEl.setAttribute('transform', liveXform);
           // v0.8.26: opacity is always written (cheap setAttribute,

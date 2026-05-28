@@ -36,7 +36,7 @@
  *   in that file.
  */
 
-const CONTENT_SCHEMA_VERSION = 11;
+const CONTENT_SCHEMA_VERSION = 12;
 
 $SCHEMA_HISTORY = [
     1 => 'Initial: content/<slug>/{lines.json, groups.json}; flat array of'
@@ -113,6 +113,13 @@ $SCHEMA_HISTORY = [
        . ' designated as template, every member adopts its behaviors[]).'
        . ' Non-behavior keys in defaults (stroke, width, font, etc.)'
        . ' survive untouched.',
+    12 => 'Per-instance scrollMode field. scrollMode ∈ {flow, static}.'
+        . ' Runtime default for absent field = "flow" (object scrolls with'
+        . ' the page, the expected HTML default). "static" = viewport-pinned'
+        . ' (the pre-v12 behavior for all objects). Migration stamps every'
+        . ' existing instance with scrollMode="static" so current pages are'
+        . ' visually unchanged after the upgrade. New objects created after'
+        . ' this version default to "flow" (absent = flow).',
 ];
 
 /**
@@ -167,6 +174,45 @@ $MIGRATIONS = [
                 } else {
                     file_put_contents($gpPath,
                         json_encode($groups, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+                }
+            }
+        }
+        return true;
+    },
+
+    11 => function (string $pageRoot, bool $dryRun): bool {
+        // v11 → v12: stamp scrollMode='static' on every existing instance
+        // across all classes. Before v12 all objects were viewport-pinned
+        // (position: fixed SVG layer, no scroll-offset applied). v12
+        // introduces per-instance scrollMode ('flow' | 'static'). The
+        // runtime defaults absent-field to 'flow' (scrolls with page), so
+        // every pre-v12 instance must be explicitly stamped 'static' to
+        // preserve current visual behavior.
+        $cfgPath = $pageRoot . '/page.json';
+        if (!is_file($cfgPath)) return true;
+        $cfg = json_decode(file_get_contents($cfgPath), true) ?: [];
+        $useClasses = (isset($cfg['useClasses']) && is_array($cfg['useClasses']))
+            ? $cfg['useClasses'] : [];
+        foreach ($useClasses as $cid) {
+            $instPath = $pageRoot . '/' . $cid . '/instances.json';
+            if (!is_file($instPath)) continue;
+            $instances = json_decode(file_get_contents($instPath), true);
+            if (!is_array($instances)) continue;
+            $changed = 0;
+            foreach ($instances as &$inst) {
+                if (!is_array($inst)) continue;
+                if (!isset($inst['scrollMode'])) {
+                    $inst['scrollMode'] = 'static';
+                    $changed++;
+                }
+            }
+            unset($inst);
+            if ($changed > 0) {
+                if ($dryRun) {
+                    echo "    would stamp scrollMode=static on $changed instance(s) in $instPath\n";
+                } else {
+                    file_put_contents($instPath,
+                        json_encode($instances, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
                 }
             }
         }

@@ -292,6 +292,14 @@ function art_resolve_instance(array $instance, array $mastersById): array
     $line['behaviors']      = isset($instance['behaviors']) && is_array($instance['behaviors'])
         ? $instance['behaviors']
         : [];
+    // v0.8.231 / schema v12: scrollMode is per-instance ('flow' | 'static').
+    // Absent field = 'flow' in the runtime; pass the raw value (or null)
+    // so the runtime can distinguish "explicitly flow" vs "absent = flow".
+    // The distinction doesn't matter today, but keeping the raw value avoids
+    // baking an implicit default into the server output.
+    if (isset($instance['scrollMode'])) {
+        $line['scrollMode'] = $instance['scrollMode'];
+    }
     if ($masterId)  $line['masterId'] = $masterId;
     return $line;
 }
