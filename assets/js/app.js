@@ -577,21 +577,46 @@
     // first start event waits until the user actually scrolls — no
     // false fires at page load.
     const SCROLL_STILL_MS = 150;
+    // v0.8.243: dead zone before scroll-start fires. 4mm physical ≈ 15
+    // CSS px on a standard display (96 CSS px per inch ÷ 25.4 mm/inch
+    // ≈ 3.78 px/mm). Small enough to feel responsive on real scrolls,
+    // large enough that a stray finger jiggle while reading doesn't
+    // fire start triggers. Global / non-configurable today — every
+    // scroll-start trigger waits for the same threshold.
+    const SCROLL_START_DEADZONE_PX = 15;
     const scrollActivity = (function () {
       const subs = [];
-      let scrolling = false;
+      let scrolling = false;       // motion seen since last still period
+      let startAnnounced = false;  // onStart already fired this period
+      let periodStartY = 0;        // window.scrollY when the period began
       let stillTimer = null;
       function onScroll() {
+        const y = window.scrollY;
         if (!scrolling) {
+          // First scroll event after stillness — open a new period.
           scrolling = true;
-          const t = performance.now() / 1000;
-          for (let i = 0; i < subs.length; i++) {
-            try { if (subs[i].onStart) subs[i].onStart(t); } catch (e) {}
+          startAnnounced = false;
+          periodStartY = y;
+        }
+        // Defer the onStart announcement until cumulative |Δy| crosses
+        // the dead zone. Once announced, sticky for the rest of the
+        // period (a wobble doesn't re-fire). Direction is captured from
+        // the sign of the crossing delta — subscribers can filter by it.
+        if (!startAnnounced) {
+          const delta = y - periodStartY;
+          if (Math.abs(delta) >= SCROLL_START_DEADZONE_PX) {
+            startAnnounced = true;
+            const direction = (delta > 0) ? 'down' : 'up';
+            const t = performance.now() / 1000;
+            for (let i = 0; i < subs.length; i++) {
+              try { if (subs[i].onStart) subs[i].onStart(t, direction); } catch (e) {}
+            }
           }
         }
         clearTimeout(stillTimer);
         stillTimer = setTimeout(function () {
           scrolling = false;
+          startAnnounced = false;
           const t = performance.now() / 1000;
           for (let i = 0; i < subs.length; i++) {
             try { if (subs[i].onStop) subs[i].onStop(t); } catch (e) {}
@@ -1492,6 +1517,12 @@
               scheduled = null;
             }
           };
+          // v0.8.243: scroll-start subscribers can filter by direction.
+          // trig.direction in {'down','up'} → ignore the other direction;
+          // absent / 'both' → fire on either (the previous behavior).
+          // scroll-stop stays direction-agnostic — user explicitly only
+          // asked for direction on the start trigger.
+          const wantDir = (when === 'scroll-start') ? (trig.direction || 'both') : 'both';
           const sub = (when === 'scroll-stop')
             ? {
                 onStop: function () {
@@ -1501,7 +1532,8 @@
                 onStart: cancel
               }
             : {
-                onStart: function () {
+                onStart: function (_t, direction) {
+                  if (wantDir !== 'both' && direction !== wantDir) return;
                   cancel();
                   scheduled = setTimeout(fire, delaySec * 1000);
                 },

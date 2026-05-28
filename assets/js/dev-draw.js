@@ -223,6 +223,13 @@
       if (b.trigger.stopEasing)     out.stopEasing     = String(b.trigger.stopEasing);
       // v0.8.84: easy-hit opt-in for click/hover triggers.
       if (b.trigger.treatAsFilled)  out.treatAsFilled  = true;
+      // v0.8.243: per-trigger scroll direction filter (scroll-start only).
+      // 'down' | 'up' | 'both' — absent = 'both' (no filter, current behavior).
+      // We only carry the value when it's actually constraining, so legacy
+      // data without the field stays clean.
+      if (b.trigger.direction === 'down' || b.trigger.direction === 'up') {
+        out.direction = b.trigger.direction;
+      }
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.
@@ -5914,6 +5921,17 @@
       if (value !== 'click' && value !== 'hover') {
         delete b.trigger.treatAsFilled;
       }
+      // v0.8.243: direction filter is scroll-start-only — strip when
+      // leaving so the data doesn't carry stale orientation.
+      if (value !== 'scroll-start') {
+        delete b.trigger.direction;
+      }
+    } else if (key === 'direction') {
+      // v0.8.243: 'both' is the absent / no-filter case — don't store it
+      // (keeps legacy data shape clean). 'down' / 'up' both stored.
+      const v = String(value || 'both');
+      if (v === 'down' || v === 'up') b.trigger.direction = v;
+      else delete b.trigger.direction;
     } else if (key === 'selector') {
       b.trigger.selector = String(value || '');
     } else if (key === 'viewportAt') {
@@ -12896,9 +12914,14 @@
         ? 'Triggers ' + formatSeconds(delay) + ' after the user stops scrolling'
         : 'Triggers the moment the user stops scrolling';
     } else if (when === 'scroll-start') {
+      // v0.8.243: surface direction in the summary so the panel name
+      // tells the truth at a glance (… 'scrolling downward' / 'upward').
+      const dirSuffix = (trigger.direction === 'down') ? ' downward'
+                      : (trigger.direction === 'up')   ? ' upward'
+                      : '';
       act = (delay > 0)
-        ? 'Triggers ' + formatSeconds(delay) + ' after the user resumes scrolling'
-        : 'Triggers the moment the user resumes scrolling';
+        ? 'Triggers ' + formatSeconds(delay) + ' after the user resumes scrolling' + dirSuffix
+        : 'Triggers the moment the user resumes scrolling' + dirSuffix;
     } else if (when === 'wait') {
       // v0.8.82
       act = 'Waits for another object’s Start command (does not fire on its own)';
@@ -13446,6 +13469,22 @@
           { value: 'every', label: 'Every crossing' }
         ], function (v) {
           updateBehaviorTrigger(line.id, blockIdx, 'repeat', v);
+        }, null));
+      }
+
+      // v0.8.243: scroll-start direction filter. Absent = 'both' (any
+      // direction triggers, matches pre-v0.8.243 behavior). Authors who
+      // want a one-way trigger pick 'down' or 'up'. The runtime also
+      // applies a ~4mm dead zone so accidental tiny scrolls don't fire
+      // — that's global / non-configurable today.
+      if (when === 'scroll-start') {
+        const dir = trigger.direction || 'both';
+        card.appendChild(behaviorButtonGroup('Direction', dir, [
+          { value: 'down', label: 'Down' },
+          { value: 'up',   label: 'Up' },
+          { value: 'both', label: 'Both' }
+        ], function (v) {
+          updateBehaviorTrigger(line.id, blockIdx, 'direction', v);
         }, null));
       }
 
