@@ -12644,6 +12644,7 @@
     // object's master (the setter would refuse it anyway, but better
     // to not offer it).
     if (line.masterId) {
+      wrap.appendChild(divider('FOLLOWS'));
       const donorByMasterId = {};
       // v0.8.278: full-chain cycle filter. Walk each candidate donor's
       // follow chain; skip if it transitively reaches this line's master.
