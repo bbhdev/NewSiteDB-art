@@ -579,6 +579,33 @@
     }
   };
 
+  // v0.8.258 (textBlock Slice 1c): htmlKey is the phase-2 page
+  // generator's slot identifier. It lives on the master (one key per
+  // master, shared by every resolved instance) and validates against
+  // strict HTML id rules: starts with a letter, then letters / digits
+  // / dash / underscore. Empty string = no key set (the textBlock just
+  // has no slot identity yet). We don't auto-sanitize bad input —
+  // store as typed, badge visually, let the user fix it.
+  const HTML_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
+  function isValidHtmlKey(s) {
+    return !s || HTML_KEY_RE.test(s);
+  }
+  // Scan current-page masters of kind=textBlock and return a map
+  // (key → [masterId, …]) of every htmlKey actually in use. Any
+  // value with .length > 1 is a duplicate conflict. Empty / missing
+  // keys are excluded — they don't conflict with anything.
+  function findHtmlKeyConflicts() {
+    const map = {};
+    (state.masters || []).forEach(function (m) {
+      if (!m || m.kind !== 'textBlock') return;
+      const k = m.htmlKey;
+      if (!k) return;
+      if (!map[k]) map[k] = [];
+      map[k].push(m.id);
+    });
+    return map;
+  }
+
   // v0.8.195: text overlay helpers. The text record is a small
   // optional object on the master (and propagated to every resolved
   // line by Object.assign in resolveInstanceJS). Slice 1 is master-
@@ -12046,6 +12073,74 @@
       } else {
         // Degenerate: no geometry to anchor the position to.
         wrap.appendChild(textField('Position', '— (no geometry)', function () {}, ''));
+      }
+    }
+
+    // v0.8.258 (textBlock Slice 1c): HTML key — identifies the slot
+    // in the phase-2 page generator. Master-scoped: one key per
+    // master, shared by every resolved instance. Validates against
+    // HTML id rules; duplicates within the current page are flagged
+    // (warning badge below the field) but the user can still save —
+    // matches the rule "don't silently auto-fix author identity."
+    if (line.kind === 'textBlock' && line.masterId) {
+      const masterRecHK = state.masters.find(function (m) { return m.id === line.masterId; });
+      if (masterRecHK) {
+        wrap.appendChild(divider('HTML key'));
+        const initialKey = String(masterRecHK.htmlKey || '');
+        // The warning div is created up-front so the input-handler can
+        // update its text in-place without re-rendering the panel
+        // (which would steal focus on every keystroke).
+        const warnDiv = document.createElement('div');
+        warnDiv.className = 'ed-field-warning';
+        const keyField = textField('Key', initialKey, function (v) {
+          const trimmed = String(v || '').trim();
+          if (trimmed) masterRecHK.htmlKey = trimmed;
+          else delete masterRecHK.htmlKey;
+          // Mirror onto resolved lines so any downstream reader sees
+          // the current value (mirrors the master.text pattern at
+          // line 12195).
+          (state.pageConfig.useClasses || []).forEach(function (cid) {
+            const lns = (state.byClass[cid] && state.byClass[cid].lines) || [];
+            lns.forEach(function (l) {
+              if (l.masterId !== masterRecHK.id) return;
+              if (trimmed) l.htmlKey = trimmed;
+              else delete l.htmlKey;
+            });
+          });
+          state.dirty = true;
+          scheduleSnapshot();
+          refreshHtmlKeyWarn(trimmed);
+        }, 'e.g. hero-title  (letters · digits · - · _ ; start with a letter)');
+        const inpHK = keyField.querySelector('input');
+        function refreshHtmlKeyWarn(currentVal) {
+          const v = String(currentVal == null ? (masterRecHK.htmlKey || '') : currentVal).trim();
+          const validShape = isValidHtmlKey(v);
+          let conflictNames = [];
+          if (v && validShape) {
+            const conflicts = findHtmlKeyConflicts();
+            const ids = (conflicts[v] || []).filter(function (id) { return id !== masterRecHK.id; });
+            conflictNames = ids.map(function (id) {
+              const other = state.masters.find(function (m) { return m.id === id; });
+              return other ? (other.name || other.id) : id;
+            });
+          }
+          const bad = !validShape || conflictNames.length > 0;
+          inpHK.classList.toggle('is-invalid', bad);
+          if (!validShape) {
+            warnDiv.textContent =
+              'Invalid format — must start with a letter, then letters, digits, dashes, or underscores only.';
+            warnDiv.style.display = '';
+          } else if (conflictNames.length > 0) {
+            warnDiv.textContent = 'Conflicts with: ' + conflictNames.join(', ');
+            warnDiv.style.display = '';
+          } else {
+            warnDiv.textContent = '';
+            warnDiv.style.display = 'none';
+          }
+        }
+        wrap.appendChild(keyField);
+        wrap.appendChild(warnDiv);
+        refreshHtmlKeyWarn(initialKey);
       }
     }
 

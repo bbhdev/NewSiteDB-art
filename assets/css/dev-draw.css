@@ -969,6 +969,26 @@ body.editor {
   box-shadow: 0 0 0 1px #c25b3a;
   outline: none;
 }
+/* v0.8.258 (textBlock Slice 1c): invalid-input feedback used by the
+   HTML key field. Same warm-red signal as required-empty but applied
+   directly to an input that flunks live validation (bad pattern OR
+   duplicate across the current page). Paired with .ed-field-warning
+   below for the message. */
+.ed-field input.is-invalid {
+  border-color: #c25b3a !important;
+  box-shadow: 0 0 0 1px #c25b3a;
+  outline: none;
+}
+.ed-field-warning {
+  margin: 4px 0 2px;
+  padding: 2px 6px;
+  font-size: 0.85em;
+  color: #e07050;
+  background: rgba(194, 91, 58, 0.10);
+  border-left: 2px solid #c25b3a;
+  border-radius: 2px;
+  line-height: 1.3;
+}
 
 /* v0.8.158: "Also control other objects" intentional-disclosure button.
    Collapsed by default at phase 2; dashed border signals optional/add-on. */
