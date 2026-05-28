@@ -1090,14 +1090,44 @@
       // effects (translate, rotate) the sum is order-independent too.
       //
       // See dev-draw.js renderGroupPanel → "Behavior template" section.
+      // v0.8.274: per-object "Follow this object" (lineDef.followsMasterId)
+      // takes precedence over the group template. When set, the donor's
+      // behaviors[] is prepended to this line's own behaviors[] using the
+      // same composition rule as the group template (last-active-wins for
+      // opacity, sum for translate/rotate, pathFollow suppression when
+      // the follower has its own pathFollow). The group template is then
+      // skipped entirely — explicit follow is a more specific intent.
+      //
+      // Donor is identified by masterId (the cross-class identity). If
+      // no donor with that masterId exists in this class, follow is a
+      // no-op (treated as not set).
+      let donorLine = null;
+      if (lineDef.followsMasterId) {
+        donorLine = lines.find(function (l) {
+          return l.masterId === lineDef.followsMasterId && l.id !== lineDef.id;
+        }) || null;
+      }
       let groupTemplateActive = false;
+      let followActive = false;
       let compoundedBehaviors = lineDef.behaviors || [];
-      if (group.behaviorTemplateObjectId) {
+      if (donorLine) {
+        followActive = true;
+        const memberBeh = lineDef.behaviors || [];
+        const memberHasPathFollow = memberBeh.some(function (b) {
+          return b && b.params && b.params.translateMode === 'pathFollow';
+        });
+        const donorBeh = (donorLine.behaviors || []).filter(function (b) {
+          if (!memberHasPathFollow) return true;
+          return !(b && b.params && b.params.translateMode === 'pathFollow');
+        });
+        compoundedBehaviors = donorBeh.concat(memberBeh);
+      } else if (group.behaviorTemplateObjectId) {
         const tplLine = lines.find(function (l) {
           return l.id === group.behaviorTemplateObjectId;
         });
         if (tplLine) {
           groupTemplateActive = true;
+          donorLine = tplLine;
           if (tplLine.id === lineDef.id) {
             // The template object itself: use only its own behaviors,
             // no prepend (otherwise its blocks would run twice).
@@ -1254,11 +1284,12 @@
         return null;
       };
       let pivotDelta = findPivotDelta(lineDef.behaviors);
-      if (!pivotDelta && groupTemplateActive) {
-        const tplLine = lines.find(function (l) {
-          return l.id === group.behaviorTemplateObjectId;
-        });
-        if (tplLine) pivotDelta = findPivotDelta(tplLine.behaviors);
+      // v0.8.274: pivot inheritance from the donor — follow takes
+      // precedence (already reflected in donorLine when followActive),
+      // then group template. donorLine is set under either path.
+      if (!pivotDelta && (followActive || groupTemplateActive) && donorLine
+          && donorLine.id !== lineDef.id) {
+        pivotDelta = findPivotDelta(donorLine.behaviors);
       }
       if (!pivotDelta) pivotDelta = { dx: 0, dy: 0 };
       const originX = centerX + pivotDelta.dx;

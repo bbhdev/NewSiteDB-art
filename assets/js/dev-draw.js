@@ -5711,6 +5711,47 @@
     return touched;
   }
 
+  // v0.8.274: per-object "Follow this object". Stored on the line as
+  // `followsMasterId` (the donor's masterId — cross-class identity).
+  // null clears it. Validation:
+  //   - donorMasterId must exist among masters
+  //   - cannot follow self (the line's own masterId)
+  //   - one-hop cycle guard: refuse if the donor already follows this
+  //     line's masterId
+  // Multi-hop cycle detection is deferred to slice 3 (configurable
+  // depth cap). ALL-mode fans out to sibling-class instances of this
+  // line's master so the relationship is class-symmetric.
+  function updateLineFollowsMaster(lineId, donorMasterId) {
+    const l = state.lines.find(function (ln) { return ln.id === lineId; });
+    if (!l) return;
+    if (donorMasterId) {
+      if (donorMasterId === l.masterId) return; // can't follow self
+      const donorExists = state.masters.some(function (m) { return m.id === donorMasterId; });
+      if (!donorExists) return;
+      // One-hop cycle guard. If any instance of the donor master already
+      // follows this line's master, accepting would create A↔B.
+      if (l.masterId) {
+        const cycle = state.lines.some(function (ln) {
+          return ln.masterId === donorMasterId && ln.followsMasterId === l.masterId;
+        });
+        if (cycle) {
+          alert('That would create a follow cycle (the chosen object already follows this one).');
+          return;
+        }
+      }
+    }
+    l.followsMasterId = donorMasterId || null;
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        sib.followsMasterId = donorMasterId || null;
+      });
+    }
+    state.dirty = true;
+    snapshot();
+    renderLines();
+    PanelManager.notifyDataChanged();
+  }
+
   function updateLine(id, patch) {
     const l = state.lines.find(function (l) { return l.id === id; });
     if (!l) return;
@@ -10004,6 +10045,86 @@
       g.appendChild(ttl);
       labelsG.appendChild(g);
     });
+
+    // v0.8.274: per-object "Follow" badge. Anchored above the bbox
+    // top-right (mirroring the template badge's top-left position so
+    // the two don't collide when an object happens to be both a
+    // template member and a follower). Shape: teal circle with ↪
+    // glyph + a text label to the right showing the donor's name —
+    // the name is useful for orientation when the canvas has several
+    // followers.
+    state.lines.forEach(function (line) {
+      if (!line.followsMasterId) return;
+      if (!state.showLabels && !selectedSet[line.id]) return;
+      const hasGeo = (Array.isArray(line.points) && line.points.length) ||
+                     (PRIMITIVES[line.kind] && line.params);
+      if (!hasGeo) return;
+      const donor = state.lines.find(function (l) {
+        return l.masterId === line.followsMasterId && l.id !== line.id;
+      });
+      const donorMaster = state.masters.find(function (m) { return m.id === line.followsMasterId; });
+      const donorName = (donor && donor.name && donor.name.trim())
+        || (donorMaster && donorMaster.name)
+        || shortMasterId(line.followsMasterId);
+      // Anchor: bbox top-right. Read directly from the rendered SVG
+      // (getBBox) — no points-array helper for the right edge, and
+      // the on-screen bbox is what the user sees anyway.
+      let anchorRX, anchorY;
+      {
+        const svgEl = linesG.querySelector('[data-line-id="' + line.id + '"]');
+        if (!svgEl) return;
+        let bb;
+        try { bb = svgEl.getBBox(); } catch (e) { return; }
+        if (!bb || !Number.isFinite(bb.x) || !Number.isFinite(bb.y)) return;
+        anchorRX = bb.x + bb.width;
+        anchorY  = bb.y;
+      }
+      const r = 12 / z;
+      const cx = anchorRX + (9 / z);
+      const cy = anchorY - (16 / z) - r - (6 / z);
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'ed-follow-canvas-badge');
+      g.style.pointerEvents = 'none';
+      const circ = document.createElementNS(SVG_NS, 'circle');
+      circ.setAttribute('cx', cx);
+      circ.setAttribute('cy', cy);
+      circ.setAttribute('r',  r);
+      circ.setAttribute('fill',   '#3da08e');
+      circ.setAttribute('stroke', '#fff');
+      circ.setAttribute('stroke-width', (1.4 / z));
+      g.appendChild(circ);
+      const glyph = document.createElementNS(SVG_NS, 'text');
+      glyph.setAttribute('x', cx);
+      glyph.setAttribute('y', cy + (1 / z));
+      glyph.setAttribute('text-anchor', 'middle');
+      glyph.setAttribute('dominant-baseline', 'central');
+      glyph.setAttribute('fill', '#fff');
+      glyph.setAttribute('font-weight', '700');
+      glyph.setAttribute('font-size', (14 / z));
+      glyph.setAttribute('font-family', 'system-ui, sans-serif');
+      glyph.textContent = '↪';
+      g.appendChild(glyph);
+      // Donor name label to the right of the circle. Boxed so it
+      // reads on top of busy canvases.
+      const labelText = document.createElementNS(SVG_NS, 'text');
+      labelText.setAttribute('x', cx + r + (5 / z));
+      labelText.setAttribute('y', cy);
+      labelText.setAttribute('text-anchor', 'start');
+      labelText.setAttribute('dominant-baseline', 'central');
+      labelText.setAttribute('fill', '#fff');
+      labelText.setAttribute('font-size', (13 / z));
+      labelText.setAttribute('font-family', 'system-ui, sans-serif');
+      labelText.setAttribute('paint-order', 'stroke');
+      labelText.setAttribute('stroke', '#000');
+      labelText.setAttribute('stroke-width', (3 / z));
+      labelText.setAttribute('stroke-linejoin', 'round');
+      labelText.textContent = donorName;
+      g.appendChild(labelText);
+      const ttl = document.createElementNS(SVG_NS, 'title');
+      ttl.textContent = 'Follows "' + donorName + '" — inherits its behaviors';
+      g.appendChild(ttl);
+      labelsG.appendChild(g);
+    });
   }
 
   // Label placement: primitives use their own labelPosition() (anchored
@@ -12476,6 +12597,51 @@
           }));
         }
       }
+    }
+
+    // v0.8.274: "Follow this object" picker. Object inherits the
+    // donor's behaviors[] (prepended to its own — see app.js
+    // resolveInstanceJS). Only meaningful for objects with a masterId
+    // (the donor is identified by masterId, the cross-class identity).
+    // Picker enumerates one entry per UNIQUE other masterId in this
+    // class — the user picks a logical object, not an instance.
+    // Cycle guard: hides any donor master that already follows this
+    // object's master (the setter would refuse it anyway, but better
+    // to not offer it).
+    if (line.masterId) {
+      const donorByMasterId = {};
+      state.lines.forEach(function (l) {
+        if (!l.masterId || l.masterId === line.masterId) return;
+        if (donorByMasterId[l.masterId]) return;
+        // One-hop cycle: skip masters whose instances already follow
+        // this line's master.
+        const wouldCycle = state.lines.some(function (other) {
+          return other.masterId === l.masterId && other.followsMasterId === line.masterId;
+        });
+        if (wouldCycle) return;
+        donorByMasterId[l.masterId] = l;
+      });
+      const opts = [{ value: '__none__', label: '(none — own behaviors only)' }]
+        .concat(Object.keys(donorByMasterId).map(function (mid) {
+          const donor = donorByMasterId[mid];
+          const master = state.masters.find(function (m) { return m.id === mid; });
+          const nm = (donor.name && donor.name.trim())
+            || (master && master.name)
+            || shortMasterId(mid);
+          return { value: mid, label: nm + ' (' + shortMasterId(mid) + ')' };
+        }));
+      const currentFollow = line.followsMasterId || '__none__';
+      // If the stored follow doesn't resolve in this class (donor
+      // missing here, or following its own master), surface as warn.
+      if (line.followsMasterId && !donorByMasterId[line.followsMasterId]) {
+        opts.push({
+          value: line.followsMasterId,
+          label: '⚠ ' + shortMasterId(line.followsMasterId) + ' (not in this class)'
+        });
+      }
+      wrap.appendChild(selectField('Follows', currentFollow, opts, function (v) {
+        updateLineFollowsMaster(line.id, v === '__none__' ? null : v);
+      }));
     }
 
     // v0.8.114: BEHAVIORS divider now carries an (i) tooltip for the
