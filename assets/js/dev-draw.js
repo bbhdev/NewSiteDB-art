@@ -687,10 +687,11 @@
       ts.setAttribute('x', String(anchorX));
       ts.setAttribute('text-anchor', 'start');
       ts.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'space', 'preserve');
-      // First line: drop one full line-height so the anchor is the
-      // top of the text block (1em ≈ glyph height; close enough for
-      // Slice 1b — Slice 1b-3 will measure exact line-box if needed).
-      ts.setAttribute('dy', i === 0 ? '1em' : '1em');
+      // v0.8.235: with dominant-baseline=text-before-edge on the
+      // parent <text>, the y attribute already marks the top of the
+      // first line. No dy on tspan 0; subsequent tspans drop 1em
+      // for one-line-height spacing.
+      if (i > 0) ts.setAttribute('dy', '1em');
       ts.textContent = lines[i];
       tEl.appendChild(ts);
     }
@@ -9324,7 +9325,12 @@
         tEl.setAttribute('y', String(c.y + tx.offsetY));
         // v0.8.234: no centering — left/top-aligned at the offset
         // point (HTML textbox-like). tspans inherit text-anchor=start.
+        // v0.8.235: dominant-baseline=text-before-edge so the y attr
+        // marks the TOP of the first line, not its baseline — matches
+        // the "set on canvas" mental model where the click point
+        // lands at the top-left of the rendered text block.
         tEl.setAttribute('text-anchor', 'start');
+        tEl.setAttribute('dominant-baseline', 'text-before-edge');
         tEl.setAttribute('font-family', tx.fontFamily);
         tEl.setAttribute('font-size', String(tx.fontSize));
         tEl.setAttribute('fill', tx.color || stroke || '#888');

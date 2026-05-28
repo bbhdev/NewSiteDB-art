@@ -773,7 +773,11 @@
         tEl.setAttribute('x', String(ax));
         tEl.setAttribute('y', String(cyN + tx.offsetY));
         // v0.8.234: no centering — left/top-aligned at the offset point.
+        // v0.8.235: dominant-baseline=text-before-edge so y marks the
+        // top edge of the first line (matches editor; matches author
+        // mental model of "click point = top-left of the text").
         tEl.setAttribute('text-anchor', 'start');
+        tEl.setAttribute('dominant-baseline', 'text-before-edge');
         tEl.setAttribute('font-family', tx.fontFamily);
         tEl.setAttribute('font-size', String(tx.fontSize));
         tEl.setAttribute('fill', tx.color || (stroke || 'currentColor'));
@@ -797,10 +801,10 @@
             ts.setAttribute('x', String(ax));
             ts.setAttribute('text-anchor', 'start');
             ts.setAttributeNS(XML_NS, 'space', 'preserve');
-            // v0.8.234: anchor = top-left of text block; every line
-            // (including the first) drops 1em from the previous
-            // position so line 0's baseline sits below the anchor.
-            ts.setAttribute('dy', '1em');
+            // v0.8.235: with dominant-baseline=text-before-edge on
+            // the parent <text>, line 0's top sits at y directly. No
+            // dy on the first line; subsequent lines drop 1em.
+            if (i > 0) ts.setAttribute('dy', '1em');
             ts.textContent = lines[i];
             tEl.appendChild(ts);
           }
