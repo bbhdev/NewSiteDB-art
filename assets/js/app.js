@@ -771,11 +771,13 @@
         const ax = cxN + tx.offsetX;
         const tEl = document.createElementNS(SVG_NS, 'text');
         tEl.setAttribute('x', String(ax));
-        tEl.setAttribute('y', String(cyN + tx.offsetY));
+        // v0.8.236: same -0.15em y nudge as the editor — compensates
+        // for the gap between em-box top and the visible glyph top so
+        // the offset point lands at the visual top of the text.
+        tEl.setAttribute('y', String(cyN + tx.offsetY - tx.fontSize * 0.15));
         // v0.8.234: no centering — left/top-aligned at the offset point.
         // v0.8.235: dominant-baseline=text-before-edge so y marks the
-        // top edge of the first line (matches editor; matches author
-        // mental model of "click point = top-left of the text").
+        // top edge of the first line (matches editor).
         tEl.setAttribute('text-anchor', 'start');
         tEl.setAttribute('dominant-baseline', 'text-before-edge');
         tEl.setAttribute('font-family', tx.fontFamily);

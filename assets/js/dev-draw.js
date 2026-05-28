@@ -645,7 +645,8 @@
     const c = lineCenterFor(line, pathEl);
     const ax = c.x + tx.offsetX;
     tEl.setAttribute('x', String(ax));
-    tEl.setAttribute('y', String(c.y + tx.offsetY));
+    // v0.8.236: same -0.15em y compensation as the main render path.
+    tEl.setAttribute('y', String(c.y + tx.offsetY - tx.fontSize * 0.15));
     // Re-anchor every tspan to the new x (multi-line text — v0.8.232).
     // Single-line texts have either no tspans (legacy textContent path)
     // or one tspan; loop handles both.
@@ -9322,13 +9323,16 @@
         const ax = c.x + tx.offsetX;
         const tEl = document.createElementNS(SVG_NS, 'text');
         tEl.setAttribute('x', String(ax));
-        tEl.setAttribute('y', String(c.y + tx.offsetY));
+        // v0.8.236: shift y up by ~0.15em to compensate for the gap
+        // between the em-box top (where text-before-edge anchors) and
+        // the visible glyph top. Empirically ~0.15em lands the visual
+        // top of typical fonts (incl. script faces like Allura) at the
+        // intended offset point.
+        tEl.setAttribute('y', String(c.y + tx.offsetY - tx.fontSize * 0.15));
         // v0.8.234: no centering — left/top-aligned at the offset
         // point (HTML textbox-like). tspans inherit text-anchor=start.
         // v0.8.235: dominant-baseline=text-before-edge so the y attr
-        // marks the TOP of the first line, not its baseline — matches
-        // the "set on canvas" mental model where the click point
-        // lands at the top-left of the rendered text block.
+        // marks the TOP of the first line, not its baseline.
         tEl.setAttribute('text-anchor', 'start');
         tEl.setAttribute('dominant-baseline', 'text-before-edge');
         tEl.setAttribute('font-family', tx.fontFamily);
