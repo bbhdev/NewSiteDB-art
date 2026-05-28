@@ -374,6 +374,16 @@ body.editor {
   animation: ed-set-origin-pulse 1.1s ease-in-out infinite;
 }
 .ed-mini.ed-set-origin-btn.is-armed:hover { background: #c0392b; }
+/* v0.8.264: Move-on-canvas active state. Amber to distinguish it
+   from the red Set-on-canvas armed state; same pulse for "you are
+   in a live mode, click again to leave." */
+.ed-mini.ed-move-text-btn.is-active {
+  background: #b87503;
+  color: #fff;
+  border-color: #ffaa00;
+  animation: ed-set-origin-pulse 1.1s ease-in-out infinite;
+}
+.ed-mini.ed-move-text-btn.is-active:hover { background: #b87503; }
 @keyframes ed-set-origin-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.55); }
   50%      { box-shadow: 0 0 0 4px rgba(231, 76, 60, 0); }
@@ -3072,15 +3082,18 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
    block list can't miss a muted block. Border desaturates to a
    warm muted grey instead of the active-block navy. */
 .ed-block-row.is-disabled {
+  /* v0.8.263: stronger visual — saturated wine ground + red outline
+     so a muted block reads as "deliberately off" from across the
+     panel instead of looking like a subtle skin variation. */
   background:
     repeating-linear-gradient(
       135deg,
-      rgba(0, 0, 0, 0.35) 0 6px,
-      rgba(0, 0, 0, 0.20) 6px 12px
+      rgba(0, 0, 0, 0.30) 0 6px,
+      rgba(0, 0, 0, 0.10) 6px 12px
     ),
-    #2c2c2c;
-  border-color: #555;
-  opacity: 0.85;
+    #770033;
+  border-color: #ff0000;
+  opacity: 1;
 }
 .ed-block-row.is-disabled .ed-block-name {
   color: #9a9a9a;

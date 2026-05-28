@@ -701,6 +701,29 @@
     Array.prototype.forEach.call(tEl.querySelectorAll('tspan'), function (ts) {
       ts.setAttribute('x', String(ax));
     });
+    // v0.8.265: keep the textBlock's clipPath rect in lockstep with
+    // the in-place drag. Before this fix, dragging a textBlock moved
+    // the text element to the new location but the clipPath rect
+    // stayed where it was originally created — once the text strayed
+    // outside that frozen rect, it vanished entirely. Full renderLines
+    // calls rebuilt the clip from line.params, but the live-drag path
+    // does in-place mutation only, so syncTextOverlayPosition is the
+    // right place to keep the clip aligned. Same shape as renderLines.
+    if (line.kind === 'textBlock'
+        && line.params && Number.isFinite(line.params.x)
+        && Number.isFinite(line.params.y)
+        && Number.isFinite(line.params.w)
+        && Number.isFinite(line.params.h)) {
+      const clipId = 'ed-tbclip-' + line.id;
+      const cp = linesG.querySelector('clipPath[id="' + clipId + '"]');
+      if (cp && cp.firstChild) {
+        const r = cp.firstChild;
+        r.setAttribute('x', String(line.params.x));
+        r.setAttribute('y', String(line.params.y));
+        r.setAttribute('width',  String(line.params.w));
+        r.setAttribute('height', String(line.params.h));
+      }
+    }
   }
 
   /**
@@ -5845,7 +5868,7 @@
   // edit left them in mixed states (no migration; just convergence
   // on next toggle). Only stores `true`; `false` deletes the field
   // to keep legacy / fresh blocks clean.
-  function toggleBehaviorBlockDisabled(lineId, blockIdx) {
+  function toggleBehaviorBlockDisabled(lineId, blockIdx, srcRow) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
     if (!l || !Array.isArray(l.behaviors) || blockIdx >= l.behaviors.length) return;
     const blk = l.behaviors[blockIdx];
@@ -5869,15 +5892,22 @@
     // v0.8.260: in-place row update instead of renderSelectionPanel.
     // The full panel re-render reset scrollTop to 0 — toggling a
     // block midway down the list yanked the user back to the top.
-    // Only the row's class + the power button's class/title actually
-    // need to change visually, and the data side is already updated
-    // above, so we patch the DOM and skip the rebuild. Sibling lines
-    // (all-mode fan-out) aren't shown in the current panel, so their
-    // UI naturally reflects the change next time they're selected.
-    const row = selectionPanel.querySelector(
+    // v0.8.261 fix: the block list isn't necessarily mounted inside
+    // selectionPanel — for single selection the rows live in the
+    // floating 'object' panel (PanelManager-managed body). The first
+    // attempt scoped the querySelector to selectionPanel and found
+    // nothing in that case, leaving the visual stale; the user then
+    // clicked again to "make it work", which silently toggled the
+    // data back (and made an Add-block render look like block 1 had
+    // re-enabled itself). Use the click-target row when available,
+    // and fall back to a document-wide query that also patches every
+    // sibling row mirrored across other open panels.
+    const rows = [];
+    if (srcRow) rows.push(srcRow);
+    document.querySelectorAll(
       '.ed-block-row[data-line-id="' + l.id + '"][data-block-id="' + (blk.id || '') + '"]'
-    );
-    if (row) {
+    ).forEach(function (r) { if (rows.indexOf(r) < 0) rows.push(r); });
+    rows.forEach(function (row) {
       row.classList.toggle('is-disabled', next);
       const pwr = row.querySelector('.ed-block-toggle');
       if (pwr) {
@@ -5887,7 +5917,7 @@
           : 'Disable this block (design-time mute; persists on save)';
         pwr.setAttribute('aria-label', next ? 'Enable block' : 'Disable block');
       }
-    }
+    });
   }
   function removeBehaviorBlock(lineId, blockIdx) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
@@ -11261,6 +11291,12 @@
   let lastScrolledSelectionId = null;
 
   function renderSelectionPanel(opts) {
+    // v0.8.261: preserve scrollTop across rebuilds — same rationale
+    // as the per-panel preservation in PanelManager.renderPanel.
+    // Many edits trigger a full sidebar rebuild even when only a
+    // sub-section changed; without this the user is yanked to the
+    // top every time. Browser clamps overshoot automatically.
+    const savedSelScroll = selectionPanel.scrollTop;
     selectionPanel.innerHTML = '';
     // v0.8.119: drop the multi-select dedupe memo whenever the
     // selection collapses, so a later identical multi-select still
@@ -11351,6 +11387,14 @@
       // we wire one up later) but renderSelectionPanel no longer
       // calls it.
     }
+    // v0.8.261: restore the pre-rebuild scroll. Done last so any
+    // earlier scrollIntoView (multi-select first-spawn) still wins
+    // — that path runs only when wasSingleSelect was false AND the
+    // primary id changed, and writes to a different lastScrolled
+    // tracker, so it's safe to overwrite our saved position when it
+    // fired. For the dominant case (edits to the currently-shown
+    // panel) this is just "stay where you were."
+    if (savedSelScroll > 0) selectionPanel.scrollTop = savedSelScroll;
   }
 
   // v0.8.119: per-multi-select-set memo. Used to dedupe the fan-out
@@ -12367,6 +12411,48 @@
             ensureMasterText();
             startSetTextOffset({ masterId: masterRec.id, lineId: line.id });
           }));
+          // v0.8.264: live-drag companion. Selects the rendered text
+          // with a strong dashed bbox and lets the user drag it
+          // anywhere within that bbox. Each pointerup commits the new
+          // offsetX/Y; the user clicks the button again (relabeled
+          // "✓ Validate this position") to leave the mode.
+          (function () {
+            const wrapBtn = document.createElement('div');
+            wrapBtn.className = 'ed-field';
+            const lblBtn = document.createElement('label'); lblBtn.textContent = '';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'ed-mini ed-move-text-btn';
+            const isActiveForThis = movingTextOffset
+              && movingTextOffset.masterId === masterRec.id
+              && movingTextOffset.lineId === line.id;
+            if (isActiveForThis) {
+              btn.textContent = '✓ Validate this position';
+              btn.title = 'Click to leave move mode and keep the current text position.';
+              btn.classList.add('is-active');
+            } else {
+              btn.textContent = 'Move on canvas →';
+              btn.title = 'Grab and drag the text by its bounding box until it sits right; click again to validate.';
+            }
+            btn.addEventListener('click', function () {
+              ensureMasterText();
+              if (movingTextOffset
+                  && movingTextOffset.masterId === masterRec.id
+                  && movingTextOffset.lineId === line.id) {
+                exitMoveTextOffset();
+              } else {
+                startMoveTextOffset({ masterId: masterRec.id, lineId: line.id });
+              }
+              // Refresh panels so the button label flips between
+              // "Move on canvas →" and "✓ Validate this position".
+              if (window.PanelManager) {
+                try { window.PanelManager.notifyDataChanged(); } catch (e) { console.error(e); }
+              }
+            });
+            wrapBtn.appendChild(lblBtn);
+            wrapBtn.appendChild(btn);
+            wrap.appendChild(wrapBtn);
+          })();
           wrap.appendChild(fontFamilyField('Font family', t.fontFamily || '', function (v) {
             ensureMasterText().fontFamily = v || TEXT_DEFAULTS.fontFamily;
             state.dirty = true; scheduleSnapshot();
@@ -12481,7 +12567,10 @@
           '</svg>';
         pwrBtn.addEventListener('click', function (e) {
           e.stopPropagation();
-          toggleBehaviorBlockDisabled(line.id, idx);
+          // v0.8.261: pass the row element so the toggler can update
+          // it in place regardless of which panel mounts the list
+          // (sidebar vs. floating object panel).
+          toggleBehaviorBlockDisabled(line.id, idx, row);
         });
         row.appendChild(pwrBtn);
 
@@ -14677,6 +14766,14 @@
   // from the line's natural center). { masterId, lineId } so we can
   // recompute the center via centerOf(line). Exits on click.
   let settingTextOffset = null;
+  // v0.8.264: live-drag text-offset mode. The user clicks "Move on
+  // canvas" in the textBlock text panel, then drags the text by its
+  // overlay bbox until it sits right; clicks the same button (now
+  // labeled "✓ Validate this position") to exit. State carries the
+  // overlay rect element so the canvas hit area can be cleared on
+  // exit without re-querying the DOM.
+  // Shape: { masterId, lineId, overlayEl }
+  let movingTextOffset = null;
 
   // v0.8.125: toggle the 'object' panel for a specific objectId.
   // The caller passes the opt-clicked id explicitly so we can
@@ -14773,6 +14870,354 @@
     canvasWrap.classList.remove('ed-set-origin-mode');
     if (setOriginBanner) setOriginBanner.hidden = true;
     clearArmedSetOriginButtons();
+  }
+  // v0.8.264: "Move on canvas" mode — companion to the click-to-set
+  // flow above, but the user keeps grabbing the overlay bbox and
+  // dragging until satisfied, then clicks the same button (relabeled
+  // "✓ Validate this position") to leave the mode. Each pointerup
+  // commits the offset; the rendered text is updated in place via a
+  // transient transform during the drag so the move feels live.
+  function startMoveTextOffset(target) {
+    // Only one move can be active at a time. Re-entering for the
+    // same target is a no-op; entering for a different one closes
+    // the previous overlay first.
+    if (movingTextOffset
+        && movingTextOffset.masterId === target.masterId
+        && movingTextOffset.lineId === target.lineId) return;
+    if (movingTextOffset) exitMoveTextOffset();
+    // v0.8.265: snapshot the offset at entry so Esc can cancel back
+    // to it. The button still commits (it's the "✓ Validate" path);
+    // Esc is the conventional bail-out.
+    const masterRec = state.masters.find(function (m) { return m.id === target.masterId; });
+    const baseOX = (masterRec && masterRec.text && Number.isFinite(masterRec.text.offsetX))
+      ? masterRec.text.offsetX : 0;
+    const baseOY = (masterRec && masterRec.text && Number.isFinite(masterRec.text.offsetY))
+      ? masterRec.text.offsetY : 0;
+    movingTextOffset = {
+      masterId: target.masterId,
+      lineId:   target.lineId,
+      overlayEl: null,
+      entryOffsetX: baseOX,
+      entryOffsetY: baseOY,
+      outsidePointerHandler: null
+    };
+    // v0.8.272: click-outside commits and exits move mode. Without
+    // this the band + pulsing button persisted forever if the user
+    // clicked anywhere off the overlay (their natural way to say
+    // "done"). Capture-phase document listener so it runs before the
+    // overlay's own pointerdown stopPropagation; we just check the
+    // event target and skip if it's the overlay itself.
+    const outsideHandler = function (e) {
+      if (!movingTextOffset) return;
+      if (e.button !== 0) return;
+      const t = e.target;
+      if (t && movingTextOffset.overlayEl && (t === movingTextOffset.overlayEl
+          || (movingTextOffset.overlayEl.contains && movingTextOffset.overlayEl.contains(t)))) {
+        return; // drag — let the overlay handle it
+      }
+      // Also skip clicks on the panel button that toggles the mode —
+      // it has its own handler that will call exitMoveTextOffset and
+      // we don't want to double-exit before its handler reads state.
+      if (t && t.closest && t.closest('.ed-move-text-btn')) return;
+      exitMoveTextOffset();
+      if (window.PanelManager) {
+        try { window.PanelManager.notifyDataChanged(); } catch (err) {}
+      }
+    };
+    movingTextOffset.outsidePointerHandler = outsideHandler;
+    document.addEventListener('pointerdown', outsideHandler, true);
+    refreshMoveTextOverlay();
+  }
+  // v0.8.265: Esc-cancel — revert offset to the value at the time
+  // the move mode started, then exit. Mirrors the standard "Esc =
+  // discard pending changes" semantics elsewhere in the editor.
+  function cancelMoveTextOffset() {
+    if (!movingTextOffset) return;
+    const target = movingTextOffset;
+    const masterRec = state.masters.find(function (m) { return m.id === target.masterId; });
+    if (masterRec && masterRec.text) {
+      masterRec.text.offsetX = target.entryOffsetX;
+      masterRec.text.offsetY = target.entryOffsetY;
+      // Mirror onto every resolved line for this master (same fan-out
+      // as the commit path) so the renderer reads the reverted record.
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const lns = (state.byClass[cid] && state.byClass[cid].lines) || [];
+        lns.forEach(function (l) {
+          if (l.masterId === masterRec.id) l.text = masterRec.text;
+        });
+      });
+      state.dirty = true;
+      scheduleSnapshot();
+    }
+    exitMoveTextOffset();
+    renderLines();
+  }
+  function exitMoveTextOffset() {
+    if (movingTextOffset) {
+      if (movingTextOffset.overlayEl && movingTextOffset.overlayEl.parentNode) {
+        movingTextOffset.overlayEl.parentNode.removeChild(movingTextOffset.overlayEl);
+      }
+      // v0.8.266: also drop the striped out-of-bounds band, if drawn.
+      if (movingTextOffset.bandEl && movingTextOffset.bandEl.parentNode) {
+        movingTextOffset.bandEl.parentNode.removeChild(movingTextOffset.bandEl);
+      }
+      // v0.8.272: detach the click-outside listener.
+      if (movingTextOffset.outsidePointerHandler) {
+        document.removeEventListener('pointerdown',
+          movingTextOffset.outsidePointerHandler, true);
+      }
+    }
+    movingTextOffset = null;
+  }
+  // v0.8.266: lazy-create the diagonal-red-stripe pattern used by the
+  // out-of-bounds band. One def lives in the main svg for the
+  // session; subsequent renders reuse it via url(#…). Pattern coords
+  // are in user space so the stripe pitch reads identically at every
+  // zoom.
+  function ensureMoveTextStripePattern() {
+    if (svg.querySelector('#ed-move-text-stripes')) return;
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS(SVG_NS, 'defs');
+      svg.insertBefore(defs, svg.firstChild);
+    }
+    // v0.8.267: pattern wasn't visible in v0.8.266. Two likely culprits:
+    //   (1) `fill="rgba(...)"` is a presentation-attribute value that
+    //       not all SVG renderers accept on its own — splitting into
+    //       solid `fill="#…"` + `fill-opacity` is the safe form.
+    //   (2) the original tile (14×14, half-and-half) had a stripe so
+    //       wide it didn't read as a stripe once tiled and rotated.
+    // Reworked: bigger tile (16×16), thinner solid red stripe (6×16
+    // in tile space ≈ ~4.2 user-units at 45°), no background fill so
+    // the canvas / clipped content underneath still reads through.
+    const pat = document.createElementNS(SVG_NS, 'pattern');
+    pat.setAttribute('id', 'ed-move-text-stripes');
+    pat.setAttribute('patternUnits', 'userSpaceOnUse');
+    pat.setAttribute('width', '16');
+    pat.setAttribute('height', '16');
+    pat.setAttribute('patternTransform', 'rotate(45)');
+    const stripe = document.createElementNS(SVG_NS, 'rect');
+    stripe.setAttribute('x', '0');
+    stripe.setAttribute('y', '0');
+    stripe.setAttribute('width', '6');
+    stripe.setAttribute('height', '16');
+    stripe.setAttribute('fill', '#ff2020');
+    stripe.setAttribute('fill-opacity', '0.7');
+    pat.appendChild(stripe);
+    defs.appendChild(pat);
+  }
+  // Position (or create) the overlay rect over the current text bbox.
+  // Called when the mode starts, and again after every drag commits
+  // so the bbox follows the new text location.
+  function refreshMoveTextOverlay() {
+    if (!movingTextOffset) return;
+    const tEl = linesG && linesG.querySelector(
+      'text[data-text-for="' + movingTextOffset.lineId + '"]'
+    );
+    if (!tEl) return;
+    let bb;
+    try { bb = tEl.getBBox(); } catch (e) { return; }
+    if (!bb || (bb.width <= 0 && bb.height <= 0)) return;
+    let r = movingTextOffset.overlayEl;
+    // renderHandles() wipes handlesG, which orphans our overlay rect
+    // even though the reference is still held. Detect that and rebuild.
+    if (r && !r.parentNode) r = movingTextOffset.overlayEl = null;
+    if (!r) {
+      r = document.createElementNS(SVG_NS, 'rect');
+      r.setAttribute('class', 'ed-move-text-overlay');
+      r.setAttribute('fill', 'rgba(255, 200, 0, 0.10)');
+      r.setAttribute('stroke', '#ffaa00');
+      r.setAttribute('stroke-width', '2');
+      r.setAttribute('stroke-dasharray', '6 3');
+      r.style.cursor = 'grab';
+      r.addEventListener('pointerdown', onMoveTextPointerDown);
+      handlesG.appendChild(r);
+      movingTextOffset.overlayEl = r;
+    }
+    const PAD = 6;
+    r.setAttribute('x', String(bb.x - PAD));
+    r.setAttribute('y', String(bb.y - PAD));
+    r.setAttribute('width',  String(bb.width  + 2 * PAD));
+    r.setAttribute('height', String(bb.height + 2 * PAD));
+
+    // v0.8.266: out-of-bounds band. Striped red ring 30 user-units
+    // wide hugging the textBlock rect on all four sides — the text
+    // gets clipped past that rect, so this is a strong visual hint
+    // not to drag past the edge. Drawn as a single path with two
+    // subpaths and fill-rule=evenodd (outer minus inner). Only
+    // applies when the host line is a textBlock; other kinds have
+    // no rect to honor and the band would be meaningless.
+    // v0.8.269: previous attempts gated the band on
+    // `state.lines.find(...).kind === 'textBlock'` with finite params.
+    // The amber overlay rect was visible while the band was not, which
+    // means that gate was the culprit — either the line lookup returned
+    // undefined (state.classId mismatch / different class), or params
+    // failed the Number.isFinite check. Bypass the lookup entirely and
+    // base the band on the visible text bbox (bb) — the same source the
+    // amber overlay uses. Slightly different semantics (band hugs the
+    // text bbox not the textBlock frame) but the visible feedback is the
+    // point and the values are guaranteed to be finite here.
+    let band = movingTextOffset.bandEl;
+    // Same orphan-on-renderHandles handling as the overlay rect.
+    // Now band lives on svg root so it shouldn't be wiped by
+    // renderHandles, but keep the guard anyway in case something else
+    // removes it.
+    if (band && !band.parentNode) {
+      band = movingTextOffset.bandEl = null;
+      movingTextOffset.bandTopSolid = null;
+      movingTextOffset.bandRightSolid = null;
+      movingTextOffset.bandBottomSolid = null;
+      movingTextOffset.bandLeftSolid = null;
+      movingTextOffset.bandTopStripe = null;
+      movingTextOffset.bandRightStripe = null;
+      movingTextOffset.bandBottomStripe = null;
+      movingTextOffset.bandLeftStripe = null;
+    }
+    // Prefer textBlock params (snaps to the actual frame the user sees
+    // outlined in white) when available; fall back to text bbox.
+    const ln = state.lines && state.lines.find
+      ? state.lines.find(function (l) { return l.id === movingTextOffset.lineId; })
+      : null;
+    const pax = ln && ln.params ? Number(ln.params.x) : NaN;
+    const pay = ln && ln.params ? Number(ln.params.y) : NaN;
+    const paw = ln && ln.params ? Number(ln.params.w) : NaN;
+    const pah = ln && ln.params ? Number(ln.params.h) : NaN;
+    const useFrame = Number.isFinite(pax) && Number.isFinite(pay)
+                  && Number.isFinite(paw) && Number.isFinite(pah);
+    const bx = useFrame ? pax : bb.x;
+    const by = useFrame ? pay : bb.y;
+    const bw = useFrame ? paw : bb.width;
+    const bh = useFrame ? pah : bb.height;
+    {
+      // v0.8.271: diagnostic (v0.8.270) confirmed a plain <rect> in svg
+      // root renders fine, while <path> + <pattern> + evenodd did not.
+      // Rebuild as a 4-rect ring (top / bottom / left / right strips),
+      // each pair = solid translucent red backing + striped overlay,
+      // so the danger zone reads even if the pattern is dropped.
+      // Inserted into svg root (same place the diagnostic worked).
+      ensureMoveTextStripePattern();
+      const BAND = 30;
+      const ox = bx - BAND, oy = by - BAND;
+      const ow = bw + 2 * BAND, oh = bh + 2 * BAND;
+      // 8 child rects: [topSolid, rightSolid, bottomSolid, leftSolid,
+      //                 topStripe, rightStripe, bottomStripe, leftStripe]
+      if (!band) {
+        band = document.createElementNS(SVG_NS, 'g');
+        band.setAttribute('class', 'ed-move-text-band');
+        band.style.pointerEvents = 'none';
+        const mkRect = function (fill, opacity) {
+          const rr = document.createElementNS(SVG_NS, 'rect');
+          rr.setAttribute('fill', fill);
+          if (opacity != null) rr.setAttribute('fill-opacity', String(opacity));
+          band.appendChild(rr);
+          return rr;
+        };
+        movingTextOffset.bandTopSolid    = mkRect('#ff2020', 0.28);
+        movingTextOffset.bandRightSolid  = mkRect('#ff2020', 0.28);
+        movingTextOffset.bandBottomSolid = mkRect('#ff2020', 0.28);
+        movingTextOffset.bandLeftSolid   = mkRect('#ff2020', 0.28);
+        movingTextOffset.bandTopStripe    = mkRect('url(#ed-move-text-stripes)');
+        movingTextOffset.bandRightStripe  = mkRect('url(#ed-move-text-stripes)');
+        movingTextOffset.bandBottomStripe = mkRect('url(#ed-move-text-stripes)');
+        movingTextOffset.bandLeftStripe   = mkRect('url(#ed-move-text-stripes)');
+        svg.appendChild(band);
+        movingTextOffset.bandEl = band;
+      }
+      const setRect = function (el, x, y, w, h) {
+        if (!el) return;
+        el.setAttribute('x', String(x));
+        el.setAttribute('y', String(y));
+        el.setAttribute('width',  String(Math.max(0, w)));
+        el.setAttribute('height', String(Math.max(0, h)));
+      };
+      // T = full outer width × BAND tall, above the inner rect
+      // B = full outer width × BAND tall, below the inner rect
+      // L = BAND wide × inner height, left of inner rect
+      // R = BAND wide × inner height, right of inner rect
+      const tX = ox,        tY = oy,        tW = ow, tH = BAND;
+      const bX = ox,        bY = by + bh,   bW = ow, bH = BAND;
+      const lX = ox,        lY = by,        lW = BAND, lH = bh;
+      const rX = bx + bw,   rY = by,        rW = BAND, rH = bh;
+      setRect(movingTextOffset.bandTopSolid,    tX, tY, tW, tH);
+      setRect(movingTextOffset.bandBottomSolid, bX, bY, bW, bH);
+      setRect(movingTextOffset.bandLeftSolid,   lX, lY, lW, lH);
+      setRect(movingTextOffset.bandRightSolid,  rX, rY, rW, rH);
+      setRect(movingTextOffset.bandTopStripe,    tX, tY, tW, tH);
+      setRect(movingTextOffset.bandBottomStripe, bX, bY, bW, bH);
+      setRect(movingTextOffset.bandLeftStripe,   lX, lY, lW, lH);
+      setRect(movingTextOffset.bandRightStripe,  rX, rY, rW, rH);
+    }
+  }
+  function onMoveTextPointerDown(e) {
+    if (!movingTextOffset || e.button !== 0) return;
+    // Prevent the canvas-level pointerdown from starting a selection
+    // drag or consuming the gesture for anything else.
+    e.stopPropagation();
+    e.preventDefault();
+    const masterRec = state.masters.find(function (m) {
+      return m.id === movingTextOffset.masterId;
+    });
+    if (!masterRec || !masterRec.text) return;
+    const tEl = linesG && linesG.querySelector(
+      'text[data-text-for="' + movingTextOffset.lineId + '"]'
+    );
+    const overlay = movingTextOffset.overlayEl;
+    if (!tEl || !overlay) return;
+    const start = clientToSvg(e.clientX, e.clientY);
+    const baseX = Number.isFinite(masterRec.text.offsetX) ? masterRec.text.offsetX : 0;
+    const baseY = Number.isFinite(masterRec.text.offsetY) ? masterRec.text.offsetY : 0;
+    const overlayBase = {
+      x: parseFloat(overlay.getAttribute('x')) || 0,
+      y: parseFloat(overlay.getAttribute('y')) || 0
+    };
+    overlay.style.cursor = 'grabbing';
+    overlay.setPointerCapture(e.pointerId);
+    function onMove(ev) {
+      const p = clientToSvg(ev.clientX, ev.clientY);
+      const dx = p.x - start.x;
+      const dy = p.y - start.y;
+      // Live preview via a transient transform on the text element —
+      // avoids a full renderLines() on every pointermove. Overlay
+      // tracks the same delta so the bbox stays around the visual.
+      tEl.setAttribute('transform', 'translate(' + dx + ',' + dy + ')');
+      overlay.setAttribute('x', String(overlayBase.x + dx));
+      overlay.setAttribute('y', String(overlayBase.y + dy));
+    }
+    function onUp(ev) {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      try { overlay.releasePointerCapture(e.pointerId); } catch (_) {}
+      overlay.style.cursor = 'grab';
+      const p = clientToSvg(ev.clientX, ev.clientY);
+      const dx = p.x - start.x;
+      const dy = p.y - start.y;
+      masterRec.text.offsetX = Math.round((baseX + dx) * 10) / 10;
+      masterRec.text.offsetY = Math.round((baseY + dy) * 10) / 10;
+      // Mirror onto every resolved line for this master so the
+      // renderer reads the updated record (same pattern as
+      // startSetTextOffset's commit path).
+      state.pageConfig.useClasses.forEach(function (cid) {
+        const lns = (state.byClass[cid] && state.byClass[cid].lines) || [];
+        lns.forEach(function (l) {
+          if (l.masterId === masterRec.id) l.text = masterRec.text;
+        });
+      });
+      state.dirty = true;
+      scheduleSnapshot();
+      tEl.removeAttribute('transform');
+      renderLines();
+      refreshMoveTextOverlay();
+      // Refresh the Offset X / Y number fields in the open panel so
+      // the new values show. notifyDataChanged + the v0.8.261 scroll
+      // preservation means the panel updates without jumping.
+      if (window.PanelManager) {
+        try { window.PanelManager.notifyDataChanged(); } catch (e) { console.error(e); }
+      }
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
   }
 
   svg.addEventListener('pointerdown', function (e) {
@@ -15376,6 +15821,18 @@
       // so an in-progress "click anywhere" never leaks into other
       // Escape handlers.
       if (settingTextOffset) { exitSetTextOffset(); return; }
+      // v0.8.264: Escape leaves the live-drag move-text mode.
+      // v0.8.265: Esc now CANCELS — reverts the offset to its value
+      // at the time move mode was entered. The traditional Esc-as-
+      // discard semantics; clicking the button itself remains the
+      // "Validate this position" commit path.
+      if (movingTextOffset) {
+        cancelMoveTextOffset();
+        if (window.PanelManager) {
+          try { window.PanelManager.notifyDataChanged(); } catch (err) { console.error(err); }
+        }
+        return;
+      }
       // Wizard takes priority next — if the user has begun a create
       // flow (with or without a drawn draft), Esc tears it down.
       if (state.wizard) { cancelWizard(); return; }
@@ -15979,6 +16436,15 @@
         p.sub.textContent = '';
       }
       try {
+        // v0.8.261: preserve scrollTop across re-renders. Many edits
+        // (toggling a behavior option, adding/deleting a block,
+        // tweaking a field) trigger notifyDataChanged → renderPanel
+        // on every open panel — including ones the user wasn't even
+        // looking at. Wiping innerHTML resets scrollTop to 0, so the
+        // user's reading position is lost. Restoring after render
+        // keeps the panel pinned to where they were. The browser
+        // clamps overshoot if the new layout is shorter.
+        const savedScroll = p.body.scrollTop;
         // v0.8.112: clear body before each render so registry
         // functions don't all have to repeat the boilerplate.
         // Demo panel previously did this itself; now it's central.
@@ -16000,6 +16466,10 @@
         }
         p.lastBoundObjectId = ctx.primarySelectionId;
         reg.render(p.body, ctx);
+        // v0.8.261: restore scrollTop after the new content lands.
+        // Assigning a too-large value is safe — the browser clamps
+        // to (scrollHeight - clientHeight).
+        if (savedScroll > 0) p.body.scrollTop = savedScroll;
       } catch (e) {
         p.body.innerHTML = '';
         const err = document.createElement('div');

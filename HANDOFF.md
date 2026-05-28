@@ -1039,6 +1039,142 @@ Developer API (would catch typos, return richer metadata). The current
 regex validation just protects against malformed input; a typo silently
 passes.
 
+### textBlock + scrollMode + group templates + block disable + move-on-canvas (v0.8.210–v0.8.272)
+
+The most recent work batch. Several independent threads, listed in
+roughly the order they shipped.
+
+**Group behavior template (v0.8.210–v0.8.224, tasks #23–#25).** Groups
+gained an optional `behaviorTemplate` array — same shape as a line's
+`behaviors[]`. Lines inside a group that has a template adopt the
+template's behaviors at runtime resolution time (in
+`resolveInstanceJS`), unless the line carries its own behaviors (line
+behaviors win — explicit override). Editor: group panel picker lets
+the user pick a "donor" line whose behaviors become the template;
+visual marking on member lines indicates "this line is following the
+group's template." Schema bumped v10→v11 to drop the old
+"per-group-default-behaviors" shape (the unused predecessor). Bump
+was authorized.
+
+**scrollMode (v0.8.225–v0.8.231, tasks #29–#31).** New page-level
+config: `pageConfig.scrollMode` ∈ `'standard' | 'windowed'`. Standard
+= existing pin/long-scroll behavior. Windowed = the page acts as a
+fixed viewport; scroll range maps to a virtual longer scroll without
+the body actually growing — useful for "scene"-style pages where
+content is layered, not stacked. Schema bumped v11→v12; existing
+content silently defaults to `'standard'` via migration.
+
+**textBlock kind (v0.8.232–v0.8.258, tasks #26–#28).** A new line
+kind, complementary to the master-`.text` overlay shipped in
+v0.8.180-batch:
+
+- **Slice 1a** (v0.8.232–v0.8.234): geometry. `kind: 'textBlock'`
+  with `params { x, y, w, h }` — a rect on the canvas. Editor draws
+  the frame as a white outline (`stroke="#fff"`, low opacity) so the
+  user sees where text will land.
+- **Slice 1b** (v0.8.232–v0.8.241): text rendering inside the rect.
+  Multi-line input → `<tspan>` per line with `x=` re-anchored and
+  `dy` per line; `xml:space="preserve"`. Anchor = top-left at the
+  rect origin offset by `text.offsetX/Y` (not first-line baseline —
+  v0.8.234–v0.8.237 walked through the various baseline attempts and
+  settled on top-edge as the simplest mental model). Color comes
+  from the palette (v0.8.238). Runtime hides text overlays until
+  fonts load to avoid FOUT flash (v0.8.239). Word-wrap + clipPath
+  for overflow at the rect bounds (v0.8.241): `<clipPath
+  id="ed-tbclip-<lineId>">` containing a rect matching the
+  textBlock frame; the text element gets `clip-path="url(#…)"`. Any
+  text that exceeds the frame is clipped.
+- **Slice 1c** (v0.8.258): htmlKey field + duplicate detection. Each
+  textBlock can carry an `htmlKey` string identifying it as the
+  authoring source for a named slot on a Kirby page (groundwork for
+  Phase 2 wiring). Editor flags duplicate keys per page.
+- **stroke-width 0 accepted on all kinds incl. textBlock** (v0.8.242)
+  — the textBlock frame needs to be hideable.
+
+**Block disable (v0.8.259–v0.8.263, Slice 1).** Per-block design-time
+mute. Each behavior block can be toggled OFF (`disabled: true`) from
+its row in the BEHAVIORS list — a small power-icon toggle on each
+row. Disabled blocks are skipped at runtime via
+`isBehaviorBlockDisabled(block)`. Visual: row gains
+`.ed-block-row.is-disabled` (background `#770033`, outline
+`#ff0000`, diagonal stripe overlay — v0.8.263). `cloneBehavior`
+preserves the `disabled` flag through `resolveInstanceJS`'s
+behavior-cloning pass so the runtime sees it.
+
+Two regressions from the v0.8.260 first pass, both fixed in v0.8.261:
+
+1. **"Cannot disable nor reactivate a block."** The toggle handler
+   queried `selectionPanel.querySelector(...)` to find the row to
+   update, but block rows live in the **floating** object panel, not
+   the sidebar selectionPanel — the query returned null, no UI
+   update happened, and the user clicked twice (which double-toggled
+   the data, returning it to its original state). Fix: pass the
+   clicked `row` element from the click handler directly + fall back
+   to a document-wide `querySelectorAll` for any other open panel
+   showing the same block.
+2. **"Block 1 disabled; add a block: block 1 becomes enabled."** Same
+   root cause — double-click on a non-updating UI flipped the
+   underlying data.
+
+**Panel scroll-jump fix (v0.8.262).** Many actions
+(`notifyDataChanged()`) trigger `renderPanel(p)` on every open
+floating panel, which does `p.body.innerHTML = ''`. innerHTML reset
+zeroes `scrollTop`, so an object panel scrolled to the middle of a
+long block list would snap back to the top every time the user
+toggled disabled, added a block, deleted a block, etc. — even on
+panels the action wasn't aimed at. Fix: save `p.body.scrollTop`
+before the wipe, restore after re-render. Same pattern in
+`renderSelectionPanel` (sidebar). Cheap; preserves scroll across
+arbitrary panel re-renders.
+
+**Move-on-canvas (v0.8.264–v0.8.272).** New textBlock affordance.
+Below the existing "Set on canvas" button in the textBlock's text
+section, a "Move on canvas →" button enters a transient drag mode:
+
+- Overlay rect (amber dashed, `#ffaa00`, `cursor: grab`) is painted
+  over the visible text bbox in `handlesG`.
+- Dragging the overlay updates the text's `offsetX/Y` live via a
+  transient `transform="translate(dx,dy)"` on the SVG text element
+  (avoids a full `renderLines()` mid-drag — same lesson as the
+  draggable-labels batch v0.8.107–v0.8.108).
+- On pointerup the offset is committed, mirrored to every instance
+  of the master, and `renderLines()` runs once.
+- The button itself relabels to "✓ Validate this position" while
+  active, with a pulsing accent treatment.
+- Esc cancels (snapshots `entryOffsetX/Y` at mode entry,
+  `cancelMoveTextOffset` reverts) — the Esc-cancels-button-validates
+  asymmetry is the standard editor pattern (v0.8.265).
+- **clipPath sync fix** (v0.8.265): `syncTextOverlayPosition` was
+  updating the SVG `<text>` element's `x/y` but not the
+  `clipPath id="ed-tbclip-<lineId>"`'s rect. After dragging a
+  textBlock far from its original position the text would disappear
+  — still clipped at the **frozen** original rect. Fix: rewrite the
+  clipPath rect's `x/y/w/h` whenever `syncTextOverlayPosition`
+  updates a textBlock's frame. Lives at `dev-draw.js` ~line 688.
+
+**Out-of-bounds band (v0.8.266–v0.8.271).** Strong visual hint that
+text dragged outside the textBlock rect will be clipped: a striped
+red ring 30 user-units wide hugging the textBlock frame on all four
+sides. **Implementation gotcha worth flagging**: the first three
+attempts used `<path fill-rule="evenodd">` with two subpaths (outer
+rect, inner rect) for the ring shape, with `fill="url(#stripes)"`
+for the pattern. None of them rendered — the band was completely
+invisible while a sibling amber `<rect>` rendered fine. v0.8.270
+diagnostic confirmed a plain `<rect>` in svg root renders, while
+`<path> + <pattern> + evenodd` does not in whatever combination of
+renderer / DOM context this editor lives in. v0.8.271 final
+implementation: 4 plain `<rect>` strips (top / bottom / left /
+right), each backed by a translucent-red solid rect under a striped
+overlay rect. Inserted on svg root (bypassing `handlesG`).
+
+**Click-outside exits move mode (v0.8.272).** A capture-phase
+`pointerdown` listener on document is installed while move mode is
+active; if the click target is anything other than the overlay rect
+or the panel's Move/Validate button, the mode exits and
+`PanelManager.notifyDataChanged()` refreshes the button label.
+Without this the band + pulsing button persisted forever for users
+whose "I'm done" gesture was a click somewhere else on the canvas.
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:
@@ -1239,6 +1375,27 @@ Past examples where clarifying first was correct:
   nothing. Put it on a painted child instead. Cursor CSS on the group
   inherits visually, so a hand cursor without a working pointerdown is
   the diagnostic signature. See v0.8.107 label-drag fix.
+- **`<path fill-rule="evenodd">` + `<pattern>` fill silently fails** in
+  this editor's SVG rendering context. Three attempts at a ring-shaped
+  out-of-bounds band (v0.8.266 / v0.8.267 / v0.8.269) all produced an
+  invisible element while sibling plain `<rect>` elements with the
+  same pattern fill rendered fine. Workaround: build the ring out of 4
+  plain `<rect>` strips (T/B/L/R). See v0.8.271 for the canonical
+  implementation. The diagnostic that isolated this is in v0.8.270 —
+  shrink to a single fully-opaque magenta `<rect>` to confirm the code
+  path runs at all, then add complexity until something breaks.
+- **`PanelManager.renderPanel`'s `innerHTML = ''` resets `scrollTop`.**
+  Any cross-panel notify (notifyDataChanged) re-renders every open
+  panel and snaps each one to scroll position 0 unless you save/restore
+  `body.scrollTop` around the wipe. v0.8.262 patched this in both
+  `PanelManager.renderPanel` and `renderSelectionPanel`. New
+  panel-render paths added later should preserve scroll the same way.
+- **Block-row click handlers must pass the DOM row to data updaters
+  when the panel may live in multiple containers.** The block-disable
+  toggle (v0.8.260 regression) queried `selectionPanel.querySelector`,
+  but block rows render in floating object panels too. Either fall
+  back to `document.querySelectorAll('.ed-block-row[data-…]')`, or
+  thread the clicked row through the handler (v0.8.261 does both).
 - **Don't re-render the dragged layer mid-gesture.** If a pointermove
   handler triggers a `layerG.innerHTML = ''` re-render, the dragged
   element disappears, pointer capture releases, and subsequent
