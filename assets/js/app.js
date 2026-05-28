@@ -336,6 +336,29 @@
         color:      (typeof t.color === 'string' && t.color) ? t.color : null
       };
     }
+    // v0.8.239: hide text overlays until web fonts are loaded, so the
+    // page doesn't flash a fallback font and then swap. Each created
+    // <text> element starts with opacity:0 and is registered here; once
+    // document.fonts.ready resolves (after injectFonts has appended the
+    // @font-face / Google link), every pending element is revealed at
+    // once. Safety net: a 2 s timeout reveals anyway, so a font that
+    // never loads doesn't leave the page text invisible forever.
+    const pendingTextEls = [];
+    let fontsSettled = false;
+    function revealPendingText() {
+      if (fontsSettled) return;
+      fontsSettled = true;
+      pendingTextEls.forEach(function (el) { el.style.opacity = ''; });
+      pendingTextEls.length = 0;
+    }
+    function awaitFontsThenReveal() {
+      let done = false;
+      const finish = function () { if (!done) { done = true; revealPendingText(); } };
+      if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
+        document.fonts.ready.then(finish);
+      }
+      setTimeout(finish, 2000);
+    }
     // Inject font references for every distinct fontFamily referenced
     // by any line.text across every class. Two sources:
     //   1. Local fonts: served by @font-face from /assets/fonts/local/.
@@ -357,8 +380,8 @@
           if (t && t.fontFamily) usedSet[t.fontFamily] = true;
         });
       });
-      // No text at all → no work.
-      if (!Object.keys(usedSet).length) return;
+      // No text at all → no work, and no need to gate the reveal.
+      if (!Object.keys(usedSet).length) { revealPendingText(); return; }
 
       function injectGoogleLink(excludeSet) {
         const families = Object.keys(usedSet).filter(function (f) {
@@ -404,12 +427,14 @@
             document.head.appendChild(style);
           }
           injectGoogleLink(localSet);
+          awaitFontsThenReveal();
         })
         .catch(function () {
           // Endpoint absent (e.g. static deploy with no PHP runtime) —
           // proceed with Google-only injection so the page still renders
           // its text overlays in whatever Google families are referenced.
           injectGoogleLink({});
+          awaitFontsThenReveal();
         });
     })();
 
@@ -786,6 +811,12 @@
         tEl.style.pointerEvents = 'none';
         tEl.dataset.textFor = line.id;
         if (isHidden) tEl.style.visibility = 'hidden';
+        // v0.8.239: hide until fonts settle, then reveal in one pass to
+        // avoid a fallback-font flash on first paint.
+        if (!fontsSettled) {
+          tEl.style.opacity = '0';
+          pendingTextEls.push(tEl);
+        }
         // v0.8.232: multi-line content via <tspan>s, mirroring the
         // editor's setMultilineText. xml:space=preserve keeps runs of
         // whitespace; dy lifts the first line so the whole block is
