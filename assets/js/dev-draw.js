@@ -4142,11 +4142,20 @@
     { id: 'ellipse', label: 'Ellipse', hint: 'click center, drag rx/ry' },
     { id: 'rect',    label: 'Rect',    hint: 'click corner, drag size' },
     { id: 'polygon', label: 'Polygon', hint: 'triangle/N-gon (set Sides)' },
-    { id: 'star',    label: 'Star',    hint: 'N-pointed' },
-    { id: 'image',   label: 'Image',   hint: 'click corner, drag bbox · set URL in panel' },
+    { id: 'star',    label: 'Star',    hint: 'N-pointed' }
+  ];
+  // v0.8.229: third column. Kinds that carry external content
+  // (bitmap, text) rather than purely geometric shape. Same
+  // drag-create UX as primitives; grouped separately so authors
+  // can scan "what kind of thing does this object hold" in one
+  // glance.
+  const CREATE_TYPES_CONTAINERS = [
+    { id: 'image',     label: 'Image',      hint: 'click corner, drag bbox · set URL in panel' },
     { id: 'textBlock', label: 'Text block', hint: 'click corner, drag bbox · holds HTML text for phase-2 page gen' }
   ];
-  const CREATE_TYPES = CREATE_TYPES_LINES.concat(CREATE_TYPES_PRIMITIVES);
+  const CREATE_TYPES = CREATE_TYPES_LINES
+    .concat(CREATE_TYPES_PRIMITIVES)
+    .concat(CREATE_TYPES_CONTAINERS);
 
   function showCreateModal() {
     if (state.wizard) return; // already mid-wizard
@@ -4245,8 +4254,19 @@
     primsCol.appendChild(primsHead);
     CREATE_TYPES_PRIMITIVES.forEach(function (t) { makeTypeButton(t, primsCol); });
 
+    // v0.8.229: Containers column — kinds that wrap external
+    // content (image bitmap, future-phase-2 HTML text). Sits to
+    // the right of Primitives.
+    const containersCol = document.createElement('div');
+    containersCol.className = 'ed-create-types-col';
+    const containersHead = document.createElement('h5');
+    containersHead.textContent = 'Containers';
+    containersCol.appendChild(containersHead);
+    CREATE_TYPES_CONTAINERS.forEach(function (t) { makeTypeButton(t, containersCol); });
+
     typesGrid.appendChild(linesCol);
     typesGrid.appendChild(primsCol);
+    typesGrid.appendChild(containersCol);
     body.appendChild(typesGrid);
 
     // Destination classes for the current page (only).
@@ -11621,33 +11641,18 @@
     // which is discoverable from the panel. moveLinesToGroup also
     // fans the change out to sibling classes in ALL mode by name.
     if (state.groups.length > 1) {
-      // v0.8.114: confirm-before-move. Group reassignment fans out to
-      // sibling classes in ALL mode (via moveLinesToGroup) and is not
-      // visually obvious in the panel, so a misclick on the picker
-      // can silently relocate an object. Stage + confirm protects
-      // against that; the dialog reverts the picker on cancel by
-      // re-rendering.
+      // v0.8.229: confirm dialog removed. The group reassignment is
+      // fully reversible (Cmd+Z, or pick the original group back) and
+      // the confirm() interrupted a frequent, low-risk operation. The
+      // fan-out to sibling instances in ALL mode is still in effect
+      // via moveLinesToGroup — that's a feature, not a hazard.
       wrap.appendChild(selectField(
         'Group',
         line.groupId || '',
         state.groups.map(function (gr) { return { value: gr.id, label: gr.name }; }),
         function (newId) {
           if (!newId || newId === line.groupId) return;
-          const targetGroup = state.groups.find(function (gr) { return gr.id === newId; });
-          const targetName = targetGroup ? targetGroup.name : '(unknown)';
-          const objLabel = line.name || ('object ' + line.id);
-          const ok = window.confirm(
-            'Move "' + objLabel + '" to group "' + targetName + '"?\n\n' +
-            'This also moves sibling instances in other classes that share the same group.'
-          );
-          if (ok) {
-            moveLinesToGroup([line.id], newId);
-          } else {
-            // Re-render to revert the picker to the original groupId.
-            if (window.PanelManager) {
-              try { window.PanelManager.notifyDataChanged(); } catch (e) {}
-            }
-          }
+          moveLinesToGroup([line.id], newId);
         }
       ));
     }
@@ -14358,7 +14363,14 @@
     // rebinding it. Alt-click selection is handled entirely in pointerup.
     const modifier = e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
     let armMove = false;
-    if (!modifier) {
+    // v0.8.229: only the Select tool intercepts a press on an existing
+    // object as a select / move gesture. When a drawing tool is active
+    // (rect, textBlock, image, freehand, …), a press that lands on an
+    // existing object must still start the new drawing — otherwise users
+    // can't draw a new object whose top-left corner falls on top of an
+    // existing one, which is a perfectly normal layout situation.
+    const toolIsDrawing = state.activeToolId && state.activeToolId !== 'select';
+    if (!modifier && !toolIsDrawing) {
       if (pressedSelected) {
         armMove = true;
         // v0.8.123/124: removed the inline panel auto-open.

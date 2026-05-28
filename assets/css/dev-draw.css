@@ -2258,7 +2258,8 @@ body.editor input[type="range"] {
 }
 .ed-create-types-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* v0.8.229: three columns — Lines | Primitives | Containers. */
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0.8rem;
 }
 /* v0.8.36: Import-SVG section, sits above the type grid in the
