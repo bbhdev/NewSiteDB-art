@@ -673,14 +673,70 @@
    * shape; the runtime has its own copy so the two evolve together if
    * they need to.
    */
-  function setMultilineText(tEl, value, anchorX) {
+  /**
+   * v0.8.241 (textBlock Slice 1b-3): greedy word-wrap helper.
+   *
+   *   value     — source string (\n splits paragraphs)
+   *   maxWidth  — wrap width in user / viewBox units; ≤ 0 disables
+   *               wrap (caller gets one visual line per \n-segment)
+   *   fontSize  — px size for measureText
+   *   fontFamily— family name passed straight to ctx.font
+   *
+   * Returns an array of visual line strings. Within each paragraph,
+   * tokens are split on whitespace runs (the runs are kept as tokens
+   * so multi-space groups can survive when they fit on a line); we
+   * greedily append tokens until the next would overflow, then start
+   * a new line, dropping any pure-whitespace token that would
+   * otherwise indent the wrapped line.
+   *
+   * Caveat: if the chosen font hasn't finished loading, measureText
+   * uses fallback metrics and lines may break in the wrong place.
+   * The editor re-renders on every edit so it self-corrects almost
+   * immediately; the runtime triggers a re-wrap pass once
+   * document.fonts.ready resolves (see app.js).
+   */
+  let _wrapCanvas = null;
+  function wrapTextToWidth(value, maxWidth, fontSize, fontFamily) {
+    const paragraphs = String(value == null ? '' : value).split('\n');
+    if (!(maxWidth > 0)) return paragraphs;
+    if (!_wrapCanvas) _wrapCanvas = document.createElement('canvas');
+    const ctx = _wrapCanvas.getContext('2d');
+    ctx.font = fontSize + 'px ' + fontFamily;
+    const out = [];
+    for (let p = 0; p < paragraphs.length; p++) {
+      const para = paragraphs[p];
+      if (para === '') { out.push(''); continue; }
+      const tokens = para.split(/(\s+)/);
+      let current = '';
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i];
+        if (!tok) continue;
+        const tentative = current + tok;
+        if (current === '' || ctx.measureText(tentative).width <= maxWidth) {
+          current = tentative;
+        } else {
+          out.push(current);
+          // Drop leading whitespace at the start of a wrapped line so
+          // text doesn't appear indented after a soft break.
+          current = /^\s+$/.test(tok) ? '' : tok;
+        }
+      }
+      out.push(current);
+    }
+    return out;
+  }
+
+  function setMultilineText(tEl, lines, anchorX) {
     while (tEl.firstChild) tEl.removeChild(tEl.firstChild);
     // v0.8.234: no centering — text flows from (offsetX, offsetY) like
     // an HTML textbox. Each line is left-aligned at anchorX; the first
     // line's baseline sits below the anchor point (so the offset
     // marks the top of the text), subsequent lines drop by 1em.
+    // v0.8.241: now accepts a pre-split lines[] array — the caller
+    // decides whether lines come from naive \n-split or from
+    // wrapTextToWidth (textBlock kind).
     tEl.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'space', 'preserve');
-    const lines = String(value == null ? '' : value).split('\n');
+    if (!Array.isArray(lines)) lines = [String(lines == null ? '' : lines)];
     const n = lines.length;
     for (let i = 0; i < n; i++) {
       const ts = document.createElementNS(SVG_NS, 'tspan');
@@ -9346,7 +9402,44 @@
         if (line.hidden || (group && group.hidden)) tEl.style.opacity = '0.18';
         // v0.8.232: multi-line content via tspans. Preserves \n line
         // breaks and runs of whitespace.
-        setMultilineText(tEl, tx.value, ax);
+        // v0.8.241 (Slice 1b-3): for textBlock, wrap text within the
+        // rect's horizontal bounds (anchor → rect right edge) and
+        // clip vertical overflow to the rect. Other kinds keep the
+        // naive \n-split behavior — they have no natural wrap zone.
+        let visualLines;
+        if (line.kind === 'textBlock'
+            && line.params && Number.isFinite(line.params.x)
+            && Number.isFinite(line.params.w) && line.params.w > 0) {
+          const maxWidth = Math.max(0, (line.params.x + line.params.w) - ax);
+          visualLines = wrapTextToWidth(tx.value, maxWidth, tx.fontSize, tx.fontFamily);
+        } else {
+          visualLines = String(tx.value == null ? '' : tx.value).split('\n');
+        }
+        setMultilineText(tEl, visualLines, ax);
+        // Clip vertical (and horizontal) overflow to the textBlock
+        // rect. Author resizes the rect if they want more text to
+        // show; this matches the "HTML textarea inside a box" mental
+        // model — content past the bottom edge is hidden.
+        if (line.kind === 'textBlock'
+            && line.params && Number.isFinite(line.params.x)
+            && Number.isFinite(line.params.y)
+            && Number.isFinite(line.params.w)
+            && Number.isFinite(line.params.h)) {
+          const clipId = 'ed-tbclip-' + line.id;
+          let cp = linesG.querySelector('clipPath[id="' + clipId + '"]');
+          if (!cp) {
+            cp = document.createElementNS(SVG_NS, 'clipPath');
+            cp.setAttribute('id', clipId);
+            cp.appendChild(document.createElementNS(SVG_NS, 'rect'));
+            linesG.appendChild(cp);
+          }
+          const r = cp.firstChild;
+          r.setAttribute('x', String(line.params.x));
+          r.setAttribute('y', String(line.params.y));
+          r.setAttribute('width',  String(line.params.w));
+          r.setAttribute('height', String(line.params.h));
+          tEl.setAttribute('clip-path', 'url(#' + clipId + ')');
+        }
         linesG.appendChild(tEl);
       }
 

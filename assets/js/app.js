@@ -336,6 +336,61 @@
         color:      (typeof t.color === 'string' && t.color) ? t.color : null
       };
     }
+    // v0.8.241 (Slice 1b-3): greedy word-wrap helper. Mirrors
+    // wrapTextToWidth in dev-draw.js — keep the two in sync. Returns
+    // an array of visual lines. maxWidth ≤ 0 disables wrap.
+    let _wrapCanvas = null;
+    function wrapTextToWidth(value, maxWidth, fontSize, fontFamily) {
+      const paragraphs = String(value == null ? '' : value).split('\n');
+      if (!(maxWidth > 0)) return paragraphs;
+      if (!_wrapCanvas) _wrapCanvas = document.createElement('canvas');
+      const ctx = _wrapCanvas.getContext('2d');
+      ctx.font = fontSize + 'px ' + fontFamily;
+      const out = [];
+      for (let p = 0; p < paragraphs.length; p++) {
+        const para = paragraphs[p];
+        if (para === '') { out.push(''); continue; }
+        const tokens = para.split(/(\s+)/);
+        let current = '';
+        for (let i = 0; i < tokens.length; i++) {
+          const tok = tokens[i];
+          if (!tok) continue;
+          const tentative = current + tok;
+          if (current === '' || ctx.measureText(tentative).width <= maxWidth) {
+            current = tentative;
+          } else {
+            out.push(current);
+            current = /^\s+$/.test(tok) ? '' : tok;
+          }
+        }
+        out.push(current);
+      }
+      return out;
+    }
+
+    // Re-run wrap on a text element registered in pendingWrapEls.
+    // Reads its wrap inputs from data-* attrs and rewrites tspans in
+    // place. Called from revealPendingText after document.fonts.ready.
+    const RT_XML_NS = 'http://www.w3.org/XML/1998/namespace';
+    function rewrapTextEl(tEl) {
+      const value      = tEl.getAttribute('data-text-value') || '';
+      const maxWidth   = parseFloat(tEl.getAttribute('data-wrap-width') || '0');
+      const fontSize   = parseFloat(tEl.getAttribute('data-font-size') || '14');
+      const fontFamily = tEl.getAttribute('data-font-family') || 'sans-serif';
+      const ax         = parseFloat(tEl.getAttribute('x') || '0');
+      const lines = wrapTextToWidth(value, maxWidth, fontSize, fontFamily);
+      while (tEl.firstChild) tEl.removeChild(tEl.firstChild);
+      for (let i = 0; i < lines.length; i++) {
+        const ts = document.createElementNS(SVG_NS, 'tspan');
+        ts.setAttribute('x', String(ax));
+        ts.setAttribute('text-anchor', 'start');
+        ts.setAttributeNS(RT_XML_NS, 'space', 'preserve');
+        if (i > 0) ts.setAttribute('dy', '1em');
+        ts.textContent = lines[i];
+        tEl.appendChild(ts);
+      }
+    }
+
     // v0.8.239: hide text overlays until web fonts are loaded, so the
     // page doesn't flash a fallback font and then swap. Each created
     // <text> element starts with opacity:0 and is registered here; once
@@ -344,10 +399,21 @@
     // once. Safety net: a 2 s timeout reveals anyway, so a font that
     // never loads doesn't leave the page text invisible forever.
     const pendingTextEls = [];
+    // v0.8.241 (Slice 1b-3): elements that need their tspans
+    // re-measured once web fonts have loaded. Wrap distance from
+    // canvas.measureText is wrong before the real font arrives
+    // (browser substitutes a fallback face with different metrics),
+    // so we keep the wrap inputs on data-* attrs and re-run wrap +
+    // re-emit tspans inside revealPendingText.
+    const pendingWrapEls = [];
     let fontsSettled = false;
     function revealPendingText() {
       if (fontsSettled) return;
       fontsSettled = true;
+      // Re-wrap textBlock text before revealing — the wrap done at
+      // render time used pre-load fallback metrics.
+      pendingWrapEls.forEach(rewrapTextEl);
+      pendingWrapEls.length = 0;
       pendingTextEls.forEach(function (el) { el.style.opacity = ''; });
       pendingTextEls.length = 0;
     }
@@ -817,6 +883,24 @@
           tEl.style.opacity = '0';
           pendingTextEls.push(tEl);
         }
+        // v0.8.241 (Slice 1b-3): for textBlock, wrap inside the rect's
+        // horizontal bounds (anchor → rect right edge). Other kinds
+        // have no natural wrap zone, so they keep \n-split only.
+        let isTextBlockWrap = false;
+        let wrapMaxWidth = 0;
+        if (line.kind === 'textBlock'
+            && line.params && Number.isFinite(line.params.x)
+            && Number.isFinite(line.params.w) && line.params.w > 0) {
+          isTextBlockWrap = true;
+          wrapMaxWidth = Math.max(0, (line.params.x + line.params.w) - ax);
+          // Stash wrap inputs on the element so revealPendingText can
+          // re-measure once the real font has loaded.
+          tEl.setAttribute('data-text-value', String(tx.value == null ? '' : tx.value));
+          tEl.setAttribute('data-wrap-width', String(wrapMaxWidth));
+          tEl.setAttribute('data-font-size', String(tx.fontSize));
+          tEl.setAttribute('data-font-family', tx.fontFamily);
+          if (!fontsSettled) pendingWrapEls.push(tEl);
+        }
         // v0.8.232: multi-line content via <tspan>s, mirroring the
         // editor's setMultilineText. xml:space=preserve keeps runs of
         // whitespace; dy lifts the first line so the whole block is
@@ -827,7 +911,11 @@
         const XML_NS = 'http://www.w3.org/XML/1998/namespace';
         tEl.setAttributeNS(XML_NS, 'space', 'preserve');
         (function writeTspans() {
-          const lines = String(tx.value == null ? '' : tx.value).split('\n');
+          // v0.8.241: textBlock wraps to maxWidth; other kinds keep
+          // naive \n-split. wrapTextToWidth handles both.
+          const lines = isTextBlockWrap
+            ? wrapTextToWidth(tx.value, wrapMaxWidth, tx.fontSize, tx.fontFamily)
+            : String(tx.value == null ? '' : tx.value).split('\n');
           const n = lines.length;
           for (let i = 0; i < n; i++) {
             const ts = document.createElementNS(SVG_NS, 'tspan');
@@ -842,6 +930,27 @@
             tEl.appendChild(ts);
           }
         })();
+        // v0.8.241 (Slice 1b-3): clip the text to the textBlock rect
+        // so vertical overflow is hidden — author resizes the rect
+        // when more text needs to show. clipPath def is appended to
+        // the same layer; ids are scoped per-line.
+        if (line.kind === 'textBlock'
+            && line.params && Number.isFinite(line.params.x)
+            && Number.isFinite(line.params.y)
+            && Number.isFinite(line.params.w)
+            && Number.isFinite(line.params.h)) {
+          const clipId = 'rt-tbclip-' + line.id;
+          const cp = document.createElementNS(SVG_NS, 'clipPath');
+          cp.setAttribute('id', clipId);
+          const cr = document.createElementNS(SVG_NS, 'rect');
+          cr.setAttribute('x', String(line.params.x));
+          cr.setAttribute('y', String(line.params.y));
+          cr.setAttribute('width',  String(line.params.w));
+          cr.setAttribute('height', String(line.params.h));
+          cp.appendChild(cr);
+          layer.appendChild(cp);
+          tEl.setAttribute('clip-path', 'url(#' + clipId + ')');
+        }
         layer.appendChild(tEl);
       }
     });
