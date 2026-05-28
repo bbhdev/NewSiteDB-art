@@ -772,8 +772,8 @@
         const tEl = document.createElementNS(SVG_NS, 'text');
         tEl.setAttribute('x', String(ax));
         tEl.setAttribute('y', String(cyN + tx.offsetY));
-        tEl.setAttribute('text-anchor', 'middle');
-        tEl.setAttribute('dominant-baseline', 'central');
+        // v0.8.234: no centering — left/top-aligned at the offset point.
+        tEl.setAttribute('text-anchor', 'start');
         tEl.setAttribute('font-family', tx.fontFamily);
         tEl.setAttribute('font-size', String(tx.fontSize));
         tEl.setAttribute('fill', tx.color || (stroke || 'currentColor'));
@@ -795,13 +795,12 @@
           for (let i = 0; i < n; i++) {
             const ts = document.createElementNS(SVG_NS, 'tspan');
             ts.setAttribute('x', String(ax));
-            ts.setAttribute('text-anchor', 'middle');
+            ts.setAttribute('text-anchor', 'start');
             ts.setAttributeNS(XML_NS, 'space', 'preserve');
-            if (i === 0) {
-              if (n > 1) ts.setAttribute('dy', (-(n - 1) / 2) + 'em');
-            } else {
-              ts.setAttribute('dy', '1em');
-            }
+            // v0.8.234: anchor = top-left of text block; every line
+            // (including the first) drops 1em from the previous
+            // position so line 0's baseline sits below the anchor.
+            ts.setAttribute('dy', '1em');
             ts.textContent = lines[i];
             tEl.appendChild(ts);
           }

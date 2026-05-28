@@ -675,28 +675,22 @@
    */
   function setMultilineText(tEl, value, anchorX) {
     while (tEl.firstChild) tEl.removeChild(tEl.firstChild);
-    // v0.8.233: xml:space must be set via the XML namespace, not as a
-    // plain attribute name — setAttribute('xml:space', …) doesn't
-    // reliably reach the namespaced attribute, so runs of whitespace
-    // collapsed back to one space at render time.
+    // v0.8.234: no centering — text flows from (offsetX, offsetY) like
+    // an HTML textbox. Each line is left-aligned at anchorX; the first
+    // line's baseline sits below the anchor point (so the offset
+    // marks the top of the text), subsequent lines drop by 1em.
     tEl.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'space', 'preserve');
     const lines = String(value == null ? '' : value).split('\n');
     const n = lines.length;
     for (let i = 0; i < n; i++) {
       const ts = document.createElementNS(SVG_NS, 'tspan');
       ts.setAttribute('x', String(anchorX));
-      // v0.8.233: explicitly anchor each line. Inherited text-anchor
-      // from the parent <text> is supposed to start a new anchored
-      // chunk at every tspan with an `x` attribute, but browsers vary
-      // — without an explicit text-anchor on the tspan, lines after
-      // the first drifted cumulatively to the right.
-      ts.setAttribute('text-anchor', 'middle');
+      ts.setAttribute('text-anchor', 'start');
       ts.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'space', 'preserve');
-      if (i === 0) {
-        if (n > 1) ts.setAttribute('dy', (-(n - 1) / 2) + 'em');
-      } else {
-        ts.setAttribute('dy', '1em');
-      }
+      // First line: drop one full line-height so the anchor is the
+      // top of the text block (1em ≈ glyph height; close enough for
+      // Slice 1b — Slice 1b-3 will measure exact line-box if needed).
+      ts.setAttribute('dy', i === 0 ? '1em' : '1em');
       ts.textContent = lines[i];
       tEl.appendChild(ts);
     }
@@ -9328,8 +9322,9 @@
         const tEl = document.createElementNS(SVG_NS, 'text');
         tEl.setAttribute('x', String(ax));
         tEl.setAttribute('y', String(c.y + tx.offsetY));
-        tEl.setAttribute('text-anchor', 'middle');
-        tEl.setAttribute('dominant-baseline', 'central');
+        // v0.8.234: no centering — left/top-aligned at the offset
+        // point (HTML textbox-like). tspans inherit text-anchor=start.
+        tEl.setAttribute('text-anchor', 'start');
         tEl.setAttribute('font-family', tx.fontFamily);
         tEl.setAttribute('font-size', String(tx.fontSize));
         tEl.setAttribute('fill', tx.color || stroke || '#888');
