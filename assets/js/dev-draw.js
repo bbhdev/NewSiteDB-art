@@ -12672,6 +12672,92 @@
     behaviorsDivider.appendChild(helpIcon);
     wrap.appendChild(behaviorsDivider);
 
+    // v0.8.276: "Inherited from <donor>" read-only section. Shown
+    // when followsMasterId is set AND the donor resolves in this
+    // class. Each donor block is rendered as a non-interactive row
+    // (no power toggle, no delete, no click) showing behaviorAutoName
+    // so the user sees WHAT they're inheriting without leaving the
+    // panel. A small "↪ Open donor" button jumps to the donor for
+    // editing.
+    //
+    // Composition note in the sub-header: inherited blocks run BEFORE
+    // own blocks (donor's behaviors are PREPENDED in resolveInstanceJS).
+    // For sum effects (translate, rotate, drawIn flag) order doesn't
+    // matter; for last-active-wins (opacity, pathFollow), own blocks
+    // are evaluated after inherited and therefore win on overlap.
+    if (line.followsMasterId) {
+      const donorLine = state.lines.find(function (l) {
+        return l.masterId === line.followsMasterId && l.id !== line.id;
+      });
+      if (donorLine) {
+        const donorMaster = state.masters.find(function (m) { return m.id === line.followsMasterId; });
+        const donorName = (donorLine.name && donorLine.name.trim())
+          || (donorMaster && donorMaster.name)
+          || shortMasterId(line.followsMasterId);
+        const donorBlocks = Array.isArray(donorLine.behaviors) ? donorLine.behaviors : [];
+
+        const subHead = document.createElement('div');
+        subHead.className = 'ed-behavior-subhead';
+        subHead.style.cssText = 'display:flex;align-items:center;justify-content:space-between;'
+          + 'margin:0.25rem 0 0.15rem;font-size:0.85em;color:#bbb;';
+        const subTitle = document.createElement('span');
+        subTitle.textContent = '↪ Inherited from "' + donorName + '"';
+        subTitle.title = 'Donor blocks run before this object\'s own. '
+          + 'Translate/rotate sum; for opacity/along-path, your own blocks win where both are active.';
+        subHead.appendChild(subTitle);
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'ed-mini';
+        openBtn.textContent = 'Open donor';
+        openBtn.title = 'Select the donor object to edit its behaviors';
+        openBtn.addEventListener('click', function () {
+          if (donorLine.groupId) {
+            state.activeGroupId = donorLine.groupId;
+            state.openGroupIds[donorLine.groupId] = true;
+          }
+          selectOnly(donorLine.id);
+          renderAll();
+        });
+        subHead.appendChild(openBtn);
+        wrap.appendChild(subHead);
+
+        const inheritedList = document.createElement('ul');
+        inheritedList.className = 'ed-block-list';
+        inheritedList.style.opacity = '0.7';
+        if (!donorBlocks.length) {
+          const ph = document.createElement('li');
+          ph.className = 'ed-behavior-empty';
+          ph.style.cssText = 'list-style:none;padding:0.15rem 0 0.35rem;font-style:italic;';
+          ph.textContent = '(donor has no behaviors)';
+          inheritedList.appendChild(ph);
+        } else {
+          donorBlocks.forEach(function (block, idx) {
+            const row = document.createElement('li');
+            const isDisabled = !!(block && block.disabled);
+            row.className = 'ed-block-row is-inherited' + (isDisabled ? ' is-disabled' : '');
+            row.style.cursor = 'default';
+            row.title = 'Inherited block — edit on the donor object';
+            const nameEl = document.createElement('span');
+            nameEl.className = 'ed-block-name';
+            nameEl.style.cursor = 'default';
+            nameEl.textContent = behaviorAutoName(block, idx);
+            row.appendChild(nameEl);
+            inheritedList.appendChild(row);
+          });
+        }
+        wrap.appendChild(inheritedList);
+
+        // Sub-header for the own-behaviors section that follows.
+        const ownHead = document.createElement('div');
+        ownHead.className = 'ed-behavior-subhead';
+        ownHead.style.cssText = 'margin:0.5rem 0 0.15rem;font-size:0.85em;color:#bbb;';
+        ownHead.textContent = 'Own behaviors';
+        ownHead.title = 'Run AFTER inherited blocks (additive for sum effects; '
+          + 'override for last-active-wins effects like opacity).';
+        wrap.appendChild(ownHead);
+      }
+    }
+
     // v0.8.113: block list — one row per block, click to open the
     // block-detail floating panel. Replaces the inline cards that
     // used to fill this section (now relocated to the dedicated
