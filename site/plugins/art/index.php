@@ -300,6 +300,12 @@ function art_resolve_instance(array $instance, array $mastersById): array
     if (isset($instance['scrollMode'])) {
         $line['scrollMode'] = $instance['scrollMode'];
     }
+    // v0.8.275: per-object "Follow this object" — pass through the
+    // donor's masterId so the runtime (app.js resolveInstanceJS) can
+    // compose the donor's behaviors onto this line.
+    if (isset($instance['followsMasterId']) && $instance['followsMasterId']) {
+        $line['followsMasterId'] = $instance['followsMasterId'];
+    }
     if ($masterId)  $line['masterId'] = $masterId;
     return $line;
 }

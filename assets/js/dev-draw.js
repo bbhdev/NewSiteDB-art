@@ -1140,6 +1140,9 @@
     // Pass through so the editor can display and persist it correctly.
     // Absent field = 'flow' (the runtime and editor both read undefined as flow).
     if (inst.scrollMode) line.scrollMode = inst.scrollMode;
+    // v0.8.275: per-object "Follow this object" — pass through on load
+    // so the editor can display the picker state and write it back.
+    if (inst.followsMasterId) line.followsMasterId = inst.followsMasterId;
     return line;
   }
 
@@ -2232,6 +2235,11 @@
           instRecord.scrollMode = 'flow';
         }
         // (absent = flow — no field needed for the default)
+        // v0.8.275: per-object "Follow this object". Donor's masterId,
+        // cross-class identity. Omitted when null/absent (default).
+        if (line.followsMasterId) {
+          instRecord.followsMasterId = line.followsMasterId;
+        }
         return instRecord;
       });
       byClass[cid] = {
