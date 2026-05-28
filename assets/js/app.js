@@ -104,6 +104,10 @@
       if (b.trigger.selector) out.selector = String(b.trigger.selector);
       if (b.trigger.viewportAt) out.viewportAt = String(b.trigger.viewportAt);
       if (b.trigger.repeat)     out.repeat     = String(b.trigger.repeat);
+      // v0.8.245: scroll-start direction filter ('down' | 'up'); absent = both.
+      if (b.trigger.direction === 'down' || b.trigger.direction === 'up') {
+        out.direction = b.trigger.direction;
+      }
       // v0.8.79: cross-object Start / Stop side effects on fire.
       // Target is a class identity (line.masterId, stable string).
       // Stop has optional fade-out + return-home cleanup tween;
