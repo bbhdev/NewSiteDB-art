@@ -3034,8 +3034,12 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 .ed-block-row {
   display: flex;
   align-items: stretch;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  /* v0.8.247: dark-navy tint so each block row stands out as a discrete
+     unit in the object panel — the previous neutral #2a2a2a blended into
+     the panel chrome and the rows read as a flat list. Still dark enough
+     to keep white text contrast intact. */
+  background: #004499;
+  border: 1px solid #1a66bb;
   border-radius: 4px;
   overflow: hidden;
 }
@@ -3053,7 +3057,7 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   font: inherit;
   cursor: pointer;
 }
-.ed-block-name:hover { background: #353535; color: #fff; }
+.ed-block-name:hover { background: #1a66bb; color: #fff; }
 .ed-block-del {
   flex: 0 0 auto;
   background: transparent;

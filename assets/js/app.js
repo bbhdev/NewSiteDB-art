@@ -1054,6 +1054,13 @@
       try { window.scrollTo(0, 0); } catch (e) { /* not all envs */ }
       mountScrollProgressIndicator();
     }
+    // v0.8.249: scroll-range overlay. Independent toggle so authors can
+    // see range markers during normal animated browsing (no scrollTo(0,0)
+    // or grid clutter). Each named line with a scroll-range behavior gets
+    // a dotted horizontal line + label per range edge.
+    if (hasLS && localStorage.getItem('ed-show-scroll-ranges') === '1') {
+      renderRuntimeScrollRanges(lines, paletteById);
+    }
 
     // Animate each rendered line per its group's behaviors + overrides.
     // Walk every renderable line element (paths AND images both
@@ -2820,6 +2827,160 @@
     update();
     window.addEventListener('scroll', update, { passive: true });
     window.addEventListener('resize', update);
+  }
+
+  /**
+   * v0.8.249: Scroll-range overlay. For every line whose behaviors carry
+   * a scroll-range trigger, draw two horizontal dotted lines on the page
+   * — one at the document-Y corresponding to range.start, one at
+   * range.end — labeled with the line's name in the line's stroke color.
+   *
+   * Geometry: scrollP = scrollY / maxScroll, so document-Y for a given
+   * range fraction r is r * maxScroll. When the user has scrolled so
+   * the top of the viewport sits on a marker, the threshold has just
+   * been crossed at that point. The marker lines extend across the
+   * full viewport width so the eye can pick them up regardless of
+   * horizontal scroll / page width.
+   *
+   * Recomputed on resize (maxScroll depends on viewport height and the
+   * document's own scrollHeight, which can shift if fonts load late or
+   * the user resizes). One container element, idempotent — re-calling
+   * removes any prior overlay first.
+   */
+  function renderRuntimeScrollRanges(lines, paletteById) {
+    const HOST_ID = 'runtime-scroll-ranges';
+    const existing = document.getElementById(HOST_ID);
+    if (existing) existing.remove();
+
+    // Gather marker descriptors first; bail if there are none so we
+    // don't pollute the DOM with an empty overlay container.
+    const markers = [];
+    function resolve(ref) {
+      if (!ref) return null;
+      return paletteById[ref] ? paletteById[ref].value : ref;
+    }
+    lines.forEach(function (line) {
+      if (!Array.isArray(line.behaviors)) return;
+      const name  = line.name || line.id || '?';
+      const color = resolve(line.stroke) || resolve(line.fill) || '#ff00ff';
+      line.behaviors.forEach(function (b) {
+        if (!b || !b.trigger || b.trigger.when !== 'scroll-range') return;
+        const r = b.trigger.range || { start: 0, end: 1 };
+        const s = Number(r.start);
+        const e = Number(r.end);
+        if (Number.isFinite(s)) markers.push({ frac: s, edge: 'start', name: name, color: color });
+        if (Number.isFinite(e)) markers.push({ frac: e, edge: 'end',   name: name, color: color });
+      });
+    });
+    if (markers.length === 0) return;
+
+    const host = document.createElement('div');
+    host.id = HOST_ID;
+    host.style.cssText =
+      'position:absolute;top:0;left:0;width:100%;height:100%;' +
+      'pointer-events:none;z-index:150;';
+    document.body.appendChild(host);
+
+    function place() {
+      const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      host.innerHTML = '';
+      // v0.8.253: when several objects share the same scroll position +
+      // edge, merge them into ONE marker — combined label ("obj1 + obj2
+      // · start (0.30)") and a single dotted line split horizontally
+      // into N equal segments, each in one object's color. Thickness
+      // bumps from 2px (solo) to 4px (multi) so the "many objects fire
+      // here" signal is unmistakable. We still stack labels vertically
+      // by Y bucket as a fallback for groups that fall on nearly-equal
+      // (but not identical) frac values.
+      const groupMap = {};
+      markers.forEach(function (m) {
+        // Group key = edge + frac rounded to 2dp (the displayed value),
+        // so 0.30 and 0.301 merge into one group on screen.
+        const key = m.edge + '|' + m.frac.toFixed(2);
+        if (!groupMap[key]) {
+          groupMap[key] = { edge: m.edge, frac: m.frac, items: [] };
+        }
+        groupMap[key].items.push({ name: m.name, color: m.color });
+      });
+      const groups = Object.keys(groupMap).map(function (k) { return groupMap[k]; });
+      groups.sort(function (a, b) { return a.frac - b.frac; });
+
+      const LABEL_H = 22;
+      const occupancy = {};
+      groups.forEach(function (g) {
+        const y      = g.frac * max;
+        const bucket = Math.round(y / LABEL_H);
+        const slot   = occupancy[bucket] || 0;
+        occupancy[bucket] = slot + 1;
+        const labelY = y + 3 + slot * LABEL_H;
+
+        // Dotted line — N equal-width segments via flex; thickness 4px
+        // when merged, 2px solo.
+        const N     = g.items.length;
+        const thick = (N > 1) ? 4 : 2;
+        const lineWrap = document.createElement('div');
+        lineWrap.style.cssText =
+          'position:absolute;left:0;right:0;height:0;' +
+          'top:' + y + 'px;display:flex;pointer-events:none;';
+        g.items.forEach(function (it) {
+          const seg = document.createElement('div');
+          seg.style.cssText =
+            'flex:1 1 0;border-top:' + thick + 'px dotted ' + it.color + ';';
+          lineWrap.appendChild(seg);
+        });
+        host.appendChild(lineWrap);
+
+        // Label — flex row with a left color stripe (single color for
+        // solo, equal-band vertical gradient for merged) and the text.
+        const lbl = document.createElement('div');
+        lbl.style.cssText =
+          'position:absolute;right:8px;' +
+          'top:' + labelY + 'px;' +
+          'font:13px/1.25 ui-monospace,monospace;' +
+          'color:#fff;' +
+          'background:rgba(0,0,0,0.85);' +
+          'border-radius:3px;' +
+          'pointer-events:none;white-space:nowrap;' +
+          'display:flex;align-items:stretch;overflow:hidden;';
+        const stripe = document.createElement('div');
+        let stripeBg;
+        // v0.8.254: bands run horizontally (left-to-right) inside the
+        // stripe column instead of stacked, so a big merge (e.g. 8
+        // objects) still gives each color a visible slice. The stripe
+        // also widens with N so per-band width stays usable: 10px solo,
+        // +6px per extra item, capped at 40px (≈ 5px per band at N=8).
+        const stripeW = Math.min(40, Math.max(10, N * 6 + 4));
+        if (N === 1) {
+          stripeBg = g.items[0].color;
+        } else {
+          // Horizontal gradient with crisp band edges (hard stops at
+          // band boundaries) so each color reads as its own slice.
+          const stops = [];
+          g.items.forEach(function (it, i) {
+            const a = (i / N) * 100;
+            const b = ((i + 1) / N) * 100;
+            stops.push(it.color + ' ' + a + '%', it.color + ' ' + b + '%');
+          });
+          stripeBg = 'linear-gradient(to right, ' + stops.join(', ') + ')';
+        }
+        stripe.style.cssText =
+          'flex:0 0 ' + stripeW + 'px;background:' + stripeBg + ';';
+        lbl.appendChild(stripe);
+        const text = document.createElement('div');
+        text.style.cssText = 'padding:2px 7px;';
+        const names = g.items.map(function (i) { return i.name; }).join(' + ');
+        text.textContent = names + ' · ' + g.edge + ' (' + g.frac.toFixed(2) + ')';
+        lbl.appendChild(text);
+        host.appendChild(lbl);
+      });
+    }
+    place();
+    // Recompute on resize only — scrollHeight is stable across scroll
+    // events, so we don't pay every-frame cost.
+    window.addEventListener('resize', place);
+    // Late-loading fonts / images can shift scrollHeight after first
+    // paint; schedule one deferred re-place to catch that.
+    setTimeout(place, 500);
   }
 
   function renderRuntimeDiagGrid(layer, page) {

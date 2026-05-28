@@ -1194,6 +1194,11 @@
     // separate toggle so the table only appears when we're actively
     // diagnosing a position drift — Grid alone shouldn't pay the cost.
     showRuntimeDump: localStorage.getItem('ed-show-runtime-dump') === '1',
+    // v0.8.249: Live-site overlay showing scroll-range start/end edges
+    // as dotted horizontal lines on the page, labeled with the object
+    // name in the object's stroke color. No editor-side rendering — the
+    // toggle only flips a localStorage flag that the runtime reads.
+    showScrollRanges: localStorage.getItem('ed-show-scroll-ranges') === '1',
     // v0.8.99: keyboard-arrow nudge step (mm of canvas geometry).
     // Persisted so refresh keeps the value. Shift+arrow multiplies
     // by 10 (standard editor convention).
@@ -9076,6 +9081,20 @@
              'so shapes show at their authored coords.',
       value: state.showDiagGrid,
       onChange: function (v) { if (v !== state.showDiagGrid) toggleDiagGrid(); }
+    }));
+
+    body.appendChild(settingRow({
+      label: 'Scroll range markers',
+      help:  'Live site only. Overlays a horizontal dotted line at every ' +
+             'scroll-range edge (start + end) across the document height, ' +
+             'labeled with the object name in the object color. Useful for ' +
+             'seeing exactly where each scroll-driven animation begins and ' +
+             'ends as you scroll through the page.',
+      value: state.showScrollRanges,
+      onChange: function (v) {
+        state.showScrollRanges = v;
+        localStorage.setItem('ed-show-scroll-ranges', v ? '1' : '0');
+      }
     }));
 
     body.appendChild(settingRow({
