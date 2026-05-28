@@ -675,12 +675,23 @@
    */
   function setMultilineText(tEl, value, anchorX) {
     while (tEl.firstChild) tEl.removeChild(tEl.firstChild);
-    tEl.setAttribute('xml:space', 'preserve');
+    // v0.8.233: xml:space must be set via the XML namespace, not as a
+    // plain attribute name — setAttribute('xml:space', …) doesn't
+    // reliably reach the namespaced attribute, so runs of whitespace
+    // collapsed back to one space at render time.
+    tEl.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'space', 'preserve');
     const lines = String(value == null ? '' : value).split('\n');
     const n = lines.length;
     for (let i = 0; i < n; i++) {
       const ts = document.createElementNS(SVG_NS, 'tspan');
       ts.setAttribute('x', String(anchorX));
+      // v0.8.233: explicitly anchor each line. Inherited text-anchor
+      // from the parent <text> is supposed to start a new anchored
+      // chunk at every tspan with an `x` attribute, but browsers vary
+      // — without an explicit text-anchor on the tspan, lines after
+      // the first drifted cumulatively to the right.
+      ts.setAttribute('text-anchor', 'middle');
+      ts.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'space', 'preserve');
       if (i === 0) {
         if (n > 1) ts.setAttribute('dy', (-(n - 1) / 2) + 'em');
       } else {

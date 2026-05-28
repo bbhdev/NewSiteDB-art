@@ -784,13 +784,19 @@
         // editor's setMultilineText. xml:space=preserve keeps runs of
         // whitespace; dy lifts the first line so the whole block is
         // vertically centered around the anchor.
-        tEl.setAttribute('xml:space', 'preserve');
+        // v0.8.233: xml:space via XML namespace (plain setAttribute
+        // didn't preserve whitespace); explicit text-anchor on each
+        // tspan (inherited anchor drifted right line-by-line).
+        const XML_NS = 'http://www.w3.org/XML/1998/namespace';
+        tEl.setAttributeNS(XML_NS, 'space', 'preserve');
         (function writeTspans() {
           const lines = String(tx.value == null ? '' : tx.value).split('\n');
           const n = lines.length;
           for (let i = 0; i < n; i++) {
             const ts = document.createElementNS(SVG_NS, 'tspan');
             ts.setAttribute('x', String(ax));
+            ts.setAttribute('text-anchor', 'middle');
+            ts.setAttributeNS(XML_NS, 'space', 'preserve');
             if (i === 0) {
               if (n > 1) ts.setAttribute('dy', (-(n - 1) / 2) + 'em');
             } else {
