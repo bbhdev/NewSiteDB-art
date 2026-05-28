@@ -230,6 +230,16 @@
       if (b.trigger.direction === 'down' || b.trigger.direction === 'up') {
         out.direction = b.trigger.direction;
       }
+      // v0.8.246: scroll-range deactivation policy. 'sticky' = once
+      // entered, persists past range.end (classic scroll-reveal).
+      // 'windowed' = inactive (p=0) outside range — for loop/pingpong
+      // the clock keeps advancing ("continue hidden"), for time/loopTo
+      // it's a one-shot. Only carried when explicitly set; absent =
+      // defaulted at the runtime use-site by duration mode (scroll →
+      // sticky, time-based → windowed).
+      if (b.trigger.rangeBehavior === 'sticky' || b.trigger.rangeBehavior === 'windowed') {
+        out.rangeBehavior = b.trigger.rangeBehavior;
+      }
       return out;
     }
     // Legacy: old trigger.type 'time' → page-load + carry delay.

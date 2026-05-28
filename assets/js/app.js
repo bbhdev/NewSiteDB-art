@@ -108,6 +108,20 @@
       if (b.trigger.direction === 'down' || b.trigger.direction === 'up') {
         out.direction = b.trigger.direction;
       }
+      // v0.8.246: scroll-range deactivation policy.
+      //   'sticky'   — once entered, block persists in its final/looping
+      //                state above range.end (classic scroll-reveal).
+      //   'windowed' — block is inactive (p=0) outside the range. For
+      //                loop/pingpong this is "continue hidden" (the clock
+      //                keeps advancing, output is gated on in-range); for
+      //                time/loopTo this is "one-shot" (fires once per page
+      //                load, no replay on re-entry).
+      //   Absent: defaulted at the use-site by duration mode (scroll
+      //   defaults to sticky; time-based modes default to windowed,
+      //   which fixes the loop-runs-forever bug for legacy data).
+      if (b.trigger.rangeBehavior === 'sticky' || b.trigger.rangeBehavior === 'windowed') {
+        out.rangeBehavior = b.trigger.rangeBehavior;
+      }
       // v0.8.79: cross-object Start / Stop side effects on fire.
       // Target is a class identity (line.masterId, stable string).
       // Stop has optional fade-out + return-home cleanup tween;
@@ -1393,6 +1407,14 @@
       const loopPlayed    = blocks.map(function () { return false; });
       const loopIterCount = blocks.map(function () { return 0; });
       const loopDone      = blocks.map(function () { return false; });
+      // v0.8.255 / v0.8.256: windowed scroll-range "freeze in place". When
+      // scrollP leaves the range, we don't advance the clock — instead
+      // we render the frozen phase at the moment of exit. On re-entry,
+      // we shift activationState forward by the paused duration so the
+      // computed t resumes at exactly the frozen value (no visual jump,
+      // no snap-back to home). null = currently in range / not paused;
+      // a timestamp = nowSec at the moment we left the range.
+      const pauseStartSec = blocks.map(function () { return null; });
 
       // v0.8.53: pathFollow per-block end-mode state.
       //   pathStopMax[i]   monotonic max of bp ever seen; used by
@@ -1763,9 +1785,14 @@
         // scrollP directly).
         if (mode === 'scroll') {
           const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
+          // v0.8.246: rangeBehavior decides what happens past the
+          // range. Sticky (default for scroll) parks at p=1 above
+          // end — classic scroll-reveal. Windowed forces p=0 outside
+          // both edges so the object is "active only within range."
+          const rb = (b.trigger && b.trigger.rangeBehavior) || 'sticky';
           let p;
           if (scrollP <= r.start) p = 0;
-          else if (scrollP >= r.end) p = 1;
+          else if (scrollP >= r.end) p = (rb === 'windowed') ? 0 : 1;
           else {
             const span = r.end - r.start;
             p = span > 0 ? (scrollP - r.start) / span : 1;
@@ -1787,8 +1814,22 @@
         // tampered-data path only).
         if (activationState[idx] == null) {
           if (when === 'scroll-range') {
+            // v0.8.256: one-shot consumption gate removed — freeze-in-
+            // place handles all windowed durations uniformly. Time /
+            // loopTo can't "replay" because raw clamps at 1 once
+            // completed; mid-play exits freeze + resume on re-entry.
             const r = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
-            if (scrollP >= r.start) {
+            // Sticky: legacy "scroll has reached start" gate (also
+            // activates if user scrolled past the range before
+            // landing in it — preserves old behavior). Windowed:
+            // require the user to actually be IN range, so a fast
+            // scroll past doesn't silently consume a one-shot or
+            // start a loop the user never saw.
+            const rb    = (b.trigger && b.trigger.rangeBehavior) || (mode === 'scroll' ? 'sticky' : 'windowed');
+            const gateOk = (rb === 'windowed')
+              ? (scrollP >= r.start && scrollP <= r.end)
+              : (scrollP >= r.start);
+            if (gateOk) {
               activationState[idx] = nowSec;
               applyObjectEffects(b.trigger);  // v0.8.79
             }
@@ -1815,7 +1856,50 @@
         }
 
         const delay = (b.trigger && b.trigger.delay) || 0;
-        const t = nowSec - activationState[idx] - delay;
+        // v0.8.255: freeze-in-place for windowed loop/pingpong. The
+        // clock is "paused" while out of range — we render whatever
+        // phase the loop had at the moment of exit, so the object
+        // stays visibly where it last was instead of snapping home.
+        // On re-entry we shift activationState forward by the paused
+        // duration, so the next computed t lands exactly on the
+        // frozen value: seamless resume, no jump. Implemented by
+        // computing t against `effectiveNow` instead of nowSec:
+        // effectiveNow = pauseStartSec[idx] while paused, nowSec
+        // otherwise.
+        let effectiveNow = nowSec;
+        // v0.8.256: freeze-in-place now applies to ALL windowed scroll-
+        // range durations, not just loop/pingpong. Time/loopTo used to
+        // snap home (raw=0) on exit and refuse replay — but the visible
+        // snap is jarring. Treating them the same way as loop/pingpong
+        // (clock pauses out of range, resumes on re-entry) eliminates
+        // the jump, and the "one-shot" property still holds naturally:
+        // raw is clamped at 1, so once the animation has played to
+        // completion it stays at its end pose regardless of scroll;
+        // if it exits mid-play it freezes there and finishes on
+        // re-entry without ever replaying.
+        if (when === 'scroll-range' &&
+            (mode === 'loop' || mode === 'pingpong' || mode === 'time' || mode === 'loopTo')) {
+          const rb = (b.trigger && b.trigger.rangeBehavior) || 'windowed';
+          if (rb === 'windowed') {
+            const r2 = (b.trigger && b.trigger.range) || { start: 0, end: 1 };
+            const inR = (scrollP >= r2.start && scrollP <= r2.end);
+            if (inR) {
+              // Re-entry: shift activation forward by the paused gap
+              // so t resumes seamlessly at the frozen value.
+              if (pauseStartSec[idx] != null) {
+                activationState[idx] += (nowSec - pauseStartSec[idx]);
+                pauseStartSec[idx] = null;
+              }
+            } else {
+              // Exiting / still out: record the freeze-point if new,
+              // then compute t against it so raw stays at the value
+              // it had the instant we left the range.
+              if (pauseStartSec[idx] == null) pauseStartSec[idx] = nowSec;
+              effectiveNow = pauseStartSec[idx];
+            }
+          }
+        }
+        const t = effectiveNow - activationState[idx] - delay;
         if (t <= 0) return 0;
         const dur = (b.duration && b.duration.seconds > 0) ? b.duration.seconds : 1;
         let raw;
@@ -1894,6 +1978,16 @@
           }
         }
 
+        // v0.8.246 / v0.8.255 / v0.8.256: windowed scroll-range no
+        // longer has a raw=0 output gate. ALL durations use the
+        // clock-pause logic above (effectiveNow = pauseStartSec[idx]
+        // while out of range), so raw already holds the frozen phase
+        // at exit. Re-entry shifts activation forward to resume
+        // seamlessly. The "one-shot" property of time / loopTo is
+        // preserved naturally: raw clamps at 1, so once the animation
+        // has played to completion it stays at its end pose regardless
+        // of subsequent scroll position; if it exits mid-play it
+        // freezes there and finishes on re-entry without replaying.
         return blockEases[idx](raw);
       };
       // v0.8.17: drift accumulator support.
