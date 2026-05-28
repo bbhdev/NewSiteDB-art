@@ -14,8 +14,14 @@ Thumbs.db
 # they're ignored so pulls never collide with locally-saved drawings.
 # On fresh clones the snippet/template falls back to the .example file.
 /content/colors.json
+# Root-level page (the "home" page served from /content directly, no
+# per-page subdir) — its config and per-class data sit one level
+# shallower than other pages, so they need their own patterns.
+/content/page.json
+/content/*/instances.json
 /content/*/lines.json
 /content/*/groups.json
+# Per-page (subdir'd) pages — config + per-class data nested one deeper.
 /content/*/page.json
 /content/*/*/lines.json
 /content/*/*/groups.json
