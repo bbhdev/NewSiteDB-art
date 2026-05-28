@@ -1273,6 +1273,14 @@
       const raw = parseInt(localStorage.getItem('ed-multi-panel-limit'), 10);
       return Number.isFinite(raw) && raw >= 1 ? raw : 5;
     })(),
+    // v0.8.278: max depth of "Follow this object" chains. Cap is a soft
+    // editor limit (the runtime also has a hard 16-hop guard against
+    // pathological data). Default 4 covers typical compositions while
+    // keeping the inherited-blocks panel readable.
+    followsDepthCap: (function () {
+      const raw = parseInt(localStorage.getItem('ed-follows-depth-cap'), 10);
+      return Number.isFinite(raw) && raw >= 1 ? raw : 4;
+    })(),
     dirty: false
   };
   // Make sure every useClass has a dims slot + a byClass entry, so
@@ -5724,11 +5732,8 @@
   // null clears it. Validation:
   //   - donorMasterId must exist among masters
   //   - cannot follow self (the line's own masterId)
-  //   - one-hop cycle guard: refuse if the donor already follows this
-  //     line's masterId
-  // Multi-hop cycle detection is deferred to slice 3 (configurable
-  // depth cap). ALL-mode fans out to sibling-class instances of this
-  // line's master so the relationship is class-symmetric.
+  //   - full-chain cycle guard (v0.8.278): walking from the prospective
+  //     donor up its own follow chain must not reach this line's master
   function updateLineFollowsMaster(lineId, donorMasterId) {
     const l = state.lines.find(function (ln) { return ln.id === lineId; });
     if (!l) return;
@@ -5736,15 +5741,20 @@
       if (donorMasterId === l.masterId) return; // can't follow self
       const donorExists = state.masters.some(function (m) { return m.id === donorMasterId; });
       if (!donorExists) return;
-      // One-hop cycle guard. If any instance of the donor master already
-      // follows this line's master, accepting would create A↔B.
+      // Full-chain cycle guard: walk donor → donor's donor → … and refuse
+      // if we'd reach this line's masterId.
       if (l.masterId) {
-        const cycle = state.lines.some(function (ln) {
-          return ln.masterId === donorMasterId && ln.followsMasterId === l.masterId;
-        });
-        if (cycle) {
-          alert('That would create a follow cycle (the chosen object already follows this one).');
-          return;
+        const seen = { };
+        let curMasterId = donorMasterId;
+        for (let hop = 0; hop < 16 && curMasterId; hop++) {
+          if (curMasterId === l.masterId) {
+            alert('That would create a follow cycle.');
+            return;
+          }
+          if (seen[curMasterId]) break;
+          seen[curMasterId] = true;
+          const anc = state.lines.find(function (ln) { return ln.masterId === curMasterId; });
+          curMasterId = (anc && anc.followsMasterId) || null;
         }
       }
     }
@@ -9296,6 +9306,23 @@
       }
     }));
 
+    // v0.8.278: "Follow this object" chain depth cap.
+    body.appendChild(settingNumberRow({
+      label: '"Follow" chain depth',
+      help:  'How many follow-hops the editor walks when composing inherited ' +
+             'behaviors (A follows B follows C…). Default 4 keeps the inherited ' +
+             'panel readable; raise it for deeper compositions. The runtime ' +
+             'enforces a hard ceiling of 16 hops regardless.',
+      value: state.followsDepthCap,
+      min:   1,
+      onChange: function (v) {
+        if (!Number.isFinite(v) || v < 1) return;
+        state.followsDepthCap = v | 0;
+        try { localStorage.setItem('ed-follows-depth-cap', String(state.followsDepthCap)); } catch (e) {}
+        renderAll();
+      }
+    }));
+
     // v0.8.205: Font bundle — list of Google Fonts available for text
     // overlays. One family per line; Save normalizes (trim, dedupe,
     // alpha-sort) and persists via /dev/draw/font-bundle. The TEXT
@@ -12618,15 +12645,24 @@
     // to not offer it).
     if (line.masterId) {
       const donorByMasterId = {};
+      // v0.8.278: full-chain cycle filter. Walk each candidate donor's
+      // follow chain; skip if it transitively reaches this line's master.
+      function reachesThisMaster(startMid) {
+        const seen = {};
+        let cur = startMid;
+        for (let hop = 0; hop < 16 && cur; hop++) {
+          if (cur === line.masterId) return true;
+          if (seen[cur]) return false;
+          seen[cur] = true;
+          const anc = state.lines.find(function (ln) { return ln.masterId === cur; });
+          cur = (anc && anc.followsMasterId) || null;
+        }
+        return false;
+      }
       state.lines.forEach(function (l) {
         if (!l.masterId || l.masterId === line.masterId) return;
         if (donorByMasterId[l.masterId]) return;
-        // One-hop cycle: skip masters whose instances already follow
-        // this line's master.
-        const wouldCycle = state.lines.some(function (other) {
-          return other.masterId === l.masterId && other.followsMasterId === line.masterId;
-        });
-        if (wouldCycle) return;
+        if (reachesThisMaster(l.masterId)) return;
         donorByMasterId[l.masterId] = l;
       });
       const opts = [{ value: '__none__', label: '(none — own behaviors only)' }]
@@ -12686,73 +12722,89 @@
     // matter; for last-active-wins (opacity, pathFollow), own blocks
     // are evaluated after inherited and therefore win on overlap.
     if (line.followsMasterId) {
-      const donorLine = state.lines.find(function (l) {
-        return l.masterId === line.followsMasterId && l.id !== line.id;
-      });
-      if (donorLine) {
-        const donorMaster = state.masters.find(function (m) { return m.id === line.followsMasterId; });
-        const donorName = (donorLine.name && donorLine.name.trim())
-          || (donorMaster && donorMaster.name)
-          || shortMasterId(line.followsMasterId);
-        const donorBlocks = Array.isArray(donorLine.behaviors) ? donorLine.behaviors : [];
-
-        const subHead = document.createElement('div');
-        subHead.className = 'ed-behavior-subhead';
-        subHead.style.cssText = 'display:flex;align-items:center;justify-content:space-between;'
-          + 'margin:0.25rem 0 0.15rem;font-size:0.85em;color:#bbb;';
-        const subTitle = document.createElement('span');
-        subTitle.textContent = '↪ Inherited from "' + donorName + '"';
-        subTitle.title = 'Donor blocks run before this object\'s own. '
-          + 'Translate/rotate sum; for opacity/along-path, your own blocks win where both are active.';
-        subHead.appendChild(subTitle);
-        const openBtn = document.createElement('button');
-        openBtn.type = 'button';
-        openBtn.className = 'ed-mini';
-        openBtn.textContent = 'Open donor';
-        openBtn.title = 'Select the donor object to edit its behaviors';
-        openBtn.addEventListener('click', function () {
-          if (donorLine.groupId) {
-            state.activeGroupId = donorLine.groupId;
-            state.openGroupIds[donorLine.groupId] = true;
-          }
-          selectOnly(donorLine.id);
-          renderAll();
+      // v0.8.278: walk the full follow chain (multi-hop). Each ancestor
+      // becomes its own sub-group in the panel; deepest is rendered at
+      // the top because it runs first in resolveInstanceJS composition.
+      const cap = (state.followsDepthCap && state.followsDepthCap > 0) ? state.followsDepthCap : 4;
+      const followChain = [];
+      const seenChain = { };
+      seenChain[line.id] = true;
+      let cursor = line;
+      for (let hop = 0; hop < cap; hop++) {
+        if (!cursor.followsMasterId) break;
+        const next = state.lines.find(function (l) {
+          return l.masterId === cursor.followsMasterId && l.id !== cursor.id;
         });
-        subHead.appendChild(openBtn);
-        wrap.appendChild(subHead);
+        if (!next || seenChain[next.id]) break;
+        seenChain[next.id] = true;
+        followChain.push(next);
+        cursor = next;
+      }
+      if (followChain.length > 0) {
+        const renderOrder = followChain.slice().reverse(); // deepest → direct (top-to-bottom = run order)
+        renderOrder.forEach(function (ancestor, ancestorIdx) {
+          const donorMaster = state.masters.find(function (m) { return m.id === ancestor.masterId; });
+          const donorName = (ancestor.name && ancestor.name.trim())
+            || (donorMaster && donorMaster.name)
+            || shortMasterId(ancestor.masterId);
+          const donorBlocks = Array.isArray(ancestor.behaviors) ? ancestor.behaviors : [];
+          const depthFromOwn = followChain.length - ancestorIdx; // 1 = direct donor
+          const depthLabel = depthFromOwn === 1 ? '' : ' (depth ' + depthFromOwn + ')';
 
-        const inheritedList = document.createElement('ul');
-        inheritedList.className = 'ed-block-list';
-        if (!donorBlocks.length) {
-          const ph = document.createElement('li');
-          ph.className = 'ed-behavior-empty';
-          ph.style.cssText = 'list-style:none;padding:0.15rem 0 0.35rem;font-style:italic;';
-          ph.textContent = '(donor has no behaviors)';
-          inheritedList.appendChild(ph);
-        } else {
-          donorBlocks.forEach(function (block, idx) {
-            const row = document.createElement('li');
-            const isDisabled = !!(block && block.disabled);
-            row.className = 'ed-block-row is-inherited' + (isDisabled ? ' is-disabled' : '');
-            row.title = 'Inherited block — edit on the donor object';
-            // v0.8.277: leading ↪ glyph occupies the same column the
-            // power-toggle uses on own-block rows, so the two row
-            // types line up vertically.
-            const glyph = document.createElement('span');
-            glyph.className = 'ed-inherited-glyph';
-            glyph.textContent = '↪';
-            glyph.setAttribute('aria-hidden', 'true');
-            row.appendChild(glyph);
-            const nameEl = document.createElement('span');
-            nameEl.className = 'ed-block-name';
-            nameEl.textContent = behaviorAutoName(block, idx);
-            row.appendChild(nameEl);
-            inheritedList.appendChild(row);
+          const subHead = document.createElement('div');
+          subHead.className = 'ed-behavior-subhead';
+          subHead.style.cssText = 'display:flex;align-items:center;justify-content:space-between;'
+            + 'margin:0.25rem 0 0.15rem;font-size:0.85em;color:#bbb;';
+          const subTitle = document.createElement('span');
+          subTitle.textContent = '↪ Inherited from "' + donorName + '"' + depthLabel;
+          subTitle.title = 'Donor blocks run before this object\'s own. '
+            + 'Translate/rotate sum; for opacity/along-path, closer-to-own blocks win where both are active.';
+          subHead.appendChild(subTitle);
+          const openBtn = document.createElement('button');
+          openBtn.type = 'button';
+          openBtn.className = 'ed-mini';
+          openBtn.textContent = 'Open donor';
+          openBtn.title = 'Select this donor object to edit its behaviors';
+          openBtn.addEventListener('click', function () {
+            if (ancestor.groupId) {
+              state.activeGroupId = ancestor.groupId;
+              state.openGroupIds[ancestor.groupId] = true;
+            }
+            selectOnly(ancestor.id);
+            renderAll();
           });
-        }
-        wrap.appendChild(inheritedList);
+          subHead.appendChild(openBtn);
+          wrap.appendChild(subHead);
 
-        // Sub-header for the own-behaviors section that follows.
+          const inheritedList = document.createElement('ul');
+          inheritedList.className = 'ed-block-list';
+          if (!donorBlocks.length) {
+            const ph = document.createElement('li');
+            ph.className = 'ed-behavior-empty';
+            ph.style.cssText = 'list-style:none;padding:0.15rem 0 0.35rem;font-style:italic;';
+            ph.textContent = '(donor has no behaviors)';
+            inheritedList.appendChild(ph);
+          } else {
+            donorBlocks.forEach(function (block, idx) {
+              const row = document.createElement('li');
+              const isDisabled = !!(block && block.disabled);
+              row.className = 'ed-block-row is-inherited' + (isDisabled ? ' is-disabled' : '');
+              row.title = 'Inherited block — edit on the donor object';
+              const glyph = document.createElement('span');
+              glyph.className = 'ed-inherited-glyph';
+              glyph.textContent = '↪';
+              glyph.setAttribute('aria-hidden', 'true');
+              row.appendChild(glyph);
+              const nameEl = document.createElement('span');
+              nameEl.className = 'ed-block-name';
+              nameEl.textContent = behaviorAutoName(block, idx);
+              row.appendChild(nameEl);
+              inheritedList.appendChild(row);
+            });
+          }
+          wrap.appendChild(inheritedList);
+        });
+
         const ownHead = document.createElement('div');
         ownHead.className = 'ed-behavior-subhead';
         ownHead.style.cssText = 'margin:0.5rem 0 0.15rem;font-size:0.85em;color:#bbb;';

@@ -1101,26 +1101,59 @@
       // Donor is identified by masterId (the cross-class identity). If
       // no donor with that masterId exists in this class, follow is a
       // no-op (treated as not set).
+      // v0.8.278: multi-hop chains. Walk lineDef → donor → donor's donor …
+      // until a node has no followsMasterId, the donor masterId is unknown
+      // in this class, a cycle is hit, or the depth cap (defensive 16) is
+      // reached. Order returned: [direct donor, second donor, …, deepest].
       let donorLine = null;
+      let followChain = [];
       if (lineDef.followsMasterId) {
-        donorLine = lines.find(function (l) {
-          return l.masterId === lineDef.followsMasterId && l.id !== lineDef.id;
-        }) || null;
+        const seen = { };
+        seen[lineDef.id] = true;
+        let cur = lineDef;
+        for (let hop = 0; hop < 16; hop++) {
+          if (!cur.followsMasterId) break;
+          const next = lines.find(function (l) {
+            return l.masterId === cur.followsMasterId && l.id !== cur.id;
+          });
+          if (!next) break;
+          if (seen[next.id]) break;
+          seen[next.id] = true;
+          followChain.push(next);
+          cur = next;
+        }
+        if (followChain.length > 0) donorLine = followChain[0];
       }
       let groupTemplateActive = false;
       let followActive = false;
       let compoundedBehaviors = lineDef.behaviors || [];
       if (donorLine) {
         followActive = true;
-        const memberBeh = lineDef.behaviors || [];
-        const memberHasPathFollow = memberBeh.some(function (b) {
+        // Build the chain bottom-up. Each level prepends its donor's
+        // behaviors with pathFollow suppression: once any descendant has
+        // a pathFollow block, deeper ancestors' pathFollow blocks are
+        // dropped (the closest pathFollow intent wins). Iterate from
+        // direct donor down to deepest; each ancestor's pathFollow is
+        // suppressed if the accumulated descendant chain (member +
+        // closer ancestors) already carries pathFollow.
+        let accum = lineDef.behaviors || [];
+        let accumHasPathFollow = accum.some(function (b) {
           return b && b.params && b.params.translateMode === 'pathFollow';
         });
-        const donorBeh = (donorLine.behaviors || []).filter(function (b) {
-          if (!memberHasPathFollow) return true;
-          return !(b && b.params && b.params.translateMode === 'pathFollow');
-        });
-        compoundedBehaviors = donorBeh.concat(memberBeh);
+        for (let i = 0; i < followChain.length; i++) {
+          const ancestor = followChain[i];
+          const ancestorBeh = (ancestor.behaviors || []).filter(function (b) {
+            if (!accumHasPathFollow) return true;
+            return !(b && b.params && b.params.translateMode === 'pathFollow');
+          });
+          accum = ancestorBeh.concat(accum);
+          if (!accumHasPathFollow) {
+            accumHasPathFollow = ancestorBeh.some(function (b) {
+              return b && b.params && b.params.translateMode === 'pathFollow';
+            });
+          }
+        }
+        compoundedBehaviors = accum;
       } else if (group.behaviorTemplateObjectId) {
         const tplLine = lines.find(function (l) {
           return l.id === group.behaviorTemplateObjectId;
