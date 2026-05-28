@@ -1267,7 +1267,8 @@ body.editor input[type="range"] {
   font-size: 0.85em;
 }
 .ed-field input[type="text"],
-.ed-field input[type="number"] {
+.ed-field input[type="number"],
+.ed-field textarea {
   background: #111;
   color: #f0f0f0;
   border: 1px solid #444;
@@ -1277,6 +1278,22 @@ body.editor input[type="range"] {
   width: 100%;
   box-sizing: border-box;
 }
+/* v0.8.232: multi-line text input for the master text feature. Mono
+   nothing — uses the panel's regular font so the author sees what
+   they're typing in roughly the rendered glyph. Resize vertical only
+   so the panel layout stays predictable. */
+.ed-field textarea {
+  resize: vertical;
+  min-height: 4.5em;
+  line-height: 1.3;
+  font-family: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+/* When a field contains a textarea, top-align the label so it sits
+   beside the first row instead of floating in the textarea's center. */
+.ed-field:has(textarea) { align-items: start; }
+.ed-field:has(textarea) > label { padding-top: 0.3rem; }
 .ed-field input[type="checkbox"] { justify-self: start; }
 .ed-field select {
   background: #111;

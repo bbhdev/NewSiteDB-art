@@ -768,8 +768,9 @@
             if (b && b.width > 0) { cxN = b.x + b.width / 2; cyN = b.y + b.height / 2; }
           } catch (e) { /* getBBox unavailable */ }
         }
+        const ax = cxN + tx.offsetX;
         const tEl = document.createElementNS(SVG_NS, 'text');
-        tEl.setAttribute('x', String(cxN + tx.offsetX));
+        tEl.setAttribute('x', String(ax));
         tEl.setAttribute('y', String(cyN + tx.offsetY));
         tEl.setAttribute('text-anchor', 'middle');
         tEl.setAttribute('dominant-baseline', 'central');
@@ -779,7 +780,26 @@
         tEl.style.pointerEvents = 'none';
         tEl.dataset.textFor = line.id;
         if (isHidden) tEl.style.visibility = 'hidden';
-        tEl.textContent = tx.value;
+        // v0.8.232: multi-line content via <tspan>s, mirroring the
+        // editor's setMultilineText. xml:space=preserve keeps runs of
+        // whitespace; dy lifts the first line so the whole block is
+        // vertically centered around the anchor.
+        tEl.setAttribute('xml:space', 'preserve');
+        (function writeTspans() {
+          const lines = String(tx.value == null ? '' : tx.value).split('\n');
+          const n = lines.length;
+          for (let i = 0; i < n; i++) {
+            const ts = document.createElementNS(SVG_NS, 'tspan');
+            ts.setAttribute('x', String(ax));
+            if (i === 0) {
+              if (n > 1) ts.setAttribute('dy', (-(n - 1) / 2) + 'em');
+            } else {
+              ts.setAttribute('dy', '1em');
+            }
+            ts.textContent = lines[i];
+            tEl.appendChild(ts);
+          }
+        })();
         layer.appendChild(tEl);
       }
     });

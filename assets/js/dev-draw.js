@@ -643,8 +643,52 @@
     if (!tx) return;
     const pathEl = linesG.querySelector('[data-line-id="' + line.id + '"]');
     const c = lineCenterFor(line, pathEl);
-    tEl.setAttribute('x', String(c.x + tx.offsetX));
+    const ax = c.x + tx.offsetX;
+    tEl.setAttribute('x', String(ax));
     tEl.setAttribute('y', String(c.y + tx.offsetY));
+    // Re-anchor every tspan to the new x (multi-line text — v0.8.232).
+    // Single-line texts have either no tspans (legacy textContent path)
+    // or one tspan; loop handles both.
+    Array.prototype.forEach.call(tEl.querySelectorAll('tspan'), function (ts) {
+      ts.setAttribute('x', String(ax));
+    });
+  }
+
+  /**
+   * v0.8.232: write a (possibly multi-line) string into an SVG <text>
+   * element as a stack of <tspan>s, one per source line.
+   *
+   *   • newlines (\n) split lines; multiple spaces survive because the
+   *     parent <text> sets xml:space="preserve".
+   *   • Each tspan sets x = anchorX so the multi-line block stays
+   *     horizontally centered with text-anchor=middle.
+   *   • dy lifts the first line by -((n-1)/2) em so the *block* is
+   *     vertically centered around the anchor (matches the single-line
+   *     dominant-baseline=central feel for n=1). Subsequent lines drop
+   *     by 1em.
+   *   • Empty lines: tspans with no text still advance the baseline
+   *     thanks to dy — visible blank line between paragraphs.
+   *
+   * Both the editor (dev-draw.js) and runtime (app.js) call into this
+   * shape; the runtime has its own copy so the two evolve together if
+   * they need to.
+   */
+  function setMultilineText(tEl, value, anchorX) {
+    while (tEl.firstChild) tEl.removeChild(tEl.firstChild);
+    tEl.setAttribute('xml:space', 'preserve');
+    const lines = String(value == null ? '' : value).split('\n');
+    const n = lines.length;
+    for (let i = 0; i < n; i++) {
+      const ts = document.createElementNS(SVG_NS, 'tspan');
+      ts.setAttribute('x', String(anchorX));
+      if (i === 0) {
+        if (n > 1) ts.setAttribute('dy', (-(n - 1) / 2) + 'em');
+      } else {
+        ts.setAttribute('dy', '1em');
+      }
+      ts.textContent = lines[i];
+      tEl.appendChild(ts);
+    }
   }
 
   /**
@@ -9269,8 +9313,9 @@
       const tx = resolveText(line);
       if (tx) {
         const c = lineCenterFor(line, p);
+        const ax = c.x + tx.offsetX;
         const tEl = document.createElementNS(SVG_NS, 'text');
-        tEl.setAttribute('x', String(c.x + tx.offsetX));
+        tEl.setAttribute('x', String(ax));
         tEl.setAttribute('y', String(c.y + tx.offsetY));
         tEl.setAttribute('text-anchor', 'middle');
         tEl.setAttribute('dominant-baseline', 'central');
@@ -9280,7 +9325,9 @@
         tEl.style.pointerEvents = 'none';
         tEl.dataset.textFor = line.id;
         if (line.hidden || (group && group.hidden)) tEl.style.opacity = '0.18';
-        tEl.textContent = tx.value;
+        // v0.8.232: multi-line content via tspans. Preserves \n line
+        // breaks and runs of whitespace.
+        setMultilineText(tEl, tx.value, ax);
         linesG.appendChild(tEl);
       }
 
@@ -11958,7 +12005,7 @@
             return masterRec.text;
           }
           const t = masterRec.text || TEXT_DEFAULTS;
-          wrap.appendChild(textField('Text', t.value || '', function (v) {
+          wrap.appendChild(textareaField('Text', t.value || '', function (v) {
             const rec = ensureMasterText();
             rec.value = v;
             // Mirror onto every resolved line.text for this master so
@@ -12264,6 +12311,32 @@
     if (placeholder) inp.placeholder = placeholder;
     inp.addEventListener('input', function () { onChange(inp.value); });
     wrap.appendChild(lbl); wrap.appendChild(inp);
+    return wrap;
+  }
+  /**
+   * v0.8.232: multi-line text input. Same wrap/label as textField but a
+   * <textarea> instead of <input> so newlines and runs of whitespace
+   * are preserved verbatim. Used by the master TEXT block so authors
+   * can write paragraphs that render as multi-line SVG <text> (one
+   * <tspan> per source line). Rows default to 3 — tall enough to read
+   * a short paragraph, the user can drag-resize for longer copy.
+   */
+  function textareaField(label, value, onChange, placeholder, rows) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+    const ta = document.createElement('textarea');
+    ta.value = value || '';
+    ta.rows = rows || 3;
+    // Disable autocorrect / autocapitalize so authored copy isn't
+    // silently mutated mid-type — the field is a content holder, not
+    // a chat input.
+    ta.setAttribute('spellcheck', 'false');
+    ta.setAttribute('autocapitalize', 'off');
+    ta.setAttribute('autocomplete', 'off');
+    if (placeholder) ta.placeholder = placeholder;
+    ta.addEventListener('input', function () { onChange(ta.value); });
+    wrap.appendChild(lbl); wrap.appendChild(ta);
     return wrap;
   }
   /**
