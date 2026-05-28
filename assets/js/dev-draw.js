@@ -5907,7 +5907,7 @@
     // therefore that the runtime filter was ignored).
     if (key === 'when' || key === 'viewportAt' || key === 'repeat'
         || key === 'startObjectId' || key === 'stopObjectId'
-        || key === 'direction') {
+        || key === 'direction' || key === 'rangeBehavior') {
       renderSelectionPanel();
     } else {
       refreshBehaviorSummary(lineId, blockIdx);
@@ -5954,6 +5954,14 @@
       const v = String(value || 'both');
       if (v === 'down' || v === 'up') b.trigger.direction = v;
       else delete b.trigger.direction;
+    } else if (key === 'rangeBehavior') {
+      // v0.8.257: only store an explicit choice; unknown values clear
+      // the field so the runtime use-site default (scroll → sticky,
+      // time-based → windowed) takes over. Keeps legacy / freshly-
+      // created blocks free of redundant fields.
+      const v = String(value || '');
+      if (v === 'sticky' || v === 'windowed') b.trigger.rangeBehavior = v;
+      else delete b.trigger.rangeBehavior;
     } else if (key === 'selector') {
       b.trigger.selector = String(value || '');
     } else if (key === 'viewportAt') {
@@ -13482,6 +13490,31 @@
           updateBehaviorTrigger(line.id, blockIdx, 'rangeEnd', v);
         }));
         card.appendChild(rangeRow);
+
+        // v0.8.257: out-of-range behavior picker. Two policies:
+        //   sticky   — once entered (scrollP crosses range.start), the
+        //              block stays active even after scrollP leaves the
+        //              range. For scroll-driven progress this parks at
+        //              p=1 above range.end; for time-based modes the
+        //              clock keeps running. This was the legacy default
+        //              before v0.8.246.
+        //   windowed — block is active only while scrollP is inside the
+        //              range. For loop/pingpong/time/loopTo this freezes
+        //              the clock at exit and resumes seamlessly on re-
+        //              entry (no snap-back, no jump — v0.8.255 / 256).
+        //
+        // Use-site defaults (matching runtime, when field is absent):
+        // scroll-mode progress → sticky; everything else → windowed. The
+        // picker highlight reflects that default so the user can see at
+        // a glance what's in effect even before they pick explicitly.
+        const defaultRb = (dmode === 'scroll') ? 'sticky' : 'windowed';
+        const rb = trigger.rangeBehavior || defaultRb;
+        card.appendChild(behaviorButtonGroup('Out of range', rb, [
+          { value: 'sticky',   label: 'Continues' },
+          { value: 'windowed', label: 'On/off' }
+        ], function (v) {
+          updateBehaviorTrigger(line.id, blockIdx, 'rangeBehavior', v);
+        }, null));
       }
 
       if (when === 'scroll-key') {
