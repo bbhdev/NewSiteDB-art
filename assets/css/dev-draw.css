@@ -3134,6 +3134,41 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   border-right-color: #555;
 }
 .ed-block-row.is-disabled .ed-block-toggle { border-right-color: #555; }
+/* v0.8.277: inherited block rows ("Follow this object" donor blocks
+   shown read-only above the object's own behaviors). Muted slate so
+   they read as background context against the active navy of own
+   rows, while still being clearly legible. */
+.ed-block-row.is-inherited {
+  background: #2a3548;
+  border-color: #3a4658;
+  cursor: default;
+}
+.ed-block-row.is-inherited .ed-block-name {
+  cursor: default;
+  color: #b8bcc4;
+}
+.ed-block-row.is-inherited .ed-block-name:hover {
+  background: transparent;
+  color: #b8bcc4;
+}
+/* Leading-slot glyph (↪) on inherited rows. Occupies the same column
+   the power-toggle would on an editable row, so the two row types
+   align vertically in the panel. */
+.ed-inherited-glyph {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #3a4658;
+  color: #8aa6c8;
+  width: 2.0rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  user-select: none;
+}
 .ed-block-name {
   flex: 1 1 auto;
   background: transparent;

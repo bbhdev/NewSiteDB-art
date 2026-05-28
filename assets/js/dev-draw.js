@@ -12723,7 +12723,6 @@
 
         const inheritedList = document.createElement('ul');
         inheritedList.className = 'ed-block-list';
-        inheritedList.style.opacity = '0.7';
         if (!donorBlocks.length) {
           const ph = document.createElement('li');
           ph.className = 'ed-behavior-empty';
@@ -12735,11 +12734,17 @@
             const row = document.createElement('li');
             const isDisabled = !!(block && block.disabled);
             row.className = 'ed-block-row is-inherited' + (isDisabled ? ' is-disabled' : '');
-            row.style.cursor = 'default';
             row.title = 'Inherited block — edit on the donor object';
+            // v0.8.277: leading ↪ glyph occupies the same column the
+            // power-toggle uses on own-block rows, so the two row
+            // types line up vertically.
+            const glyph = document.createElement('span');
+            glyph.className = 'ed-inherited-glyph';
+            glyph.textContent = '↪';
+            glyph.setAttribute('aria-hidden', 'true');
+            row.appendChild(glyph);
             const nameEl = document.createElement('span');
             nameEl.className = 'ed-block-name';
-            nameEl.style.cursor = 'default';
             nameEl.textContent = behaviorAutoName(block, idx);
             row.appendChild(nameEl);
             inheritedList.appendChild(row);
