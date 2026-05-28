@@ -5848,14 +5848,15 @@
   function toggleBehaviorBlockDisabled(lineId, blockIdx) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
     if (!l || !Array.isArray(l.behaviors) || blockIdx >= l.behaviors.length) return;
-    const cur = !!l.behaviors[blockIdx].disabled;
+    const blk = l.behaviors[blockIdx];
+    const cur = !!blk.disabled;
     const next = !cur;
     function applyTo(b) {
       if (!b) return;
       if (next) b.disabled = true;
       else delete b.disabled;
     }
-    applyTo(l.behaviors[blockIdx]);
+    applyTo(blk);
     if (modeIsAll() && l.masterId) {
       forSiblingsOf(l.masterId, function (sib) {
         if (Array.isArray(sib.behaviors) && blockIdx < sib.behaviors.length) {
@@ -5865,7 +5866,28 @@
     }
     state.dirty = true;
     snapshot();
-    renderSelectionPanel();
+    // v0.8.260: in-place row update instead of renderSelectionPanel.
+    // The full panel re-render reset scrollTop to 0 — toggling a
+    // block midway down the list yanked the user back to the top.
+    // Only the row's class + the power button's class/title actually
+    // need to change visually, and the data side is already updated
+    // above, so we patch the DOM and skip the rebuild. Sibling lines
+    // (all-mode fan-out) aren't shown in the current panel, so their
+    // UI naturally reflects the change next time they're selected.
+    const row = selectionPanel.querySelector(
+      '.ed-block-row[data-line-id="' + l.id + '"][data-block-id="' + (blk.id || '') + '"]'
+    );
+    if (row) {
+      row.classList.toggle('is-disabled', next);
+      const pwr = row.querySelector('.ed-block-toggle');
+      if (pwr) {
+        pwr.classList.toggle('is-off', next);
+        pwr.title = next
+          ? 'Block is OFF — click to enable'
+          : 'Disable this block (design-time mute; persists on save)';
+        pwr.setAttribute('aria-label', next ? 'Enable block' : 'Disable block');
+      }
+    }
   }
   function removeBehaviorBlock(lineId, blockIdx) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
