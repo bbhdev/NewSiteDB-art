@@ -5884,8 +5884,15 @@
     // available; re-render so the right ones appear and the
     // greyed-out duration options update. viewportAt also goes
     // through re-render so its button-group active state flips.
+    // v0.8.244: 'direction' joins the same list — same reason
+    // (button-group, is-active class only set at build time). Without
+    // the re-render the chip highlight stays on the previous choice
+    // even though the underlying data did update, which made the
+    // feature look broken (user thought direction wasn't saving and
+    // therefore that the runtime filter was ignored).
     if (key === 'when' || key === 'viewportAt' || key === 'repeat'
-        || key === 'startObjectId' || key === 'stopObjectId') {
+        || key === 'startObjectId' || key === 'stopObjectId'
+        || key === 'direction') {
       renderSelectionPanel();
     } else {
       refreshBehaviorSummary(lineId, blockIdx);
