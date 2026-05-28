@@ -9304,7 +9304,13 @@
       const width  = (line.width != null) ? line.width
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
-      if (width)  p.style.strokeWidth = width;
+      // v0.8.242: accept stroke-width 0 (especially useful for textBlock
+      // to make the rect outline invisible while keeping the fill). The
+      // previous truthy check treated 0 as "absent" and fell through to
+      // the CSS default of ~1px. `width != null` keeps null/undefined
+      // (no override, no group default) falling through to CSS while
+      // honoring an explicit 0.
+      if (width != null) p.style.strokeWidth = width;
       if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
       // Fill rules:
       //   - textBlock uses line.fill (independent of stroke);

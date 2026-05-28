@@ -802,7 +802,10 @@
       const width  = (line.width != null) ? line.width
                    : (group && group.defaults && group.defaults.width != null ? group.defaults.width : null);
       if (stroke) p.style.stroke = stroke;
-      if (width)  p.style.strokeWidth = width;
+      // v0.8.242: accept stroke-width 0. The previous truthy check
+      // fell through to the CSS default (~1px) for an explicit 0.
+      // Mirrors the editor fix in dev-draw.js.
+      if (width != null) p.style.strokeWidth = width;
       if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
       // Fill:
       //   - textBlock (v0.8.228) reads line.fill (independent of
