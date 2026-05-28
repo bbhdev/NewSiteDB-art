@@ -3067,6 +3067,60 @@ button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
   border-color: #c25b3a;
   box-shadow: inset 0 0 0 1px rgba(194, 91, 58, 0.35);
 }
+/* v0.8.259 (block disable Slice 1): loud OFF state. Diagonal stripe
+   pattern + dimmed name + struck-through label so a scan of the
+   block list can't miss a muted block. Border desaturates to a
+   warm muted grey instead of the active-block navy. */
+.ed-block-row.is-disabled {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(0, 0, 0, 0.35) 0 6px,
+      rgba(0, 0, 0, 0.20) 6px 12px
+    ),
+    #2c2c2c;
+  border-color: #555;
+  opacity: 0.85;
+}
+.ed-block-row.is-disabled .ed-block-name {
+  color: #9a9a9a;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.ed-block-row.is-disabled .ed-block-name:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #c4c4c4;
+}
+/* Power-toggle button on the collapsed block row. Sized like
+   .ed-behavior-chip-back (the project's icon-button benchmark): wide
+   enough that the glyph reads as a real affordance, SVG fills ~80% of
+   the button height. Green when on, red when off — colorblind-safe
+   pairing kept readable by the stripe pattern carrying the OFF signal
+   in parallel. */
+.ed-block-toggle {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #1a66bb;
+  color: #6fdc8c;             /* on = green */
+  width: 2.0rem;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ed-block-toggle svg {
+  height: 80%;
+  max-height: 1.25rem;
+  width: auto;
+}
+.ed-block-toggle:hover { background: rgba(255, 255, 255, 0.08); }
+.ed-block-toggle.is-off {
+  color: #e07050;             /* off = warm red, matches .ed-field-warning */
+  border-right-color: #555;
+}
+.ed-block-row.is-disabled .ed-block-toggle { border-right-color: #555; }
 .ed-block-name {
   flex: 1 1 auto;
   background: transparent;

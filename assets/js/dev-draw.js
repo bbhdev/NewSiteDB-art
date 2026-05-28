@@ -201,6 +201,11 @@
       duration: cloneBehaviorDuration(b),
       params:   b.params ? Object.assign({}, b.params) : {}
     };
+    // v0.8.259 (block disable Slice 1): per-block design-time mute.
+    // Only stored when true so legacy / fresh blocks stay clean. The
+    // runtime skips disabled blocks entirely — no trigger arming, no
+    // activation, no motion contribution, no cross-object effects.
+    if (b.disabled === true) out.disabled = true;
     return out;
   }
   function cloneBehaviorTrigger(b) {
@@ -5833,6 +5838,34 @@
   function pushNewBlock(line) {
     if (!Array.isArray(line.behaviors)) line.behaviors = [];
     line.behaviors.push(newBehaviorBlock());
+  }
+  // v0.8.259 (block disable Slice 1): flip block.disabled. Target
+  // state is derived from the current value on the clicked line so
+  // sibling instances align to the same on/off — even if a prior
+  // edit left them in mixed states (no migration; just convergence
+  // on next toggle). Only stores `true`; `false` deletes the field
+  // to keep legacy / fresh blocks clean.
+  function toggleBehaviorBlockDisabled(lineId, blockIdx) {
+    const l = state.lines.find(function (l) { return l.id === lineId; });
+    if (!l || !Array.isArray(l.behaviors) || blockIdx >= l.behaviors.length) return;
+    const cur = !!l.behaviors[blockIdx].disabled;
+    const next = !cur;
+    function applyTo(b) {
+      if (!b) return;
+      if (next) b.disabled = true;
+      else delete b.disabled;
+    }
+    applyTo(l.behaviors[blockIdx]);
+    if (modeIsAll() && l.masterId) {
+      forSiblingsOf(l.masterId, function (sib) {
+        if (Array.isArray(sib.behaviors) && blockIdx < sib.behaviors.length) {
+          applyTo(sib.behaviors[blockIdx]);
+        }
+      });
+    }
+    state.dirty = true;
+    snapshot();
+    renderSelectionPanel();
   }
   function removeBehaviorBlock(lineId, blockIdx) {
     const l = state.lines.find(function (l) { return l.id === lineId; });
@@ -12398,9 +12431,37 @@
       overlaps.forEach(function (o) { inOverlap[o.a] = true; inOverlap[o.b] = true; });
       blocks.forEach(function (block, idx) {
         const row = document.createElement('li');
-        row.className = 'ed-block-row' + (inOverlap[idx] ? ' is-overlap' : '');
+        const isDisabled = !!(block && block.disabled);
+        row.className = 'ed-block-row'
+          + (inOverlap[idx] ? ' is-overlap' : '')
+          + (isDisabled    ? ' is-disabled' : '');
         row.dataset.lineId = line.id;
         row.dataset.blockId = block && block.id || '';
+
+        // v0.8.259 (block disable Slice 1): power toggle on the
+        // collapsed row only. Sits leftmost so the eye lands on it
+        // when scanning the block list. stopPropagation so a click
+        // toggles without opening the block editor panel.
+        const pwrBtn = document.createElement('button');
+        pwrBtn.type = 'button';
+        pwrBtn.className = 'ed-block-toggle' + (isDisabled ? ' is-off' : '');
+        pwrBtn.title = isDisabled
+          ? 'Block is OFF — click to enable'
+          : 'Disable this block (design-time mute; persists on save)';
+        pwrBtn.setAttribute('aria-label', isDisabled ? 'Enable block' : 'Disable block');
+        pwrBtn.innerHTML =
+          '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+            // Vertical bar (the "1") inside the broken circle (the "0").
+            '<line x1="12" y1="3" x2="12" y2="12" stroke="currentColor" ' +
+                  'stroke-width="2.75" stroke-linecap="round"/>' +
+            '<path d="M6.4 7.2 A8 8 0 1 0 17.6 7.2" stroke="currentColor" ' +
+                  'stroke-width="2.75" stroke-linecap="round" fill="none"/>' +
+          '</svg>';
+        pwrBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          toggleBehaviorBlockDisabled(line.id, idx);
+        });
+        row.appendChild(pwrBtn);
 
         const nameBtn = document.createElement('button');
         nameBtn.type = 'button';

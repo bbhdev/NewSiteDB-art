@@ -1322,6 +1322,14 @@
         return {
           trigger:  trigger,
           duration: duration,
+          // v0.8.259 (block disable Slice 1): per-block design-time
+          // mute. When true: armTrigger skips this block (no
+          // listeners, no page-load activation, no cross-object
+          // effects), blockProg returns 0 unconditionally, and the
+          // hasMotion / anyDrawIn gates ignore it. Persists on disk
+          // — the editor row shows a clear OFF state so it's hard
+          // to ship by accident.
+          disabled: b.disabled === true,
           tx:       num('translateX'),
           ty:       num('translateY'),
           rot:      num('rotate'),
@@ -1360,6 +1368,10 @@
         // v0.8.91: drawIn counts too — when drawIn lives on the
         // per-frame compute path, a block with only drawIn:true
         // still needs writeAt to advance the dashoffset.
+        // v0.8.259: disabled blocks contribute nothing — don't let
+        // a disabled fadeOpacity / pathFollow / drawIn force the
+        // per-frame writeAt loop on a line that's otherwise static.
+        if (b.disabled) return false;
         return b.tx !== 0 || b.ty !== 0 || b.rot !== 0
             || b.fadeOpacity || b.pathFollow || b.drawIn;
       });
@@ -1367,10 +1379,12 @@
       // stroke-dasharray state once, here. After this, computeAt
       // produces a per-frame dashoffset that writeAt applies.
       // <image> has no stroke, so the dash setup is path-only.
-      const anyDrawIn = blocks.some(function (b) { return b.drawIn; })
+      // v0.8.259: disabled blocks don't seed dash state — drawIn on
+      // a disabled block is treated as absent for this gate.
+      const anyDrawIn = blocks.some(function (b) { return b.drawIn && !b.disabled; })
                     && pathEl.tagName.toLowerCase() === 'path';
       const firstDrawIn = anyDrawIn
-        ? blocks.find(function (b) { return b.drawIn; })
+        ? blocks.find(function (b) { return b.drawIn && !b.disabled; })
         : null;
       const initialDashDir = (firstDrawIn && firstDrawIn.drawInDirection === 'reverse') ? -1 : 1;
       // v0.8.17: drift accumulators — one entry per block. Holds
@@ -1768,7 +1782,9 @@
         for (let i = 0; i < blocks.length; i++) armTrigger(i, blocks[i]);
       }
 
-      blocks.forEach(function (b, i) { armTrigger(i, b); });
+      // v0.8.259: disabled blocks install no triggers and never
+      // activate — design-time mute is total.
+      blocks.forEach(function (b, i) { if (b.disabled) return; armTrigger(i, b); });
 
       // Class-render teardown must release every per-block trigger
       // listener too (independent of the line-level ownListeners
@@ -1785,6 +1801,12 @@
       //   range. All non-scroll durations: progress = function of
       //   elapsed wall-clock since activation, gated by delay.
       const blockProg = function (b, idx, scrollP, nowSec) {
+        // v0.8.259: disabled = total mute. Returning 0 zeros every
+        // additive contribution (tx/ty/rot) and short-circuits all
+        // activation/effect paths below — applyObjectEffects is
+        // never reached, so cross-object Start/Stop pulses don't
+        // fire either.
+        if (b.disabled) return 0;
         const mode = b.duration && b.duration.mode || 'scroll';
         const when = b.trigger.when;
 
