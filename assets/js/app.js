@@ -779,7 +779,10 @@
         tEl.setAttribute('dominant-baseline', 'text-before-edge');
         tEl.setAttribute('font-family', tx.fontFamily);
         tEl.setAttribute('font-size', String(tx.fontSize));
-        tEl.setAttribute('fill', tx.color || (stroke || 'currentColor'));
+        // v0.8.238: text color is a palette id (Slice 1b-2). Resolve
+        // via the same paletteById table as line strokes; resolveStroke
+        // passes through legacy CSS strings unchanged for back-compat.
+        tEl.setAttribute('fill', resolveStroke(tx.color) || stroke || 'currentColor');
         tEl.style.pointerEvents = 'none';
         tEl.dataset.textFor = line.id;
         if (isHidden) tEl.style.visibility = 'hidden';

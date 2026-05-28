@@ -9338,7 +9338,9 @@
         tEl.setAttribute('dominant-baseline', 'text-before-edge');
         tEl.setAttribute('font-family', tx.fontFamily);
         tEl.setAttribute('font-size', String(tx.fontSize));
-        tEl.setAttribute('fill', tx.color || stroke || '#888');
+        // v0.8.238: text color is a palette id; resolve to CSS.
+        // resolveStroke passes through legacy CSS strings unchanged.
+        tEl.setAttribute('fill', resolveStroke(tx.color) || stroke || '#888');
         tEl.style.pointerEvents = 'none';
         tEl.dataset.textFor = line.id;
         if (line.hidden || (group && group.hidden)) tEl.style.opacity = '0.18';
@@ -12064,10 +12066,17 @@
             ensureMasterText().fontSize = Number.isFinite(v) && v > 0 ? v : TEXT_DEFAULTS.fontSize;
             state.dirty = true; scheduleSnapshot(); renderLines();
           }));
-          wrap.appendChild(textField('Text color', t.color || '', function (v) {
+          // v0.8.238 (Slice 1b-2): Text color uses the project palette
+          // instead of free-form CSS. Stores a palette id (or null for
+          // "inherit" — falls back to the object's stroke color, same
+          // as before). Legacy CSS strings on disk still render at
+          // runtime because resolveStroke passes through any non-id
+          // value unchanged; on next edit the user picks from the
+          // palette and the legacy value is overwritten.
+          wrap.appendChild(strokeField('Text color', t.color || '', function (v) {
             ensureMasterText().color = v || null;
             state.dirty = true; scheduleSnapshot(); renderLines();
-          }, 'CSS color or empty = inherit stroke'));
+          }));
         }
       }
     }
