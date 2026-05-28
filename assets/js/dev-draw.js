@@ -13776,12 +13776,33 @@
     const lbl = document.createElement('label'); lbl.textContent = '';
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'ed-mini';
+    btn.className = 'ed-mini ed-set-origin-btn';
     btn.textContent = 'Set on canvas →';
     btn.title = 'Click here, then click anywhere on the canvas to set the rotation origin to that point.';
-    btn.addEventListener('click', onClick);
+    btn.addEventListener('click', function (e) {
+      // v0.8.230: arm the button visually before invoking the callback,
+      // so the user gets immediate confirmation that the click landed.
+      // Without this, the only feedback was the red crosshair cursor —
+      // which only appears once the pointer enters the canvas area.
+      // For a button in the side panel, that meant zero feedback at
+      // the click site. Clear any previously-armed button first (only
+      // one set-origin/set-text-offset flow can be active at a time).
+      document.querySelectorAll('.ed-set-origin-btn.is-armed').forEach(function (b) {
+        b.classList.remove('is-armed');
+      });
+      btn.classList.add('is-armed');
+      onClick(e);
+    });
     wrap.appendChild(lbl); wrap.appendChild(btn);
     return wrap;
+  }
+  // v0.8.230: shared with exitSetRotateOrigin / exitSetTextOffset so
+  // the armed-button highlight clears when the canvas click consumes
+  // the mode, or when the user hits Escape.
+  function clearArmedSetOriginButtons() {
+    document.querySelectorAll('.ed-set-origin-btn.is-armed').forEach(function (b) {
+      b.classList.remove('is-armed');
+    });
   }
 
   // v0.8.132: shared helper — appends a bounding-box metadata row
@@ -14221,6 +14242,7 @@
     settingOrigin = null;
     canvasWrap.classList.remove('ed-set-origin-mode');
     if (setOriginBanner) setOriginBanner.hidden = true;
+    clearArmedSetOriginButtons();
   }
   // v0.8.197: text-offset click-to-set. Reuses the same canvasWrap
   // class + banner the rotate-origin flow already wires up, so the
@@ -14234,6 +14256,7 @@
     settingTextOffset = null;
     canvasWrap.classList.remove('ed-set-origin-mode');
     if (setOriginBanner) setOriginBanner.hidden = true;
+    clearArmedSetOriginButtons();
   }
 
   svg.addEventListener('pointerdown', function (e) {
