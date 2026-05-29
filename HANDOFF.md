@@ -1390,8 +1390,8 @@ they're not lost:
 | Drift X/Y | Yes | |
 | pathFollow | Yes (last active wins) | |
 | fadeOpacity | Yes (last active wins) | |
-| drawIn | **Flag from any block (v0.8.68); single tween** | The flag reads from any block, but the dashoffset tween itself is single. Multi-block sequential drawIn (e.g., "draw segment A over scroll 0–0.3, then segment B over 0.3–0.6") would need a per-block ScrollTrigger composition refactor. Planned as "the drawings" feature. |
-| rotate pivot (rotateOriginX/Y) | **Block 0 only** (v0.8.70 comment) | The editor exposes per-block pivot, but the runtime uses only block 0's. Multi-block pivot requires switching from `rotate(angle, ox, oy)` shorthand to `matrix(a b c d e f)` composition. See "details on multi-block pivot" discussion in commit messages around v0.8.70. |
+| drawIn | Yes — per-block, last-active-wins (v0.8.91) | Each block contributes its own dashoffset; the last active drawIn block this frame wins (same shape as fadeOpacity / pathFollow). Sequential whole-path passes work (forward → reverse, scroll-then-loop). **Geometric limitation remaining:** each block still controls the *whole* path's dashoffset — the "draw segment A over scroll 0–0.3, then segment B over 0.3–0.6" subdivision use case would need geometric path-splitting at the renderer level, not a runtime fix. |
+| rotate pivot (rotateOriginX/Y) | **One pivot per object, by design** (v0.8.220) | The runtime resolves a single pivot per object: first block with finite `rotateOriginX/Y` wins; falls back to follow-donor / group template pivot; final default is the natural center. Per-block pivots were intentionally dropped — multi-block rotations sum into a single angle around that one pivot. The editor still shows the field on every block but the resolver picks one. |
 
 ### Per-class master drift
 
