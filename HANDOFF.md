@@ -1382,35 +1382,50 @@ they're not lost:
 
 ## Known limitations to be aware of
 
-### Multi-block restrictions still in the runtime
+### Remaining geometric limitation on drawIn
 
 | Property | Multi-block aware? | Notes |
 |---|---|---|
-| translateX/Y/rotate | Yes (sum) | |
-| Drift X/Y | Yes | |
-| pathFollow | Yes (last active wins) | |
-| fadeOpacity | Yes (last active wins) | |
-| drawIn | Yes — per-block, last-active-wins (v0.8.91) | Each block contributes its own dashoffset; the last active drawIn block this frame wins (same shape as fadeOpacity / pathFollow). Sequential whole-path passes work (forward → reverse, scroll-then-loop). **Geometric limitation remaining:** each block still controls the *whole* path's dashoffset — the "draw segment A over scroll 0–0.3, then segment B over 0.3–0.6" subdivision use case would need geometric path-splitting at the renderer level, not a runtime fix. |
-| rotate pivot (rotateOriginX/Y) | **One pivot per object, by design** (v0.8.220) | The runtime resolves a single pivot per object: first block with finite `rotateOriginX/Y` wins; falls back to follow-donor / group template pivot; final default is the natural center. Per-block pivots were intentionally dropped — multi-block rotations sum into a single angle around that one pivot. The editor still shows the field on every block but the resolver picks one. |
-
-### Per-class master drift
-
-Some datasets have per-class master IDs that diverged from each other (the
-"same" logical line has different masterIds in narrow / medium / wide). This
-came from earlier save/re-mint cycles. Symptoms:
-- ALL-mode behavior fan-out writes the same value across classes; pathRef of
-  one class's masterId doesn't resolve in another → pathFollow name-fallback
-  kicks in.
-- `_dumpAllBlocks()` in the editor console reveals this.
-
-If you do a structural data cleanup later, normalizing master ids by name
-would prevent a class of weird-cross-class bugs.
+| drawIn | Yes — per-block, last-active-wins (v0.8.91) | Each block contributes its own dashoffset; the last active drawIn block this frame wins. Sequential whole-path passes work (forward → reverse, scroll-then-loop). **Geometric limitation remaining:** each block still controls the *whole* path's dashoffset — the "draw segment A over scroll 0–0.3, then segment B over 0.3–0.6" subdivision use case would need geometric path-splitting at the renderer level, not a runtime fix. |
 
 ### Editor canvas doesn't animate
 
 `/dev/draw` renders lines statically. Animation is runtime-only. If a user
 edits a behavior and asks "why isn't it moving in the editor?", that's why.
 They have to test on the live page (`/`).
+
+## Limitations removed by user decisions
+
+These were once listed as multi-block restrictions. They are no longer
+limitations — each was settled by an explicit semantic decision. Kept here
+for historical context (future-Claude reading old commits or earlier
+HANDOFF revisions will see the older framing and wonder if anything still
+needs doing — nothing does).
+
+| Property | Resolution | Decision |
+|---|---|---|
+| translateX/Y | **Sum across active blocks** | Logical: independent translation contributions add. Multiple translate blocks compose into a single net offset. |
+| rotate | **Sum across active blocks** (v0.8.220) | Logical: independent rotations add into a single net angle. Pivot is resolved once per object (first block with finite `rotateOriginX/Y` wins; falls back to follow-donor / group template pivot; final default is the natural center). The editor still shows the pivot field on every block but the resolver picks one. Per-block pivots were intentionally dropped — multi-block rotations spin around the one chosen pivot. |
+| Drift X/Y | **Multi-block, sum** | Logical: drift accumulates the same way translate does. |
+| pathFollow | **Last active block wins** | Logical: pathFollow positions the object along a path; "last active wins" matches the user's mental model when more than one pathFollow block exists. |
+| fadeOpacity | **Last active block wins** | Logical: same as pathFollow — the most recently activated opacity intent is the one that should be visible. |
+
+### Per-class master drift — resolved on this dataset
+
+Earlier datasets carried per-class master IDs that had diverged (the "same"
+logical line had different masterIds in narrow / medium / wide), a leftover
+from earlier save/re-mint cycles. Symptoms when it occurred: ALL-mode
+behavior fan-out would write across classes but pathRef of one class's
+masterId wouldn't resolve in another → pathFollow name-fallback kicked in.
+
+The current `content/home/*/instances.json` has been audited (v0.8.287)
+and shows no name-vs-masterId drift across classes. A group-level drift
+was also found and cleaned up in the same pass: medium and narrow had
+duplicate "Group A" entries (3 each) plus an unused "Group 1" (`ambient`),
+with instances dangling-referencing wide's group id. Resolved by
+unifying every class onto `g-cq9hd6` (Group A) and deleting the
+duplicates. `_dumpAllBlocks()` in the editor console remains the
+diagnostic if drift reappears.
 
 ## Diagnostic tools
 
