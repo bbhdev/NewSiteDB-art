@@ -12731,6 +12731,7 @@
       const seenChain = { };
       seenChain[line.id] = true;
       let cursor = line;
+      let truncated = false; // v0.8.281: cap-hit indicator
       for (let hop = 0; hop < cap; hop++) {
         if (!cursor.followsMasterId) break;
         const next = state.lines.find(function (l) {
@@ -12740,8 +12741,31 @@
         seenChain[next.id] = true;
         followChain.push(next);
         cursor = next;
+        // If the next hop would exist AND we're at the cap, we're cutting
+        // a real chain short — surface that to the user. Check by peeking
+        // one step further without consuming it.
+        if (followChain.length >= cap && cursor.followsMasterId) {
+          const peek = state.lines.find(function (l) {
+            return l.masterId === cursor.followsMasterId && l.id !== cursor.id;
+          });
+          if (peek && !seenChain[peek.id]) truncated = true;
+          break;
+        }
       }
       if (followChain.length > 0) {
+        // v0.8.281: warning row when the editor cap clipped a deeper chain.
+        // The runtime still walks up to 16 hops, so the truncation is
+        // editor-visibility-only (raise "Follow chain depth" in Settings
+        // to see the full chain in the panel).
+        if (truncated) {
+          const warn = document.createElement('div');
+          warn.className = 'ed-behavior-subhead';
+          warn.style.cssText = 'margin:0.25rem 0 0.15rem;font-size:0.8em;color:#e0b060;'
+            + 'font-style:italic;';
+          warn.textContent = '⚠ Chain truncated at editor cap (' + cap
+            + '). Deeper donors still apply at runtime; raise "Follow chain depth" in Settings.';
+          wrap.appendChild(warn);
+        }
         const renderOrder = followChain.slice().reverse(); // deepest → direct (top-to-bottom = run order)
         renderOrder.forEach(function (ancestor, ancestorIdx) {
           const donorMaster = state.masters.find(function (m) { return m.id === ancestor.masterId; });
@@ -12750,7 +12774,8 @@
             || shortMasterId(ancestor.masterId);
           const donorBlocks = Array.isArray(ancestor.behaviors) ? ancestor.behaviors : [];
           const depthFromOwn = followChain.length - ancestorIdx; // 1 = direct donor
-          const depthLabel = depthFromOwn === 1 ? '' : ' (depth ' + depthFromOwn + ')';
+          // v0.8.281: always show depth so it's clear which hop is which.
+          const depthLabel = ' (depth ' + depthFromOwn + ')';
 
           const subHead = document.createElement('div');
           subHead.className = 'ed-behavior-subhead';
