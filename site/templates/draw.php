@@ -26,7 +26,7 @@ if (!$targetPage) {
 // class folder our migration created inside each page (Kirby
 // treats every folder as a page).
 $contentRoot = kirby()->root('content');
-$classes     = art_load_classes($contentRoot);
+$classes     = deco_load_classes($contentRoot);
 $classIds    = array_map(function ($c) { return $c['id']; }, $classes);
 $pageOptions = [];
 foreach (kirby()->site()->index() as $p) {
@@ -52,15 +52,15 @@ $readJson = function ($path) {
   return is_array($decoded) ? $decoded : [];
 };
 
-$pageCfg     = $targetPage ? art_load_page_config($targetPage->root())
-                          : ['useClasses' => ['wide'], 'dims' => ['wide' => art_default_dims()]];
-$masters     = art_load_masters($contentRoot);
+$pageCfg     = $targetPage ? deco_load_page_config($targetPage->root())
+                          : ['useClasses' => ['wide'], 'dims' => ['wide' => deco_default_dims()]];
+$masters     = deco_load_masters($contentRoot);
 
 // Per-class instances + groups (v4 shape: { instances, groups }).
 $byClass = [];
 foreach ($pageCfg['useClasses'] as $cid) {
     $byClass[$cid] = $targetPage
-        ? art_load_class_data($targetPage->root(), $cid)
+        ? deco_load_class_data($targetPage->root(), $cid)
         : ['instances' => [], 'groups' => []];
 }
 
@@ -70,9 +70,9 @@ foreach ($pageCfg['useClasses'] as $cid) {
 $initialClassId = in_array('wide', $pageCfg['useClasses'], true)
     ? 'wide'
     : ($pageCfg['useClasses'][0] ?? 'wide');
-$initialDims    = $pageCfg['dims'][$initialClassId] ?? art_default_dims();
+$initialDims    = $pageCfg['dims'][$initialClassId] ?? deco_default_dims();
 
-$palette   = art_load_palette($contentRoot);
+$palette   = deco_load_palette($contentRoot);
 
 // Default palette if the file doesn't exist yet — gives the editor
 // something to pick from on first run.
@@ -293,7 +293,7 @@ $payload = json_encode([
 
 <?php
   $dims = $initialDims;
-  $vb   = art_viewbox($dims);
+  $vb   = deco_viewbox($dims);
 ?>
   <main class="ed-canvas-wrap">
     <!-- Canvas geometry is driven by the current class's dims (from
@@ -302,7 +302,7 @@ $payload = json_encode([
          around it to canvasW×canvasH so lines that drift on/off the
          page have room to live. 1px = 1 viewBox unit at zoom 1.0. -->
     <svg id="draw-surface"
-         viewBox="<?= art_viewbox_attr($dims) ?>"
+         viewBox="<?= deco_viewbox_attr($dims) ?>"
          width="<?= $dims['canvasW'] ?>" height="<?= $dims['canvasH'] ?>"
          preserveAspectRatio="xMidYMid meet"
          xmlns="http://www.w3.org/2000/svg">

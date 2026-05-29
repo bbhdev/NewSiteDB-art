@@ -16,13 +16,13 @@
  * and runtime won't crash on a half-set-up tree.
  */
 
-Kirby::plugin('site/art', []);
+Kirby::plugin('site/deco', []);
 
 /**
  * Canonical flat dimensions — the values the hardcoded viewBox used
  * before Phase 1. Returned for any class whose dims are missing.
  */
-function art_default_dims(): array
+function deco_default_dims(): array
 {
     return ['pageW' => 1200, 'pageH' => 800, 'canvasW' => 2400, 'canvasH' => 1600];
 }
@@ -31,7 +31,7 @@ function art_default_dims(): array
  * Default site-wide class breakpoints. Used when classes.json is
  * absent.
  */
-function art_default_classes(): array
+function deco_default_classes(): array
 {
     return [
         ['id' => 'narrow', 'name' => 'Narrow', 'minWidth' => 0,    'maxWidth' => 640],
@@ -44,12 +44,12 @@ function art_default_classes(): array
  * Read the site-wide class breakpoints. Falls back to defaults if
  * _shared/classes.json is missing or invalid.
  */
-function art_load_classes(string $contentDir): array
+function deco_load_classes(string $contentDir): array
 {
     $marker = $contentDir . '/_shared/classes.json';
-    if (!is_file($marker)) return art_default_classes();
+    if (!is_file($marker)) return deco_default_classes();
     $data = json_decode(file_get_contents($marker), true);
-    if (!is_array($data) || !$data) return art_default_classes();
+    if (!is_array($data) || !$data) return deco_default_classes();
     return $data;
 }
 
@@ -62,20 +62,20 @@ function art_load_classes(string $contentDir): array
  *
  * @return array{useClasses:list<string>, dims:array<string,array{pageW:float,pageH:float,canvasW:float,canvasH:float}>}
  */
-function art_load_page_config(string $pageRoot): array
+function deco_load_page_config(string $pageRoot): array
 {
     $marker = $pageRoot . '/page.json';
     if (!is_file($marker)) {
         return [
             'useClasses' => ['wide'],
-            'dims'       => ['wide' => art_default_dims()],
+            'dims'       => ['wide' => deco_default_dims()],
         ];
     }
     $data = json_decode(file_get_contents($marker), true);
     if (!is_array($data)) {
         return [
             'useClasses' => ['wide'],
-            'dims'       => ['wide' => art_default_dims()],
+            'dims'       => ['wide' => deco_default_dims()],
         ];
     }
     // v3 (current) shape: nested.
@@ -83,7 +83,7 @@ function art_load_page_config(string $pageRoot): array
         && isset($data['dims']) && is_array($data['dims'])) {
         $cfg = ['useClasses' => $data['useClasses'], 'dims' => []];
         foreach ($data['useClasses'] as $classId) {
-            $cfg['dims'][$classId] = art_normalize_dims($data['dims'][$classId] ?? []);
+            $cfg['dims'][$classId] = deco_normalize_dims($data['dims'][$classId] ?? []);
         }
         // Carry _schemaVersion through so the migrator can see it
         // when reading back.
@@ -93,7 +93,7 @@ function art_load_page_config(string $pageRoot): array
     // v2 (flat) shape: wrap as single-class wide.
     return [
         'useClasses' => ['wide'],
-        'dims'       => ['wide' => art_normalize_dims($data)],
+        'dims'       => ['wide' => deco_normalize_dims($data)],
         '_schemaVersion' => $data['_schemaVersion'] ?? 2,
     ];
 }
@@ -102,9 +102,9 @@ function art_load_page_config(string $pageRoot): array
  * Pull the four known dim keys out of an arbitrary array, with
  * defaults for any missing/invalid values.
  */
-function art_normalize_dims(array $raw): array
+function deco_normalize_dims(array $raw): array
 {
-    $cfg = art_default_dims();
+    $cfg = deco_default_dims();
     foreach (['pageW', 'pageH', 'canvasW', 'canvasH'] as $k) {
         if (isset($raw[$k]) && is_numeric($raw[$k]) && $raw[$k] > 0) {
             $cfg[$k] = (float) $raw[$k];
@@ -119,7 +119,7 @@ function art_normalize_dims(array $raw): array
  *
  * @return list<array>
  */
-function art_load_masters(string $contentDir): array
+function deco_load_masters(string $contentDir): array
 {
     $marker = $contentDir . '/_shared/masters.json';
     if (!is_file($marker)) return [];
@@ -135,7 +135,7 @@ function art_load_masters(string $contentDir): array
  *
  * @return list<array>
  */
-function art_load_palette(string $contentDir): array
+function deco_load_palette(string $contentDir): array
 {
     $candidates = [
         $contentDir . '/_shared/palette.json',
@@ -159,7 +159,7 @@ function art_load_palette(string $contentDir): array
  *
  * @return array{instances:list<array>,groups:list<array>}
  */
-function art_load_class_data(string $pageRoot, string $classId): array
+function deco_load_class_data(string $pageRoot, string $classId): array
 {
     $classDir = $pageRoot . '/' . $classId;
     $readFirst = function (array $candidates): array {
@@ -174,7 +174,7 @@ function art_load_class_data(string $pageRoot, string $classId): array
     // Prefer v4 instances.json. If absent, wrap legacy lines.json so
     // every old-shape line becomes a master-less instance whose
     // overrides carry the full visual payload (matches what
-    // art_resolve_instance would produce when masterId is null).
+    // deco_resolve_instance would produce when masterId is null).
     $instances = $readFirst([$classDir . '/instances.json']);
     if (!$instances) {
         $legacy = $readFirst([
@@ -215,7 +215,7 @@ function art_load_class_data(string $pageRoot, string $classId): array
  * Resolution order: master visual props → instance overrides win.
  * Instance-specific fields (id, groupId, hidden) overlay on top.
  */
-function art_resolve_instance(array $instance, array $mastersById): array
+function deco_resolve_instance(array $instance, array $mastersById): array
 {
     // Behavior keys (per-class always) and the four position sub-keys
     // (per-class via positionOffset) sit outside the scope contract.
@@ -314,7 +314,7 @@ function art_resolve_instance(array $instance, array $mastersById): array
  * SVG viewBox for a single class's dims. Page area sits at (0,0);
  * canvas centers symmetrically around it.
  */
-function art_viewbox(array $dims): array
+function deco_viewbox(array $dims): array
 {
     return [
         'x' => -($dims['canvasW'] - $dims['pageW']) / 2,
@@ -324,8 +324,8 @@ function art_viewbox(array $dims): array
     ];
 }
 
-function art_viewbox_attr(array $dims): string
+function deco_viewbox_attr(array $dims): string
 {
-    $vb = art_viewbox($dims);
+    $vb = deco_viewbox($dims);
     return $vb['x'] . ' ' . $vb['y'] . ' ' . $vb['w'] . ' ' . $vb['h'];
 }

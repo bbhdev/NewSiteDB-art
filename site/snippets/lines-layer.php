@@ -38,10 +38,10 @@
 $root        = $page->root();
 $contentRoot = kirby()->root('content');
 
-$classes = art_load_classes($contentRoot);
-$pageCfg = art_load_page_config($root);
-$palette = art_load_palette($contentRoot);
-$masters = art_load_masters($contentRoot);
+$classes = deco_load_classes($contentRoot);
+$pageCfg = deco_load_page_config($root);
+$palette = deco_load_palette($contentRoot);
+$masters = deco_load_masters($contentRoot);
 $mastersById = [];
 foreach ($masters as $m) {
     if (isset($m['id'])) $mastersById[$m['id']] = $m;
@@ -52,11 +52,11 @@ foreach ($masters as $m) {
 // awareness of the master/instance split needed there).
 $byClass = [];
 foreach ($pageCfg['useClasses'] as $classId) {
-    $data = art_load_class_data($root, $classId);
+    $data = deco_load_class_data($root, $classId);
     $lines = [];
     foreach ($data['instances'] as $inst) {
         if (!is_array($inst)) continue;
-        $lines[] = art_resolve_instance($inst, $mastersById);
+        $lines[] = deco_resolve_instance($inst, $mastersById);
     }
     $byClass[$classId] = ['lines' => $lines, 'groups' => $data['groups']];
 }
@@ -80,7 +80,7 @@ if (is_dir($svgDir)) {
 $initialClass = in_array('wide', $pageCfg['useClasses'], true)
     ? 'wide'
     : ($pageCfg['useClasses'][0] ?? 'wide');
-$initialDims  = $pageCfg['dims'][$initialClass] ?? art_default_dims();
+$initialDims  = $pageCfg['dims'][$initialClass] ?? deco_default_dims();
 
 $payload = json_encode([
     'classes'    => $classes,
@@ -91,5 +91,5 @@ $payload = json_encode([
     'version'    => option('version', 'dev'),
 ], JSON_UNESCAPED_SLASHES);
 ?>
-<svg id="lines-layer" viewBox="<?= art_viewbox_attr($initialDims) ?>" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+<svg id="lines-layer" viewBox="<?= deco_viewbox_attr($initialDims) ?>" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
 <script id="lines-data" type="application/json"><?= $payload ?></script>

@@ -1196,7 +1196,7 @@ scrollMode v0.8.231):
 1. `decomposeForSave` in dev-draw.js writes `instRecord.followsMasterId`
    when non-null (omitted otherwise) on save.
 2. `composeLineFromInstance` reads it back at load.
-3. `art_resolve_instance` in `site/plugins/art/index.php` passes it
+3. `deco_resolve_instance` in `site/plugins/deco/index.php` passes it
    through to the runtime line object.
 
 No schema bump — additive optional field with safe default.

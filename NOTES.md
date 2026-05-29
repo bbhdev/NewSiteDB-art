@@ -28,7 +28,7 @@ mutation model:
 
 `decomposeForSave` is now bookkeeping only: `instance.overrides` ==
 behavior keys + scope-local visual keys, no divergence detection.
-`resolveInstanceJS` and PHP `art_resolve_instance` consult
+`resolveInstanceJS` and PHP `deco_resolve_instance` consult
 `master.scope` symmetrically. Migration v6→v7 strips legacy non-
 behavior overrides and seeds `scope: {}` on every master.
 
