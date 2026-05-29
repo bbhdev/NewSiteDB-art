@@ -336,6 +336,41 @@
     const paletteById = {};
     palette.forEach(function (c) { paletteById[c.id] = c; });
 
+    // v0.8.291 — Sequential drawIn, Slice 1.
+    // Split a path 'd' on each M (capital) command so each pen-down
+    // stroke from the source SVG editor becomes a separate subpath
+    // string. Used only when an instance has a drawIn block with
+    // drawInMode === 'sequential' AND the master's d contains more
+    // than one M. Lowercase 'm' (relative moveto) is not split on
+    // here — editors generally emit uppercase M, and a relative-m
+    // subpath split out as a standalone path would need its starting
+    // point recomputed (deferred until a real case appears).
+    function splitDOnM(d) {
+      if (typeof d !== 'string' || !d) return [];
+      const parts = d.split(/(?=M)/);
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        const s = parts[i].trim();
+        if (s.length > 0) out.push(s);
+      }
+      return out;
+    }
+
+    // Does this resolved line have at least one non-disabled drawIn
+    // block in sequential mode? Cheap O(behaviors) check we run once
+    // per line during rendering to decide the DOM shape.
+    function lineWantsSequentialDrawIn(line) {
+      const beh = line && line.behaviors;
+      if (!Array.isArray(beh)) return false;
+      for (let i = 0; i < beh.length; i++) {
+        const b = beh[i];
+        if (!b || b.disabled) continue;
+        const p = b.params || {};
+        if (p.drawIn && p.drawInMode === 'sequential') return true;
+      }
+      return false;
+    }
+
     // v0.8.195: text overlay helpers (runtime side; mirror of the
     // editor's resolveText / lineCenterFor in dev-draw.js). Slice 1 —
     // text lives on the master and is propagated to every resolved
@@ -834,12 +869,50 @@
         return;
       }
 
-      const p = document.createElementNS(SVG_NS, 'path');
-      p.setAttribute('d', line.d);
+      // v0.8.291 — Sequential drawIn, Slice 1.
+      // If this line has an active drawIn block with mode=sequential
+      // AND the master's d contains >1 M-subpath, render the line
+      // as a <g data-line-id data-master-id> whose children are one
+      // <path> per M-subpath. Stroke / width / fill / visibility go
+      // on the wrapper and are inherited by the children via SVG
+      // style inheritance. Everything else in the pipeline (
+      // transform, opacity, behavior wiring, hit testing) treats the
+      // wrapper as the dispatch element exactly like a single path.
+      //
+      // Otherwise (parallel mode, single-M d, or no drawIn at all):
+      // render as a single <path>, unchanged from prior versions.
+      //
+      // The split / multi-child branch is what makes the dashoffset
+      // animation produce stroke-by-stroke reveal — writeAt below
+      // detects pathEl._subSlices and writes per-child offsets in
+      // each subpath's length-weighted slice of [0,1].
+      let p;
+      let subSlices = null;
+      // v0.8.291: lines referenced as a pathFollow guide must remain
+      // a single <path> so guide.getPointAtLength / getCTM work. A
+      // sequential-drawIn line that's also a pathFollow guide loses
+      // its sub-stroke reveal effect — acceptable tradeoff; the
+      // combination is unusual, and pathFollow needs path geometry.
+      const wantsSeq = lineWantsSequentialDrawIn(line) && !needAsGuide;
+      const subDs    = wantsSeq ? splitDOnM(line.d) : null;
+      const useGroup = subDs && subDs.length > 1;
+      if (useGroup) {
+        p = document.createElementNS(SVG_NS, 'g');
+        subDs.forEach(function (sd) {
+          const child = document.createElementNS(SVG_NS, 'path');
+          child.setAttribute('d', sd);
+          p.appendChild(child);
+        });
+      } else {
+        p = document.createElementNS(SVG_NS, 'path');
+        p.setAttribute('d', line.d);
+      }
       // Effective stroke / width: line value wins, then group default,
       // else fall back to the CSS rule on #lines-layer path.
       // Set via style (not the SVG attribute) so var(--…) resolves —
       // SVG presentation attributes don't evaluate CSS vars in most browsers.
+      // When p is a <g>, the style props inherit to the child <path>
+      // elements via SVG style inheritance.
       const strokeRef = line.stroke || (group && group.defaults && group.defaults.stroke) || null;
       const stroke    = resolveStroke(strokeRef);
       const width  = (line.width != null) ? line.width
@@ -880,6 +953,35 @@
         p.style.pointerEvents = 'none';
       }
       layer.appendChild(p);
+
+      // v0.8.291 — once the <g> wrapper is in the DOM we can read
+      // getTotalLength() on each child. Build the length-weighted
+      // slice table the writeAt closure will consult per frame.
+      // Each entry: { el, start, end } — start/end are cumulative
+      // fractions of total path length in [0,1]. A subpath whose
+      // length comes back 0 still gets a zero-width slice so it
+      // never gets airtime; the next stroke takes over.
+      if (useGroup) {
+        const children = p.childNodes;
+        const lengths = [];
+        let total = 0;
+        for (let i = 0; i < children.length; i++) {
+          let L = 0;
+          try { L = children[i].getTotalLength() || 0; } catch (e) { L = 0; }
+          lengths.push(L);
+          total += L;
+        }
+        if (total <= 0) total = 1;
+        let cum = 0;
+        subSlices = [];
+        for (let i = 0; i < children.length; i++) {
+          const start = cum / total;
+          cum += lengths[i];
+          const end   = cum / total;
+          subSlices.push({ el: children[i], start: start, end: end });
+        }
+        p._subSlices = subSlices;
+      }
 
       // v0.8.195: text overlay. Anchored at the line's natural center
       // plus authored (offsetX, offsetY). data-text-for is queried by
@@ -1408,7 +1510,10 @@
           opacityFrom: opacityFrom,
           opacityTo:   opacityTo,
           drawIn:   !!p.drawIn,
-          drawInDirection: p.drawInDirection || 'forward'
+          drawInDirection: p.drawInDirection || 'forward',
+          // v0.8.291 (Sequential drawIn, Slice 1): default 'parallel'
+          // — every existing data file loads with the prior behaviour.
+          drawInMode: p.drawInMode || 'parallel'
         };
       });
       // Per-block easing fn (evaluated once; identity when GSAP
@@ -1445,8 +1550,12 @@
       // <image> has no stroke, so the dash setup is path-only.
       // v0.8.259: disabled blocks don't seed dash state — drawIn on
       // a disabled block is treated as absent for this gate.
+      // v0.8.291: accept a <g> wrapper too — it's the sequential-drawIn
+      // dispatch element (one child <path> per M-subpath). The dash
+      // attributes get written to each child, not the wrapper.
+      const _dispTag = pathEl.tagName.toLowerCase();
       const anyDrawIn = blocks.some(function (b) { return b.drawIn && !b.disabled; })
-                    && pathEl.tagName.toLowerCase() === 'path';
+                    && (_dispTag === 'path' || _dispTag === 'g');
       const firstDrawIn = anyDrawIn
         ? blocks.find(function (b) { return b.drawIn && !b.disabled; })
         : null;
@@ -2474,12 +2583,27 @@
       //                            follows the FIRST drawIn block's
       //                            direction.
       if (anyDrawIn) {
-        pathEl.setAttribute('pathLength',       '1');
-        pathEl.setAttribute('stroke-dasharray', '1 1');
-        pathEl.setAttribute(
-          'stroke-dashoffset',
-          diagMode ? '0' : String(initialDashDir)
-        );
+        // v0.8.291: in sequential-mode rendering, dash attributes
+        // belong on each child <path>, not the <g> wrapper (dashoffset
+        // inherits via CSS, but per-subpath offsets are exactly what
+        // we want to vary independently). Initial state: every child
+        // hidden (offset=1, forward semantics) — sequential mode in
+        // Slice 1 ignores drawInDirection.
+        if (pathEl._subSlices) {
+          for (let i = 0; i < pathEl._subSlices.length; i++) {
+            const el = pathEl._subSlices[i].el;
+            el.setAttribute('pathLength',       '1');
+            el.setAttribute('stroke-dasharray', '1 1');
+            el.setAttribute('stroke-dashoffset', diagMode ? '0' : '1');
+          }
+        } else {
+          pathEl.setAttribute('pathLength',       '1');
+          pathEl.setAttribute('stroke-dasharray', '1 1');
+          pathEl.setAttribute(
+            'stroke-dashoffset',
+            diagMode ? '0' : String(initialDashDir)
+          );
+        }
       }
 
       // Diagnostic mode (Grid toggle on): paths render at their authored
@@ -2509,7 +2633,16 @@
           // state on the next tick — better to do it here in one
           // assignment than tolerate the flicker.
           if (anyDrawIn) {
-            pathEl.setAttribute('stroke-dashoffset', String(initialDashDir));
+            // v0.8.291: sequential mode resets every child to hidden
+            // (offset=1, forward semantics). Parallel mode resets the
+            // single dispatch path to its initial dash direction.
+            if (pathEl._subSlices) {
+              for (let i = 0; i < pathEl._subSlices.length; i++) {
+                pathEl._subSlices[i].el.setAttribute('stroke-dashoffset', '1');
+              }
+            } else {
+              pathEl.setAttribute('stroke-dashoffset', String(initialDashDir));
+            }
           }
         };
         const writeAt = function (scrollP, nowSec) {
@@ -2621,7 +2754,30 @@
           // pre-trigger block keeps the initial-paint hidden state;
           // a completed block keeps its final visible state).
           if (t.drawInOffset != null) {
-            pathEl.setAttribute('stroke-dashoffset', String(t.drawInOffset));
+            // v0.8.291: sequential mode — slice [0,1] reveal across
+            // the length-weighted subpath table. Each subpath's
+            // local progress is clamped to its [start, end] range:
+            //   reveal < start → offset 1 (not yet drawn)
+            //   reveal > end   → offset 0 (already drawn)
+            //   in window     → offset 1 − (reveal−start)/(end−start)
+            // Direction in sequential mode is forced forward in this
+            // slice (drawInDirection ignored); revisit when reverse
+            // semantics for sequence are nailed down.
+            if (pathEl._subSlices) {
+              const reveal = 1 - Math.abs(t.drawInOffset);
+              const slices = pathEl._subSlices;
+              for (let si = 0; si < slices.length; si++) {
+                const sp = slices[si];
+                let off;
+                if (reveal <= sp.start)      off = 1;
+                else if (reveal >= sp.end)   off = 0;
+                else if (sp.end > sp.start)  off = 1 - (reveal - sp.start) / (sp.end - sp.start);
+                else                         off = 1;
+                sp.el.setAttribute('stroke-dashoffset', String(off));
+              }
+            } else {
+              pathEl.setAttribute('stroke-dashoffset', String(t.drawInOffset));
+            }
           }
         };
         // v0.8.79: cleanupTicker drives writeAt every frame during

@@ -112,7 +112,7 @@
   // Behavior keys live on instance.overrides regardless of scope —
   // they're scroll-driven animation params, always per-class.
   const BEHAVIOR_KEYS = ['translateX', 'translateY', 'rotate',
-                         'drawIn', 'drawInDirection',
+                         'drawIn', 'drawInDirection', 'drawInMode',
                          'rotateOriginX', 'rotateOriginY'];
 
   // v0.8.46: shared issue log populated during the load pass
@@ -8240,7 +8240,7 @@
       'params.translateX', 'params.translateY', 'params.rotate',
       'params.translateMode',
       'params.fadeOpacity', 'params.opacityFrom', 'params.opacityTo',
-      'params.drawIn', 'params.drawInDirection',
+      'params.drawIn', 'params.drawInDirection', 'params.drawInMode',
       'params.pathRef', 'params.pathRefName',
       'params.pathAlignToTangent', 'params.pathEndMode',
       'params.rotateOriginX', 'params.rotateOriginY',
@@ -14680,6 +14680,22 @@
             { value: 'reverse', label: 'End → begin' }
           ],
           function (v) { updateBehaviorParam(line.id, 'drawInDirection', v, blockIdx); }));
+        // v0.8.291 (Slice 1 of sequential drawIn): a 'mode' selector
+        // distinct from direction. Parallel = current behaviour (all
+        // M-subpaths revealed simultaneously, one stroke-dashoffset
+        // for the whole <path>). Sequential = the runtime splits the
+        // master's d on M and reveals subpaths one after another,
+        // length-weighted, hard cuts between strokes. Direction is
+        // ignored when sequential is active in this slice; can be
+        // re-enabled once the semantics for "play sequence in
+        // reverse" are nailed down.
+        card.appendChild(overrideSelectField('Mode', params.drawInMode,
+          gd.drawInMode || 'parallel',
+          [
+            { value: 'parallel',   label: 'Parallel (all at once)' },
+            { value: 'sequential', label: 'Sequential (stroke by stroke)' }
+          ],
+          function (v) { updateBehaviorParam(line.id, 'drawInMode', v, blockIdx); }));
       }
     }
 
