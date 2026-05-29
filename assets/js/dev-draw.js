@@ -10281,15 +10281,23 @@
       // v0.8.284: click → select donor. Stops propagation so the
       // canvas's deselect-on-background handler doesn't fire after.
       if (donor) {
-        g.addEventListener('click', function (e) {
+        // v0.8.285: canvas selection runs on pointerdown, not click —
+        // so a click handler fires too late (deselect already ran).
+        // Handle on pointerdown and stop propagation BEFORE the canvas
+        // pointerdown listener sees the event. The click listener stays
+        // as a redundant safety net.
+        const selectDonor = function (e) {
           e.stopPropagation();
+          if (e.preventDefault) e.preventDefault();
           if (donor.groupId) {
             state.activeGroupId = donor.groupId;
             state.openGroupIds[donor.groupId] = true;
           }
           selectOnly(donor.id);
           renderAll();
-        });
+        };
+        g.addEventListener('pointerdown', selectDonor);
+        g.addEventListener('click', function (e) { e.stopPropagation(); });
       }
       labelsG.appendChild(g);
     });
