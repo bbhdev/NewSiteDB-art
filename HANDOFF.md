@@ -1175,6 +1175,108 @@ or the panel's Move/Validate button, the mode exits and
 Without this the band + pulsing button persisted forever for users
 whose "I'm done" gesture was a click somewhere else on the canvas.
 
+### Follow this object — per-object behavior inheritance (v0.8.274–v0.8.285)
+
+Object-level composition primitive. An object X can "follow" another
+object D, inheriting D's `behaviors[]` as if X had them — plus X's own
+behaviors layered on top. Donor is identified by **masterId** (the
+cross-class identity), so following an object follows it across every
+class instance.
+
+**Why not just use a group's behavior template?** A group template
+applies to every member. Follow is per-object — useful for "object X
+should behave like D plus a bit more" without conscripting D's whole
+group. Per-object follow **takes precedence** over the group template
+when both apply.
+
+**Data shape.** One new field on the line: `followsMasterId: string |
+null`. Persisted via the standard three-place pattern (matches
+scrollMode v0.8.231):
+
+1. `decomposeForSave` in dev-draw.js writes `instRecord.followsMasterId`
+   when non-null (omitted otherwise) on save.
+2. `composeLineFromInstance` reads it back at load.
+3. `art_resolve_instance` in `site/plugins/art/index.php` passes it
+   through to the runtime line object.
+
+No schema bump — additive optional field with safe default.
+
+**Runtime composition (`resolveInstanceJS` in app.js, ~line 1093).**
+The donor's behaviors are prepended to X's own. The walk is multi-hop:
+A→B→C→… up to 16 hops (hard ceiling) with cycle detection (seen-set).
+Composition is bottom-up: each ancestor's behaviors prepend onto the
+accumulator with **pathFollow suppression** — once any closer-to-X
+level carries a pathFollow block, deeper ancestors' pathFollow blocks
+are dropped (geometrically nonsense to follow two paths at once;
+closest intent wins). Sum effects (translate, rotate, drawIn flag)
+remain order-independent. The group template path still exists as the
+`else if` branch when no follow is set, and the donor for pivot
+inheritance is the direct donor (`followChain[0]`) under either path.
+
+**Editor depth cap (`state.followsDepthCap`).** Default 4, persisted
+in localStorage as `ed-follows-depth-cap`. Editor UI walks at most
+this many hops — purely a panel-readability soft limit. The runtime
+walks the full chain (up to 16) regardless. Configurable in the
+Settings dialog (`"Follow" chain depth`).
+
+**Editor UI surfaces.**
+
+- **Follows picker** (renderLinePanel, under a new FOLLOWS divider).
+  Only shown when `line.masterId` is set (donor lookup is by masterId).
+  Picker enumerates one entry per unique other masterId in this class.
+  Cycle guard walks the prospective donor's full chain up to 16 hops
+  and refuses any donor whose chain would reach this line's masterId.
+  Setter (`updateLineFollowsMaster`) reapplies the same check and
+  fans out to siblings in ALL mode (`forSiblingsOf(masterId, fn)`).
+
+- **Inherited section in the object panel.** Above own behaviors:
+  one sub-group per ancestor in the chain, rendered **deepest first**
+  (top-to-bottom matches run order). Each header carries a `(depth N)`
+  label and an `Open donor` button that selects+focuses the donor.
+  Rows are read-only with a leading `↪` glyph in the same column the
+  power toggle occupies on own-block rows (`.ed-inherited-glyph`
+  matches `.ed-block-toggle` geometry at 2.0rem). Muted slate
+  background (`.ed-block-row.is-inherited`).
+
+- **Truncation warning** (mitigation #1, v0.8.282). When the editor
+  cap clips a deeper real chain, an amber italic row surfaces it.
+  Repeated in **every chain member's panel** under the FOLLOWS divider
+  via `chainTruncatesBelow(line, cap)` — not just the head's, which
+  was easy to miss.
+
+- **Canvas follow badge.** Teal circle with `↪` glyph at the bbox
+  top-right + a stroke-haloed donor name label. For chains of length
+  ≥ 2, the name is prefixed with `#pos/total` so chain order reads at
+  a glance (mitigation #2). **Clickable** — pointerdown selects the
+  donor and focuses its group, so users walk the chain by repeatedly
+  clicking each new badge. Handler is on `pointerdown` (not click)
+  because canvas selection runs on pointerdown — a click handler fires
+  after the canvas deselect (v0.8.284 → v0.8.285 fix).
+
+- **Sidebar follow-chain pill.** Each line row carries a fixed-width
+  slot (`.ed-follow-chain-slot`, 2.6em) reserved for a pill, so chain
+  and non-chain rows align. Pill shows position only (`↪N`) — total
+  lives on the canvas badge. **Per-chain color** via `chainIdOf(line)`:
+  computes the connected component in the follow graph (union of
+  follow-edges between masters) and picks from a six-hue palette
+  (`CHAIN_PALETTE`). Independent chains read as distinct groups
+  (mitigation #3).
+
+**Shared helpers** (dev-draw.js, near `updateLineFollowsMaster`):
+- `chainPositionOf(line)` — 1 = chain head (follower no one follows),
+  increments going up to the deepest donor.
+- `upWalkLength(line)` — runtime hops to deepest reachable donor.
+- `chainLengthAt(line)` — total length of the chain this line is in.
+- `chainTruncatesBelow(line, cap)` — first descendant whose up-walk
+  exceeds cap, or null.
+- `chainIdOf(line)` — stable connected-component id, or -1.
+
+**Object panel block-detail persistence (v0.8.280).** Adjacent UX
+improvement landed in the same slice: when an unpinned object panel
+rebinds to a new selection, its attached behavior-block child no
+longer closes — it retargets to the new object's first block. Falls
+back to closeChildrenOf when the new object has no behaviors.
+
 ### Orphan cleanup (v0.8.43–v0.8.44)
 
 `🔍 Orphans` button in the Master library header opens a dialog that scans for:
