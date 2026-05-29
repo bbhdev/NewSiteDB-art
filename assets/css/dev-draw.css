@@ -561,6 +561,23 @@ body.editor {
   user-select: none;
 }
 
+/* v0.8.282: follow-chain badge — compact pill showing this object's
+   position in a follow chain ("↪2/3"). Teal to match the canvas
+   follow badge so the eye groups them. */
+.ed-follow-chain-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.4em;
+  height: 1.5em;
+  border-radius: 0.75em;
+  background: #3da08e;
+  color: #fff;
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
 /* v0.8.220: inline info (i) icon for panel hints. Replaces multi-line
    prose hint text — the tooltip carries the full explanation. */
 .ed-info-icon {

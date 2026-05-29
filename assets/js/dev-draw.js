@@ -5770,6 +5770,73 @@
     PanelManager.notifyDataChanged();
   }
 
+  // v0.8.282: follow-chain helpers.
+  // Position 1 = chain head (the object no one follows). Position
+  // increments going UP toward the deepest donor. For A→B→C: A=1,B=2,C=3.
+  // Returns 0 for objects with no masterId (chain position is meaningless).
+  function chainPositionOf(line) {
+    if (!line || !line.masterId) return 0;
+    function maxDescDepth(masterId, seen) {
+      let m = 0;
+      state.lines.forEach(function (l) {
+        if (l.followsMasterId !== masterId) return;
+        if (seen[l.id]) return;
+        const seenNext = Object.assign({}, seen);
+        seenNext[l.id] = true;
+        const d = 1 + maxDescDepth(l.masterId, seenNext);
+        if (d > m) m = d;
+      });
+      return m;
+    }
+    const seen = {}; seen[line.id] = true;
+    return 1 + maxDescDepth(line.masterId, seen);
+  }
+  // Up-walk length from `line` (runtime ceiling = 16).
+  function upWalkLength(line) {
+    if (!line) return 0;
+    let cursor = line, n = 0;
+    const seen = {}; seen[line.id] = true;
+    for (let hop = 0; hop < 16; hop++) {
+      if (!cursor.followsMasterId) break;
+      const next = state.lines.find(function (l) {
+        return l.masterId === cursor.followsMasterId && l.id !== cursor.id;
+      });
+      if (!next || seen[next.id]) break;
+      seen[next.id] = true;
+      n++;
+      cursor = next;
+    }
+    return n;
+  }
+  // Total length of the chain `line` participates in (max position any
+  // member reaches). For A→B→C any of A/B/C returns 3.
+  function chainLengthAt(line) {
+    if (!line || !line.masterId) return 0;
+    const pos = chainPositionOf(line);
+    return pos + upWalkLength(line);
+  }
+  // True if any descendant of `line` (object that transitively follows
+  // it) has an up-walk that exceeds the editor cap. Used to propagate
+  // the truncation warning to every chain member's panel (mitigation 1).
+  function chainTruncatesBelow(line, cap) {
+    if (!line || !line.masterId) return null;
+    let starter = null;
+    function walk(masterId, seen) {
+      state.lines.forEach(function (l) {
+        if (l.followsMasterId !== masterId) return;
+        if (seen[l.id]) return;
+        if (starter) return;
+        if (upWalkLength(l) > cap) { starter = l; return; }
+        const next = Object.assign({}, seen);
+        next[l.id] = true;
+        walk(l.masterId, next);
+      });
+    }
+    const s = {}; s[line.id] = true;
+    walk(line.masterId, s);
+    return starter;
+  }
+
   function updateLine(id, patch) {
     const l = state.lines.find(function (l) { return l.id === id; });
     if (!l) return;
@@ -10098,9 +10165,21 @@
         return l.masterId === line.followsMasterId && l.id !== line.id;
       });
       const donorMaster = state.masters.find(function (m) { return m.id === line.followsMasterId; });
-      const donorName = (donor && donor.name && donor.name.trim())
+      const donorRawName = (donor && donor.name && donor.name.trim())
         || (donorMaster && donorMaster.name)
         || shortMasterId(line.followsMasterId);
+      // v0.8.282 mitigation #2: prefix the donor name with its chain
+      // position, so scanning the canvas reveals the chain order at a
+      // glance. Position 1 = chain head, increasing toward the deepest
+      // donor. Only prepended when the chain has length ≥ 2 (otherwise
+      // the prefix would add noise to a simple A-follows-B pair).
+      let donorName = donorRawName;
+      if (donor) {
+        const total = chainLengthAt(donor);
+        if (total >= 2) {
+          donorName = '#' + chainPositionOf(donor) + '/' + total + ' ' + donorRawName;
+        }
+      }
       // Anchor: bbox top-right. Read directly from the rendered SVG
       // (getBBox) — no points-array helper for the right edge, and
       // the on-screen bbox is what the user sees anyway.
@@ -11092,6 +11171,24 @@
           const linkBadge = buildLinkBadgeHTML(line.masterId, rel,
                                                  inClassCounts[line.masterId] || 0);
           if (linkBadge) rightWrap.appendChild(linkBadge);
+          // v0.8.282 mitigation #3: follow-chain badge. Shows position
+          // and total length when this object participates in a chain
+          // of length ≥ 2 (either it follows someone, or something
+          // follows it). Compact "↪N/M" so the eye reads chain order
+          // at a glance from the line list.
+          if (line.masterId) {
+            const total = chainLengthAt(line);
+            if (total >= 2) {
+              const pos = chainPositionOf(line);
+              const chainBadge = document.createElement('span');
+              chainBadge.className = 'ed-follow-chain-badge';
+              chainBadge.textContent = '↪' + pos + '/' + total;
+              chainBadge.title = 'Follow chain: position ' + pos + ' of ' + total
+                + (pos === 1 ? ' — head (follower)' : '')
+                + (pos === total ? ' — root donor' : '');
+              rightWrap.appendChild(chainBadge);
+            }
+          }
           rightWrap.appendChild(overrideTag);
           // v0.8.52: always render the behavior badge — "-" for zero
           // counts, the number otherwise. Consistent column position
@@ -12645,6 +12742,24 @@
     // to not offer it).
     if (line.masterId) {
       wrap.appendChild(divider('FOLLOWS'));
+      // v0.8.282 mitigation #1: propagate truncation warning. If any
+      // descendant of this object (someone who follows this object
+      // transitively) has an up-walk exceeding the editor cap, the
+      // chain head's view is hiding donors above the cap. Surface the
+      // warning here too so every member of the chain sees it — not
+      // only the chain head, where it's easy to miss.
+      const followsCap = (state.followsDepthCap && state.followsDepthCap > 0) ? state.followsDepthCap : 4;
+      const truncatedStarter = chainTruncatesBelow(line, followsCap);
+      if (truncatedStarter) {
+        const starterName = (truncatedStarter.name && truncatedStarter.name.trim())
+          || ('object ' + shortMasterId(truncatedStarter.masterId));
+        const warn = document.createElement('div');
+        warn.className = 'ed-behavior-subhead';
+        warn.style.cssText = 'margin:0.25rem 0 0.15rem;font-size:0.8em;color:#e0b060;'
+          + 'font-style:italic;';
+        warn.textContent = '⚠ "' + starterName + '" (down-chain) has a truncated inherited view — its full chain exceeds the editor cap (' + followsCap + '). Raise "Follow chain depth" in Settings to see it complete.';
+        wrap.appendChild(warn);
+      }
       const donorByMasterId = {};
       // v0.8.278: full-chain cycle filter. Walk each candidate donor's
       // follow chain; skip if it transitively reaches this line's master.
@@ -12754,9 +12869,6 @@
       }
       if (followChain.length > 0) {
         // v0.8.281: warning row when the editor cap clipped a deeper chain.
-        // The runtime still walks up to 16 hops, so the truncation is
-        // editor-visibility-only (raise "Follow chain depth" in Settings
-        // to see the full chain in the panel).
         if (truncated) {
           const warn = document.createElement('div');
           warn.className = 'ed-behavior-subhead';
