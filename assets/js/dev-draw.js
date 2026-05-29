@@ -5815,6 +5815,41 @@
     const pos = chainPositionOf(line);
     return pos + upWalkLength(line);
   }
+  // v0.8.283: connected-component id for the follow graph. All lines
+  // whose masterIds are reachable via follow-edges share the same id,
+  // used to assign a per-chain color in the sidebar pill. Returns -1
+  // for lines not in any chain (length < 2). Computed each call —
+  // sidebar render is the only hot caller and lists are small.
+  function chainIdOf(line) {
+    if (!line || !line.masterId) return -1;
+    if (chainLengthAt(line) < 2) return -1;
+    const compSet = {};
+    const queue = [line.masterId];
+    compSet[line.masterId] = true;
+    while (queue.length) {
+      const mid = queue.shift();
+      state.lines.forEach(function (l) {
+        if (l.masterId === mid && l.followsMasterId && !compSet[l.followsMasterId]) {
+          compSet[l.followsMasterId] = true;
+          queue.push(l.followsMasterId);
+        }
+        if (l.followsMasterId === mid && l.masterId && !compSet[l.masterId]) {
+          compSet[l.masterId] = true;
+          queue.push(l.masterId);
+        }
+      });
+    }
+    // Stable hash: alphabetically smallest masterId in the component →
+    // small integer for palette indexing. Same hash across renders.
+    let rep = null;
+    Object.keys(compSet).forEach(function (m) { if (rep === null || m < rep) rep = m; });
+    let hash = 0;
+    for (let i = 0; i < rep.length; i++) hash = ((hash * 31) + rep.charCodeAt(i)) | 0;
+    return Math.abs(hash);
+  }
+  // Per-chain color palette. Indexed by chainIdOf % length.
+  const CHAIN_PALETTE = ['#3da08e', '#9d6bbf', '#c08838', '#5fa050', '#c0605a', '#5a7ec0'];
+
   // True if any descendant of `line` (object that transitively follows
   // it) has an up-walk that exceeds the editor cap. Used to propagate
   // the truncation warning to every chain member's panel (mitigation 1).
@@ -11171,24 +11206,32 @@
           const linkBadge = buildLinkBadgeHTML(line.masterId, rel,
                                                  inClassCounts[line.masterId] || 0);
           if (linkBadge) rightWrap.appendChild(linkBadge);
-          // v0.8.282 mitigation #3: follow-chain badge. Shows position
-          // and total length when this object participates in a chain
-          // of length ≥ 2 (either it follows someone, or something
-          // follows it). Compact "↪N/M" so the eye reads chain order
-          // at a glance from the line list.
+          // v0.8.283: follow-chain pill. Always rendered (empty
+          // placeholder when not in a chain) so the row's right-side
+          // columns stay aligned. Shows the position number only —
+          // total length lives on the canvas badge, no need to repeat
+          // here. Color depends on the chain (chainIdOf), so multiple
+          // independent chains read as distinct groups in the list.
+          const chainSlot = document.createElement('span');
+          chainSlot.className = 'ed-follow-chain-slot';
           if (line.masterId) {
             const total = chainLengthAt(line);
             if (total >= 2) {
               const pos = chainPositionOf(line);
-              const chainBadge = document.createElement('span');
-              chainBadge.className = 'ed-follow-chain-badge';
-              chainBadge.textContent = '↪' + pos + '/' + total;
-              chainBadge.title = 'Follow chain: position ' + pos + ' of ' + total
+              const cid = chainIdOf(line);
+              const pill = document.createElement('span');
+              pill.className = 'ed-follow-chain-badge';
+              if (cid >= 0) {
+                pill.style.background = CHAIN_PALETTE[cid % CHAIN_PALETTE.length];
+              }
+              pill.textContent = '↪' + pos;
+              pill.title = 'Follow chain: position ' + pos + ' of ' + total
                 + (pos === 1 ? ' — head (follower)' : '')
                 + (pos === total ? ' — root donor' : '');
-              rightWrap.appendChild(chainBadge);
+              chainSlot.appendChild(pill);
             }
           }
+          rightWrap.appendChild(chainSlot);
           rightWrap.appendChild(overrideTag);
           // v0.8.52: always render the behavior badge — "-" for zero
           // counts, the number otherwise. Consistent column position

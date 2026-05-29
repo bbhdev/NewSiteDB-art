@@ -561,20 +561,33 @@ body.editor {
   user-select: none;
 }
 
-/* v0.8.282: follow-chain badge — compact pill showing this object's
-   position in a follow chain ("↪2/3"). Teal to match the canvas
-   follow badge so the eye groups them. */
+/* v0.8.282/283: follow-chain badge — compact pill showing this
+   object's position in a follow chain ("↪2"). Fixed-width slot
+   reserves the column on every row so chain and non-chain rows
+   align. Color is set inline per-chain (palette in dev-draw.js)
+   so multiple chains read as distinct groups in the list. */
+.ed-follow-chain-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.6em;
+  height: 1.6em;
+}
 .ed-follow-chain-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0 0.4em;
-  height: 1.5em;
-  border-radius: 0.75em;
+  justify-content: center;
+  min-width: 2.4em;
+  padding: 0 0.5em;
+  height: 1.6em;
+  border-radius: 0.8em;
   background: #3da08e;
   color: #fff;
-  font-size: 0.72em;
-  font-weight: 600;
+  font-size: 0.9em;
+  font-weight: 700;
   line-height: 1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
   user-select: none;
 }
 
