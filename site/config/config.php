@@ -189,9 +189,26 @@ return [
       'action'  => function () {
         $body = kirby()->request()->body()->toArray();
         $name = isset($body['name']) ? trim((string)$body['name']) : '';
-        if (!preg_match('/^[A-Za-z0-9 _.\-]{1,80}$/', $name)) {
+        // v0.8.319: snapshot names accept any Unicode letter / digit,
+        // plus a generous set of safe punctuation (space, dash,
+        // underscore, dot, comma, parens, brackets, apostrophe). The
+        // previous ASCII-only regex barred accented letters and
+        // common punctuation for no real reason — the constraint
+        // exists only because the name becomes a directory name on
+        // disk, so we just need to bar the characters real
+        // filesystems reject + the path-traversal / hidden-file
+        // shapes. Length cap 1..80 retained.
+        $bad =
+             $name === ''
+          || mb_strlen($name) > 80
+          || $name === '.' || $name === '..'
+          || $name[0] === '.'                              // hidden dir
+          || strpos($name, '..') !== false                 // path traversal
+          || preg_match('#[\\\\/:\*\?"<>\|\x00-\x1f]#', $name) === 1
+          || preg_match('/^[\p{L}\p{N} _.,\'()\[\]\-]+$/u', $name) !== 1;
+        if ($bad) {
           return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Invalid snapshot name. Use letters, digits, space, underscore, dot, or hyphen (1–80 chars).']),
+            json_encode(['ok' => false, 'error' => 'Invalid snapshot name. Letters (any script), digits, spaces and . , - _ \' ( ) [ ] are allowed (1–80 chars). Cannot start with a dot or contain "..".']),
             'application/json', 400
           );
         }
@@ -262,7 +279,19 @@ return [
       'action'  => function () {
         $body = kirby()->request()->body()->toArray();
         $name = isset($body['name']) ? trim((string)$body['name']) : '';
-        if (!preg_match('/^[A-Za-z0-9 _.\-]{1,80}$/', $name)) {
+        // v0.8.319: mirror the save endpoint's loosened validation —
+        // any Unicode letter/digit + safe punctuation, with
+        // path-traversal / hidden-file guards. Keep identical to
+        // /save so a name accepted on write stays valid on read.
+        $bad =
+             $name === ''
+          || mb_strlen($name) > 80
+          || $name === '.' || $name === '..'
+          || $name[0] === '.'
+          || strpos($name, '..') !== false
+          || preg_match('#[\\\\/:\*\?"<>\|\x00-\x1f]#', $name) === 1
+          || preg_match('/^[\p{L}\p{N} _.,\'()\[\]\-]+$/u', $name) !== 1;
+        if ($bad) {
           return new Kirby\Http\Response(
             json_encode(['ok' => false, 'error' => 'Invalid snapshot name.']),
             'application/json', 400

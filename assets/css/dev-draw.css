@@ -2780,6 +2780,64 @@ button.ed-primary {
 button.ed-primary:hover:not(:disabled) { filter: brightness(1.1); }
 button.ed-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* v0.8.312 — Sequential drawIn order-editor exclusive mode. While the
+   modal is open, every other affordance is suppressed so the author
+   can't accidentally fire an unrelated action and leave the canvas
+   in an incoherent state. The modal itself, the canvas (for visual
+   reference), and the modal's own overlay layer remain interactive. */
+body.ed-seq-order-editing .ed-toolbar,
+body.ed-seq-order-editing .ed-sidebar,
+body.ed-seq-order-editing .ed-panel-host {
+  pointer-events: none;
+  opacity: 0.25;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+/* Handles layer hidden outright — handles are visual noise that
+   obstructs the drawing the author needs to see. */
+body.ed-seq-order-editing #handles-layer { display: none; }
+/* Block drag / click on canvas lines while editing fragment order.
+   The overlay itself has pointer-events:none so this rule blanket-
+   disables the lines layer without affecting our overlay (which
+   already opts out of pointer events at its own root). */
+body.ed-seq-order-editing #lines-layer { pointer-events: none; }
+.ed-seq-order-modal { z-index: 320; }   /* above default modal z=300 */
+.ed-seq-order-row.is-highlighted {
+  outline: 2px solid #00bcd4;
+  outline-offset: -2px;
+}
+/* Scan mode: rows are hover-preview only, clicks are no-ops. The
+   cursor cue + slightly altered hover background make the mode
+   distinct from the default click-to-pin mode. */
+.ed-seq-order-list.is-scanning .ed-seq-order-row {
+  cursor: crosshair !important;
+}
+/* Drag-to-reorder feedback — matches the convention used by
+   .ed-line-row / .ed-group-row / .ed-behavior-block in the side
+   panel: dragged row dims, target row shows an accent insertion
+   bar on the edge nearest the drop point. The bar (not a tinted
+   row) reads as "the drop will land in THIS gap." */
+.ed-seq-order-row.ed-seq-order-dragging { opacity: 0.45; }
+.ed-seq-order-row.ed-drop-above { box-shadow: inset 0 3px 0 0 var(--accent); }
+.ed-seq-order-row.ed-drop-below { box-shadow: inset 0 -3px 0 0 var(--accent); }
+/* Sub-toolbar that sits under the modal header so state buttons get
+   their own row. Keeps the title on one line and gives the buttons
+   the standard project geometry instead of squeezing them between
+   the h3 and the × close button. */
+.ed-seq-order-headtools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem 0.5rem;
+  border-bottom: 1px solid #3a3a3a;
+}
+/* Width hint so the label swap "Scan fragments" ↔ "Stop scanning"
+   doesn't shift surrounding geometry. The shared
+   `.ed-overview-alldetails-btn` rule already provides the outline-
+   always + dark-fill look that defines the project state-button
+   convention; we just lock min-width here. */
+.ed-seq-order-scan-btn { min-width: 9rem; }
+
 .ed-settings-body { padding: 0.75rem 0.9rem; }
 .ed-setting-row {
   display: flex;

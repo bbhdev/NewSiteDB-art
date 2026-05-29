@@ -894,13 +894,50 @@
       // its sub-stroke reveal effect — acceptable tradeoff; the
       // combination is unusual, and pathFollow needs path geometry.
       const wantsSeq = lineWantsSequentialDrawIn(line) && !needAsGuide;
-      const subDs    = wantsSeq ? splitDOnM(line.d) : null;
+      const subDsRaw = wantsSeq ? splitDOnM(line.d) : null;
+      // v0.8.310: master.seqOrder permutes the natural M-order before
+      // we build children + slices. `seqOrder` lives on the master and
+      // is inlined onto every instance by deco_resolve_instance, so we
+      // read it directly from `line`. Must be a permutation of
+      // [0..N-1]; anything else falls back to the natural order so
+      // stale / partial data never blocks rendering.
+      let subDs = subDsRaw;
+      if (subDsRaw && subDsRaw.length > 1 && Array.isArray(line.seqOrder)
+          && line.seqOrder.length === subDsRaw.length) {
+        const seen = new Array(subDsRaw.length).fill(false);
+        let valid = true;
+        for (let i = 0; i < line.seqOrder.length; i++) {
+          const idx = line.seqOrder[i];
+          if (typeof idx !== 'number' || idx < 0 || idx >= subDsRaw.length || seen[idx]) {
+            valid = false; break;
+          }
+          seen[idx] = true;
+        }
+        if (valid) {
+          subDs = line.seqOrder.map(function (idx) { return subDsRaw[idx]; });
+        }
+      }
       const useGroup = subDs && subDs.length > 1;
       if (useGroup) {
         p = document.createElementNS(SVG_NS, 'g');
         subDs.forEach(function (sd) {
           const child = document.createElementNS(SVG_NS, 'path');
           child.setAttribute('d', sd);
+          // v0.8.304: dash machinery in NATIVE path-length units —
+          // no `pathLength="1"`. Browsers don't always honour a
+          // post-attach pathLength change at first composite (we
+          // chased this for several rounds: bits visible w/o
+          // devtools, gone with it, fragment #1 visibly "erased
+          // and redrawn" the moment writeAt first touched it). By
+          // using a dasharray larger than any practical path
+          // length, the "draw" portion covers the entire path
+          // regardless of L, and `dashoffset = L` hides it. Once
+          // we know each child's actual L (via getTotalLength
+          // below), writeAt drives `dashoffset = L * (1 - reveal
+          // in slice)` — works in native units, no normalization
+          // needed, browser cannot get it wrong.
+          child.setAttribute('stroke-dasharray', '99999 99999');
+          child.setAttribute('stroke-dashoffset', '99999');
           p.appendChild(child);
         });
       } else {
@@ -923,6 +960,22 @@
       // Mirrors the editor fix in dev-draw.js.
       if (width != null) p.style.strokeWidth = width;
       if (line.linejoin) p.style.strokeLinejoin = line.linejoin;
+      // v0.8.304: when p is a <g> (sequential drawIn), style on the
+      // wrapper is INHERITED by child <path>s — but the descendant
+      // CSS rule `#lines-layer path { stroke: var(--line-stroke);
+      // fill: none; … }` applies DIRECTLY to each child and wins
+      // over the inherited style. Symptom: drawing renders in the
+      // CSS default colour, not the authored colour, in sequential
+      // mode. Fix: mirror the style onto each child element so the
+      // direct style beats the descendant CSS rule.
+      if (useGroup) {
+        const kids = p.childNodes;
+        for (let ki = 0; ki < kids.length; ki++) {
+          if (stroke)        kids[ki].style.stroke      = stroke;
+          if (width != null) kids[ki].style.strokeWidth = width;
+          if (line.linejoin) kids[ki].style.strokeLinejoin = line.linejoin;
+        }
+      }
       // Fill:
       //   - textBlock (v0.8.228) reads line.fill (independent of
       //     stroke). Unset → fill="none". The fill picker writes
@@ -937,6 +990,18 @@
       } else {
         const wantsFill = line.filled !== undefined ? !!line.filled : !!line.closed;
         if (wantsFill && stroke) p.style.fill = stroke;
+      }
+      // v0.8.304: same CSS-specificity workaround for fill — mirror
+      // the resolved fill onto each child so the descendant rule
+      // doesn't override it. Default unset → 'none' (matches the CSS
+      // default, but stated explicitly so wantsFill = false still
+      // wins over any future inherited fill).
+      if (useGroup) {
+        const fillStr = (p.style.fill && p.style.fill !== '') ? p.style.fill : 'none';
+        const kids = p.childNodes;
+        for (let ki = 0; ki < kids.length; ki++) {
+          kids[ki].style.fill = fillStr;
+        }
       }
       p.dataset.lineId  = line.id;
       p.dataset.groupId = line.groupId || '';
@@ -978,7 +1043,7 @@
           const start = cum / total;
           cum += lengths[i];
           const end   = cum / total;
-          subSlices.push({ el: children[i], start: start, end: end });
+          subSlices.push({ el: children[i], start: start, end: end, length: lengths[i] });
         }
         p._subSlices = subSlices;
       }
@@ -2477,7 +2542,20 @@
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (!b.drawIn) continue;
-            if (!isBlockActive(i, scrollP, nowSec)) continue;
+            // v0.8.309: for scroll-driven drawIn, skip the
+            // isBlockActive gate. blockProg already clamps bp to 0
+            // below the range and to 1 above it (sticky) / 0 above it
+            // (windowed), so dir × (1 − bp) emits the correct
+            // hidden / visible end-state at every scrollP. Gating on
+            // isBlockActive caused dashoffset to freeze at the LAST
+            // in-range frame's value when scroll crossed out of the
+            // range — and that value depended on scroll velocity vs
+            // rAF timing, so the residual remnant size varied
+            // run-to-run. Time-driven blocks still gate (their bp
+            // isn't meaningful pre-activation).
+            const isScroll = (b.duration && b.duration.mode === 'scroll')
+                          || !(b.duration && b.duration.mode);
+            if (!isScroll && !isBlockActive(i, scrollP, nowSec)) continue;
             const bp = bps[i];
             const dir = b.drawInDirection === 'reverse' ? -1 : 1;
             drawInOffset = dir * (1 - bp);
@@ -2590,11 +2668,35 @@
         // hidden (offset=1, forward semantics) — sequential mode in
         // Slice 1 ignores drawInDirection.
         if (pathEl._subSlices) {
+          // v0.8.294: child attributes are pre-set at creation time
+          // (see render branch above), so this is just a re-stamp.
+          // Kept for the diagMode → '0' branch (grid view = fully
+          // visible to match the editor canvas).
+          // v0.8.304: dash math in native path-length units —
+          // pathLength="1" was unreliable at first paint (browsers
+          // didn't always honour it before the first composite). Use
+          // a huge dasharray so the "draw" run covers any practical
+          // path length, then place the start of the path inside the
+          // gap (hidden) or inside the draw run (visible).
+          //
+          // v0.8.306: dashoffset math fix. With dasharray "BIG BIG",
+          // position 0 of the path lands at pattern position
+          // `dashoffset` — so to fully hide we need dashoffset = BIG
+          // (path starts at the draw/gap boundary), and to fully
+          // reveal a path of length L we need dashoffset = BIG − L
+          // (path covers the last L of the draw run). Partial reveal
+          // r ∈ [0,1] of length L: dashoffset = BIG − r·L. The
+          // previous formula used dashoffset = sp.length, which fell
+          // inside the draw run for any practical L < BIG and showed
+          // the entire path. (`off` here is fraction-HIDDEN, 1 = fully
+          // hidden, 0 = fully visible.)
           for (let i = 0; i < pathEl._subSlices.length; i++) {
-            const el = pathEl._subSlices[i].el;
-            el.setAttribute('pathLength',       '1');
-            el.setAttribute('stroke-dasharray', '1 1');
-            el.setAttribute('stroke-dashoffset', diagMode ? '0' : '1');
+            const sp = pathEl._subSlices[i];
+            sp.el.setAttribute('stroke-dasharray', '99999 99999');
+            sp.el.setAttribute(
+              'stroke-dashoffset',
+              diagMode ? String(99999 - sp.length) : '99999'
+            );
           }
         } else {
           pathEl.setAttribute('pathLength',       '1');
@@ -2637,8 +2739,11 @@
             // (offset=1, forward semantics). Parallel mode resets the
             // single dispatch path to its initial dash direction.
             if (pathEl._subSlices) {
+              // v0.8.306: hidden state = dashoffset BIG so the path
+              // starts at the draw/gap boundary and runs entirely
+              // into the gap. See init-paint comment for the math.
               for (let i = 0; i < pathEl._subSlices.length; i++) {
-                pathEl._subSlices[i].el.setAttribute('stroke-dashoffset', '1');
+                pathEl._subSlices[i].el.setAttribute('stroke-dashoffset', '99999');
               }
             } else {
               pathEl.setAttribute('stroke-dashoffset', String(initialDashDir));
@@ -2764,16 +2869,35 @@
             // slice (drawInDirection ignored); revisit when reverse
             // semantics for sequence are nailed down.
             if (pathEl._subSlices) {
+              // v0.8.308: write dashoffset directly with explicit
+              // endpoint snaps. The previous off-then-multiply
+              // formulation left a sub-pixel visible run at the start
+              // of the first subSlice when reverse-scroll landed
+              // `reveal` just above 0 (e.g. 1e-9 from a fp
+              // round-trip): the `reveal <= sp.start` test failed by
+              // a hair, the partial branch produced dashoffset = BIG
+              // − ε, and a single visible pixel remained at the
+              // path's first point. Snapping with a small EPS handles
+              // both endpoints (start AND end) for free, and writing
+              // the literal BIG / BIG−L for snapped cases avoids any
+              // residual fp drift from BIG − L + off·L.
               const reveal = 1 - Math.abs(t.drawInOffset);
               const slices = pathEl._subSlices;
+              const EPS = 1e-6;
               for (let si = 0; si < slices.length; si++) {
                 const sp = slices[si];
-                let off;
-                if (reveal <= sp.start)      off = 1;
-                else if (reveal >= sp.end)   off = 0;
-                else if (sp.end > sp.start)  off = 1 - (reveal - sp.start) / (sp.end - sp.start);
-                else                         off = 1;
-                sp.el.setAttribute('stroke-dashoffset', String(off));
+                let dashoff;
+                if (reveal <= sp.start + EPS) {
+                  dashoff = 99999;                       // fully hidden
+                } else if (reveal >= sp.end - EPS) {
+                  dashoff = 99999 - sp.length;           // fully visible
+                } else if (sp.end > sp.start) {
+                  const localReveal = (reveal - sp.start) / (sp.end - sp.start);
+                  dashoff = 99999 - sp.length * localReveal;
+                } else {
+                  dashoff = 99999;
+                }
+                sp.el.setAttribute('stroke-dashoffset', String(dashoff));
               }
             } else {
               pathEl.setAttribute('stroke-dashoffset', String(t.drawInOffset));
@@ -3140,12 +3264,27 @@
         // so 0.30 and 0.301 merge into one group on screen.
         const key = m.edge + '|' + m.frac.toFixed(2);
         if (!groupMap[key]) {
-          groupMap[key] = { edge: m.edge, frac: m.frac, items: [] };
+          groupMap[key] = { edge: m.edge, frac: m.frac, items: [], seen: {} };
         }
+        // v0.8.299: dedupe by object name within a group. One object
+        // can carry several scroll-range behaviors that share the
+        // same edge fraction (e.g. two distinct effects both starting
+        // at 0.05); each behavior contributes a marker, but the
+        // OBJECT-level display ("which objects fire here") should
+        // list it once.
+        if (groupMap[key].seen[m.name]) return;
+        groupMap[key].seen[m.name] = true;
         groupMap[key].items.push({ name: m.name, color: m.color });
       });
       const groups = Object.keys(groupMap).map(function (k) { return groupMap[k]; });
       groups.sort(function (a, b) { return a.frac - b.frac; });
+      // v0.8.296: per-BAND fixed width. Each color slice inside a
+      // label is BAND_W pixels regardless of how many slices the
+      // label has. So a solo label is BAND_W wide; a label merging
+      // 4 objects is 4 · BAND_W wide. No squishing, no cap. The
+      // total stripe size growing with N is intentional — there's
+      // plenty of horizontal room on the right edge.
+      const BAND_W = 12;
 
       const LABEL_H = 22;
       const occupancy = {};
@@ -3184,29 +3323,32 @@
           'border-radius:3px;' +
           'pointer-events:none;white-space:nowrap;' +
           'display:flex;align-items:stretch;overflow:hidden;';
+        // v0.8.297: stripe is a flex row of N fixed-width band divs
+        // (was: a single div with a horizontal CSS gradient). The
+        // gradient produced visually unequal slices because gradient
+        // stops at the same percentage can render with sub-pixel
+        // asymmetry, and the label's 3px border-radius clipped the
+        // leftmost band further. Sibling divs with `flex:0 0 BAND_W`
+        // each guarantee exact pixel-equal bands across all labels.
+        // v0.8.298: 1px white gutter between adjacent bands so that
+        // two items sharing a color don't visually merge into one
+        // wider band. The stripe's own background is white; flex
+        // `gap:1px` lets it show through between children.
+        // v0.8.300: 1px white padding-right so the stripe's white
+        // background also shows AFTER the final band, mirroring the
+        // gutter between bands. This makes the boundary between the
+        // last color patch and the dark text label match the inter-
+        // band hairlines — consistent visual rhythm.
         const stripe = document.createElement('div');
-        let stripeBg;
-        // v0.8.254: bands run horizontally (left-to-right) inside the
-        // stripe column instead of stacked, so a big merge (e.g. 8
-        // objects) still gives each color a visible slice. The stripe
-        // also widens with N so per-band width stays usable: 10px solo,
-        // +6px per extra item, capped at 40px (≈ 5px per band at N=8).
-        const stripeW = Math.min(40, Math.max(10, N * 6 + 4));
-        if (N === 1) {
-          stripeBg = g.items[0].color;
-        } else {
-          // Horizontal gradient with crisp band edges (hard stops at
-          // band boundaries) so each color reads as its own slice.
-          const stops = [];
-          g.items.forEach(function (it, i) {
-            const a = (i / N) * 100;
-            const b = ((i + 1) / N) * 100;
-            stops.push(it.color + ' ' + a + '%', it.color + ' ' + b + '%');
-          });
-          stripeBg = 'linear-gradient(to right, ' + stops.join(', ') + ')';
-        }
         stripe.style.cssText =
-          'flex:0 0 ' + stripeW + 'px;background:' + stripeBg + ';';
+          'flex:0 0 auto;display:flex;gap:1px;background:#fff;' +
+          'padding-right:1px;';
+        g.items.forEach(function (it) {
+          const band = document.createElement('div');
+          band.style.cssText =
+            'flex:0 0 ' + BAND_W + 'px;background:' + it.color + ';';
+          stripe.appendChild(band);
+        });
         lbl.appendChild(stripe);
         const text = document.createElement('div');
         text.style.cssText = 'padding:2px 7px;';

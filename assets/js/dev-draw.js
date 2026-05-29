@@ -1546,6 +1546,620 @@
     });
   }
 
+  // v0.8.310 — Sequential drawIn fragment-order editor.
+  //
+  // Split a master's d on each capital-M into independent subpath
+  // strings (mirror of splitDOnM in app.js). Used by the order modal
+  // and the badge overlay. Lowercase m is left as-is; in practice the
+  // editor's serialiser emits only uppercase M.
+  function splitMasterDOnM(d) {
+    if (typeof d !== 'string' || !d) return [];
+    const parts = d.split(/(?=M)/);
+    const out = [];
+    for (let i = 0; i < parts.length; i++) {
+      const s = parts[i].trim();
+      if (s.length > 0) out.push(s);
+    }
+    return out;
+  }
+
+  // Validate that `arr` is a permutation of [0..n-1].
+  function isValidPermutation(arr, n) {
+    if (!Array.isArray(arr) || arr.length !== n) return false;
+    const seen = new Array(n).fill(false);
+    for (let i = 0; i < n; i++) {
+      const v = arr[i];
+      if (typeof v !== 'number' || v < 0 || v >= n || seen[v]) return false;
+      seen[v] = true;
+    }
+    return true;
+  }
+
+  // Resolve the master's effective draw order. Returns an array of
+  // length n containing a permutation of [0..n-1]. Falls back to
+  // natural [0,1,…,n-1] when seqOrder is missing or invalid.
+  function effectiveSeqOrder(master, n) {
+    if (master && isValidPermutation(master.seqOrder, n)) {
+      return master.seqOrder.slice();
+    }
+    const nat = [];
+    for (let i = 0; i < n; i++) nat.push(i);
+    return nat;
+  }
+
+  // v0.8.312 — Sequential drawIn order-editor canvas overlay.
+  //
+  // Replaces the v0.8.310 badges-only mount. While the modal is open,
+  // we take over the canvas representation of the anchor line:
+  //   - The original line element is hidden (visibility: hidden, kept
+  //     in DOM so its transform / bbox stay queryable).
+  //   - One overlay <path> per fragment is rendered in accent color,
+  //     all matching the line's natural stroke width and transform.
+  //   - One <rect> is drawn around the line's bbox, expanded outward
+  //     by EXTEND user units, 4px accent stroke. This replaces the
+  //     selection handles as the "you're editing this object" cue.
+  //   - Numbered badges at each fragment's start point reflect the
+  //     working order (callback so live drags update without remount).
+  //   - One fragment may be "highlighted" — that fragment's path
+  //     switches from accent to cyan, so the author can identify
+  //     which fragment corresponds to which row in the modal.
+  //
+  // Returns { repaint, highlight(naturalFragIdx|null), destroy }.
+  // The modal calls `repaint` after every row drop, `highlight` from
+  // row click + scan-mode hover, and `destroy` on close.
+  let seqOrderOverlay = null;
+  const SEQ_ACCENT = '#e76f00';
+  const SEQ_HIGHLIGHT = '#00bcd4';
+  const SEQ_BBOX_EXTEND = 20;         // user units beyond the bbox
+  const SEQ_BBOX_STROKE = 4;          // px (vector-effect: non-scaling)
+  const SEQ_BBOX_COLOR  = '#ffffff';  // bbox outline — white reads
+
+  function mountSeqOrderOverlay(master, anchorLineId, getOrder) {
+    if (seqOrderOverlay && seqOrderOverlay.destroy) seqOrderOverlay.destroy();
+    // Split the ANCHOR LINE's d, not the master's. A line carries its
+    // own `d` which `shiftLineBy` rewrites when the instance gets
+    // moved — so master.d and line.d diverge whenever an instance has
+    // been translated away from the master origin. The visible anchor
+    // renders from line.d, so for the overlay to land on top of it
+    // (and the bbox derived from anchorEl.getBBox()), we must split
+    // the same source. seqOrder still applies (it's indexed by
+    // fragment ordinal, not by absolute coords).
+    const anchorLineForSplit = anchorLineId
+      ? state.lines.find(function (ln) { return ln.id === anchorLineId; })
+      : null;
+    const splitD = (anchorLineForSplit && anchorLineForSplit.d) || master.d;
+    const subDs = splitMasterDOnM(splitD);
+    const n = subDs.length;
+    if (n < 1) return null;
+
+    // Find the anchor line element — there may be several elements
+    // sharing the same data-line-id (visible path, hit target, label
+    // group). We want the path: it has the `d` and the CSS transform.
+    // For hiding we'll dim ALL of them.
+    const anchorMatches = anchorLineId
+      ? Array.from(linesG.querySelectorAll('[data-line-id="' + CSS.escape(anchorLineId) + '"]'))
+      : [];
+    let anchorEl = null;
+    for (let i = 0; i < anchorMatches.length; i++) {
+      if (anchorMatches[i].tagName && anchorMatches[i].tagName.toLowerCase() === 'path') {
+        anchorEl = anchorMatches[i]; break;
+      }
+    }
+    if (!anchorEl && anchorMatches.length) anchorEl = anchorMatches[0];
+
+    // Stroke width: try to read off the anchor or fall back to the
+    // master's default. Keeps overlay paths visually consistent with
+    // what the author was just looking at.
+    let strokeW = null;
+    if (anchorEl) {
+      const sw = anchorEl.style.strokeWidth || anchorEl.getAttribute('stroke-width');
+      if (sw) strokeW = sw;
+    }
+    if (!strokeW) strokeW = (master.width != null) ? String(master.width) : '2';
+
+    // Hide every element tagged with this line id (path, hit, label).
+    // Track previous values so destroy() can restore them.
+    const savedHide = [];
+    for (let i = 0; i < anchorMatches.length; i++) {
+      const el = anchorMatches[i];
+      savedHide.push({ el: el, opacity: el.style.opacity, display: el.style.display });
+      el.style.opacity = '0';
+    }
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('id', 'seq-order-overlay');
+    g.style.pointerEvents = 'none';
+    // Mirror the anchor path's CSS transform stack so the overlay
+    // sits exactly on top of where the (now hidden) line was. The
+    // path's positioning comes from style.transform + transformBox +
+    // transformOrigin (set per-line in the render pipeline), NOT from
+    // the SVG `transform` attribute. Copying just that attribute was
+    // why v0.8.312 rendered the overlay at the wrong location.
+    if (anchorEl) {
+      g.style.transform       = anchorEl.style.transform       || '';
+      g.style.transformBox    = anchorEl.style.transformBox    || '';
+      g.style.transformOrigin = anchorEl.style.transformOrigin || '';
+    }
+
+    // BBox rect — placed first so it sits behind the fragment paths.
+    // Inline `style.stroke` to defeat the `#lines-layer path { stroke:
+    // var(--line-stroke) }` descendant rule. (Rect isn't a path so
+    // that specific selector wouldn't hit it, but we follow the same
+    // discipline for safety against future rules.)
+    if (anchorEl && typeof anchorEl.getBBox === 'function') {
+      try {
+        const bb = anchorEl.getBBox();
+        const bbRect = document.createElementNS(SVG_NS, 'rect');
+        bbRect.setAttribute('x', String(bb.x - SEQ_BBOX_EXTEND));
+        bbRect.setAttribute('y', String(bb.y - SEQ_BBOX_EXTEND));
+        bbRect.setAttribute('width',  String(bb.width  + 2 * SEQ_BBOX_EXTEND));
+        bbRect.setAttribute('height', String(bb.height + 2 * SEQ_BBOX_EXTEND));
+        bbRect.setAttribute('vector-effect', 'non-scaling-stroke');
+        // Solid black fill behind the drawing — masks out neighbouring
+        // objects so the author can see this drawing in isolation
+        // without the rest of the canvas crowding it. The fragment
+        // paths are appended AFTER the rect inside `g`, so SVG paint
+        // order naturally places them on top.
+        bbRect.style.fill   = '#000';
+        bbRect.style.stroke = SEQ_BBOX_COLOR;
+        bbRect.style.strokeWidth = String(SEQ_BBOX_STROKE);
+        g.appendChild(bbRect);
+      } catch (e) { /* no bbox available */ }
+    }
+
+    // Fragment paths — one per subpath, indexed by NATURAL fragment
+    // index (0..n-1), so highlight(fragIdx) maps directly to
+    // fragPaths[fragIdx]. Stroke/fill set via inline style: the
+    // global `#lines-layer path { stroke: var(--line-stroke); fill:
+    // none }` rule beats SVG presentation attributes via CSS
+    // specificity, so attribute-only colouring would render white.
+    // (See "CSS descendant selectors vs wrapper-based rendering" in
+    // ~/.claude/CLAUDE.md — same trap, identical fix.)
+    const fragPaths = [];
+    for (let i = 0; i < n; i++) {
+      const fp = document.createElementNS(SVG_NS, 'path');
+      fp.setAttribute('d', subDs[i]);
+      fp.setAttribute('vector-effect', 'non-scaling-stroke');
+      fp.style.fill            = 'none';
+      fp.style.stroke          = SEQ_ACCENT;
+      fp.style.strokeWidth     = strokeW;
+      fp.style.strokeLinejoin  = 'round';
+      fp.style.strokeLinecap   = 'round';
+      g.appendChild(fp);
+      fragPaths.push(fp);
+    }
+
+    function repaint() {
+      // No badges in v0.8.313 — user feedback: numbers on canvas
+      // hinder viewing. Order identification is via row click + scan
+      // mode in the modal. Function kept as a no-op so drag-end
+      // handlers calling overlay.repaint() don't need to branch.
+    }
+
+    function highlight(fragIdx) {
+      for (let i = 0; i < fragPaths.length; i++) {
+        // Inline style so we beat the `#lines-layer path` CSS rule;
+        // setAttribute('stroke', ...) would be silently overridden.
+        fragPaths[i].style.stroke = (i === fragIdx) ? SEQ_HIGHLIGHT : SEQ_ACCENT;
+      }
+    }
+
+    // Mount inside linesG (anchor's parent) so the overlay shares
+    // every ancestor transform (zoom/pan / class group). The g's own
+    // style.transform mirrors the anchor path's per-line transform.
+    (anchorEl && anchorEl.parentNode ? anchorEl.parentNode : linesG).appendChild(g);
+
+    const api = {
+      repaint: repaint,
+      highlight: highlight,
+      destroy: function () {
+        if (g.parentNode) g.parentNode.removeChild(g);
+        // Restore prior opacity / display on every anchor-tagged
+        // element we dimmed.
+        for (let i = 0; i < savedHide.length; i++) {
+          savedHide[i].el.style.opacity = savedHide[i].opacity;
+          savedHide[i].el.style.display = savedHide[i].display;
+        }
+        if (seqOrderOverlay === api) seqOrderOverlay = null;
+      }
+    };
+    seqOrderOverlay = api;
+    return api;
+  }
+
+  // The modal itself.
+  function showSeqOrderModal(masterId, anchorLineId) {
+    const master = state.masters.find(function (m) { return m.id === masterId; });
+    if (!master) return;
+    const subDs = splitMasterDOnM(master.d);
+    const n = subDs.length;
+    if (n < 2) return;
+
+    // Working state: a copy of the effective order. Save commits it
+    // to the master; Cancel / Esc / × discards.
+    let workingOrder = effectiveSeqOrder(master, n);
+
+    // v0.8.311: transparent overlay, no dim backdrop, no flex
+    // centering — the canvas needs to stay visible behind the modal
+    // so the author can match badges to fragments. pointer-events
+    // none on the overlay lets canvas clicks through; auto on the
+    // modal keeps the modal interactive.
+    const backdrop = document.createElement('div');
+    backdrop.className = 'ed-modal-overlay ed-seq-order-overlay';
+    // v0.8.314: visually transparent (no dim/blur) so the canvas stays
+    // fully readable behind the modal — but pointer-events:auto so the
+    // backdrop swallows every click that misses the modal. Earlier
+    // versions used pointer-events:none and let clicks fall through to
+    // the canvas, which produced the "edit panel open but everything
+    // else acts in normal state" inconsistency.
+    backdrop.style.background = 'transparent';
+    backdrop.style.display = 'block';
+    backdrop.style.pointerEvents = 'auto';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal ed-seq-order-modal';
+    modal.style.pointerEvents = 'auto';
+    modal.style.position = 'fixed';
+    // Start docked near the right edge so the canvas (typically
+    // left-of-center under the inspector panel) stays uncovered. The
+    // user can drag from anywhere on the header to move it.
+    modal.style.top = '6rem';
+    modal.style.right = '1rem';
+    modal.style.maxWidth = '22rem';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    head.style.cursor = 'move';
+    head.title = 'Drag to move';
+    const t = document.createElement('h3');
+    t.textContent = 'Fragment order — ' + (master.name || 'master');
+    head.appendChild(t);
+    // "Scan fragments" toggle — STATE button (outline-always-visible,
+    // label swaps to the action it would perform on next click). Sits
+    // on a row of its own under the title so the title can read on a
+    // single line and the button has the standard project-state-button
+    // proportions instead of being squeezed into the header row.
+    // Class name matches the established convention
+    // (`ed-overview-alldetails-btn`) used by "All details" / "Diff"
+    // and others; we add `ed-seq-order-scan-btn` only as a hook for
+    // any future per-button tweaks.
+    const scanBtn = document.createElement('button');
+    scanBtn.type = 'button';
+    scanBtn.className = 'ed-overview-alldetails-btn ed-seq-order-scan-btn';
+    scanBtn.textContent = 'Scan fragments';
+    scanBtn.title = 'Hover rows to preview which fragment they represent';
+    let scanning = false;
+    scanBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      scanning = !scanning;
+      scanBtn.classList.toggle('is-active', scanning);
+      scanBtn.textContent = scanning ? 'Stop scanning' : 'Scan fragments';
+      // Scan and click-to-pin are mutually exclusive. Entering scan
+      // mode discards any pinned selection so the hover preview is
+      // the single source of truth. Leaving scan mode falls back to
+      // "nothing pinned" (user re-clicks a row if they want to pin).
+      clickedFragIdx = null;
+      hoveredFragIdx = null;
+      // Mark the list as scanning so rows can show a "no-click"
+      // affordance and we can short-circuit row click handlers.
+      list.classList.toggle('is-scanning', scanning);
+      applyHighlight();
+    });
+    // mousedown on the button must not start the header drag.
+    scanBtn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close'; x.textContent = '×';
+    x.style.cursor = 'pointer';
+    x.addEventListener('click', cleanup);
+    head.appendChild(x);
+    modal.appendChild(head);
+    // Header sub-toolbar — sits directly under the title row. State
+    // buttons live here so the title stays on a single line and the
+    // buttons inherit the standard project state-button geometry.
+    const headTools = document.createElement('div');
+    headTools.className = 'ed-seq-order-headtools';
+    headTools.appendChild(scanBtn);
+    modal.appendChild(headTools);
+
+    // Highlight state: clickedFragIdx is sticky (set by row click,
+    // toggled off by clicking the same row). hoveredFragIdx is
+    // ephemeral and only matters while scan mode is on. Effective
+    // highlight = hover ?? clicked.
+    let clickedFragIdx = null;
+    let hoveredFragIdx = null;
+    function applyHighlight() {
+      const effective = (scanning && hoveredFragIdx != null)
+        ? hoveredFragIdx
+        : clickedFragIdx;
+      if (overlay && overlay.highlight) overlay.highlight(effective);
+      // Mirror to the row UI: in click-to-pin mode the pinned row
+      // carries .is-highlighted; in scan mode it's the hovered row
+      // (so the author always sees which row drives the canvas
+      // highlight, regardless of mode).
+      const rowFragIdx = (scanning && hoveredFragIdx != null)
+        ? hoveredFragIdx
+        : clickedFragIdx;
+      list.querySelectorAll('li').forEach(function (li) {
+        const fi = parseInt(li.dataset.fragIdx, 10);
+        li.classList.toggle('is-highlighted', fi === rowFragIdx);
+      });
+    }
+
+    // Drag-to-move: mousedown on header (not on the × button) starts
+    // a drag that updates modal left/top. Touch-friendly via pointer
+    // events. Clear `right` once we start dragging so left wins.
+    head.addEventListener('mousedown', function (e) {
+      if (e.target === x) return; // close button click — don't start drag
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const rect = modal.getBoundingClientRect();
+      modal.style.right = 'auto';
+      modal.style.left  = rect.left + 'px';
+      modal.style.top   = rect.top  + 'px';
+      e.preventDefault();
+      function onMove(ev) {
+        const nx = rect.left + (ev.clientX - startX);
+        const ny = rect.top  + (ev.clientY - startY);
+        // Clamp to viewport so the modal can't be lost off-screen.
+        const maxX = window.innerWidth  - 40;
+        const maxY = window.innerHeight - 40;
+        modal.style.left = Math.max(-rect.width + 60, Math.min(maxX, nx)) + 'px';
+        modal.style.top  = Math.max(0, Math.min(maxY, ny)) + 'px';
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body';
+    const hint = document.createElement('p');
+    hint.style.margin = '0 0 0.5rem';
+    hint.style.color = '#aaa';
+    hint.style.fontSize = '0.85em';
+    hint.textContent = 'Drag rows to set the order strokes are drawn in. '
+      + 'Numbered badges on the canvas show the current order. Position #1 draws first.';
+    body.appendChild(hint);
+
+    const list = document.createElement('ol');
+    list.className = 'ed-seq-order-list';
+    list.style.listStyle = 'none';
+    list.style.padding   = '0';
+    list.style.margin    = '0';
+    body.appendChild(list);
+    modal.appendChild(body);
+
+    // Build rows. Each row carries data-frag-idx (the natural M-index
+    // it represents). Row order in the DOM is the working order.
+    function buildRows() {
+      list.innerHTML = '';
+      for (let position = 0; position < workingOrder.length; position++) {
+        const fragIdx = workingOrder[position];
+        const row = document.createElement('li');
+        row.className = 'ed-seq-order-row';
+        row.draggable = true;
+        row.dataset.fragIdx = String(fragIdx);
+        // v0.8.311: rows take the same dark palette as the rest of
+        // the ed-modal — #1a1a1a panel-style background with a #444
+        // border, light text. Matches .ed-clone-groups / panel
+        // controls elsewhere in the editor.
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '0.5rem';
+        row.style.padding = '0.4rem 0.6rem';
+        row.style.margin = '0.2rem 0';
+        row.style.border = '1px solid #444';
+        row.style.borderRadius = '4px';
+        row.style.background = '#1a1a1a';
+        row.style.color = '#e4e4e4';
+        row.style.cursor = 'grab';
+        row.style.userSelect = 'none';
+
+        const handle = document.createElement('span');
+        handle.textContent = '⋮⋮';
+        handle.style.color = '#888';
+        handle.style.fontSize = '1.1em';
+        handle.style.cursor = 'grab';
+        row.appendChild(handle);
+
+        const posSpan = document.createElement('span');
+        posSpan.className = 'ed-seq-order-pos';
+        posSpan.textContent = '#' + (position + 1);
+        posSpan.style.fontWeight = '700';
+        posSpan.style.color = 'var(--accent)';
+        posSpan.style.minWidth = '2.2em';
+        row.appendChild(posSpan);
+
+        const label = document.createElement('span');
+        label.textContent = 'fragment ' + String.fromCharCode(65 + fragIdx);
+        label.style.color = '#c0c0c0';
+        row.appendChild(label);
+
+        // Click → toggle sticky highlight for this fragment.
+        // Suppressed in scan mode: hover is the highlight source, so
+        // pinning would conflict with the preview.
+        row.addEventListener('click', function (e) {
+          if (scanning) return;
+          // Ignore clicks that initiated a drag (handle area).
+          if (e.target === handle) return;
+          clickedFragIdx = (clickedFragIdx === fragIdx) ? null : fragIdx;
+          applyHighlight();
+        });
+        // Scan mode: hovering a row previews its fragment.
+        row.addEventListener('mouseenter', function () {
+          if (!scanning) return;
+          hoveredFragIdx = fragIdx;
+          applyHighlight();
+        });
+        row.addEventListener('mouseleave', function () {
+          if (!scanning) return;
+          hoveredFragIdx = null;
+          applyHighlight();
+        });
+
+        // Drag-to-reorder — follows the project standard idiom shared
+        // by sidebar line rows, group rows, and behavior blocks:
+        //
+        //   • the dragged row dims (ed-seq-order-dragging, opacity .45);
+        //   • hovering any other row shows an accent bar ABOVE or
+        //     BELOW it (ed-drop-above / ed-drop-below) indicating
+        //     exactly where the drop will land — the in-between gap,
+        //     not the row itself;
+        //   • the actual DOM move happens on `drop`, not during
+        //     `dragover`, so the list doesn't reshuffle under the
+        //     pointer mid-gesture.
+        //
+        // Drop on the dragged row itself is a no-op.
+        row.addEventListener('dragstart', function (e) {
+          row.classList.add('ed-seq-order-dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          // The payload's body doesn't matter (we identify the
+          // dragged row by its .ed-seq-order-dragging class) but
+          // dataTransfer must carry SOMETHING for Firefox to keep
+          // the drag alive.
+          e.dataTransfer.setData('text/plain', String(fragIdx));
+        });
+        row.addEventListener('dragend', function () {
+          row.classList.remove('ed-seq-order-dragging');
+          clearDropMarkers();
+        });
+        row.addEventListener('dragover', function (e) {
+          const dragging = list.querySelector('.ed-seq-order-dragging');
+          if (!dragging || dragging === row) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = row.getBoundingClientRect();
+          const above = e.clientY < rect.top + rect.height / 2;
+          // Only mutate classes when the side changes — keeps the
+          // bar from flickering during the same half of a row.
+          if (above) {
+            if (!row.classList.contains('ed-drop-above')) {
+              clearDropMarkers();
+              row.classList.add('ed-drop-above');
+            }
+          } else {
+            if (!row.classList.contains('ed-drop-below')) {
+              clearDropMarkers();
+              row.classList.add('ed-drop-below');
+            }
+          }
+        });
+        row.addEventListener('dragleave', function (e) {
+          // Only clear if the pointer left this row entirely (not
+          // just transitioned to a child element).
+          const r = row.getBoundingClientRect();
+          if (e.clientY < r.top || e.clientY > r.bottom
+              || e.clientX < r.left || e.clientX > r.right) {
+            row.classList.remove('ed-drop-above');
+            row.classList.remove('ed-drop-below');
+          }
+        });
+        row.addEventListener('drop', function (e) {
+          e.preventDefault();
+          const dragging = list.querySelector('.ed-seq-order-dragging');
+          if (!dragging || dragging === row) {
+            clearDropMarkers();
+            return;
+          }
+          if (row.classList.contains('ed-drop-above')) {
+            list.insertBefore(dragging, row);
+          } else {
+            list.insertBefore(dragging, row.nextSibling);
+          }
+          clearDropMarkers();
+          // Rebuild workingOrder + UI from new DOM order.
+          workingOrder = [];
+          list.querySelectorAll('li').forEach(function (li) {
+            workingOrder.push(parseInt(li.dataset.fragIdx, 10));
+          });
+          updatePositionLabels();
+          if (overlay && overlay.repaint) overlay.repaint();
+          applyHighlight();
+        });
+
+        list.appendChild(row);
+      }
+    }
+    function updatePositionLabels() {
+      list.querySelectorAll('li').forEach(function (li, idx) {
+        const ps = li.querySelector('.ed-seq-order-pos');
+        if (ps) ps.textContent = '#' + (idx + 1);
+      });
+    }
+    // Clear any "drop above / below" insertion-bar classes across
+    // all rows. Used by drag handlers to ensure at most one row
+    // carries an insertion bar at any moment.
+    function clearDropMarkers() {
+      list.querySelectorAll('.ed-drop-above, .ed-drop-below').forEach(function (li) {
+        li.classList.remove('ed-drop-above');
+        li.classList.remove('ed-drop-below');
+      });
+    }
+    buildRows();
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'ed-modal-buttons';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', cleanup);
+    btnRow.appendChild(cancel);
+    const save = document.createElement('button');
+    save.className = 'ed-primary';
+    save.textContent = 'Save';
+    save.addEventListener('click', function () {
+      // Recompute one more time from DOM (defensive).
+      const finalOrder = [];
+      list.querySelectorAll('li').forEach(function (li) {
+        finalOrder.push(parseInt(li.dataset.fragIdx, 10));
+      });
+      if (!isValidPermutation(finalOrder, n)) { cleanup(); return; }
+      // Mutate the master in place + snapshot. If the natural order
+      // results, store nothing (clean defaults — don't pollute saves).
+      let isNatural = true;
+      for (let i = 0; i < n; i++) {
+        if (finalOrder[i] !== i) { isNatural = false; break; }
+      }
+      if (isNatural) {
+        delete master.seqOrder;
+      } else {
+        master.seqOrder = finalOrder;
+      }
+      scheduleSnapshot();
+      cleanup();
+    });
+    btnRow.appendChild(save);
+    modal.appendChild(btnRow);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    // Canvas overlay (hides anchor, draws fragment paths + bbox +
+    // badges) lives while the modal is open. Body class drives the
+    // editor-wide inhibition styles (toolbar/sidebar/panels dimmed,
+    // handles hidden).
+    document.body.classList.add('ed-seq-order-editing');
+    const overlay = mountSeqOrderOverlay(master, anchorLineId, function () {
+      return workingOrder;
+    });
+
+    function cleanup() {
+      backdrop.remove();
+      if (overlay && overlay.destroy) overlay.destroy();
+      document.body.classList.remove('ed-seq-order-editing');
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') cleanup();
+    }
+    document.addEventListener('keydown', onKey);
+    // The backdrop is pointer-events:none, so clicks on it won't fire;
+    // dismissal is via × / Cancel / Esc only. (Intentional: keeps the
+    // canvas clickable behind the modal.)
+  }
+
   function showChoiceDialog(opts) {
     return new Promise(function (resolve) {
       const overlay = document.createElement('div');
@@ -6470,24 +7084,12 @@
       state.nudgeStepMM = v;
       try { localStorage.setItem('ed-nudge-step-mm', String(v)); } catch (e) {}
     }));
-    // v0.8.110: floating-panel system launcher (Step 1 stub). Until
-    // real panel types are migrated in subsequent steps, this single
-    // button opens the demo panel so the user can validate drag /
-    // resize / pin / close / per-class persistence end-to-end.
-    const launchRow = document.createElement('div');
-    launchRow.style.marginTop = '0.5rem';
-    launchRow.style.paddingTop = '0.5rem';
-    launchRow.style.borderTop = '1px dashed #3a3a3a';
-    const launchBtn = document.createElement('button');
-    launchBtn.type = 'button';
-    launchBtn.className = 'ed-mini';
-    launchBtn.textContent = '🪟 Demo floating panel';
-    launchBtn.title = 'Open the Step-1 demo panel — validates the floating-panel framework. Drag the header to move, drag the corner to resize, 📌 to pin to the current selection, ✕ to close. Position persists per class.';
-    launchBtn.addEventListener('click', function () {
-      if (window.PanelManager) window.PanelManager.open('demo');
-    });
-    launchRow.appendChild(launchBtn);
-    canvasFieldsEl.appendChild(launchRow);
+    // v0.8.321: removed the v0.8.110 "🪟 Demo floating panel" Step-1
+    // stub. The floating-panel framework it was meant to validate
+    // has long since shipped real panel types (object, block-detail,
+    // overview, …), so the demo launcher had become dead UI in the
+    // sidebar. PanelManager.open('demo') still exists in the
+    // framework if anyone needs it from the console.
   }
 
   /**
@@ -11940,31 +12542,23 @@
       renderGroupsList();
       renderLines();
     }));
-    wrap.appendChild(triggerField('Trigger', g.trigger || '', function (v) {
-      updateGroup(g.id, { trigger: v.trim() === '' ? null : v.trim() });
-    }));
 
-    wrap.appendChild(divider('Appearance'));
-    wrap.appendChild(strokeField('Color', g.defaults.stroke, function (v) {
-      updateGroupDefaults(g.id, { stroke: v });
-      // Cascade: clear line.stroke on every line in this group so
-      // the new default actually paints. silent: true so the
-      // cascade doesn't fire N refusal dialogs in 'one' mode; in
-      // 'one' mode + canonical stroke the silent call just skips
-      // the per-line clear, and lines with explicit strokes keep
-      // them — the user gets the group default for new/un-set
-      // lines only. To force every line to the new color in 'one'
-      // mode, user can switch to 'all' or click each line's color.
-      state.lines
-        .filter(function (l) { return l.groupId === g.id; })
-        .forEach(function (l) { setVisualProp(l.id, 'stroke', null, { silent: true }); });
-      renderLines();
-    }));
-    // "Line width" — distinguishes the stroke width from primitives'
-    // shape width (rect's `w` param uses "Width" as its label).
-    wrap.appendChild(numberField('Line width', g.defaults.width != null ? g.defaults.width : 1, function (v) {
-      updateGroupDefaults(g.id, { width: v });
-    }));
+    // v0.8.319: phase-1 cleanup. The group-level Trigger, Color
+    // (g.defaults.stroke) and Line width (g.defaults.width) fields
+    // have been removed from the side panel — they're redundant now
+    // that a behavior-template object can carry every visual + timing
+    // property a member object would otherwise inherit from a group
+    // default. Groups now expose exactly: Name (structural), Visible
+    // (supersedes per-object visibility, useful for whole-group
+    // toggling), and the Behavior template picker (the mechanism by
+    // which a group conveys any properties at all). Groups with no
+    // template are "static" — name + visibility only.
+    //
+    // The data model still allows g.trigger / g.defaults.stroke /
+    // g.defaults.width to exist (some legacy snapshots may carry
+    // them); they just no longer have an editor UI. A future content
+    // migration can drop them if/when the team wants to retire the
+    // dead fields entirely.
 
     // v0.8.219: Behavior template picker.
     // Lists only objects that are themselves members of this group.
@@ -12015,7 +12609,10 @@
           label: '⚠ ' + g.behaviorTemplateObjectId + ' (not in group)'
         });
       }
-      wrap.appendChild(selectField('Template object', currentVal, options, function (v) {
+      // Label is just "Object" — the divider above already reads
+       // "Behavior template", so prefixing this field with "Template"
+       // again wraps onto two lines for no information gain.
+      wrap.appendChild(selectField('Object', currentVal, options, function (v) {
         updateGroupBehaviorTemplate(g.id, v === '__none__' ? null : v);
       }));
     }
@@ -12025,6 +12622,13 @@
     // rotateOriginX/Y, drawIn, drawInDirection, translateMode are no longer
     // part of the schema — behaviors live entirely on objects (or on the
     // group's behavior-template object, compounded onto members at runtime).
+
+    // Thin separator before the actions block — settings (above) and
+    // group-level actions (duplicate/delete, below) are not directly
+    // related, so the project convention is a hairline divider
+    // between them. Empty-label `divider()` produces the standard
+    // 1px #333 top border + small breathing room used elsewhere.
+    wrap.appendChild(divider(''));
 
     selectionPanel.appendChild(wrap);
 
@@ -12311,6 +12915,30 @@
           selectSiblingsOfMaster(line.masterId);
         });
         host.appendChild(chip);
+      }
+    }
+
+    // v0.8.310: "Edit fragment order" — opens the sequential-drawIn
+    // order modal. Visible whenever the master's d has >1 M-subpath,
+    // independent of sibling count and of whether any block currently
+    // uses sequential drawIn (the author may want to pre-set order
+    // before adding the behavior). Hidden for single-subpath masters
+    // where order is meaningless.
+    if (line.masterId) {
+      const m = state.masters.find(function (x) { return x.id === line.masterId; });
+      if (m && splitMasterDOnM(m.d).length > 1) {
+        // v0.8.311: use ed-primary so the button picks up the project
+        // accent (orange) automatically, like other primary actions.
+        const seqBtn = document.createElement('button');
+        seqBtn.type = 'button';
+        seqBtn.className = 'ed-primary ed-seq-order-btn';
+        seqBtn.textContent = '↕ Edit fragment order';
+        seqBtn.title = 'Reorder the strokes that draw sequentially when drawIn mode is sequential';
+        seqBtn.style.marginBottom = '0.5rem';
+        seqBtn.addEventListener('click', function () {
+          showSeqOrderModal(line.masterId, line.id);
+        });
+        host.appendChild(seqBtn);
       }
     }
 

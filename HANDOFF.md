@@ -167,6 +167,103 @@ its own trigger).
 
 ## Recent architectural decisions and why
 
+### Phase 1 close — v0.9.0 milestone (v0.8.300 → v0.9.0)
+
+Phase 1 is the sequential drawIn feature plus its editor surface, with a
+cleanup pass on the surrounding UI. The v0.9.0 bump marks "phase 1 done";
+no behavioral or schema change vs v0.8.322 — it is purely a milestone marker.
+
+**Sequential drawIn fragment ordering (v0.8.300–0.8.318).** A `master.d`
+that contains multiple `M…` subpaths is now drawable as an ordered sequence
+of fragments rather than one continuous tween. Storage lives on the master
+as `master.seqOrder = [fragIdx, …]` — a permutation of fragment indices
+addressing the natural split of `master.d` on uppercase `M`. Renderer
+splits at draw time, paints each fragment as a child `<path>` inside a
+`<g>` wrapper added under `#lines-layer`, and tweens them in the stored
+order with the standard drawIn dash machinery (dasharray=99999 99999,
+dashoffset = BIG − reveal · L) per fragment.
+
+The CSS-vs-wrapper trap documented in `~/.claude/CLAUDE.md` ("CSS
+descendant selectors vs. wrapper-based rendering") was hit here: setting
+`style.stroke` on the wrapper `<g>` was clobbered by
+`#lines-layer path { stroke: var(--line-stroke) }` matching the child
+paths directly. Fix: write stroke/width as **inline style on each
+fragment path** (not on the group), so direct child CSS doesn't override.
+The same discipline applies to the order-editor overlay (see below) and
+to any future feature that wraps painted children in a styled group.
+
+**Order editor (`mountSeqOrderOverlay` + `showSeqOrderModal`,
+v0.8.312–0.8.318).** Opens from the line's behavior block. Visually:
+- Body gets `ed-seq-order-editing` — toolbar / sidebar / panel host go
+  pointer-events:none + opacity 0.25 + grayscale; `#handles-layer`
+  hidden; `#lines-layer` pointer-events:none. The line being edited
+  remains its real geometry; all OTHER `[data-line-id]` elements are
+  hidden via savedHide (opacity/display) and restored on close.
+- Canvas overlay mounts inside `anchorEl.parentNode` (= linesG) and
+  mirrors the anchor's CSS `style.transform` + `transformBox` +
+  `transformOrigin` so the bbox + fragments register exactly over the
+  real line. Source for the split is `(line && line.d) || master.d` —
+  `line.d` differs from `master.d` once the instance has been moved
+  (`shiftLineBy` rewrites line.d, no transform); using master.d here
+  produces a displaced overlay.
+- bbox uses inline `style.stroke = '#ffffff'` and `style.fill = '#000'`
+  (black backdrop so other content is hidden behind it); fragments use
+  inline `style.stroke = '#e76f00'` (SEQ_ACCENT). No numbered badges
+  (intentionally — user wants the canvas uncluttered).
+- The modal `backdrop` (renamed from `overlay` to free that name) uses
+  `pointerEvents: 'auto'` to block underlying clicks.
+
+Modal layout follows the project's state-button convention:
+- Header `<h3>` is on its own line with the `×` close button.
+- A separate `.ed-seq-order-headtools` sub-toolbar below the header
+  hosts the "Scan fragments" toggle, styled as the standard outline-
+  always / label-swap state button (`ed-overview-alldetails-btn`).
+
+Two highlight modes coexist:
+- **Click** — clicking a list row pins `clickedFragIdx`, outlines the
+  row + colors the fragment.
+- **Scan** — entering scan mode clears `clickedFragIdx` and suppresses
+  row clicks; hovering a row sets `hoveredFragIdx` for transient
+  highlight. Cursor becomes crosshair via
+  `.ed-seq-order-list.is-scanning .ed-seq-order-row`.
+
+Drag-to-reorder uses the project's standard idiom (not bespoke):
+`ed-seq-order-dragging` (opacity 0.45), `ed-drop-above` / `ed-drop-below`
+inset box-shadow bars to indicate the **gap** the drop will land in,
+move happens on `drop` only (not on `dragover`). `clearDropMarkers()`
+helper resets between gestures.
+
+**Group panel slimming (v0.8.319).** Now that a group can carry a
+behavior-template object, the group's own appearance defaults are
+redundant. `renderGroupPanel` keeps only Name, Visible, Behavior
+template; removed Trigger, Appearance divider, Color (g.defaults.stroke),
+Line width (g.defaults.width). Legacy fields are still tolerated in
+data — they're simply not surfaced in the UI. Groups are allowed to
+have no behavior template (no properties) or to have one.
+
+**Snapshot name validation (v0.8.319).** The old regex was ASCII-only
+and rejected common accented characters. Replaced with a multi-check:
+empty / >80 chars / `.` / `..` / leading-dot / contains `..` /
+filesystem-unsafe chars (`\\/:*?"<>|` + control chars) are all
+rejected, then the name must match
+`/^[\p{L}\p{N} _.,'()\[\]\-]+$/u`. Filesystem-traversal safety is
+preserved; Unicode letters and common punctuation are now accepted.
+Applied to both `/dev/draw/library/save` and `/dev/draw/library/load`
+in `site/config/config.php`.
+
+**Misc UI cleanups.**
+- v0.8.320 — hairline divider before the duplicate-group action block
+  in the side panel (project rule: non-directly-related items are
+  separated by the standard thin-line divider).
+- v0.8.321 — removed the leftover "🪟 Demo floating panel" launcher
+  in `renderCanvasPanel` (v0.8.110 dev stub).
+- v0.8.322 — relabel "Template object" → "Object" in the group panel
+  (the divider above the field already says "Behavior template", so
+  the word was redundant and was forcing a wrap). Note: do **not**
+  widen this single field to take advantage of the extra room — the
+  `.ed-field` uniform label/data column width across the panel is
+  sacrosanct; widening one field is bad UI.
+
 ### Why `isBlockActive` instead of `bp <= 0` to gate contribution (v0.8.54, v0.8.67)
 
 When a block has `bp === 0` (legitimate start-of-animation state, like scroll
