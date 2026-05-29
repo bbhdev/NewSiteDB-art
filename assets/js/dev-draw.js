@@ -10233,7 +10233,11 @@
       const cy = anchorY - (16 / z) - r - (6 / z);
       const g = document.createElementNS(SVG_NS, 'g');
       g.setAttribute('class', 'ed-follow-canvas-badge');
-      g.style.pointerEvents = 'none';
+      // v0.8.284: badge is now clickable — click selects the donor so
+      // you can walk the chain by repeatedly clicking each new badge.
+      // Children inherit pointerEvents from the group; cursor hints at
+      // interactivity.
+      g.style.cursor = donor ? 'pointer' : 'default';
       const circ = document.createElementNS(SVG_NS, 'circle');
       circ.setAttribute('cx', cx);
       circ.setAttribute('cy', cy);
@@ -10270,8 +10274,23 @@
       labelText.textContent = donorName;
       g.appendChild(labelText);
       const ttl = document.createElementNS(SVG_NS, 'title');
-      ttl.textContent = 'Follows "' + donorName + '" — inherits its behaviors';
+      ttl.textContent = donor
+        ? 'Follows "' + donorRawName + '" — click to select the donor (walk the chain)'
+        : 'Follows "' + donorRawName + '" — donor missing in this class';
       g.appendChild(ttl);
+      // v0.8.284: click → select donor. Stops propagation so the
+      // canvas's deselect-on-background handler doesn't fire after.
+      if (donor) {
+        g.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (donor.groupId) {
+            state.activeGroupId = donor.groupId;
+            state.openGroupIds[donor.groupId] = true;
+          }
+          selectOnly(donor.id);
+          renderAll();
+        });
+      }
       labelsG.appendChild(g);
     });
   }
