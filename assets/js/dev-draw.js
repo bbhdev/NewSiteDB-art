@@ -16779,7 +16779,26 @@
           const prev = p.lastBoundObjectId || null;
           const nextId = ctx.primarySelectionId || null;
           if (prev && nextId && prev !== nextId) {
-            closeChildrenOf(p.state.id);
+            // v0.8.280: instead of closing block-detail children when
+            // the object panel rebinds, retarget them to the new
+            // object's first behavior block. Keeps the user in the
+            // same editing context across selection changes. If the
+            // new object has no behaviors, fall back to closing the
+            // child (it has nothing to show).
+            const newLine = state.lines.find(function (l) { return l.id === nextId; });
+            const firstBlock = newLine && Array.isArray(newLine.behaviors) && newLine.behaviors[0];
+            const childIds = Object.keys(panels).filter(function (pid) {
+              return panels[pid].state.parentId === p.state.id
+                  && panels[pid].state.type === 'behavior-block';
+            });
+            if (firstBlock && firstBlock.id) {
+              childIds.forEach(function (cid) {
+                panels[cid].state.objectId = nextId;
+                panels[cid].state.blockId  = firstBlock.id;
+              });
+            } else {
+              closeChildrenOf(p.state.id);
+            }
           }
         }
         p.lastBoundObjectId = ctx.primarySelectionId;
