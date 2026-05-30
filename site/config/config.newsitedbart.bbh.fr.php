@@ -100,6 +100,12 @@
 
 return [
     'ready' => function ($kirby) {
+        // Strip PHP fingerprint from EVERY response (not just /dev/draw).
+        // `expose_php = Off` in php.ini would also do this server-wide,
+        // but Infomaniak shared hosting doesn't always honor user overrides;
+        // doing it in PHP guarantees the header is gone for this app.
+        header_remove('X-Powered-By');
+
         $path = $kirby->request()->path()->toString();
         if (str_starts_with($path, 'dev/draw')) {
             if ($kirby->user() === null) {

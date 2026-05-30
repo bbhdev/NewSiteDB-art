@@ -111,6 +111,18 @@ if [ "$SKIP_ICLOUD_CHECK" -ne 1 ]; then
   echo "  ✓ No placeholder stubs found."
 fi
 
+# ── Stage a comment-stripped .htaccess ───────────────────────────────
+# The in-repo .htaccess carries a top-of-file commentary block that is
+# useful for future maintenance but is a complete tech-stack reveal
+# online (mentions Kirby, Infomaniak, the panel surface, etc.). We
+# keep the commented file locally (sole source of truth) and ship a
+# stripped version: all lines starting with `#` removed, blank lines
+# collapsed. Apache's directives are unchanged.
+STAGED_HTACCESS="$(mktemp -t htaccess-deploy.XXXXXX)"
+trap 'rm -f "$STAGED_HTACCESS"' EXIT
+sed -E '/^[[:space:]]*#/d; /^[[:space:]]*$/d' \
+    "$PROJECT_ROOT/.htaccess" > "$STAGED_HTACCESS"
+
 # ── rsync flags ───────────────────────────────────────────────────────
 #  -a  archive (recurse, symlinks, times, perms)
 #  -z  compress over the wire
@@ -120,10 +132,13 @@ fi
 #     the very end, shrinking the window where the live tree is mid-update.
 #  --no-owner --no-group: shared hosting usually forbids chown-by-id.
 #     Remove these if the deploy user owns the tree and you want exact perms.
+#  --exclude=/.htaccess: the in-repo .htaccess is NOT pushed — we send the
+#     stripped version separately after the main rsync.
 COMMON=(
   -az -h -i
   $DELETE --delete-after --delay-updates
   --exclude-from="$EXCLUDE_FILE"
+  --exclude=/.htaccess
   --no-owner --no-group
 )
 
@@ -132,6 +147,7 @@ DEST="$REMOTE_HOST:$REMOTE_PATH/"
 
 echo "▶ DRY RUN   $SRC"
 echo "        →   $DEST   (mirror=${DELETE:-off})"
+echo "        +   .htaccess  (sent separately, comments stripped)"
 echo "─────────────────────────────────────────────────────────────────"
 rsync "${COMMON[@]}" --dry-run "$SRC" "$DEST"
 echo "─────────────────────────────────────────────────────────────────"
@@ -147,4 +163,7 @@ fi
 
 echo "▶ DEPLOYING …"
 rsync "${COMMON[@]}" "$SRC" "$DEST"
+echo "▶ Pushing stripped .htaccess …"
+rsync -az -h -i --no-owner --no-group \
+    "$STAGED_HTACCESS" "$REMOTE_HOST:$REMOTE_PATH/.htaccess"
 echo "✓ Deploy complete."
