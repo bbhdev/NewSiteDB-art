@@ -1710,6 +1710,19 @@ get a real feel for Kirby's content model, then describe one
 concrete page in prose, then let the sub-decisions fall out of
 that page.
 
+**Workflow ordering (separate from architecture).** Phase 1 was
+built first because the project started as an exploration of
+what's possible with animated SVG — feature-driven, not
+production-driven. The natural *authoring* workflow once both
+phases exist is the reverse: **start in Phase 2 thinking content
+and page structure, then move to Phase 1 to make those content
+holders come alive, then back-and-forth** as the design evolves.
+Phase 2 is therefore upstream of Phase 1 on two axes (the
+content-structure axis already noted, AND the authoring workflow
+axis). This will inform UX decisions later — e.g. the natural
+entry point for creating a new page is Phase 2, with Phase 1
+opened from within Phase 2 to populate a specific rectangle.
+
 ### Phase 3 — Safety: auth for the web-hosted editing tools
 
 Both Phases 1 and 2 currently assume a local development model.
