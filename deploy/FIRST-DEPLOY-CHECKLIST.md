@@ -39,30 +39,97 @@ run cleanly.
 - [ ] Generate an SSH key if you don't already have one:
       ```sh
       ls ~/.ssh/id_ed25519     # exists? skip the next line
-      ssh-keygen -t ed25519 -C "your-email@example.com"
+      ssh-keygen -t ed25519 -C "newsitedbart@your-server.example"
       ```
+      The `-C` comment is just a label for the key — it shows up in
+      `~/.ssh/authorized_keys` on the server so you can later identify
+      which Mac / which purpose a key belongs to. Use something
+      descriptive (`project-name@hostname` is conventional).
+
+- [ ] **When prompted for a passphrase: USE ONE.** Not empty.
+
+      Why: a passphraseless key file = anyone who reads
+      `~/.ssh/id_ed25519` (malware, a stolen Mac, a leaked backup) has
+      immediate server access with no second factor. A passphrase
+      makes the keyfile useless on its own. The macOS Keychain
+      integration (next two steps) removes the daily friction reason
+      people skip the passphrase in the first place — you'll type the
+      passphrase **once**, ever (or once per reboot at most), not on
+      every deploy.
+
+      Choose something you can actually remember; store it in your
+      password manager as a backup. If you lose it, you can always
+      regenerate a new keypair and re-copy the public key to the
+      server — but only if you still have server access via the old
+      key, so don't lose both at the same time.
+
+- [ ] Configure ssh-agent + Keychain integration. Add this block at the
+      **top** of `~/.ssh/config` (create the file if it doesn't exist),
+      *before* any `Host` blocks:
+      ```
+      Host *
+        AddKeysToAgent yes
+        UseKeychain yes
+        IdentityFile ~/.ssh/id_ed25519
+      ```
+      - `AddKeysToAgent yes` — first `ssh` invocation that needs the
+        key prompts for the passphrase once and hands the unlocked key
+        to ssh-agent for the rest of the session.
+      - `UseKeychain yes` — the macOS-specific setting that stores
+        the passphrase in your login Keychain, so even after a reboot
+        the key unlocks automatically when you log into your Mac
+        account (Keychain is unlocked by your account password).
+      - `IdentityFile` — tells ssh which keyfile to offer; explicit
+        is better than relying on the default search order.
+
+- [ ] Pre-load the key into the Keychain once now, so the first
+      deploy doesn't prompt:
+      ```sh
+      ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+      ```
+      You'll be asked for the passphrase one time. After this, it's
+      stored in Keychain and ssh uses it transparently.
 
 - [ ] Copy the public key to the server:
       ```sh
       ssh-copy-id user@your-server.example
       ```
-      Or manually append `~/.ssh/id_ed25519.pub` to
-      `~/.ssh/authorized_keys` on the server.
+      This appends `~/.ssh/id_ed25519.pub` to
+      `~/.ssh/authorized_keys` on the server. You'll be asked for the
+      server password once during this step — that's the *server
+      account* password, not the SSH-key passphrase. After this, the
+      server lets you in via the key.
 
-- [ ] Add a host alias to `~/.ssh/config` so commands stay short:
+      If `ssh-copy-id` isn't installed, the manual equivalent:
+      ```sh
+      cat ~/.ssh/id_ed25519.pub | ssh user@your-server.example \
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+         cat >> ~/.ssh/authorized_keys && \
+         chmod 600 ~/.ssh/authorized_keys"
+      ```
+
+- [ ] Add a host alias to `~/.ssh/config` (below the `Host *` block
+      from earlier) so commands stay short:
       ```
       Host bondard
         HostName bondard.net
         User youruser
-        IdentityFile ~/.ssh/id_ed25519
       ```
+      (No need to repeat `IdentityFile` here — the `Host *` block
+      already covers it.)
 
-- [ ] Test it:
+- [ ] Test it — should print the server's hostname and your remote
+      home, **with no password and no passphrase prompt**:
       ```sh
       ssh bondard "hostname -f && pwd"
       ```
-      Should print the server's hostname and your remote home, with no
-      password prompt.
+      If you get a passphrase prompt here, the Keychain wiring didn't
+      take. Re-check the `Host *` block in `~/.ssh/config` (must be
+      `UseKeychain yes`, not commented out) and re-run
+      `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`.
+
+      If you get a *password* prompt (for the server account), the
+      public key wasn't copied successfully. Re-run `ssh-copy-id`.
 
 ---
 
