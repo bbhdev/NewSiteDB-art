@@ -290,8 +290,22 @@ it's faster to fix proactively.
 
 ## 5 · First deploy (on the Mac)
 
-- [ ] From the project root:
+> **Run this in a regular Mac terminal window — NOT inside an SSH
+> session into the server.** `deploy.sh` is a one-way push *from* your
+> Mac *to* the server; it uses your Mac's local working tree as the
+> source, reads `deploy/deploy.env` for the target, and consults
+> `~/.ssh/config` for the alias. Running it from inside `ssh newsitedbart`
+> fails on every axis: the iCloud check uses BSD-only flags that error
+> on Linux, the server doesn't have your latest edits, and there's no
+> path back from the server to your Mac's filesystem anyway. If your
+> prompt shows `uid…@h2web499:…` you're on the server — `exit` first.
+>
+> Confirm you're on the Mac (prompt should be something like
+> `bbh@…` or `~ %`), `cd` into the project root, then run:
+
+- [ ] From the project root **on your Mac**:
       ```sh
+      cd "/Users/bbh/Library/Mobile Documents/com~apple~CloudDocs/DEV :icl/Claude CODE/NewSiteDB-art"
       deploy/deploy.sh
       ```
 
