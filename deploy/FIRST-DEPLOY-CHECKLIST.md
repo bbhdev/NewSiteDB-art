@@ -272,19 +272,7 @@ this file is never pushed by rsync — you copy it once, manually.
 
 ---
 
-## 4 · Create a Kirby Panel user (one-time, on the server)
-
-The gate from step 3 lets in any logged-in Panel user. You need at least
-one.
-
-- [ ] Visit `https://newsitedbart.bbh.fr/panel` in a browser.
-- [ ] Kirby walks you through creating an admin user on first visit.
-      Use a strong password — this is your editor login.
-- [ ] Stay logged in for the verification step below.
-
----
-
-## 5 · Materialize the project tree (every deploy, on the Mac)
+## 4 · Materialize the project tree (every deploy, on the Mac)
 
 This project lives in iCloud Drive. If any files are dataless
 placeholder stubs, rsync will stall or silently skip them. `deploy.sh`
@@ -300,7 +288,7 @@ it's faster to fix proactively.
 
 ---
 
-## 6 · First deploy (on the Mac)
+## 5 · First deploy (on the Mac)
 
 - [ ] From the project root:
       ```sh
@@ -308,7 +296,7 @@ it's faster to fix proactively.
       ```
 
 - [ ] **The script will:**
-      1. Run the iCloud-placeholder pre-check (should pass after step 5).
+      1. Run the iCloud-placeholder pre-check (should pass after step 4).
       2. Run `rsync --dry-run` and print an itemized list of every file
          it *would* add/update/delete.
       3. Ask `Proceed with the REAL transfer shown above? [y/N]`.
@@ -334,9 +322,34 @@ it's faster to fix proactively.
 
 ---
 
+## 6 · Create a Kirby Panel user (one-time, on the server)
+
+The auth gate from step 3 lets in any logged-in Panel user. You need
+at least one. **This must come after step 5 (deploy)** — Kirby's
+`/panel` route is served by code in the `kirby/` directory and dispatched
+through `index.php` + `.htaccess`, none of which are guaranteed to be on
+the server until the deploy lands. Trying `/panel` before step 5 gives
+a 404.
+
+- [ ] Visit `https://newsitedbart.bbh.fr/panel` in a browser.
+- [ ] Kirby walks you through creating an admin user on first visit.
+      Use a strong password — this is your editor login.
+- [ ] Stay logged in for the verification step below.
+
+> **If `/panel` still 404s after a successful deploy:** check the
+> Infomaniak Manager → Logs → PHP error log. Most common causes: the
+> deploy excluded `kirby/` accidentally (verify
+> `ssh newsitedbart 'ls sites/newsitedbart.bbh.fr/kirby/'` shows the
+> Kirby source), or `.htaccess` rewrite rules aren't being honored by
+> Apache (Infomaniak's stock `.htaccess` for Kirby should work; if it
+> doesn't, ask Infomaniak support whether `mod_rewrite` is enabled for
+> the hosting plan).
+
+---
+
 ## 7 · Verify the auth gate
 
-- [ ] **Logged in (Panel session active from step 4):** visit
+- [ ] **Logged in (Panel session active from step 6):** visit
       `https://newsitedbart.bbh.fr/dev/draw` — editor should load
       normally, exactly like localhost.
 
