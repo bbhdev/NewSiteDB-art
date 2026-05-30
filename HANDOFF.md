@@ -1711,6 +1711,44 @@ why and what replaced it.) This unblocks first deployment but does NOT
 replace Phase 3 — endpoint-by-endpoint auth audit, MIME validation,
 and role distinction are all still pending.
 
+### Parked: Panel IP allowlist via dynamic DNS
+
+Idea floated during the v0.10.x security batch, **not needed now,
+worth looking into later**. Layer an IP-based restriction on top
+of the `/panel` route (and possibly `/dev/draw/*`) so that even
+with valid credentials, the surface is unreachable from arbitrary
+IPs. The hard part on a home/consumer connection is that the
+public IP changes; the standard solution is a dynamic-DNS service
+that resolves a stable hostname to the current IP, and a server-
+side check that resolves that hostname per request and compares.
+
+Sketch of the moving parts (for the future implementer):
+- A dyndns provider with a free or low-cost tier and a client
+  that runs on the user's machine/router updating the A record
+  when the IP changes (Dynu, DuckDNS, No-IP, Cloudflare
+  ddclient — all viable; the user has used such a service in
+  the past, exact provider TBD at implementation time).
+- A `.htaccess` `Require host <hostname>` block on `/panel`
+  (Apache resolves the hostname per request — TTL-bounded
+  cache, acceptable on Infomaniak), OR a Kirby `ready`-callback
+  IP check that does `gethostbyname()` on the dyndns hostname
+  and compares against `$_SERVER['REMOTE_ADDR']`. The Kirby-side
+  approach has more flexibility (custom error response, can
+  bypass for known-good user tokens, etc.) but adds a DNS
+  lookup to every gated request.
+- Decide whether to gate just `/panel` (cheap, blocks the
+  primary attack surface) or also `/dev/draw/*` (heavier; the
+  v0.10.2 opaque 403 already neutralizes the public reveal,
+  and a logged-in user check is the existing auth layer).
+
+Why parked: the v0.10.x batch (opaque 403, X-Powered-By stripped,
+.htaccess comment-stripped, Kirby upgraded, ErrorDocument lines)
+already removes the obvious reveals and CVE exposure. IP-based
+hardening is defence-in-depth, not blocking any current concern.
+Worth revisiting if (a) an attacker is observed probing the
+Panel, or (b) the user wants to relax some other security
+constraint and needs the network-layer fence as a tradeoff.
+
 ### On-server editing pre-requisites (small running list)
 
 Things that need building when Phase 3 happens — captured here so
