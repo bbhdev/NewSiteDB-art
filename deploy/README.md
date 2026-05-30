@@ -90,24 +90,78 @@ If you ever need settings that must differ per environment (e.g. `debug`,
 Put environment-specific values there; the exclude list keeps that file
 environment-local (never pushed, never deleted).
 
-## ⚠️ Security — the editor is currently ungated
+## Security — the `/dev/draw` auth gate
 
 The `/dev/draw` editor and its write routes (`dev/draw/save`,
-`dev/draw/library/{save,load}`, `dev/draw/font-bundle` POST) have **no
-authentication gate** in the code today. Locally that's fine; on a public
-server it means anyone who finds the URL can overwrite your content or load
-snapshots. Before (or right after) the first production deploy, gate it.
-Options, cheapest first:
+`dev/draw/library/{save,load}`, `dev/draw/font-bundle` POST, etc.) have
+**no authentication check** in the shared `config.php`. Locally that's
+fine; on a public server it would mean anyone who finds the URL can
+overwrite your content.
 
-- **Web-server auth** on the `/dev` path (HTTP Basic via `.htaccess`/nginx),
-  or block `/dev` entirely at the server and only open it when editing.
-- **Kirby-level gate**: in a host-scoped `config.<SERVER_NAME>.php`, add a
-  route guard (or a flag the routes check) that returns 403 for
-  `dev/draw/*` unless a Panel user is logged in. This keeps the gate
-  environment-local and out of the shared `config.php`.
+A **host-scoped auth gate** is shipped as a template at
+`site/config/config.example-host.php`. Kirby auto-loads a file named
+`config.<SERVER_NAME>.php` and merges it over `config.php`, so by
+renaming the template to match the production hostname you install the
+gate on the server only — `localhost` ignores it and continues without
+auth.
 
-This is independent of the deploy mechanism, but it's the main risk the
-first deploy exposes, so it's flagged here.
+### One-time setup on the server
+
+1. **SCP the template up.** The deploy excludes match
+   `/site/config/config.*.php`, so rsync will never push it for you.
+   Manually copy it once:
+
+   ```sh
+   scp site/config/config.example-host.php \
+       $REMOTE_HOST:$REMOTE_PATH/site/config/
+   ```
+
+2. **Rename it to match the server's hostname.** On the server:
+
+   ```sh
+   cd $REMOTE_PATH/site/config
+   hostname -f                                       # note the result
+   mv config.example-host.php config.<that-hostname>.php
+   ```
+
+   Kirby compares this filename against `$_SERVER['SERVER_NAME']` at
+   request time. If they don't match, the file is silently ignored and
+   the gate doesn't apply.
+
+3. **Create at least one Kirby Panel user** (if you haven't already).
+   Visit `/panel` on the server; on first visit Kirby walks you through
+   creating an admin user. The Panel session cookie then authenticates
+   all `/dev/draw` requests until you log out.
+
+4. **Verify.** Logged out, hit `/dev/draw` — expect a 403 with a short
+   plain-text message pointing you at `/panel`. Log in at `/panel`,
+   reload `/dev/draw` — should load normally.
+
+### Mental model
+
+- The gate is a single wildcard route `dev/draw/(:all?)` registered via
+  Kirby's `ready` callback. It runs *before* the real routes; if you're
+  logged in it returns `false` (which tells Kirby "no match — try the
+  next route") so the actual editor/save handler runs unchanged. If
+  you're anonymous it returns a 403 Response and the request stops.
+- The gate does **not** cover `/panel` itself (Kirby has its own login
+  flow there). So even if you mess up the gate, you can always reach
+  `/panel` to fix it.
+
+### Escape hatches
+
+- **Locked out?** SSH in and either `mv config.<host>.php elsewhere.php`
+  to disable the gate, or delete the stale session in `site/sessions/`.
+- **Want to test the gate locally?** Temporarily rename the file to
+  match your Mac's hostname (`hostname -f` on your Mac), confirm it
+  works, then rename it back. Or just trust that the routing pattern is
+  standard Kirby — it is.
+
+### Note on `--no-delete`
+
+The host config file lives in `site/config/`, which is part of the
+synced tree. Because it matches the exclude pattern, neither `--delete`
+nor a normal push will touch it. So even a full mirror deploy is safe.
 
 ## Notes & gotchas
 
