@@ -62,3 +62,22 @@ Thumbs.db
 # --delete mirror would wipe them and break the site.
 /.htaccess
 /.user.ini
+
+# ── Infomaniak landing & maintenance pages — server-owned ─────────────
+# Files Infomaniak's hosting machinery puts at the web root:
+#   __index.html               — the placeholder landing page shown when
+#                                no real index.php exists yet; Infomaniak
+#                                regenerates it on certain admin actions.
+#   .infomaniak-maintenance.html — served by the host when maintenance
+#                                mode is toggled in the Manager.
+# Both belong to the hosting platform, not the app.
+/__index.html
+/.infomaniak-maintenance.html
+
+# ── Local diagnostics living on the server — keep, don't wipe ─────────
+# Small, hand-deployed diagnostic scripts placed directly on the server
+# (e.g. via SFTP) for one-off verification of runtime values like
+# SERVER_NAME. They're outside the repo on purpose — keeping the deploy
+# from removing them so a diagnostic session can stretch across multiple
+# deploys without re-uploading the probe each time.
+/x.php
