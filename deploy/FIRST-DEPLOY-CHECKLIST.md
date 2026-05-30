@@ -217,10 +217,25 @@ run cleanly.
       (The example file ships with these exact values for this
       project, so on first setup you can `cp` and proceed.)
 
-- [ ] Confirm it's gitignored (it should already be — added in `.gitignore`):
+- [ ] Confirm it's gitignored (it should already be — added in `.gitignore`).
+      Use one of these — they give an unambiguous yes/no, unlike
+      `git status` whose "branch is ahead" preamble can hide the signal:
       ```sh
-      git status -- deploy/deploy.env   # → nothing listed
+      git check-ignore -v deploy/deploy.env
       ```
+      **Expected:** prints the matching `.gitignore` line, e.g.
+      `.gitignore:NN:deploy/deploy.env	deploy/deploy.env`.
+      **Bad case:** prints nothing (exit code 1) — the file is NOT
+      ignored, fix `.gitignore` before continuing.
+
+      Alternative phrasing of the same check:
+      ```sh
+      git ls-files --error-unmatch deploy/deploy.env
+      ```
+      **Expected:** `error: pathspec ... did not match any file(s) known to git`
+      (file exists on disk but is untracked = good).
+      **Bad case:** prints the path with no error — file is tracked,
+      remove it from the index: `git rm --cached deploy/deploy.env`.
 
 ---
 
