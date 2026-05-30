@@ -103,10 +103,12 @@ return [
         $path = $kirby->request()->path()->toString();
         if (str_starts_with($path, 'dev/draw')) {
             if ($kirby->user() === null) {
+                // Neutral 403 — do NOT name the framework, the admin surface,
+                // or hint at a login path. Knowing the stack lets an attacker
+                // target known CVEs; the response stays opaque on purpose.
                 http_response_code(403);
                 header('Content-Type: text/plain; charset=utf-8');
-                echo "Forbidden — /dev/draw requires a logged-in Kirby Panel user.\n"
-                   . "Log in at /panel and reload this page.\n";
+                echo "Forbidden\n";
                 exit;
             }
         }
