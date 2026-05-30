@@ -21,9 +21,9 @@ You need these BEFORE running anything from your Mac.
       the exact constraint — currently `getkirby/cms ^5.2`, which needs
       PHP 8.2+). `ssh <host> php -v`.
 - [ ] **A web root path** ready to receive the site (e.g.
-      `/var/www/bondard.net`). The web server (Apache or nginx) should
-      already be pointed at it — set up the vhost / server block before
-      deploying, not after.
+      `/home/clients/<account-hash>/sites/newsitedbart.bbh.fr` on
+      Infomaniak shared hosting). The web server is already pointed at
+      it via the Infomaniak Manager — set up there, not via the deploy.
 
 > **Heads-up.** The deploy script doesn't install PHP, configure the web
 > server, or create the vhost. Those are server-admin steps. If you
@@ -39,7 +39,7 @@ run cleanly.
 - [ ] Generate an SSH key if you don't already have one:
       ```sh
       ls ~/.ssh/id_ed25519     # exists? skip the next line
-      ssh-keygen -t ed25519 -C "newsitedbart@your-server.example"
+      ssh-keygen -t ed25519 -C "newsitedbart@newsitedbart.bbh.fr"
       ```
       The `-C` comment is just a label for the key — it shows up in
       `~/.ssh/authorized_keys` on the server so you can later identify
@@ -92,17 +92,17 @@ run cleanly.
 
 - [ ] Copy the public key to the server:
       ```sh
-      ssh-copy-id user@your-server.example
+      ssh-copy-id 1m5eb_from_infomaniak@1m5eb.ftp.infomaniak.com
       ```
       This appends `~/.ssh/id_ed25519.pub` to
       `~/.ssh/authorized_keys` on the server. You'll be asked for the
-      server password once during this step — that's the *server
-      account* password, not the SSH-key passphrase. After this, the
-      server lets you in via the key.
+      server password once during this step — that's the *Infomaniak
+      SSH/SFTP account* password, not the SSH-key passphrase. After
+      this, the server lets you in via the key.
 
       If `ssh-copy-id` isn't installed, the manual equivalent:
       ```sh
-      cat ~/.ssh/id_ed25519.pub | ssh user@your-server.example \
+      cat ~/.ssh/id_ed25519.pub | ssh 1m5eb_from_infomaniak@1m5eb.ftp.infomaniak.com \
         "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
          cat >> ~/.ssh/authorized_keys && \
          chmod 600 ~/.ssh/authorized_keys"
@@ -111,18 +111,28 @@ run cleanly.
 - [ ] Add a host alias to `~/.ssh/config` (below the `Host *` block
       from earlier) so commands stay short:
       ```
-      Host bondard
-        HostName bondard.net
-        User youruser
+      Host newsitedbart
+        HostName 1m5eb.ftp.infomaniak.com
+        User 1m5eb_from_infomaniak
       ```
       (No need to repeat `IdentityFile` here — the `Host *` block
-      already covers it.)
+      already covers it. Note: `HostName` is the *Infomaniak SSH
+      backend*, NOT the public web hostname `newsitedbart.bbh.fr` —
+      those are two different things on shared hosting.)
 
-- [ ] Test it — should print the server's hostname and your remote
-      home, **with no password and no passphrase prompt**:
+- [ ] Test it — should print the backend hostname (`h2web499` or
+      similar — that's the Infomaniak cluster node, not the web
+      hostname) and your remote home,
+      **with no password and no passphrase prompt**:
       ```sh
-      ssh bondard "hostname -f && pwd"
+      ssh newsitedbart "hostname && pwd"
       ```
+      Expected output approximately:
+      ```
+      h2web499
+      /home/clients/94e3ce6271e3648b7b00d6c32be0a6e2
+      ```
+
       If you get a passphrase prompt here, the Keychain wiring didn't
       take. Re-check the `Host *` block in `~/.ssh/config` (must be
       `UseKeychain yes`, not commented out) and re-run
@@ -142,9 +152,11 @@ run cleanly.
 
 - [ ] Edit `deploy/deploy.env`:
       ```sh
-      REMOTE_HOST="bondard"            # your ~/.ssh/config alias
-      REMOTE_PATH="/var/www/bondard.net"
+      REMOTE_HOST="newsitedbart"   # your ~/.ssh/config alias
+      REMOTE_PATH="/home/clients/94e3ce6271e3648b7b00d6c32be0a6e2/sites/newsitedbart.bbh.fr"
       ```
+      (The example file ships with these exact values for this
+      project, so on first setup you can `cp` and proceed.)
 
 - [ ] Confirm it's gitignored (it should already be — added in `.gitignore`):
       ```sh
@@ -162,26 +174,27 @@ this file is never pushed by rsync — you copy it once, manually.
 - [ ] SCP the template up:
       ```sh
       scp site/config/config.example-host.php \
-          bondard:/var/www/bondard.net/site/config/
+          newsitedbart:/home/clients/94e3ce6271e3648b7b00d6c32be0a6e2/sites/newsitedbart.bbh.fr/site/config/
       ```
 
-- [ ] Find the server's real hostname:
+- [ ] Rename on the server to match the **web hostname** (NOT the SSH
+      backend hostname — they differ on Infomaniak):
       ```sh
-      ssh bondard "hostname -f"
-      # e.g. "bondard.net"  or  "www.bondard.net"
+      ssh newsitedbart "cd ~/sites/newsitedbart.bbh.fr/site/config && \
+        mv config.example-host.php config.newsitedbart.bbh.fr.php"
       ```
 
-      > Some hosts return short names (`web01`) instead of the public
-      > domain. Use whatever Kirby will see as `$_SERVER['SERVER_NAME']`
-      > at request time, not necessarily what `hostname -f` returns.
-      > If unsure, see step 6: the verification step will tell you if
-      > the rename matched.
-
-- [ ] Rename on the server:
-      ```sh
-      ssh bondard "cd /var/www/bondard.net/site/config && \
-        mv config.example-host.php config.<hostname-from-above>.php"
-      ```
+      > Why the web hostname and not what `hostname -f` returns:
+      > Kirby loads `config.<X>.php` where `X` is
+      > `$_SERVER['SERVER_NAME']` at request time — i.e. the Host
+      > header from the browser, which for this project is
+      > `newsitedbart.bbh.fr`. The SSH backend hostname Infomaniak
+      > returns (`h2web499` or similar) is the *cluster node*, not
+      > what Kirby sees. Naming the file after the backend hostname
+      > would silently never activate the gate.
+      >
+      > If you ever need to verify what `$_SERVER['SERVER_NAME']`
+      > actually is at runtime, see step 7's diagnostic.
 
 ---
 
@@ -190,7 +203,7 @@ this file is never pushed by rsync — you copy it once, manually.
 The gate from step 3 lets in any logged-in Panel user. You need at least
 one.
 
-- [ ] Visit `https://your-server.example/panel` in a browser.
+- [ ] Visit `https://newsitedbart.bbh.fr/panel` in a browser.
 - [ ] Kirby walks you through creating an admin user on first visit.
       Use a strong password — this is your editor login.
 - [ ] Stay logged in for the verification step below.
@@ -237,18 +250,20 @@ it's faster to fix proactively.
 
 - [ ] First-deploy quirks:
       - Kirby may take a moment on the first request to create
-        `site/cache/` and `media/` dirs. Make sure the web root is
-        writable by the server user.
-      - If you see PHP errors on the homepage, check error logs first
-        (`tail -f /var/log/apache2/error.log` or equivalent). The
-        deploy moved files; it didn't change web-server config.
+        `site/cache/` and `media/` dirs. On Infomaniak the web root
+        is owned by your SSH user, so writability is automatic.
+      - If you see PHP errors on the homepage, check the Infomaniak
+        PHP error log (Infomaniak Manager → your site → **Logs** →
+        **PHP error log**). The deploy moved files; it didn't change
+        any server-level config (`.htaccess`, `.user.ini`, PHP
+        version) — those stay as Infomaniak has them.
 
 ---
 
 ## 7 · Verify the auth gate
 
 - [ ] **Logged in (Panel session active from step 4):** visit
-      `https://your-server.example/dev/draw` — editor should load
+      `https://newsitedbart.bbh.fr/dev/draw` — editor should load
       normally, exactly like localhost.
 
 - [ ] **Logged out:** open a private/incognito window and visit the
@@ -259,16 +274,35 @@ it's faster to fix proactively.
 
 - [ ] If the logged-out test loads the editor → the gate is NOT
       active. Most likely cause: the renamed config file's hostname
-      doesn't match `$_SERVER['SERVER_NAME']`. To diagnose, SSH in and
-      temporarily add `error_log('host=' . $_SERVER['SERVER_NAME']);`
-      to `config.php`, hit the page, check the PHP error log to see
-      what hostname Kirby actually sees, then rename your config file
-      to match.
+      doesn't match `$_SERVER['SERVER_NAME']`. Diagnostic:
+
+      1. SSH in and temporarily prepend one line to `config.php`:
+         ```sh
+         ssh newsitedbart "sed -i.bak '1a\\
+         error_log(\"SERVER_NAME=\" . (\$_SERVER[\"SERVER_NAME\"] ?? \"unset\"));
+         ' ~/sites/newsitedbart.bbh.fr/site/config/config.php"
+         ```
+      2. Hit `https://newsitedbart.bbh.fr/dev/draw` once.
+      3. Read the value back from the Infomaniak Manager → Logs →
+         PHP error log. Look for the `SERVER_NAME=…` line.
+      4. Rename your config file to match that exact string:
+         ```sh
+         ssh newsitedbart "cd ~/sites/newsitedbart.bbh.fr/site/config && \
+           mv config.<old>.php config.<actual-SERVER_NAME>.php"
+         ```
+      5. Revert the probe:
+         ```sh
+         ssh newsitedbart "mv ~/sites/newsitedbart.bbh.fr/site/config/config.php.bak \
+           ~/sites/newsitedbart.bbh.fr/site/config/config.php"
+         ```
 
 - [ ] If you get a 500 Internal Server Error → likely a PHP syntax
-      issue in `config.<hostname>.php`. SSH in,
-      `php -l site/config/config.<hostname>.php` to confirm, fix the
-      typo, retry.
+      issue in `config.<hostname>.php`. SSH in and lint:
+      ```sh
+      ssh newsitedbart "php -l ~/sites/newsitedbart.bbh.fr/site/config/config.newsitedbart.bbh.fr.php"
+      ```
+      Fix the typo locally in `site/config/config.example-host.php`,
+      re-SCP, re-rename.
 
 ---
 
@@ -301,7 +335,7 @@ Optional flags:
       need instant rollback on the server, take a hardlink snapshot
       *before* deploying:
       ```sh
-      ssh bondard "cp -al /var/www/bondard.net /var/www/bondard.net.pre-$(date +%Y%m%d-%H%M%S)"
+      ssh newsitedbart "cp -al ~/sites/newsitedbart.bbh.fr ~/sites/newsitedbart.bbh.fr.pre-$(date +%Y%m%d-%H%M%S)"
       ```
       Costs almost no disk (hardlinks); restores by swapping symlinks
       or `rsync -a` back.

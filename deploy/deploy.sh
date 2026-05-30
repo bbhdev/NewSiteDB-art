@@ -24,14 +24,17 @@
 #
 # One-time setup: create deploy/deploy.env (gitignored) exporting the
 # target, e.g.
-#   REMOTE_HOST="bondard"            # an alias from ~/.ssh/config
-#   REMOTE_PATH="/var/www/bondard.net"
+#   REMOTE_HOST="newsitedbart"   # an alias from ~/.ssh/config
+#   REMOTE_PATH="/home/clients/94e3ce6271e3648b7b00d6c32be0a6e2/sites/newsitedbart.bbh.fr"
 
 set -euo pipefail
 
 # ── Defaults (override via env or deploy/deploy.env) ──────────────────
-REMOTE_HOST="${REMOTE_HOST:-user@your-server.example}"
-REMOTE_PATH="${REMOTE_PATH:-/var/www/bondard.net}"
+# These are deliberate sentinel placeholders — the check below aborts if
+# REMOTE_HOST is still the placeholder, forcing the user to create deploy.env.
+# REMOTE_PATH's default is never reached in practice (sentinel check fires first).
+REMOTE_HOST="${REMOTE_HOST:-PLACEHOLDER-set-in-deploy.env}"
+REMOTE_PATH="${REMOTE_PATH:-/PLACEHOLDER/set-in-deploy.env}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -56,7 +59,7 @@ done
 
 command -v rsync >/dev/null || { echo "✗ rsync not found in PATH" >&2; exit 1; }
 [ -f "$EXCLUDE_FILE" ] || { echo "✗ Missing exclude file: $EXCLUDE_FILE" >&2; exit 1; }
-if [ "$REMOTE_HOST" = "user@your-server.example" ]; then
+if [ "$REMOTE_HOST" = "PLACEHOLDER-set-in-deploy.env" ]; then
   echo "✗ REMOTE_HOST is still the placeholder." >&2
   echo "  Create deploy/deploy.env from deploy/deploy.env.example first." >&2
   exit 1

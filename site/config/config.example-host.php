@@ -6,14 +6,23 @@
  *
  * WHAT THIS FILE IS
  *   Kirby loads `config.php` first, then merges this file *over* it IF
- *   its filename matches the current server hostname:
+ *   its filename matches the WEB hostname Kirby sees in
+ *   $_SERVER['SERVER_NAME'] at request time:
  *
  *       config.<SERVER_NAME>.php
  *
- *   So on a server whose hostname is `bondard.net`, rename a copy of
- *   this template to `config.bondard.net.php` (next to `config.php`).
- *   Kirby will then load both. On localhost the filename doesn't match,
- *   so this file is ignored — local dev is unaffected.
+ *   For this project, the web hostname is `newsitedbart.bbh.fr`, so
+ *   this template should be renamed to `config.newsitedbart.bbh.fr.php`
+ *   (next to `config.php`) on the server. Kirby will then load both.
+ *   On localhost the filename doesn't match, so this file is ignored —
+ *   local dev is unaffected.
+ *
+ *   IMPORTANT: on shared hosting (Infomaniak, etc.) the SSH backend
+ *   hostname is NOT the same as the web hostname. Running `hostname -f`
+ *   while SSH'd in returns something like `h2web499` (the backend
+ *   server), but Kirby sees `newsitedbart.bbh.fr` because that's the
+ *   Host header from the visitor's browser. The config file MUST be
+ *   named after the WEB hostname, not the backend hostname.
  *
  * WHY IT EXISTS
  *   The /dev/draw editor and its write endpoints (dev/draw/save,
@@ -38,15 +47,22 @@
  * SETUP CHECKLIST (one time, on the server)
  *   1. SCP this file to site/config/ on the server (it is excluded from
  *      the rsync deploy by design — see deploy/deploy-exclude.txt).
- *   2. Rename it to match the server's hostname:
- *         mv config.example-host.php config.<your-hostname>.php
- *      Find the hostname with `hostname -f` on the server.
- *   3. Create at least one Kirby Panel user (if you haven't already):
- *         php site/sandbox/users.php   # or via /panel after first login
- *      The Panel is at /panel — log in once, the session cookie then
- *      authenticates all /dev/draw requests until logout.
+ *   2. Rename it to match the WEB hostname:
+ *         mv config.example-host.php config.newsitedbart.bbh.fr.php
+ *      (NOT what `hostname -f` returns — that's the SSH backend host
+ *       on shared hosting and Kirby won't match against it.)
+ *   3. Create at least one Kirby Panel user via /panel — on first
+ *      visit Kirby walks you through user creation. The session
+ *      cookie then authenticates all /dev/draw requests until logout.
  *   4. Verify: visit /dev/draw logged-out → should get 403. Log in via
  *      /panel → /dev/draw should load normally.
+ *
+ *   If the 403 doesn't appear (editor loads even when logged out), the
+ *   hostname doesn't match. Drop a one-line probe into config.php to
+ *   confirm what Kirby actually sees:
+ *      error_log('SERVER_NAME=' . ($_SERVER['SERVER_NAME'] ?? 'unset'));
+ *   Hit /dev/draw once, check the Infomaniak Manager → Logs → PHP
+ *   error log, then rename this file to match that string exactly.
  *
  * SANITY-CHECK ESCAPE HATCH
  *   If you somehow lock yourself out (Panel session lost, can't get
