@@ -56,6 +56,21 @@ RewriteRule ^(.*) index.php [L]
 # anything else relying on HTTP Authorization).
 SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
+# ── ErrorDocument overrides ───────────────────────────────────────────
+# Apache's default 403/404 templates leak `mailto:webmaster@bbh.fr` and
+# a visible "Apache" string in the body. Override with inline plain-text
+# bodies — no framework or host mention.
+#
+# Historical note (v0.10.5): a first attempt to add these lines coincided
+# with a site-wide 403. We initially blamed Infomaniak's AllowOverride
+# policy. The real culprit, found in v0.10.7, was deploy.sh shipping the
+# staged .htaccess with mode 0600 (mktemp's default), making it
+# unreadable by Apache and triggering directory-wide 403. With the
+# chmod 644 fix in place, the ErrorDocument lines can be retested
+# cleanly.
+ErrorDocument 403 "Forbidden"
+ErrorDocument 404 "Not Found"
+
 # ── Infomaniak: gzip compression ─────────────────────────────────────
 SetOutputFilter DEFLATE
 AddOutputFilterByType DEFLATE "application/atom+xml" "application/javascript" "application/json" "application/ld+json" "application/manifest+json" "application/rdf+xml" "application/rss+xml" "application/schema+json" "application/vnd.geo+json" "application/vnd.ms-fontobject" "application/x-font-ttf" "application/x-javascript" "application/x-web-app-manifest+json" "application/xhtml+xml" "application/xml" "font/eot" "font/opentype" "image/bmp" "image/svg+xml" "image/vnd.microsoft.icon" "image/x-icon" "text/cache-manifest" "text/css" "text/html" "text/javascript" "text/plain" "text/vcard" "text/vnd.rim.location.xloc" "text/vtt" "text/x-component" "text/x-cross-domain-policy" "text/xml"

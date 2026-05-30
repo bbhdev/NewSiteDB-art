@@ -118,10 +118,19 @@ fi
 # keep the commented file locally (sole source of truth) and ship a
 # stripped version: all lines starting with `#` removed, blank lines
 # collapsed. Apache's directives are unchanged.
+#
+# CRITICAL: mktemp creates files with mode 0600 (owner-only read/write).
+# rsync -a preserves the source mode, so without an explicit chmod the
+# .htaccess lands on the server as mode 600 and Apache (running as a
+# different user on shared hosting) cannot read it. The visible
+# symptom is that EVERY url under the site returns HTTP 403 — Apache's
+# response to an unreadable .htaccess in a directory is to forbid the
+# whole directory. We chmod 644 immediately to avoid this.
 STAGED_HTACCESS="$(mktemp -t htaccess-deploy.XXXXXX)"
 trap 'rm -f "$STAGED_HTACCESS"' EXIT
 sed -E '/^[[:space:]]*#/d; /^[[:space:]]*$/d' \
     "$PROJECT_ROOT/.htaccess" > "$STAGED_HTACCESS"
+chmod 644 "$STAGED_HTACCESS"
 
 # ── rsync flags ───────────────────────────────────────────────────────
 #  -a  archive (recurse, symlinks, times, perms)
