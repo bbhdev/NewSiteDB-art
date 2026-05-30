@@ -10,10 +10,17 @@
 # then asks for confirmation before the real transfer.
 #
 # Usage:
-#   deploy/deploy.sh             # dry run, then prompt, then transfer
-#   deploy/deploy.sh -y          # skip the confirmation prompt
-#   deploy/deploy.sh --no-delete # upload/update only, never remove server files
+#   deploy/deploy.sh                   # dry run, then prompt, then transfer
+#   deploy/deploy.sh -y                # skip the confirmation prompt
+#   deploy/deploy.sh --no-delete       # upload/update only, never remove server files
+#   deploy/deploy.sh --skip-icloud-check  # bypass the iCloud-placeholder pre-check
 #   deploy/deploy.sh --help
+#
+# iCloud pre-check: this project lives in iCloud Drive. If "Optimize Mac
+# Storage" has evicted any file to a dataless placeholder stub, rsync will
+# either stall forcing a download or silently skip it. Before transferring,
+# the script scans for dataless files (BSD `find -flags +dataless`) and
+# aborts if any are found, with instructions to materialize them first.
 #
 # One-time setup: create deploy/deploy.env (gitignored) exporting the
 # target, e.g.
@@ -34,12 +41,14 @@ EXCLUDE_FILE="$SCRIPT_DIR/deploy-exclude.txt"
 # ── Flags ─────────────────────────────────────────────────────────────
 ASSUME_YES=0
 DELETE="--delete"
+SKIP_ICLOUD_CHECK=0
 for arg in "$@"; do
   case "$arg" in
-    -y|--yes)    ASSUME_YES=1 ;;
-    --no-delete) DELETE="" ;;
+    -y|--yes)             ASSUME_YES=1 ;;
+    --no-delete)          DELETE="" ;;
+    --skip-icloud-check)  SKIP_ICLOUD_CHECK=1 ;;
     -h|--help)
-      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
       exit 0 ;;
     *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
   esac
@@ -51,6 +60,52 @@ if [ "$REMOTE_HOST" = "user@your-server.example" ]; then
   echo "✗ REMOTE_HOST is still the placeholder." >&2
   echo "  Create deploy/deploy.env from deploy/deploy.env.example first." >&2
   exit 1
+fi
+
+# ── iCloud-placeholder pre-check ──────────────────────────────────────
+# This project lives in iCloud Drive. With "Optimize Mac Storage" enabled,
+# macOS can evict files to dataless stubs (zero physical bytes, full logical
+# size). rsync will either stall forcing a download or skip them — either
+# way the deploy is unreliable. BSD `find -flags +dataless` lists any such
+# files in the tree. We abort if found, with a clear remediation.
+#
+# We scan the project root with the same exclude shape as rsync's transfer
+# (skip .git, library/, deploy/, site/{accounts,sessions,cache}, media/) so
+# server-owned state or local-only backups don't trigger false positives.
+if [ "$SKIP_ICLOUD_CHECK" -ne 1 ]; then
+  echo "▶ Scanning for iCloud placeholder stubs …"
+  dataless_files=$(
+    find "$PROJECT_ROOT" \
+      \( -path "$PROJECT_ROOT/.git" \
+         -o -path "$PROJECT_ROOT/library" \
+         -o -path "$PROJECT_ROOT/deploy" \
+         -o -path "$PROJECT_ROOT/site/accounts" \
+         -o -path "$PROJECT_ROOT/site/sessions" \
+         -o -path "$PROJECT_ROOT/site/cache" \
+         -o -path "$PROJECT_ROOT/media" \
+      \) -prune -o \
+      -type f -flags +dataless -print 2>/dev/null | head -20
+  )
+  if [ -n "$dataless_files" ]; then
+    echo "✗ Found iCloud placeholder stubs (dataless flag set):" >&2
+    echo "$dataless_files" | sed 's|^|    |' >&2
+    echo >&2
+    echo "  These files exist as stubs but their contents aren't on disk." >&2
+    echo "  rsync would stall or skip them, producing an unreliable deploy." >&2
+    echo >&2
+    echo "  Fix options:" >&2
+    echo "  - In Finder: right-click the project folder → Download Now," >&2
+    echo "    then re-run deploy/deploy.sh." >&2
+    echo "  - Materialize the whole tree from the CLI:" >&2
+    echo "      find \"$PROJECT_ROOT\" -type f -flags +dataless -exec brctl download {} \\;" >&2
+    echo "  - System Settings → Apple Account → iCloud → iCloud Drive →" >&2
+    echo "    turn OFF \"Optimize Mac Storage\" for this Mac (recommended" >&2
+    echo "    if you deploy from here regularly)." >&2
+    echo >&2
+    echo "  Or bypass with --skip-icloud-check (not recommended)." >&2
+    exit 1
+  fi
+  echo "  ✓ No placeholder stubs found."
 fi
 
 # ── rsync flags ───────────────────────────────────────────────────────

@@ -27,14 +27,38 @@ simpler and more complete here than git-pull-on-server or a CI pipeline.
 ## Deploy
 
 ```sh
-deploy/deploy.sh             # dry run → shows changes → asks → transfers
-deploy/deploy.sh -y          # skip the confirmation prompt
-deploy/deploy.sh --no-delete # upload/update only, never delete on server
+deploy/deploy.sh                     # dry run → shows changes → asks → transfers
+deploy/deploy.sh -y                  # skip the confirmation prompt
+deploy/deploy.sh --no-delete         # upload/update only, never delete on server
+deploy/deploy.sh --skip-icloud-check # bypass the iCloud pre-check (not recommended)
 ```
 
 The script **always dry-runs first** and prints an itemized list of every
 file it would add/update/delete, then waits for your `y`. Nothing changes on
 the server until you confirm.
+
+## iCloud-placeholder pre-check (macOS / iCloud Drive)
+
+This project lives in iCloud Drive. With **Optimize Mac Storage** on, macOS
+can evict files to dataless placeholder stubs (zero physical bytes, full
+logical size). rsync then either stalls forcing a download or silently
+skips them — either way the deploy is unreliable.
+
+Before each run, `deploy.sh` scans the project tree with BSD
+`find -flags +dataless` and aborts if any placeholders are found, listing
+up to 20 of them with remediation instructions:
+
+- Finder → right-click the project folder → **Download Now**.
+- Or from the CLI: `find <root> -type f -flags +dataless -exec brctl download {} \;`
+- Or turn **Optimize Mac Storage** off for this Mac in System Settings →
+  Apple Account → iCloud → iCloud Drive (recommended if you deploy from
+  here regularly).
+
+Bypass with `--skip-icloud-check` only if you're certain (e.g. you've just
+manually materialized the tree and the placeholder scan is slow on a large
+project). Server-owned and excluded paths (`.git`, `library/`, `deploy/`,
+`site/{accounts,sessions,cache}`, `media/`) are skipped by the scan, so
+those don't produce false positives.
 
 ## What gets excluded (and why)
 
