@@ -1667,6 +1667,49 @@ This is also where any "geometric object as part of a page" gets
 done — embedding the SVG animation as a block within a Kirby page
 template, alongside text blocks, image blocks, etc.
 
+**Parked design direction (not yet decided, captured so it isn't
+lost):** the favored integration shape is **Deco-and-Kirby
+coexisting on the same page** along a continuum from 0% Deco
+(pure Kirby page — legal, privacy, contact) to 100% Deco (full
+canvas — landing, showcase), with hybrid pages in between where
+first-class HTML and Deco regions share the surface, both
+clickable, the author managing layout conflicts and Deco warning
+about overlaps. `htmlKey` slots are the spatial bridge: a
+Phase-2 page-planning canvas lays down rectangles (content
+holders); each rectangle has a key; Kirby templates reference
+the key; at runtime the slot is filled with either inert HTML
+or a live Deco mount.
+
+**Phase-2 rectangles flow back into Phase 1.** The same rectangle
+list authored in the Phase 2 planning canvas must surface inside
+the `/dev/draw` Deco editor too — rendered alongside the
+existing page-area outline, but as nested blocks within it.
+Phase 1 doesn't create them; it inherits them as authored
+constraints (visible reference for placing Deco objects relative
+to where content will live). Technically light (the rectangle
+list is JSON; Deco already renders a page-area outline; nested
+rectangles are the same render path with one more layer).
+Architecturally important because it pins the directionality:
+**Phase 2 is upstream of Phase 1 on this axis**, even though
+Phase 1 came first chronologically.
+
+Open sub-decisions, all deferred until concrete pages exist:
+- responsiveness model (Deco-regions-fill-CSS-boxes vs. keep
+  per-class snapshots vs. one-snapshot + per-object responsive
+  rules)
+- textBlock source-of-truth (Kirby field with Deco rendering it,
+  vs. Deco JSON with Kirby referencing it)
+- multi-page navigation (each page is a fresh canvas vs. Deco
+  continuum spans navigation events)
+- editing surface (start simple: edit Deco regions by opening
+  `/dev/draw` against the page's snapshot; in-page edit mode
+  later)
+
+Resolution strategy: build a small 100% Kirby exercise first to
+get a real feel for Kirby's content model, then describe one
+concrete page in prose, then let the sub-decisions fall out of
+that page.
+
 ### Phase 3 — Safety: auth for the web-hosted editing tools
 
 Both Phases 1 and 2 currently assume a local development model.
