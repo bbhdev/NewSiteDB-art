@@ -63,83 +63,142 @@ run cleanly.
       server — but only if you still have server access via the old
       key, so don't lose both at the same time.
 
-- [ ] Configure ssh-agent + Keychain integration. Add this block at the
-      **top** of `~/.ssh/config` (create the file if it doesn't exist),
-      *before* any `Host` blocks:
+- [ ] Configure ssh-agent + Keychain integration with a **host-scoped
+      block** in `~/.ssh/config` (create the file if it doesn't exist).
+      Use a specific `Host newsitedbart` block rather than `Host *` —
+      the project-scoped form keeps settings tied to this one server
+      and won't leak `IdentityFile`/`UseKeychain` into unrelated
+      future SSH connections to other hosts:
       ```
-      Host *
-        AddKeysToAgent yes
-        UseKeychain yes
-        IdentityFile ~/.ssh/id_ed25519
+      Host newsitedbart
+          HostName 1m5eb.ftp.infomaniak.com
+          User 1m5eb_from_infomaniak
+          IdentityFile ~/.ssh/id_ed25519
+          AddKeysToAgent yes
+          UseKeychain yes
       ```
+      - The `Host` name (`newsitedbart`) is a client-side alias *you*
+        invent; it has no relationship to anything on the server. SSH
+        matches it against the literal string you type after `ssh`.
+      - `HostName` is the actual SSH-backend DNS name. On Infomaniak
+        shared hosting this is the *backend* hostname (`1m5eb.ftp...`),
+        which is **different from the web hostname** (`newsitedbart.bbh.fr`).
+        Both are real, they're separate services.
       - `AddKeysToAgent yes` — first `ssh` invocation that needs the
         key prompts for the passphrase once and hands the unlocked key
         to ssh-agent for the rest of the session.
-      - `UseKeychain yes` — the macOS-specific setting that stores
-        the passphrase in your login Keychain, so even after a reboot
-        the key unlocks automatically when you log into your Mac
-        account (Keychain is unlocked by your account password).
+      - `UseKeychain yes` — the macOS-specific setting that *reads*
+        the passphrase from your login Keychain (Keychain is unlocked
+        by your account password, so unlock-on-login is automatic).
       - `IdentityFile` — tells ssh which keyfile to offer; explicit
-        is better than relying on the default search order.
+        is better than relying on default search order.
 
-- [ ] Pre-load the key into the Keychain once now, so the first
-      deploy doesn't prompt:
+- [ ] **Seed the passphrase into Keychain.** On modern macOS (Monterey
+      and later) `UseKeychain yes` only makes ssh *read* from Keychain —
+      it does NOT auto-prompt to save the passphrase on first
+      connection (that older behavior was removed). You must seed
+      Keychain once explicitly:
       ```sh
       ssh-add --apple-use-keychain ~/.ssh/id_ed25519
       ```
-      You'll be asked for the passphrase one time. After this, it's
-      stored in Keychain and ssh uses it transparently.
+      Prompts for the key passphrase one time, stores it in your login
+      Keychain, and adds the key to the running ssh-agent.
 
-- [ ] Copy the public key to the server:
+      Verify with `ssh-add -l` — should list the ED25519 fingerprint.
+
+      > **If a fresh terminal later doesn't have the key loaded**
+      > (`ssh-add -l` says "no identities"), run:
+      > ```sh
+      > ssh-add --apple-load-keychain
+      > ```
+      > That re-populates ssh-agent from Keychain. Usually only needed
+      > the first time after seeding, or after a reboot if `AddKeysToAgent`
+      > didn't auto-pull. Once it's seeded in Keychain you never type
+      > the passphrase again.
+
+- [ ] **Copy the public key to the server.** This is the one step
+      that authorizes your key on the Infomaniak side. There are two
+      approaches; try `ssh-copy-id` first, fall back to the manual
+      one-liner if it fails.
+
+      **Try first:**
       ```sh
-      ssh-copy-id 1m5eb_from_infomaniak@1m5eb.ftp.infomaniak.com
+      ssh-copy-id newsitedbart
       ```
-      This appends `~/.ssh/id_ed25519.pub` to
-      `~/.ssh/authorized_keys` on the server. You'll be asked for the
-      server password once during this step — that's the *Infomaniak
-      SSH/SFTP account* password, not the SSH-key passphrase. After
-      this, the server lets you in via the key.
+      You'll be asked for the *Infomaniak SSH account password* once
+      (not the key passphrase — see the distinction box below). On
+      success, prints a "Number of key(s) added: 1" line.
 
-      If `ssh-copy-id` isn't installed, the manual equivalent:
+      **If `ssh-copy-id` fails with `Connection closed by ...` after
+      the password prompt** (a known Infomaniak quirk — accepts the
+      auth but rejects the way `ssh-copy-id` invokes the remote shell):
       ```sh
-      cat ~/.ssh/id_ed25519.pub | ssh 1m5eb_from_infomaniak@1m5eb.ftp.infomaniak.com \
-        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+      cat ~/.ssh/id_ed25519.pub | ssh newsitedbart \
+        'mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
          cat >> ~/.ssh/authorized_keys && \
-         chmod 600 ~/.ssh/authorized_keys"
+         chmod 600 ~/.ssh/authorized_keys && echo OK'
       ```
+      Prompts for the Infomaniak password once. Look for `OK` at the
+      end of the output — that confirms the key landed AND that
+      `~/.ssh` + `authorized_keys` have the perms Infomaniak's sshd
+      requires (anything group-writable causes a silent key rejection).
 
-- [ ] Add a host alias to `~/.ssh/config` (below the `Host *` block
-      from earlier) so commands stay short:
-      ```
-      Host newsitedbart
-        HostName 1m5eb.ftp.infomaniak.com
-        User 1m5eb_from_infomaniak
-      ```
-      (No need to repeat `IdentityFile` here — the `Host *` block
-      already covers it. Note: `HostName` is the *Infomaniak SSH
-      backend*, NOT the public web hostname `newsitedbart.bbh.fr` —
-      those are two different things on shared hosting.)
+      > **Password vs passphrase — the recurring confusion.** Two
+      > different secrets prompt during this step on different occasions:
+      > - **Server account password** (Infomaniak Manager → Hosting →
+      >   FTP/SSH). The prompt format is `user@host's password:`.
+      >   This is what `ssh-copy-id` / the manual one-liner asks for.
+      > - **Key passphrase** (the one you chose during `ssh-keygen`).
+      >   The prompt format is `Enter passphrase for /Users/.../id_ed25519:`.
+      >   You only see this if Keychain seeding didn't take.
+      >
+      > A "wrong password" attempt on Infomaniak often closes the
+      > connection silently rather than re-prompting — `Connection closed
+      > by <ip> port 22` right after the password line is the symptom.
+      > If you suspect a typo, retry interactively first:
+      > `ssh newsitedbart` — if that lands you in a shell, the password
+      > is right and the issue is the ssh-copy-id command shape.
 
-- [ ] Test it — should print the backend hostname (`h2web499` or
-      similar — that's the Infomaniak cluster node, not the web
-      hostname) and your remote home,
-      **with no password and no passphrase prompt**:
+- [ ] **Test it — passwordless, passphrase-less:**
       ```sh
-      ssh newsitedbart "hostname && pwd"
+      ssh newsitedbart pwd
       ```
-      Expected output approximately:
+      Expected output (and nothing else — no prompts):
       ```
-      h2web499
       /home/clients/94e3ce6271e3648b7b00d6c32be0a6e2
       ```
 
-      If you get a passphrase prompt here, the Keychain wiring didn't
-      take. Re-check the `Host *` block in `~/.ssh/config` (must be
-      `UseKeychain yes`, not commented out) and re-run
-      `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`.
+      > **`pwd` shows your home dir, not the web root.** That's
+      > expected — SSH lands you in your account home; the web root
+      > for this site is a *subdirectory*:
+      > `<home>/sites/newsitedbart.bbh.fr/`. The deploy script targets
+      > the web root explicitly via `REMOTE_PATH` in step 2.
 
-      If you get a *password* prompt (for the server account), the
-      public key wasn't copied successfully. Re-run `ssh-copy-id`.
+      **If `ssh newsitedbart pwd` prompts for a *passphrase*:** Keychain
+      wiring didn't take. Re-check the `Host newsitedbart` block has
+      `UseKeychain yes`, run `ssh-add --apple-load-keychain`, retry.
+
+      **If it prompts for a *password*** (server account password):
+      the public key wasn't installed on the server. Re-run the
+      manual one-liner from the previous step; check `echo OK` printed.
+
+      **If neither obvious — diagnose what SSH is actually doing:**
+      ```sh
+      ssh -v newsitedbart pwd 2>&1 | grep -E \
+        'Offering|Authentications|Server accepts|Authenticated|password|publickey'
+      ```
+      Reads as a transcript of the auth handshake:
+      - `Offering public key: ... ED25519` — the agent is offering the
+        right key. Good.
+      - `Server accepts key: ...` followed by `Authenticated to ...
+        using "publickey"` — server accepted, you're in via key.
+      - `Authentications that can continue: publickey,password`
+        followed by `Next authentication method: password` — server
+        **rejected** the key and fell back to password. The key is not
+        in `~/.ssh/authorized_keys` on the server (re-run the
+        manual one-liner), or perms on `~/.ssh` / `authorized_keys`
+        are wrong (the `chmod 700` / `chmod 600` in the one-liner
+        guarantees this).
 
 ---
 
@@ -353,3 +412,7 @@ Optional flags:
 | `/dev/draw` works logged-out on server | Hostname mismatch in config filename | Step 7 diagnostic |
 | 500 errors after deploy | PHP version mismatch, missing extensions, or syntax in `config.<host>.php` | `php -l` on server, check error log |
 | Panel login keeps redirecting back to login | `site/sessions/` not writable by server user | `chmod` on server |
+| `ssh-copy-id` ends with `Connection closed by ... port 22` | Infomaniak rejects the way ssh-copy-id invokes the remote shell, even with correct password | Use the manual `cat ... \| ssh ... 'mkdir -p ~/.ssh ...'` one-liner instead — step 1 |
+| `ssh newsitedbart` still asks for the **passphrase** in a fresh terminal | ssh-agent in this session didn't auto-load Keychain identities | `ssh-add --apple-load-keychain` — step 1 |
+| `ssh newsitedbart` still asks for the **server password** after `ssh-copy-id` reported success | Public key file installed but `~/.ssh` or `authorized_keys` perms are group/world-writable, server's sshd silently rejects | Re-run the manual one-liner (it sets `chmod 700` / `chmod 600`) — step 1 |
+| `ssh newsitedbart pwd` returns the home dir, not the web root | This is correct — SSH lands you in `$HOME`; the web root is `$HOME/sites/newsitedbart.bbh.fr/`, addressed via `REMOTE_PATH` in deploy.env | Not a problem |
