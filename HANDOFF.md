@@ -1,8 +1,16 @@
 # HANDOFF — NewSiteDB-art
 
 A briefing for whoever (next Claude session, or human) picks this project up
-without the context of the conversation that produced versions ~v0.8.5–0.8.72.
+without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
+
+**Current state (v0.9.8):** Phase 1 complete (v0.9.0 milestone).
+Deployment infrastructure landed (v0.9.1–v0.9.8) — rsync deploy tooling,
+iCloud-placeholder pre-check, first-deploy checklist with diagnostics,
+and a minimum-viable `/dev/draw` auth gate via host-scoped Kirby
+config. Project is ready for first live deployment to
+`https://newsitedbart.bbh.fr/` (Infomaniak shared hosting). Next phase:
+Phase 2 — actual Kirby pages and content authoring.
 
 ## What this project is
 
@@ -263,6 +271,116 @@ in `site/config/config.php`.
   widen this single field to take advantage of the extra room — the
   `.ed-field` uniform label/data column width across the panel is
   sacrosanct; widening one field is bad UI.
+
+### Deployment infrastructure + first auth gate (v0.9.1–v0.9.8)
+
+This stretch is a self-contained slice that gives the project a
+reliable, one-command path from "local working tree" to the live host
+at `https://newsitedbart.bbh.fr/` (Infomaniak shared hosting), plus the
+minimum auth needed to make that safe. No editor or runtime behavior
+changed — these versions are infrastructure only.
+
+**What landed:**
+
+- **`deploy/deploy.sh`** — rsync-over-SSH delta mirror with
+  `--delete-after --delay-updates` and a `--exclude-from` file. Always
+  runs a dry-run first and prompts for confirmation before the real
+  transfer. Flags: `-y` skip prompt, `--no-delete` upload-only,
+  `--skip-icloud-check` bypass the pre-check.
+- **iCloud-placeholder pre-check** (v0.9.1) — project lives in iCloud
+  Drive. With "Optimize Mac Storage" on, macOS can evict files to
+  dataless placeholder stubs; rsync would stall or skip them silently.
+  The script scans the tree with BSD `find -flags +dataless` (with the
+  same path exclusions as the rsync transfer) and aborts with a clear
+  remediation if any are found.
+- **`deploy/deploy-exclude.txt`** — anchored exclusions for
+  server-owned runtime state (`/site/accounts/`, `/site/sessions/`,
+  `/site/cache/`, `/media/`), local-only tooling/backups
+  (`/library/`, `/scripts/`, `/deploy/`), design-journal docs
+  (`HANDOFF.md`, `CLAUDE.md`, `project-hierarchy.csv`), and
+  **server-managed Apache/PHP config** (`/.htaccess`, `/.user.ini` —
+  v0.9.6, Infomaniak ships these tuned to the host; a `--delete` mirror
+  would wipe them without the exclude).
+- **`deploy/deploy.env.example`** — template for the gitignored
+  `deploy.env` carrying `REMOTE_HOST` (an SSH alias, not a raw
+  user@host) and `REMOTE_PATH` (web root absolute path).
+- **`deploy/FIRST-DEPLOY-CHECKLIST.md`** (v0.9.3, expanded v0.9.4 +
+  v0.9.7 + v0.9.8) — linear walkthrough of every step from zero to
+  live, with diagnostics for each common failure mode. Lessons from
+  the actual first run are folded back in: SSH-config Host-scoped vs
+  `Host *` (recommends scoped), macOS Keychain seeding now requires
+  `ssh-add --apple-use-keychain` (no more auto-prompt since Monterey),
+  `ssh-add --apple-load-keychain` for fresh-terminal cases,
+  Infomaniak-specific `ssh-copy-id` failure (`Connection closed by ...
+  port 22` even with correct password — falls back to a manual
+  `cat ... | ssh ... 'mkdir + chmod + cat >> + chmod && echo OK'`
+  one-liner), and the `pwd`-shows-home-not-web-root clarification
+  (SSH lands in `$HOME`; web root is `$HOME/sites/newsitedbart.bbh.fr/`,
+  addressed via `REMOTE_PATH`).
+- **`deploy/README.md`** — the *why* behind every choice in the
+  tooling; the checklist is the *what you do, in order*.
+
+**The `/dev/draw` auth gate (v0.9.2).** Phase 3 in the roadmap below
+remains the comprehensive auth pass over the whole `dev/draw/*`
+namespace. But for the very first deploy we needed *something*, and
+the something is a **host-scoped Kirby config file**, not a
+modification to the shared `config.php`. Template lives at
+`site/config/config.example-host.php`. Workflow:
+
+1. SCP the template to the server's `site/config/`.
+2. Rename it to `config.<SERVER_NAME>.php` — on this host
+   `config.newsitedbart.bbh.fr.php`. Kirby's host-scoped config loader
+   reads `$_SERVER['SERVER_NAME']` (the HTTP Host header) at request
+   time and merges that file over `config.php` if the filename matches.
+3. The file's `ready` callback registers a wildcard route at
+   `dev/draw/(:all?)` that returns `false` (fall-through to the real
+   route) if `kirby()->user()` is set, otherwise returns a 403.
+4. Excluded from rsync by `/site/config/config.*.php` in
+   `deploy-exclude.txt` — never pushed, never deleted. Each
+   environment owns its own host config.
+
+**Critical filename trap.** On Infomaniak shared hosting,
+`hostname -f` on the SSH backend returns the cluster-node name (e.g.
+`h2web499`), which is **not** what Kirby's `$_SERVER['SERVER_NAME']`
+contains (`newsitedbart.bbh.fr` — the public web hostname). Naming the
+config file after the backend hostname silently never activates the
+gate. The template's docblock + the checklist both spell out:
+**name after the web hostname**, and there's an `error_log()` probe
+diagnostic in checklist step 7 for confirming what Kirby actually sees
+when in doubt.
+
+**Why this is not Phase 3.** This gate covers the *editor surface* of
+`dev/draw/*` with a single check (logged-in Panel user yes/no). It
+does NOT yet:
+- audit every individual save/upload endpoint for proper auth
+  semantics (CSRF, request-method gating, etc.),
+- validate MIME/extension on uploaded files (font-bundle POST,
+  any future image upload),
+- distinguish Panel-user roles (currently any Panel user gets full
+  editor access).
+
+Those remain Phase 3 work. The host-scoped gate is the "good enough
+to expose to the open internet during early testing" minimum.
+
+**Infomaniak topology, captured once.** Two separate hostnames in
+play; future sessions should not confuse them:
+
+| Name | Service | Where it's used |
+|---|---|---|
+| `newsitedbart.bbh.fr` | HTTPS web frontend | What browsers hit; what Kirby sees in `$_SERVER['SERVER_NAME']`; **what the host-scoped config filename must match** |
+| `1m5eb.ftp.infomaniak.com` | SSH/SFTP backend | `HostName` in `~/.ssh/config`; how `deploy.sh` reaches the server |
+
+`deploy.env` carries the alias `newsitedbart` (defined in
+`~/.ssh/config` against the SSH backend). `REMOTE_PATH` is
+`/home/clients/94e3ce6271e3648b7b00d6c32be0a6e2/sites/newsitedbart.bbh.fr`
+— the account-hash directory is stable across the hosting plan.
+
+**Process artifact.** During this slice the
+"clarify high-leverage assumptions before acting" rule was violated
+once (papered-over unknown SSH user + REMOTE_PATH with TODO comments
+instead of asking). User flagged it; recovered by asking and
+collecting the real values. Worth re-reading the user's behavioral
+preference section below if you're not the same Claude.
 
 ### Why `isBlockActive` instead of `bp <= 0` to gate contribution (v0.8.54, v0.8.67)
 
@@ -1459,6 +1577,16 @@ Until Phase 3 lands, the operational rule is: **never expose a
 public host with the `dev/draw/*` routes reachable**. Deploy with
 either the routes stripped from `config.php`, or with an
 htaccess/server-config rule blocking the namespace.
+
+**Update (v0.9.2):** A minimum-viable version of this gate has been
+implemented — a host-scoped Kirby config (`site/config/config.example-host.php`
+template, rsync-excluded, renamed to `config.<SERVER_NAME>.php` on the
+server) that wraps `dev/draw/*` in a `kirby()->user()` check via a
+`ready`-callback wildcard route. See the "Deployment infrastructure +
+first auth gate" subsection in *Recent architectural decisions* for
+the full setup. This unblocks first deployment but does NOT replace
+Phase 3 — endpoint-by-endpoint auth audit, MIME validation, and role
+distinction are all still pending.
 
 ### On-server editing pre-requisites (small running list)
 
