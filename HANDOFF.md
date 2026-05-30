@@ -1633,29 +1633,35 @@ text overlays, font bundles (Google + local). The output is a set of
 JSON files in `content/` that the runtime (`app.js`) replays as
 scroll-driven SVG animations.
 
-**Important framing**: the objects this editor manipulates are
-conceptually **decoration**, not first-class content. They're moving
-graphic elements that frame or animate around the real content —
-the real content is text and images on actual Kirby pages.
+**Important framing.** Deco's primary purpose is **background
+decoration and animation** — moving graphic elements that frame the
+real page content. With significant exceptions: the text abilities
+— and the main one, **textBlock** — can carry **actual page content**
+rather than decoration, but content that retains the full power of
+Deco's animation system (scroll-driven, drift, drawIn, fadeOpacity,
+pathFollow, follow-this-object, group templates). This is what makes
+Deco more than a decoration layer: it doubles as an animated
+content-authoring surface, adding real power to the site as a whole.
 
-### Phase 2 — Actual Kirby pages: structure + content authoring
+### Phase 2 — Page structure: HTML pages / content holders
 
-Once Phase 1 is stable, the second arm of the project is building
-the real site: Kirby page blueprints, templates, the navigation and
-layout of pages, the structural skeleton that visitors actually
-read. Plain Kirby work — `site/blueprints/`, `site/templates/`,
-`site/snippets/`.
+Phase 2 generates the site's actual **page structure** — the HTML
+pages visitors land on. The output is either real final content, or
+**content holders with placeholders** waiting for content to be
+written/loaded later; the goal of this phase is to lay down the
+**structure(s)** of the future site, not necessarily to populate
+every word and image.
 
-The crossover with Phase 1: actual first-class content (text +
-images) gets authored through the tools we're building in Phase 1.
-The font bundle, the text overlay system, the eventual image
-pipeline — these don't stay confined to "decoration on a canvas";
-they're the authoring surface for the real content of the real
-pages too. Phase 2 wires Kirby pages to consume that content. The
-content model layered onto the editor needs to be designed with
-this consumption in mind — JSON shapes friendly to Kirby
-templates, asset paths that resolve under both `/dev/draw` and
-public URLs, etc.
+Plain Kirby work for the skeleton: `site/blueprints/`,
+`site/templates/`, `site/snippets/`, navigation, layout primitives.
+
+Crossover with Phase 1: where a page (or page region) needs
+animated text content, the **textBlock** mechanism authored in
+`/dev/draw` is the carrier — Phase 2 wires Kirby pages to consume
+those textBlocks (via `htmlKey` slots — see v0.8.258) so a single
+authoring surface produces both decorative motion and real content
+in motion. Asset paths, JSON shapes, and slot conventions need to
+resolve under both `/dev/draw` and public URLs.
 
 This is also where any "geometric object as part of a page" gets
 done — embedding the SVG animation as a block within a Kirby page
