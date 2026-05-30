@@ -37,3 +37,6 @@ Thumbs.db
 # you want a particular snapshot tracked.
 /library/*
 !/library/.gitkeep
+
+# Local-only deploy target config (host/path) — never commit
+/deploy/deploy.env

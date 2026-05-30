@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────
+# rsync exclude list for deploying NewSiteDB-art (local Mac → server).
+#
+# Anchored patterns (leading "/") are relative to the project root (the
+# rsync transfer root). Anything listed here is NEITHER uploaded NOR
+# deleted on the server — so the "server-owned runtime state" block below
+# survives the --delete mirror untouched.
+#
+# IMPORTANT: rsync filter files do NOT support trailing/inline comments.
+# Every comment must be on its own line starting with "#". Keep it that way.
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Server-owned runtime state — never push, never delete ─────────────
+# These live and change ON the server; clobbering them would log Panel
+# users out, wipe the cache, or destroy accounts. Kirby recreates the
+# dirs at runtime if a fresh server doesn't have them yet.
+/site/accounts/
+/site/sessions/
+/site/cache/
+/media/
+
+# ── Version control & OS junk ─────────────────────────────────────────
+/.git/
+/.gitignore
+.DS_Store
+Thumbs.db
+
+# ── Local-only backups, tooling & scratch (not web assets) ────────────
+# library/ = local snapshot backups (HANDOFF: backups, not source).
+# scripts/ = migrate-content.php; run migrations locally, then push content.
+# deploy/  = this deploy tooling itself.
+# zoom*.html = local test scratch pages.
+/library/
+/deploy/
+/scripts/
+/zoom.html
+/zoomtest.html
+
+# ── Project docs / spreadsheets (design journal, not served) ──────────
+/CLAUDE.md
+/HANDOFF.md
+/NOTES.md
+/project-hierarchy.csv
+/_projecthierarchy.csv
+/_projecthierarchy.numbers
+/deco-inventory.csv
+/deco-inventory.numbers
+/.claude/
+
+# ── Host-specific Kirby config overrides — each env keeps its own ──────
+# config.php itself IS synced (it's environment-agnostic today). Kirby
+# natively merges an optional per-host config.<SERVER_NAME>.php over it;
+# that override file holds anything that must differ per environment and
+# stays environment-local (never pushed, never deleted).
+/site/config/config.*.php
