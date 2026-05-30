@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────────
+# .htaccess for NewSiteDB-art (Kirby v5 on Infomaniak shared hosting).
+#
+# Combines three things that MUST coexist at the web root:
+#   1. Kirby's standard mod_rewrite block — routes virtual URLs
+#      (/panel, /dev/draw, page slugs, …) through index.php. Without
+#      this, Apache treats /panel as a literal filesystem path and
+#      returns 404 because no panel/ directory exists.
+#   2. Infomaniak's DEFLATE compression block — host-recommended
+#      content-type list for over-the-wire gzip.
+#   3. Infomaniak's git-protection redirect — 404s any request for
+#      /.git/* (defence in depth; the repo's .git is excluded from
+#      deploy anyway).
+#
+# This file is versioned in the repo (single source of truth) and is
+# now pushed by deploy/deploy.sh — NOT excluded. If Infomaniak's panel
+# regenerates the file out-of-band, the next deploy will restore this
+# version. If host-side compression/git-protection rules change, fold
+# the diff back into this file rather than editing the server copy.
+#
+# Locally (php -S, MAMP without Apache, etc.) this file is inert —
+# Apache is the only consumer. Safe to keep in the working tree.
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Kirby URL rewriting ──────────────────────────────────────────────
+<IfModule mod_rewrite.c>
+
+RewriteEngine on
+
+# If you ever serve Kirby from a subfolder, uncomment & adjust:
+# RewriteBase /
+
+# Block dotfiles (.git, .env, .htaccess itself, …) but allow .well-known/
+# for ACME / Let's Encrypt challenges.
+RewriteRule (^|/)\.(?!well-known\/) - [F]
+
+# Block direct access to content/ source files (txt/md/mdown) and
+# extensionless requests; route them through Kirby.
+RewriteRule ^content/(.*\.(txt|md|mdown)|([^.]+))$ index.php [L]
+
+# Block direct access to site/ internals.
+RewriteRule ^site/(.*) index.php [L]
+
+# Block direct access to Kirby core + Panel sources.
+RewriteRule ^kirby/(.*) index.php [L]
+
+# Real files / directories are served as-is; everything else is a
+# virtual route → index.php.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*) index.php [L]
+
+</IfModule>
+
+# Pass Authorization header to PHP (needed for Kirby API basic-auth and
+# anything else relying on HTTP Authorization).
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+# ── Infomaniak: gzip compression ─────────────────────────────────────
+SetOutputFilter DEFLATE
+AddOutputFilterByType DEFLATE "application/atom+xml" "application/javascript" "application/json" "application/ld+json" "application/manifest+json" "application/rdf+xml" "application/rss+xml" "application/schema+json" "application/vnd.geo+json" "application/vnd.ms-fontobject" "application/x-font-ttf" "application/x-javascript" "application/x-web-app-manifest+json" "application/xhtml+xml" "application/xml" "font/eot" "font/opentype" "image/bmp" "image/svg+xml" "image/vnd.microsoft.icon" "image/x-icon" "text/cache-manifest" "text/css" "text/html" "text/javascript" "text/plain" "text/vcard" "text/vnd.rim.location.xloc" "text/vtt" "text/x-component" "text/x-cross-domain-policy" "text/xml"
+
+# ── Infomaniak: deny direct access to /.git/* (belt-and-braces) ──────
+# SECTION BEGIN GIT PROTECTION
+RedirectMatch 404 /\.git
+# SECTION END GIT PROTECTION

@@ -55,12 +55,16 @@ Thumbs.db
 /site/config/config.*.php
 
 # ── Server-owned web-server config — never push, never delete ─────────
-# Infomaniak (and most shared hosts) ship a managed .htaccess and a
-# .user.ini at the web root with PHP/Apache settings tuned to the host
-# (PHP version selector, memory_limit, mod_rewrite rules, etc.). They
-# exist on the server but not in this repo; without these excludes a
-# --delete mirror would wipe them and break the site.
-/.htaccess
+# .user.ini is host-managed (PHP version selector, memory_limit, …);
+# Infomaniak's Manager rewrites it on certain admin actions, so we
+# leave it alone.
+#
+# NOTE: .htaccess is NOT excluded — it is owned by THIS repo. Kirby
+# needs its mod_rewrite block at the web root to route virtual URLs
+# (/panel, /dev/draw, page slugs) through index.php. The repo's
+# .htaccess folds in Infomaniak's compression + git-protection rules
+# so we don't regress host behaviour on deploy. If Infomaniak ever
+# regenerates the file out-of-band, the next deploy restores ours.
 /.user.ini
 
 # ── Infomaniak landing & maintenance pages — server-owned ─────────────

@@ -4,12 +4,17 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.9.8):** Phase 1 complete (v0.9.0 milestone).
-Deployment infrastructure landed (v0.9.1–v0.9.8) — rsync deploy tooling,
-iCloud-placeholder pre-check, first-deploy checklist with diagnostics,
-and a minimum-viable `/dev/draw` auth gate via host-scoped Kirby
-config. Project is ready for first live deployment to
-`https://newsitedbart.bbh.fr/` (Infomaniak shared hosting). Next phase:
+**Current state (v0.9.14):** Phase 1 complete (v0.9.0 milestone).
+Deployment infrastructure landed (v0.9.1–v0.9.14) — rsync deploy tooling,
+iCloud-placeholder pre-check, first-deploy checklist with diagnostics
+captured from the actual first live run, a working `/dev/draw` auth gate
+via host-scoped Kirby config (early-exit-in-ready strategy after the
+route-based v0.9.2 attempt failed live), and a repo-owned `.htaccess`
+carrying Kirby's mod_rewrite rules (without which `/panel` and every
+other virtual route 404s on Apache). First live deploy executed
+successfully against `https://newsitedbart.bbh.fr/` (Infomaniak shared
+hosting); Panel installed, first user created, gate verified end-to-end
+(curl /dev/draw → 403 logged out, editor HTML logged in). Next phase:
 Phase 2 — actual Kirby pages and content authoring.
 
 ## What this project is
@@ -272,7 +277,7 @@ in `site/config/config.php`.
   `.ed-field` uniform label/data column width across the panel is
   sacrosanct; widening one field is bad UI.
 
-### Deployment infrastructure + first auth gate (v0.9.1–v0.9.8)
+### Deployment infrastructure + first auth gate (v0.9.1–v0.9.14)
 
 This stretch is a self-contained slice that gives the project a
 reliable, one-command path from "local working tree" to the live host
@@ -297,47 +302,158 @@ changed — these versions are infrastructure only.
   server-owned runtime state (`/site/accounts/`, `/site/sessions/`,
   `/site/cache/`, `/media/`), local-only tooling/backups
   (`/library/`, `/scripts/`, `/deploy/`), design-journal docs
-  (`HANDOFF.md`, `CLAUDE.md`, `project-hierarchy.csv`), and
-  **server-managed Apache/PHP config** (`/.htaccess`, `/.user.ini` —
-  v0.9.6, Infomaniak ships these tuned to the host; a `--delete` mirror
-  would wipe them without the exclude).
+  (`HANDOFF.md`, `CLAUDE.md`, `project-hierarchy.csv`), the
+  host-managed PHP config (`/.user.ini`), Infomaniak landing /
+  maintenance pages (`/__index.html`, `/.infomaniak-maintenance.html`
+  — v0.9.10) and a hand-deployed SERVER_NAME probe (`/x.php`). NOTE:
+  `.htaccess` is intentionally **not** excluded as of v0.9.13 — see
+  the next bullet.
+- **Repo-owned `.htaccess`** (v0.9.13). The very first deploy went
+  through cleanly and the home page rendered, but `/panel` 404'd.
+  Diagnosis: Infomaniak's default `.htaccess` ships only DEFLATE
+  compression rules and a `RedirectMatch 404 /\.git`; it has no
+  `RewriteEngine` block, so Apache treats `/panel` (and every other
+  Kirby virtual route) as a literal filesystem path. The v0.9.6
+  exclude that protected this file from deletion was protecting a
+  broken state. Resolution: commit a combined `.htaccess` at the
+  repo root carrying Kirby's standard mod_rewrite block + Infomaniak's
+  DEFLATE list + the `.git` redirect (preserved verbatim from the
+  server). Remove `/.htaccess` from the exclude list so deploy pushes
+  it. The repo now owns the routing layer — any future host-side
+  drift gets restored on the next deploy. Locally the file is inert
+  (`php -S` doesn't read `.htaccess`).
 - **`deploy/deploy.env.example`** — template for the gitignored
   `deploy.env` carrying `REMOTE_HOST` (an SSH alias, not a raw
   user@host) and `REMOTE_PATH` (web root absolute path).
-- **`deploy/FIRST-DEPLOY-CHECKLIST.md`** (v0.9.3, expanded v0.9.4 +
-  v0.9.7 + v0.9.8) — linear walkthrough of every step from zero to
-  live, with diagnostics for each common failure mode. Lessons from
-  the actual first run are folded back in: SSH-config Host-scoped vs
-  `Host *` (recommends scoped), macOS Keychain seeding now requires
-  `ssh-add --apple-use-keychain` (no more auto-prompt since Monterey),
-  `ssh-add --apple-load-keychain` for fresh-terminal cases,
-  Infomaniak-specific `ssh-copy-id` failure (`Connection closed by ...
-  port 22` even with correct password — falls back to a manual
-  `cat ... | ssh ... 'mkdir + chmod + cat >> + chmod && echo OK'`
-  one-liner), and the `pwd`-shows-home-not-web-root clarification
-  (SSH lands in `$HOME`; web root is `$HOME/sites/newsitedbart.bbh.fr/`,
-  addressed via `REMOTE_PATH`).
+- **`deploy/FIRST-DEPLOY-CHECKLIST.md`** (v0.9.3, iteratively expanded
+  v0.9.4 → v0.9.13 as each step actually fired in the live run).
+  Linear walkthrough from zero to live, with diagnostics for every
+  common failure mode encountered. Lessons folded in:
+  - SSH-config Host-scoped vs `Host *` (recommends scoped — explains
+    `Host` syntax, `HostName` vs alias).
+  - macOS Keychain seeding now requires explicit
+    `ssh-add --apple-use-keychain` (no more auto-prompt since Monterey);
+    `ssh-add --apple-load-keychain` for fresh-terminal cases where
+    `ssh-add -l` shows the key but ssh still prompts.
+  - Infomaniak-specific `ssh-copy-id` failure (`Connection closed by
+    ... port 22` even with correct password) — manual one-liner
+    fallback `cat ~/.ssh/id_ed25519.pub | ssh newsitedbart 'mkdir -p
+    ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys &&
+    chmod 600 ~/.ssh/authorized_keys && echo OK'`.
+  - `pwd`-shows-home-not-web-root clarification (SSH lands in `$HOME`;
+    web root is `$HOME/sites/newsitedbart.bbh.fr/`, addressed via
+    `REMOTE_PATH`).
+  - Gitignore verification via `git check-ignore -v` +
+    `git ls-files --error-unmatch` instead of an ambiguous
+    `git status` glance (v0.9.7).
+  - **Step ordering correction (v0.9.10)** — the original draft put
+    "Create Panel user" before "Deploy", which was impossible: `/panel`
+    doesn't exist on the server until Kirby code is uploaded. Reordered
+    to 3 (gate) → 4 (iCloud) → 5 (deploy) → 6 (Panel user) → 7 (verify).
+  - **"Run on Mac, not in SSH session" warning** on the deploy step
+    (v0.9.11) — a real mis-step in the live run: user ran
+    `deploy/deploy.sh` from inside the server's SSH session (`uid…@h2web499:~/sites/…$`).
+    deploy.sh must run on the Mac; the SSH session has neither the
+    local working tree nor the BSD `find -flags +dataless` macOS-only
+    pre-check.
+  - **Three files saved from `--delete`** (v0.9.10): the first live
+    dry-run flagged `x.php` (user's hand-deployed SERVER_NAME probe)
+    and Infomaniak's `__index.html` + `.infomaniak-maintenance.html`
+    for deletion. All three added to `deploy-exclude.txt`.
+  - **`/panel` 404 root cause + fix** (v0.9.13): the Infomaniak
+    default `.htaccess` lacks Kirby's mod_rewrite rules; resolution
+    is the repo-owned `.htaccess` described above.
 - **`deploy/README.md`** — the *why* behind every choice in the
   tooling; the checklist is the *what you do, in order*.
 
-**The `/dev/draw` auth gate (v0.9.2).** Phase 3 in the roadmap below
-remains the comprehensive auth pass over the whole `dev/draw/*`
-namespace. But for the very first deploy we needed *something*, and
-the something is a **host-scoped Kirby config file**, not a
-modification to the shared `config.php`. Template lives at
-`site/config/config.example-host.php`. Workflow:
+**The `/dev/draw` auth gate (v0.9.2 → v0.9.14, strategy pivot).**
+Phase 3 in the roadmap below remains the comprehensive auth pass over
+the whole `dev/draw/*` namespace. But for the very first deploy we
+needed *something*, and the something is a **host-scoped Kirby config
+file**, not a modification to the shared `config.php`. The repo's copy
+lives at `site/config/config.newsitedbart.bbh.fr.php` (also serves as
+the template — copy & rename for new hosts). Workflow:
 
-1. SCP the template to the server's `site/config/`.
-2. Rename it to `config.<SERVER_NAME>.php` — on this host
+1. SCP the file to the server's `site/config/`, rename to
+   `config.<SERVER_NAME>.php` — on this host
    `config.newsitedbart.bbh.fr.php`. Kirby's host-scoped config loader
    reads `$_SERVER['SERVER_NAME']` (the HTTP Host header) at request
    time and merges that file over `config.php` if the filename matches.
-3. The file's `ready` callback registers a wildcard route at
-   `dev/draw/(:all?)` that returns `false` (fall-through to the real
-   route) if `kirby()->user()` is set, otherwise returns a 403.
-4. Excluded from rsync by `/site/config/config.*.php` in
+2. The `ready` callback checks `$kirby->request()->path()` against
+   `dev/draw` prefix and `$kirby->user() === null`. On match: emit
+   `http_response_code(403)`, a plain-text body, and `exit()`. The
+   route table is bypassed entirely.
+3. Excluded from rsync by `/site/config/config.*.php` in
    `deploy-exclude.txt` — never pushed, never deleted. Each
    environment owns its own host config.
+
+**Why the strategy pivot (v0.9.2 → v0.9.14).** The v0.9.2 implementation
+registered a wildcard guard route at `dev/draw/(:all?)` via a `routes`
+array returned from the `ready` callback, with `return false` for
+logged-in users (fall-through to the real route) and a 403 Response
+for anonymous. The first live test (v0.9.13, panel.install run +
+fresh-browser logout) showed the gate inert — `curl /dev/draw` returned
+200 + editor HTML with no cookie. Two reasons the route-based gate
+couldn't work in Kirby v5.2 + this codebase:
+
+- The shared `config.php` declares specific `dev/draw/library/...`,
+  `dev/draw/save`, `dev/draw/font-bundle`, `dev/draw/local-fonts`
+  routes at top-level options. Those win over routes registered from
+  a `ready` callback (Kirby's route option merge order).
+- The bare `/dev/draw` URL doesn't resolve via a route at all — it
+  resolves via PAGE resolution (`content/dev/draw/` → `template
+  draw.php`), which never consults the route table.
+
+Diagnosis trail (worth keeping for future similar puzzles):
+1. **Hostname check.** Probe via `probe.php` at the web root dumping
+   `$_SERVER['SERVER_NAME']` confirmed it equals `newsitedbart.bbh.fr`
+   — matches the filename exactly.
+2. **File-loaded check.** Injecting an unconditional
+   `file_put_contents('/tmp/marker.txt', ...)` at the top of the
+   host-scoped config and curling two URLs showed the marker file
+   accumulating one line per request → file IS being loaded.
+3. **Route-registration check.** Injecting a probe route at pattern
+   `gate-probe` into the same `ready` array and curling `/gate-probe`
+   returned 404 → the routes from `ready` weren't reachable for this
+   URL at all. Combined with the editor-HTML evidence on
+   `/dev/draw`, the conclusion was that the `routes` option merge
+   from `ready` is either appended (so config.php's specifics win
+   first) or ignored — either way the gate was unreachable.
+
+The fix is mechanically simple but architecturally different: do the
+authorization decision INSIDE the `ready` callback BEFORE returning,
+using `$kirby->request()->path()` + `$kirby->user()`, and `exit()` on
+denial. `ready` runs after the core (including session handling) is
+initialized, so `user()` correctly resolves from the cookie. No route
+registration is involved.
+
+Live verification after the pivot (v0.9.14):
+
+```
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://newsitedbart.bbh.fr/dev/draw
+403
+$ curl -sS -o /dev/null -w "%{http_code}\n" -X POST https://newsitedbart.bbh.fr/dev/draw/save
+403
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://newsitedbart.bbh.fr/
+200
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://newsitedbart.bbh.fr/panel
+302
+```
+
+`/panel` is untouched (Kirby has its own auth on it); home and other
+public pages unaffected; every `/dev/draw/*` URL — page and route —
+returns 403 to anonymous requests.
+
+**Panel installer on a public server (v0.9.13).** Kirby refuses to
+run the Panel installer on a non-localhost host by default
+("The panel installer is disabled on public servers by default"). To
+bootstrap the first user, set `'panel.install' => true` as a top-level
+option inside the host-scoped config TEMPORARILY, visit `/panel`,
+create the first user, then immediately remove the line. The setup
+section of `site/config/config.newsitedbart.bbh.fr.php` documents the
+exact one-shot procedure. Do not leave the option set; with it on,
+anyone hitting `/panel` while `site/accounts/` is empty can create
+a new admin.
 
 **Critical filename trap.** On Infomaniak shared hosting,
 `hostname -f` on the SSH backend returns the cluster-node name (e.g.
@@ -1578,15 +1694,16 @@ public host with the `dev/draw/*` routes reachable**. Deploy with
 either the routes stripped from `config.php`, or with an
 htaccess/server-config rule blocking the namespace.
 
-**Update (v0.9.2):** A minimum-viable version of this gate has been
-implemented — a host-scoped Kirby config (`site/config/config.example-host.php`
-template, rsync-excluded, renamed to `config.<SERVER_NAME>.php` on the
-server) that wraps `dev/draw/*` in a `kirby()->user()` check via a
-`ready`-callback wildcard route. See the "Deployment infrastructure +
+**Update (v0.9.14):** A minimum-viable version of this gate has been
+implemented — a host-scoped Kirby config (`site/config/config.<SERVER_NAME>.php`,
+rsync-excluded, lives only on the server) that gates the entire
+`dev/draw/*` URL prefix on `kirby()->user()` via an early-exit inside
+the `ready` callback. (The v0.9.2 attempt that registered a guard route
+turned out inert in Kirby v5 — see the "Deployment infrastructure +
 first auth gate" subsection in *Recent architectural decisions* for
-the full setup. This unblocks first deployment but does NOT replace
-Phase 3 — endpoint-by-endpoint auth audit, MIME validation, and role
-distinction are all still pending.
+why and what replaced it.) This unblocks first deployment but does NOT
+replace Phase 3 — endpoint-by-endpoint auth audit, MIME validation,
+and role distinction are all still pending.
 
 ### On-server editing pre-requisites (small running list)
 
