@@ -53,3 +53,12 @@ Thumbs.db
 # that override file holds anything that must differ per environment and
 # stays environment-local (never pushed, never deleted).
 /site/config/config.*.php
+
+# ── Server-owned web-server config — never push, never delete ─────────
+# Infomaniak (and most shared hosts) ship a managed .htaccess and a
+# .user.ini at the web root with PHP/Apache settings tuned to the host
+# (PHP version selector, memory_limit, mod_rewrite rules, etc.). They
+# exist on the server but not in this repo; without these excludes a
+# --delete mirror would wipe them and break the site.
+/.htaccess
+/.user.ini
