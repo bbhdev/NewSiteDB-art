@@ -1723,6 +1723,71 @@ axis). This will inform UX decisions later — e.g. the natural
 entry point for creating a new page is Phase 2, with Phase 1
 opened from within Phase 2 to populate a specific rectangle.
 
+**Project-wide principle: phases must be reentrant.** This is the
+most load-bearing meta-rule. Authors discover/invent things during
+work — it's the dominant mode for any creative project, not a
+corner case. A one-way pipeline (Phase 2 finishes, then Phase 1
+begins, no looking back) would force authors to either exit and
+re-enter upstream every time a new need surfaces, or work around
+it inline and accumulate drift between the actual design and the
+system meant to govern it. Both are corrosive.
+
+Reentrancy concretely means:
+- A Phase 1 session that needs a new typography token can add
+  the token there; it propagates to Phase 2's Kirby select
+  fields and to any textBlock referencing it.
+- A Phase 2 session that wants a new rectangle on a page
+  already being animated can add it; Phase 1 sees the new
+  inherited block on next open (or live if loaded).
+- A new `htmlKey` slot invented in either phase becomes
+  immediately referenceable from both.
+- Removing a shared artifact (token / rectangle / slot)
+  triggers a usage check — warning, not block; author decides.
+
+Implications:
+- **Storage**: each shared artifact lives in one canonical place;
+  both phases write to it; no copies.
+- **Editing surface**: cross-phase jumps are first-class (an
+  "edit this token" affordance in Phase 1 hops to the token
+  editor, edits, returns — no hard modal lock).
+- **Warnings**: the warning system already planned for layout
+  overlap extends to artifact lifecycle ("token X removed, used
+  by 3 textBlocks"; "rectangle Y deleted, Phase 1 has objects
+  placed inside it").
+
+**The shared-artifact list (Phase 2 owns the schemas; Phase 1
+inherits and consumes; both can write).** Three artifacts so far,
+likely to grow:
+
+1. **Page-planning rectangles** — content holders authored on
+   the Phase 2 canvas, surfaced in Phase 1 as nested blocks
+   within the page-area outline. Pin the spatial structure of
+   real content; Phase 1 places animation around/within them.
+2. **`htmlKey` slot conventions** — the spatial bridge between
+   Kirby HTML and Deco regions. Each slot has a key; Kirby
+   templates reference the key; runtime fills with inert HTML
+   or a live Deco mount.
+3. **Typography token / style set** — `heading-xl`, `heading-l`,
+   `lead`, `body`, `eyebrow`, `caption`, … Each token defines
+   family / size / weight / line-height / letter-spacing /
+   color. **Tight integration**: both Kirby select fields and
+   Deco's content-carrying textBlocks (those bound to an
+   `htmlKey`) pick from this list. Purely decorative text in
+   Deco (over-titles, kinetic display effects) may remain
+   free-form; content textBlocks must use a token. One JSON
+   file, read by both layers (Kirby CSS generation, Deco
+   runtime).
+
+Likely future additions to the shared-artifact list: color
+tokens, spacing scale, image-treatment rules, breakpoint
+definitions. Worth keeping the list explicit so it grows
+coherently rather than as ad-hoc accretion.
+
+This three-artifact (and growing) set is the concrete shape of
+"Phase 2 is upstream of Phase 1" — not a vague architectural
+claim but a specific list of JSON files Phase 2 owns and Phase 1
+reads, all reentrantly editable from either side.
+
 ### Phase 3 — Safety: auth for the web-hosted editing tools
 
 Both Phases 1 and 2 currently assume a local development model.
