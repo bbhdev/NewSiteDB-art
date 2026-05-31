@@ -1693,17 +1693,64 @@ Architecturally important because it pins the directionality:
 **Phase 2 is upstream of Phase 1 on this axis**, even though
 Phase 1 came first chronologically.
 
-Open sub-decisions, all deferred until concrete pages exist:
-- responsiveness model (Deco-regions-fill-CSS-boxes vs. keep
-  per-class snapshots vs. one-snapshot + per-object responsive
-  rules)
-- textBlock source-of-truth (Kirby field with Deco rendering it,
-  vs. Deco JSON with Kirby referencing it)
-- multi-page navigation (each page is a fresh canvas vs. Deco
-  continuum spans navigation events)
-- editing surface (start simple: edit Deco regions by opening
-  `/dev/draw` against the page's snapshot; in-page edit mode
-  later)
+**DECIDED (v0.10.12): Kirby pages manage the mix. No separate
+display layer.** A Kirby template emits HTML containing the
+rect-blocks as `<div data-rect="…" [data-deco="…"]>` placeholders.
+A small JS bootstrapper finds `[data-deco]` divs and mounts the
+Deco runtime in each, pointing at the JSON. Inert rects are
+ordinary HTML filled by Kirby field values. CSS (per rect class)
+owns responsive layout of the boxes; Deco's per-class snapshots
+continue to handle responsive animation inside each region.
+
+The shared-artifact JSON files (rectangles, slot keys, typography
+tokens — see below) live in known paths, read by PHP at template
+render time AND by JS at Deco mount time. One source of truth,
+two readers — clean, not messy. Typography tokens generate CSS
+classes (`.style-heading-xl` etc.) that the templates apply, and
+the Deco textBlock runtime reads the same JSON to render in-canvas
+text matching those tokens.
+
+Why NOT a separate display layer (rejected, documented so it
+isn't relitigated): going headless throws away Kirby's value
+proposition (Panel + flat files + simple PHP rendering) and
+forces rebuilding everything Kirby gives free (controllers,
+snippets, navigation helpers, image pipelines, multilingual
+machinery, SEO surface, browser back/forward semantics, link
+sharing, RSS, sitemaps, print stylesheets). It is precisely
+the path Divi/Elementor took to bloat. The "more open / could
+swap Kirby later" argument is theoretical: by the time swap
+mattered, the display layer would be entangled with Kirby's
+content shape and the abstraction would be illusory.
+
+Watch-outs for staying on Option A:
+1. **Keep the generated Kirby template dumb.** Phase 2's page-
+   planning canvas emits a template that does nothing but write
+   divs with classes and `data-deco` attributes. All intelligence
+   lives in the JSON artifacts (PHP+JS readers) and hand-written
+   CSS. A template that grows logic is the first step down the
+   Divi slope.
+2. **Convention, not freedom, for shared-JSON locations and
+   shapes.** Pick file paths, naming, schema early; future
+   Phase 2 work extends them but does not invent new locations
+   or shapes ad-hoc.
+
+Cross-page Deco continuity (browser navigation = reload) is
+acceptable as default; if true continuum-across-pages becomes a
+real requirement later, add a small SPA-style fetch+swap shim
+(~200 lines) without restructuring. Defer that cost.
+
+Remaining open sub-decisions, deferred until concrete pages
+exist:
+- responsiveness model FOR DECO INSIDE EACH REGION (per-class
+  snapshots as today vs. one-snapshot + per-object responsive
+  rules — page-level responsive is now CSS's job, decided)
+- textBlock content source-of-truth (Kirby field with Deco
+  rendering it, vs. Deco JSON with Kirby referencing it)
+- multi-page navigation (each page is a fresh canvas vs. SPA
+  shim for canvas continuity — defer)
+- editing surface progression (start simple: edit Deco regions
+  by opening `/dev/draw` against the page's snapshot; in-page
+  edit mode later)
 
 Resolution strategy: build a small 100% Kirby exercise first to
 get a real feel for Kirby's content model, then describe one
