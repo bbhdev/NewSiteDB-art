@@ -902,6 +902,123 @@ HTML;
           'application/json'
         );
       }
+    ],
+
+    /*
+     * Phase 2 / Slice 1 / step 3 (v0.10.18) — persist a target page's
+     * rect-block layout.
+     *
+     *   POST dev/page/save
+     *   body: { page, schemaVersion, chapters, rects }
+     *
+     * Validates the full shape before writing. Atomic write to
+     * content/<pageId>/rects.json via tmp + rename so a torn save
+     * never leaves a half-JSON file on disk. The page itself is
+     * resolved via kirby()->page() — same affordance as dev/draw/save.
+     *
+     * Canvas dimensions are NOT in this payload (see HANDOFF Slice 1
+     * step 1: dims come from Deco's existing per-page config).
+     */
+    [
+      'pattern' => 'dev/page/save',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $body  = $kirby->request()->body()->toArray();
+
+        $pageId        = $body['page']          ?? null;
+        $schemaVersion = $body['schemaVersion'] ?? null;
+        $chapters      = $body['chapters']      ?? null;
+        $rects         = $body['rects']         ?? null;
+
+        $fail = function (string $msg, int $code = 400) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => $msg]),
+            'application/json',
+            $code
+          );
+        };
+
+        if (!is_string($pageId) || $pageId === ''
+            || $schemaVersion !== 1
+            || !is_array($chapters) || !is_array($rects)) {
+          return $fail('Missing or invalid body fields.');
+        }
+
+        $targetPage = $kirby->page($pageId);
+        if (!$targetPage) {
+          return $fail('Unknown page: ' . $pageId, 404);
+        }
+
+        // Validate chapters. id is a lowercase slug; name is the
+        // same Unicode-tolerant pattern dev/draw/save uses for
+        // snapshot names so apostrophes / accents / parens all
+        // work for chapter labels.
+        $chapterIds = [];
+        foreach ($chapters as $ch) {
+          if (!is_array($ch)
+              || !isset($ch['id'])   || !is_string($ch['id'])
+              || !preg_match('/^[a-z0-9_-]+$/i', $ch['id'])
+              || !isset($ch['name']) || !is_string($ch['name'])
+              || !preg_match('/^[\p{L}\p{N} _.,\'()\[\]\-]+$/u', $ch['name'])) {
+            return $fail('Invalid chapter entry.');
+          }
+          if (isset($chapterIds[$ch['id']])) {
+            return $fail('Duplicate chapter id: ' . $ch['id']);
+          }
+          $chapterIds[$ch['id']] = true;
+        }
+
+        // Validate rects.
+        $allowedKinds = ['text', 'image', 'drilldown', 'deco-mount'];
+        $rectIds      = [];
+        foreach ($rects as $r) {
+          if (!is_array($r)) return $fail('Rect entry is not an object.');
+          if (!isset($r['id']) || !is_string($r['id'])
+              || !preg_match('/^r-[a-z0-9]+$/', $r['id'])) {
+            return $fail('Invalid rect id.');
+          }
+          if (isset($rectIds[$r['id']])) {
+            return $fail('Duplicate rect id: ' . $r['id']);
+          }
+          $rectIds[$r['id']] = true;
+          if (!isset($r['kind']) || !in_array($r['kind'], $allowedKinds, true)) {
+            return $fail('Invalid rect kind: ' . ($r['kind'] ?? 'null'));
+          }
+          foreach (['x', 'y', 'w', 'h'] as $k) {
+            if (!isset($r[$k]) || !is_numeric($r[$k])) {
+              return $fail('Rect ' . $r['id'] . ' missing/invalid ' . $k);
+            }
+          }
+          if (isset($r['chapterId']) && $r['chapterId'] !== null) {
+            if (!is_string($r['chapterId']) || !isset($chapterIds[$r['chapterId']])) {
+              return $fail('Rect references unknown chapter: ' . $r['chapterId']);
+            }
+          }
+        }
+
+        // Persist. Atomic write so a half-written file can never be
+        // read by the next editor load.
+        $payload = [
+          'schemaVersion' => 1,
+          'chapters'      => $chapters,
+          'rects'         => $rects,
+        ];
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+
+        $root   = $targetPage->root();
+        $target = $root . '/rects.json';
+        $tmp    = $target . '.tmp';
+        if (file_put_contents($tmp, $json) === false || !rename($tmp, $target)) {
+          @unlink($tmp);
+          return $fail('Failed to write rects.json.', 500);
+        }
+
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true]),
+          'application/json'
+        );
+      }
     ]
   ]
 ];

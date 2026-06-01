@@ -1,0 +1,43 @@
+# Canvas page blueprint — Phase 2 Slice 1 (v0.10.21).
+#
+# A page authored by the absolute-coord rect editor at /dev/page.
+# The blueprint deliberately carries no pageWidth / pageHeight
+# fields: canvas dimensions come from Deco's per-page config
+# (content/<page>/page.json → dims[primaryClassId]) so Phase 2 and
+# Deco share one source of truth for the page frame. Rect data
+# lives in a sibling file (content/<page>/rects.json), not as a
+# blueprint field — analogous to how Deco classes store JSON in
+# subdirs alongside the blueprint's .txt.
+#
+# Author workflow: create a page in Panel with this blueprint,
+# then visit /dev/page?page=<slug> to author rects on the canvas.
+
+title: Canvas Page
+
+columns:
+  main:
+    width: 2/3
+    sections:
+      info:
+        type: info
+        headline: Canvas authoring
+        text: >
+          This page's layout is authored on the canvas editor at
+          `/dev/page?page={{ page.slug }}`. Rect data is stored in
+          `rects.json` alongside this `.txt` file. Canvas dimensions
+          come from Deco's per-page config (`page.json` →
+          `dims[primaryClassId]`).
+      fields:
+        type: fields
+        fields:
+          text:
+            label: Notes
+            type: textarea
+            size: medium
+            help: Optional author notes. Not rendered on the page.
+  sidebar:
+    width: 1/3
+    sections:
+      files:
+        type: files
+        info: "{{ file.dimensions }}"

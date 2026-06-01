@@ -107,7 +107,12 @@ return [
         header_remove('X-Powered-By');
 
         $path = $kirby->request()->path()->toString();
-        if (str_starts_with($path, 'dev/draw')) {
+        // v0.10.22 — Phase 2 Slice 1 step 6: extend the gate to cover
+        // /dev/page (the new rect-canvas editor) and its save endpoint
+        // /dev/page/save. Same logic as /dev/draw — neither write
+        // surface should be reachable without a Panel session on a
+        // public server.
+        if (str_starts_with($path, 'dev/draw') || str_starts_with($path, 'dev/page')) {
             if ($kirby->user() === null) {
                 // Neutral 403 — do NOT name the framework, the admin surface,
                 // or hint at a login path. Knowing the stack lets an attacker

@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.13):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.23):** Phase 1 complete (v0.9.0 milestone).
 Deployment infrastructure landed (v0.9.1–v0.9.14) — rsync deploy tooling,
 iCloud-placeholder pre-check, first-deploy checklist with diagnostics
 captured from the actual first live run, a working `/dev/draw` auth gate
@@ -64,8 +64,125 @@ both per-breakpoint coords AND responsive rules (author picks per
 case), single-breakpoint for slices 1–2; chapter IDs are
 author-declared (inference would break too often).
 
-Next: detailed Slice 1 plan (data shape, blueprint, editor verbs,
-save/load endpoints), then implementation.
+**Slice 1 implementation begun (v0.10.15):** detailed Slice 1 plan
+landed (`/Users/bbh/.claude/plans/flickering-watching-mccarthy.md`).
+Architectural refinement during planning: canvas dimensions are NOT
+redefined in `rects.json` — Phase 2 reads Deco's existing per-page
+config (`deco_load_page_config` → `dims[primaryClassId]` →
+`{pageW, pageH}`) and positions rects inside *the same frame* the
+Deco runtime uses. Single source of truth. Slice 1 step 1 ships
+the editor skeleton: `site/templates/page.php`, `assets/js/dev-page.js`,
+`assets/css/dev-page.css`, plus local-only Kirby page records
+`content/dev/page/page.txt` and `content/test/test.txt` (gitignored).
+Empty-state load only — toolbar + sidebar scaffolding visible, canvas
+sized to the primary class's `pageW × pageH`, no rects rendered yet.
+The add-rect button and Save button are visible-but-disabled to keep
+the toolbar geometry stable across upcoming steps.
+
+**Slice 1 step 2 — editor verbs phase A (v0.10.17):** add/select/move
+landed. Kind picker is a `<select>` collapsed into one toolbar slot
+(`+ Add rect` → text/image/drilldown/deco-mount). Selection on
+pointerdown (accent-coloured outline). Drag with a 3px click-vs-drag
+threshold; live position update via direct style mutation during
+pointermove, canonical `render()` only on pointerup commit. Document-
+level pointermove/up listeners so the drag continues even when the
+pointer leaves the rect bounds. Palette integration shipped here too:
+the project's existing `content/_shared/palette.json` (already used by
+Deco) is consumed by the template — `accent` drives the selection
+outline + save-button-dirty colour; `text` drives rect-body
+typography. Kind-background defaults stay as CSS custom properties
+emitted from PHP until a `kindColors` palette field exists. Canvas
+stripe colours fixed (v0.10.16) — originals were darker than body
+bg so the stripes read as flat dark.
+
+**Slice 1 step 3 — Save + endpoint (v0.10.18):** `dev/page/save` POST
+route in `site/config/config.php`. Validates `pageId`, `schemaVersion
+=== 1`, chapter `id` matches `/^[a-z0-9_-]+$/i`, chapter `name`
+matches the Unicode-tolerant `/^[\p{L}\p{N} _.,'()\[\]\-]+$/u`
+regex (same one the draw-save route uses for snapshot names), rect
+`id` matches `/^r-[a-z0-9]+$/`, rect `kind` in the four-kind set,
+no duplicate ids, no dangling `chapterId`. Atomic tmp-write +
+rename. Payload shape persisted is `{schemaVersion, chapters,
+rects}` — canvas dimensions deliberately absent (they come from
+Deco's per-page config). JS side: `dirty` + `saving` state with
+Cmd/Ctrl-S shortcut; `addRect()` and the drag commit branch call
+`markDirty()`. Editor-chrome label colours (kind label + id tag)
+hardcoded to high-contrast dark — they need to read on every kind
+background regardless of the palette text token, which can be
+mid-toned. Rect body colour stays palette-bound for Slice 2 real
+content.
+
+**Slice 1 step 3.5 — Save UX polish (v0.10.19):** Save button now
+reflects dirty state via colour (accent when there are pending
+edits, default dark when clean) so the author doesn't have to
+read the status line to know whether a save is needed. On a
+successful save the button briefly pulses green via the `.is-flash`
+class — the moment-of-save is visible even when the status line is
+glanced past. Reflow trick (`void btn.offsetWidth`) used to restart
+the CSS animation when two saves fire in quick succession.
+
+**Slice 1 step 4 — editor verbs phase B (v0.10.20):** resize (8
+handles: 4 corners + 4 edge mid-points, with direction-appropriate
+cursors and N/W anchoring on the opposite edge), delete (button in
+selection panel + Delete/Backspace key, guarded against firing
+while focus is in a text input), Escape deselects, and full chapter
+management (sidebar list with inline-editable names; add form;
+delete with confirm showing affected member count — members are
+unassigned not deleted; rect→chapter assignment via dropdown on
+selected rect). Drag state extended with `mode: 'move' | 'resize'`
++ direction; resize math floors size at 20px so a rect can't
+collapse below grabbable. Client-side chapter-name validation
+mirrors the server regex for instant feedback.
+
+**Slice 1 step 5 — blueprint + runtime template (v0.10.21):**
+`site/blueprints/pages/canvas-page.yml` introduced. Single Notes
+textarea field + an info panel pointing the author at
+`/dev/page?page={{ page.slug }}`. Deliberately carries NO
+pageWidth/pageHeight fields — canvas dimensions come from Deco's
+per-page config exactly the same way the editor reads them.
+`site/templates/canvas-page.php` reads `rects.json` + the page's
+Deco config, picks the widest useClasses entry as primary class,
+emits the canvas as a `position:relative` container at
+`pageW × max(max(y+h), pageH) + 80px` with absolutely-positioned
+stub rects matching the editor's visual language.
+`assets/css/canvas-page.css` duplicates the kind-colour block from
+`dev-page.css` (single source of truth deferred to Slice 7 polish);
+palette text token wired the same way as the editor.
+
+Author workflow: create a page in Panel with the `canvas-page`
+blueprint → visit `/dev/page?page=<slug>` → author rects → Save →
+visit `/<slug>` to see the runtime render. Editor and runtime are
+visually identical except for editor chrome (handles, selection
+outline, toolbar, sidebar).
+
+Next: Slice 1 step 6 — auth gate extension in
+`site/config/config.newsitedbart.bbh.fr.php` to cover `dev/page`
+the way it already covers `dev/draw`. Local-first; deployed via
+SCP per the host-scoped config protocol.
+
+**Slice 1 step 6 — auth gate extension (v0.10.22):**
+`site/config/config.newsitedbart.bbh.fr.php` prefix check now
+matches `dev/draw` OR `dev/page`. One-line change; same 403
+behaviour applies to the new editor surface and its `dev/page/save`
+endpoint. File is rsync-excluded — activation on the live server
+requires manual SCP. Local dev untouched (host-scoped filename
+doesn't match localhost).
+
+**Slice 1 step 6.5 — runtime footer diagnostics (v0.10.23):**
+runtime template footer comment extended from `v… · class=… · N
+rect(s)` to also include `canvas=<W>×<H>px (pageH floor=<F>)` so
+the computed page height is visible in view-source without needing
+DevTools. Useful for quick verification that the
+`max(max(y+h), pageH) + 80` math gave the expected result.
+
+**Slice 1 complete (v0.10.15 → v0.10.23).** End-to-end
+canvas-authored rect-block layout: editor at `/dev/page`, runtime
+template `canvas-page.php`, save endpoint, auth gate, all sharing
+Deco's per-page config + palette as common data (the
+"integrate, don't drift" principle held).
+
+Next: Slice 2 — Kirby Panel can edit rect content (real text/image,
+not stubs). Scoping/slicing conversation to start before any code.
 
 ## What this project is
 
@@ -781,6 +898,93 @@ has been tightened in this same update; the lesson worth holding:
 when a planning sub-decision contradicts what looks like already-
 settled architecture, surface it as a question, don't quietly slice
 around it.
+
+### Slice 1 step 1 — editor skeleton + Deco-config canvas read (v0.10.15)
+
+First Phase 2 code lands. Three new files in the repo, two local-only
+Kirby page records (gitignored):
+
+- `site/templates/page.php` — editor template, mirrors `draw.php`'s
+  shape. Resolves target page from `?page=<slug>` query (falls back to
+  the editor page's `TargetPage` field, then `home`). Loads target's
+  rects.json (empty if absent), reads target's Deco config via
+  `deco_load_page_config()`, picks the widest entry in `useClasses`
+  as the Slice-1 "primary class", embeds everything as JSON in
+  `<script id="editor-data">`. Toolbar: brand + version + page picker
+  + class-label badge + disabled +Add-rect + disabled Save + status.
+  Body: sidebar with placeholders for Chapters + Selection panels;
+  main `#page-editor-surface` sized to `pageW × pageH` (canvas).
+- `assets/js/dev-page.js` — vanilla JS bootstrapper. Parses
+  `#editor-data`, defensively normalises (so a stale-cached editor
+  doesn't throw), wires the page-select reload, renders `state.rects`
+  into the surface, writes a status line. `window.__pageEditor`
+  exposed for console debugging — removed once real UI replaces it
+  in step 4+.
+- `assets/css/dev-page.css` — chrome styling. Toolbar at top, 260px
+  sidebar on the left, scrollable canvas wrap with a striped
+  background so the white canvas-surface visually pops. Kind-colour
+  palette for rect stubs: text=blue, image=amber, drilldown=violet,
+  deco-mount=mint. Duplicated to the runtime `canvas-page.css` when
+  that lands in step 5; refactor to a shared tokens file in Slice 7
+  if patterns recur.
+- `content/dev/page/page.txt` (gitignored) — Kirby page record so
+  `/dev/page` resolves. `TargetPage: home` for first-load convenience.
+- `content/test/test.txt` (gitignored) — sandbox target page used for
+  step-by-step testing before a real `canvas-page` blueprint exists.
+
+**Architectural refinement landed in step 1 — canvas dimensions
+come from Deco, not from Phase 2.** The user pointed out during
+planning that Deco's class registry already defines canvas dimensions
+per page (per-class) — having Phase 2 redefine a width would either
+duplicate that data or quietly diverge from it. Recommendation
+accepted: Phase 2 reads `deco_load_page_config($targetPage->root())`
+and uses the widest class's `pageW × pageH` as the editor canvas
+size. `rects.json` carries no width/height of its own. Slice 8
+(responsiveness) extends this with per-class coord sets inside
+`rects.json` — no coordinate translation needed at the Slice 8
+boundary because coords are already (x,y) inside the Deco frame.
+File merge (`rects.json` into `page.json`) is parked for after both
+phases stabilize — flag, not decision.
+
+**Behavioral pattern carried forward from `draw.php`:** filtering
+the page-picker to skip the `/dev` tree, the error page, and any
+"subpage" that's really a class folder. Same filter, same regex,
+copy-pasted intentionally so the two editor surfaces stay
+behaviourally aligned.
+
+**No commit / no push yet.** Step 1 is implemented locally; the user
+tests before deciding to commit and move to step 2. Per the global
+rule: commits are not autonomous.
+
+**Principle flagged after step 1 — integrate, don't drift.** The
+canvas-dimensions integration (read from Deco's `dims[classId]`) was
+applied. The kind-colour palette was NOT — `dev-page.css` hardcodes
+the four kind colours (text=blue, image=amber, drilldown=violet,
+deco-mount=mint) instead of reading from `deco_load_palette()` /
+`content/_shared/palette.json`, which already carries the project's
+design colour tokens. Not a functional problem now (the hardcoded
+defaults work as placeholders) but it IS exactly the kind of quiet
+duplication that compounds.
+
+**The rule (decided here, applies to every future slice).** Any
+affordance that already exists in any Deco phase — palette, masters,
+classes, page config, anything in `content/_shared/*.json` or
+exposed by a `deco_*` helper — is **common data by default**. Phase 2
+consumes it; it does not re-author it. If a Phase 2 need requires
+extending the existing data shape (e.g. palette gains a "page-kind
+tag" field), the extension goes into the shared data and the helper,
+not into a Phase-2-only parallel. **Starting with the next update**,
+the first question on any new Phase 2 piece is "does Deco already
+have this?" — if yes, integrate.
+
+**Concrete debt to clear next iteration.** Replace the hardcoded
+kind colours in `dev-page.css` (and the future `canvas-page.css`
+runtime copy) with values drawn from the project palette. Likely
+shape: add a `kindColors` (or similar) field to the palette JSON
+mapping rect kinds → palette token IDs, emit the resulting CSS
+custom properties from PHP at template time, reference them from
+the kind selectors. Same single-source-of-truth shape Deco already
+uses for its line colours.
 
 ### Why `isBlockActive` instead of `bp <= 0` to gate contribution (v0.8.54, v0.8.67)
 

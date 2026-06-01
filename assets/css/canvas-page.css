@@ -1,0 +1,63 @@
+/*
+ * canvas-page runtime stub styling — Phase 2 Slice 1.
+ *
+ * Kind colours intentionally mirror dev-page.css so a page rendered
+ * by the runtime looks identical to the editor canvas (minus the
+ * editor chrome: handles, selection outline, status bar). Single
+ * source of truth would be nicer; for Slice 1 the kind-colour block
+ * is duplicated. Refactor once a real content-binding layer (Slice
+ * 2+) makes the duplication pinch.
+ *
+ * The runtime emits CSS custom properties from PHP for the palette-
+ * driven 'text' colour and the four kind backgrounds (so a future
+ * palette schema with a kindColors field replaces the defaults in
+ * one place).
+ */
+
+body.canvas-page-body {
+  margin: 0;
+  background: #f5f5f5;
+  color: #222;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+.canvas-page {
+  margin: 0 auto;
+  background: #fafafa;
+  box-shadow: 0 0 0 1px #ddd, 0 4px 12px rgba(0, 0, 0, 0.06);
+  /* width + height set inline by the template */
+}
+
+.rect {
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: var(--cp-palette-text, rgba(0, 0, 0, 0.82));
+  font-size: 0.9rem;
+}
+
+.rect-stub-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.82); /* runtime chrome, not palette-bound */
+}
+
+.rect-stub-id {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.4rem;
+  font-size: 0.65rem;
+  color: rgba(0, 0, 0, 0.55); /* runtime chrome, not palette-bound */
+  font-variant-numeric: tabular-nums;
+}
+
+.rect--text       { background: var(--cp-kind-text); }
+.rect--image      { background: var(--cp-kind-image); }
+.rect--drilldown  { background: var(--cp-kind-drilldown); }
+.rect--deco-mount { background: var(--cp-kind-deco-mount); }
+.rect--unknown    { background: #eeeeee; }

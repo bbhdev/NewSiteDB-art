@@ -1,0 +1,413 @@
+/*
+ * /dev/page editor — Phase 2 Slice 1 styling.
+ *
+ * Visual language deliberately mirrors /dev/draw (dev-draw.css) so
+ * authors moving between the two editors don't suffer chrome whiplash.
+ * Toolbar at top, sidebar on the left, canvas surface centered to the
+ * right. Kind-coloured rect stubs.
+ *
+ * Single source of truth would be nicer; for Slice 1 the kind-colour
+ * block is duplicated in canvas-page.css (runtime). Refactor when
+ * patterns recur (Slice 7 polish).
+ */
+
+/* Layout primitives ───────────────────────────────────────────── */
+
+body.page-editor {
+  margin: 0;
+  background: #1f2024;
+  color: #eaeaea;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pe-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.5rem 1rem;
+  background: #16171a;
+  border-bottom: 1px solid #2c2e33;
+  flex: 0 0 auto;
+}
+
+.pe-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pe-brand-mark {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f0a060;
+}
+
+.pe-version {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-page-picker select {
+  background: #2a2c31;
+  color: #eaeaea;
+  border: 1px solid #3a3d44;
+  border-radius: 3px;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+}
+
+.pe-class-label {
+  color: #aaa;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #2c2e33;
+  border-radius: 3px;
+  background: #1b1c20;
+}
+.pe-class-label strong { color: #f0a060; font-weight: 600; }
+.pe-dims { color: #666; }
+
+.pe-tools, .pe-view {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pe-spacer { flex: 1; }
+
+button.pe-create-btn,
+button.pe-save {
+  background: #2a2c31;
+  color: #eaeaea;
+  border: 1px solid #3a3d44;
+  border-radius: 3px;
+  padding: 0.3rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+              box-shadow 0.15s ease;
+}
+button.pe-create-btn:hover:not([disabled]),
+button.pe-save:hover:not([disabled]) {
+  background: #353740;
+}
+button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Save button reflects dirty state via colour, not just the status
+   text. Dark (default) = clean / nothing to save. Accent = unsaved
+   changes pending. The brief .is-flash class applied on a successful
+   save pulses the button green so the user sees the moment-of-save
+   even when the status line is glanced past. */
+button.pe-save.is-dirty:not([disabled]) {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+button.pe-save.is-dirty:not([disabled]):hover {
+  /* slightly brighter on hover — overlay a subtle white wash */
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.08);
+}
+button.pe-save.is-flash {
+  animation: pe-save-flash 0.6s ease-out;
+}
+@keyframes pe-save-flash {
+  0%   { background: #4caf6a; border-color: #4caf6a; color: #fff;
+         box-shadow: 0 0 0 0 rgba(76, 175, 106, 0.6); }
+  60%  { background: #4caf6a; border-color: #4caf6a; color: #fff;
+         box-shadow: 0 0 0 10px rgba(76, 175, 106, 0); }
+  100% { background: #2a2c31; border-color: #3a3d44; color: #eaeaea;
+         box-shadow: 0 0 0 0 rgba(76, 175, 106, 0); }
+}
+
+.pe-status {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.5rem;
+}
+
+/* Body grid: sidebar + canvas. ──────────────────────────────── */
+
+.pe-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pe-sidebar {
+  background: #1a1b1f;
+  border-right: 1px solid #2c2e33;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+.pe-panel {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #2c2e33;
+}
+.pe-panel:last-child { border-bottom: none; }
+
+.pe-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.pe-panel-head h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #999;
+}
+
+.pe-chapters { list-style: none; margin: 0; padding: 0; }
+.pe-empty {
+  padding: 0.4rem 0.2rem;
+  color: #555;
+  font-style: italic;
+  font-size: 0.85em;
+}
+
+/* Canvas surface ─────────────────────────────────────────────── */
+
+.pe-canvas-wrap {
+  padding: 1.5rem;
+  overflow: auto;
+  /* Stripes were originally #1a1b1f / #1f2024 — both darker than the
+     body backdrop (#1f2024) and one identical to it, so the small
+     visible band around the canvas surface read as flat dark.
+     Bumped to clearly lighter shades so the wrap region pops against
+     the body and the alternation is obvious. */
+  background:
+    repeating-linear-gradient(
+      45deg,
+      #2a2d35 0 8px,
+      #353944 8px 16px
+    );
+}
+
+.pe-canvas-surface {
+  position: relative;
+  background: #fafafa;
+  color: #222;
+  margin: 0 auto;
+  box-shadow:
+    0 0 0 1px #3a3d44,
+    0 8px 24px rgba(0, 0, 0, 0.4);
+  /* Width + min-height are set inline by the template from the
+     primary class's pageW × pageH. */
+}
+
+/* Rect stubs ─────────────────────────────────────────────────── */
+
+.pe-rect {
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 0.85rem;
+  /* Rect body color inherits the palette text token so real content
+     (Slice 2) tracks the project palette. The kind-stub label below
+     overrides to a fixed high-contrast dark — it's editor chrome,
+     not content, and needs to read on every kind background even if
+     the palette text token is mid-toned. */
+  color: var(--pe-palette-text, rgba(0, 0, 0, 0.82));
+  user-select: none;
+  cursor: grab;
+  touch-action: none; /* let pointermove drive the drag without
+                         the browser stealing it for a pan/scroll. */
+}
+
+.pe-rect.is-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+
+.pe-rect.is-selected {
+  outline: 2px solid var(--pe-palette-accent, #ff5500);
+  outline-offset: 2px;
+  z-index: 1;
+}
+
+.pe-rect-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.82); /* editor chrome, not palette-bound */
+  pointer-events: none;       /* clicks pass through to the rect body */
+}
+
+.pe-rect-id {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.4rem;
+  font-size: 0.65rem;
+  color: rgba(0, 0, 0, 0.55); /* editor chrome, not palette-bound */
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Kind colours — backed by custom properties emitted from PHP
+   (template <style>). Duplicated to canvas-page.css runtime when
+   that lands in step 5. Once palette gains a kindColors map the
+   defaults move out of CSS entirely. */
+.pe-rect--text       { background: var(--pe-kind-text); }
+.pe-rect--image      { background: var(--pe-kind-image); }
+.pe-rect--drilldown  { background: var(--pe-kind-drilldown); }
+.pe-rect--deco-mount { background: var(--pe-kind-deco-mount); }
+.pe-rect--unknown    { background: #eeeeee; }
+
+/* Resize handles ─────────────────────────────────────────────
+   Eight handles on the selected rect: four corners + four edge
+   mid-points. Square nubs sized so they're easy to grab without
+   stealing too much of the rect's clickable interior. Cursor per
+   direction. Handles are children of .pe-rect (absolutely
+   positioned) and only visible when the rect is .is-selected. */
+.pe-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--pe-palette-accent, #ff5500);
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+  display: none;
+  z-index: 2;
+}
+.pe-rect.is-selected > .pe-resize-handle { display: block; }
+.pe-resize-handle--nw { top: -6px;    left: -6px;    cursor: nwse-resize; }
+.pe-resize-handle--n  { top: -6px;    left: 50%;     cursor: ns-resize;
+                        transform: translateX(-50%); }
+.pe-resize-handle--ne { top: -6px;    right: -6px;   cursor: nesw-resize; }
+.pe-resize-handle--e  { top: 50%;     right: -6px;   cursor: ew-resize;
+                        transform: translateY(-50%); }
+.pe-resize-handle--se { bottom: -6px; right: -6px;   cursor: nwse-resize; }
+.pe-resize-handle--s  { bottom: -6px; left: 50%;     cursor: ns-resize;
+                        transform: translateX(-50%); }
+.pe-resize-handle--sw { bottom: -6px; left: -6px;    cursor: nesw-resize; }
+.pe-resize-handle--w  { top: 50%;     left: -6px;    cursor: ew-resize;
+                        transform: translateY(-50%); }
+
+/* Sidebar panel rows ─────────────────────────────────────────
+   Chapter rows + selection-panel rows share a compact info-row
+   visual: name on the left, small affordances on the right. */
+.pe-chapters li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.2rem;
+  border-bottom: 1px solid #232529;
+}
+.pe-chapters li:last-child { border-bottom: none; }
+.pe-chapter-name {
+  flex: 1;
+  background: transparent;
+  color: #eaeaea;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  min-width: 0;
+}
+.pe-chapter-name:hover  { border-color: #2c2e33; }
+.pe-chapter-name:focus  { border-color: var(--pe-palette-accent, #ff5500);
+                          outline: none; background: #1b1c20; }
+.pe-chapter-count {
+  color: #777;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8em;
+  padding: 0 0.2rem;
+}
+.pe-chapter-del,
+.pe-rect-del {
+  background: transparent;
+  color: #888;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1;
+}
+.pe-chapter-del:hover,
+.pe-rect-del:hover { color: #ff7766; border-color: #5a2c2c; background: #2a1d1d; }
+
+.pe-chapter-add {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+.pe-input {
+  flex: 1;
+  background: #1b1c20;
+  color: #eaeaea;
+  border: 1px solid #2c2e33;
+  border-radius: 3px;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  min-width: 0;
+}
+.pe-input:focus { border-color: var(--pe-palette-accent, #ff5500); outline: none; }
+
+.pe-selection-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.pe-selection-row label {
+  color: #999;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  width: 5.5rem;
+  flex: 0 0 auto;
+}
+.pe-selection-row select.pe-input {
+  flex: 1;
+  padding: 0.2rem 0.3rem;
+}
+.pe-selection-row .pe-dim {
+  font-variant-numeric: tabular-nums;
+  color: #aaa;
+  flex: 1;
+}
+.pe-selection-actions {
+  margin-top: 0.6rem;
+  display: flex;
+  gap: 0.4rem;
+}
+.pe-selection-actions .pe-rect-del {
+  border: 1px solid #5a2c2c;
+  background: #2a1d1d;
+  color: #ff7766;
+  padding: 0.25rem 0.6rem;
+}
+
+/* Add-rect dropdown styled as a button. The <select> approach
+   compacts the 4 kinds into one toolbar slot without a custom
+   menu component — fine until step 4 needs richer affordances. */
+.pe-add-rect select.pe-create-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 1.5rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #aaa 50%),
+    linear-gradient(135deg, #aaa 50%, transparent 50%);
+  background-position:
+    calc(100% - 12px) 50%,
+    calc(100% - 7px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
