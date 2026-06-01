@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.9.14):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.13):** Phase 1 complete (v0.9.0 milestone).
 Deployment infrastructure landed (v0.9.1–v0.9.14) — rsync deploy tooling,
 iCloud-placeholder pre-check, first-deploy checklist with diagnostics
 captured from the actual first live run, a working `/dev/draw` auth gate
@@ -13,9 +13,40 @@ route-based v0.9.2 attempt failed live), and a repo-owned `.htaccess`
 carrying Kirby's mod_rewrite rules (without which `/panel` and every
 other virtual route 404s on Apache). First live deploy executed
 successfully against `https://newsitedbart.bbh.fr/` (Infomaniak shared
-hosting); Panel installed, first user created, gate verified end-to-end
-(curl /dev/draw → 403 logged out, editor HTML logged in). Next phase:
-Phase 2 — actual Kirby pages and content authoring.
+hosting); Panel installed, first user created, gate verified end-to-end.
+
+**Security hardening batch (v0.10.2–v0.10.7):** prompted by a Kirby
+CVSS 8.8 CVE. Five tracked production-surface changes: opaque 403
+body (no framework reveal); `header_remove('X-Powered-By')` in the
+host-scoped ready callback (covers ALL responses); deploy.sh now
+ships a comment-stripped `.htaccess` (in-repo file remains the
+commented master; sed strips the commentary, separate rsync sends
+the staged file at deploy-end); Kirby upgraded 5.4.0 → 5.4.2;
+ErrorDocument 403/404 with inline plain-text bodies. **Critical
+gotcha embedded in deploy.sh**: the staged `.htaccess` MUST be
+`chmod 644` before rsync — mktemp's default 0600 is preserved by
+rsync -a and Apache (different user on shared hosting) cannot read
+mode-600 .htaccess, returning directory-wide 403 for EVERY URL.
+This bit us once and is now both fixed and documented inline in
+deploy.sh. See the "Security hardening batch" subsection below for
+full architectural details.
+
+**Phase 2 direction (v0.10.9–v0.10.12):** decided shape recorded
+without code yet. Kirby pages own page-level rendering; small JS
+bootstrapper mounts Deco regions into `<div data-deco="…">`
+placeholders. No separate display layer (rationale, including the
+Divi/Elementor anti-pattern, captured in the Phase 2 section so it
+isn't relitigated). Shared-artifact JSON files (rectangles, htmlKey
+slots, typography tokens) read by both PHP and JS — Phase 2 owns
+the schemas, Phase 1 inherits. Project-wide principle: phases must
+be reentrant (authors discover/invent during work; one-way pipelines
+are corrosive). Workflow ordering: Phase 2 → Phase 1 in production
+authoring (reverse of how they were built). Concrete next step
+(user-side): small 100% Kirby learning exercise before any Phase 2
+code.
+
+Next: resume Phase 2 planning after the user's Kirby exercise yields
+a concrete page description.
 
 ## What this project is
 
@@ -497,6 +528,91 @@ once (papered-over unknown SSH user + REMOTE_PATH with TODO comments
 instead of asking). User flagged it; recovered by asking and
 collecting the real values. Worth re-reading the user's behavioral
 preference section below if you're not the same Claude.
+
+### Security hardening batch (v0.10.2–v0.10.7)
+
+Triggered by a Kirby CVSS 8.8 CVE notification mid-Phase-2-planning.
+Five tracked production-surface changes; all aimed at reducing what
+the deployed surface reveals to anyone probing it, plus the upstream
+patch.
+
+**1. Opaque 403 body for `/dev/draw` auth gate (v0.10.2).** Earlier
+body was developer-friendly but a tech-stack beacon:
+`"Forbidden — /dev/draw requires a logged-in Kirby Panel user. Log
+in at /panel and reload this page."` — named the framework, named
+the admin surface, named the login path. Replaced with the single
+neutral line `"Forbidden\n"`. Lives in
+`site/config/config.<SERVER_NAME>.php`'s `ready` callback. That
+file is rsync-excluded; the in-repo copy is the template / source
+of truth, the server copy is updated manually via SCP.
+
+**2. `header_remove('X-Powered-By')` globally (v0.10.3).** Added at
+the very top of the host-scoped `ready` callback so it covers
+EVERY response, not just `/dev/draw`. Reason: `expose_php = Off`
+in php.ini would also do this, but Infomaniak shared hosting
+doesn't reliably honor user php.ini overrides. Doing it in PHP
+guarantees the header is gone for this app.
+
+**3. deploy.sh ships a comment-stripped `.htaccess` (v0.10.3).**
+The in-repo `.htaccess` carries a substantial commentary block at
+the top (rationale for each directive, history of the ErrorDocument
+experiment, etc.) — useful locally, a complete tech-stack reveal
+online (Kirby, Infomaniak, `/panel`, the deploy mechanism, all
+named). Pipeline:
+- `mktemp` a staging file
+- `sed -E '/^[[:space:]]*#/d; /^[[:space:]]*$/d'` strips comments + blank lines
+- `chmod 644 "$STAGED_HTACCESS"` — **CRITICAL** (see below)
+- Main rsync uses `--exclude=/.htaccess`
+- Separate rsync at deploy-end pushes the staged file to
+  `$REMOTE_PATH/.htaccess`
+- `trap 'rm -f "$STAGED_HTACCESS"' EXIT` cleans up on any path
+
+**4. THE MODE-0600 GOTCHA (v0.10.7) — critical, save yourself
+hours.** `mktemp` creates files with mode 0600 (owner-only). `rsync
+-a` preserves source mode. Without the explicit `chmod 644`, the
+deployed `.htaccess` lands on the server as mode 0600. Apache on
+shared hosting runs as a DIFFERENT user from the deploy account
+and cannot read it. Apache's response to an unreadable `.htaccess`
+in a directory is to return **HTTP 403 for EVERY URL in that
+directory** — the whole site goes dark with no obvious cause
+upstream. The chmod 644 line in deploy.sh has a CRITICAL comment
+block explaining this. If a future deploy ever produces a
+site-wide 403, the first check is the mode of the deployed
+`.htaccess`.
+
+**5. ErrorDocument 403/404 with inline plain-text bodies
+(v0.10.7).** Apache's default 403/404 templates leak
+`mailto:webmaster@bbh.fr` and a visible "Apache" string in the
+body. Override with `ErrorDocument 403 "Forbidden"` and
+`ErrorDocument 404 "Not Found"` in `.htaccess`. **Important:
+Infomaniak DOES allow these — the v0.10.5 attempt that appeared
+to fail was actually the mode-0600 bug above masquerading as an
+AllowOverride rejection.** A clean retest after the chmod 644
+fix confirmed they work (`curl /.git/config` → HTTP 403 with the
+9-byte "Forbidden" body, no mailto, no Apache reference). Note:
+Kirby's rewrite catches every virtual URL and routes through
+`index.php`, so the 404 ErrorDocument only fires for things
+Apache itself refuses (e.g. the protected dotfiles); for in-app
+404s, Kirby's own error template renders (currently
+`<h1>Error</h1>` — minor leak, no framework name, customizable
+later via a Kirby `error.php` template if desired).
+
+**6. Kirby 5.4.0 → 5.4.2 (v0.10.4).** Straight folder swap (no
+custom modifications inside `kirby/`). 5.4.1 fixed the CVSS 8.8
+issue; 5.4.2 picked up a same-day symfony/yaml security release.
+Local smoke test (home 200, /panel 302, /dev/draw 200, no PHP
+errors) confirmed clean before commit. Backup of 5.4.0 sits at
+`../kirby-5.4.0-bak` outside the repo.
+
+**Accepted leaks (documented, not fixable here).**
+- `Server: Apache` response header — cannot be stripped on shared
+  hosting without mod_security access.
+- Kirby's `<h1>Error</h1>` 404 template body (in-app 404s only);
+  customizable later via `site/templates/error.php`.
+
+**Parked for later (v0.10.8).** Panel IP allowlist via dynamic
+DNS — captured in the Phase 3 area, not currently needed. See
+the "Parked: Panel IP allowlist via dynamic DNS" subsection.
 
 ### Why `isBlockActive` instead of `bp <= 0` to gate contribution (v0.8.54, v0.8.67)
 
