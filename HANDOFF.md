@@ -45,8 +45,27 @@ authoring (reverse of how they were built). Concrete next step
 (user-side): small 100% Kirby learning exercise before any Phase 2
 code.
 
-Next: resume Phase 2 planning after the user's Kirby exercise yields
-a concrete page description.
+**Phase 2 planning — first concrete page + slicing (v0.10.14):**
+Kirby exercise done (enough to move forward, not exhaustive). User
+described the first concrete page; slicing plan landed. Page model
+is a **monopage absolutely-positioned canvas**: chapters are
+author-mental groupings (and a UI gesture for bulk-move), not flow
+units; any rect can sit anywhere on the page; ordering is managed by
+the editor recalculating coords when the author rearranges. This is
+significantly cleaner than a flowing-HTML-chapters model and matches
+Deco's existing absolute-coord world. Rect-block authoring is
+canvas-only — there is no hand-JSON stage (parallels Deco). Slice 1
+combines data shape + runtime template + minimum rect-editor canvas;
+slices 2–8 layer content editing, typography tokens, Deco bootstrapper,
+textBlock binding, drill-down (overlay), custom polish, responsiveness,
+second blueprint. Sub-decisions: drill-down behavior = overlay (push
+parked; freeze+darken TBD on first real test); responsiveness offers
+both per-breakpoint coords AND responsive rules (author picks per
+case), single-breakpoint for slices 1–2; chapter IDs are
+author-declared (inference would break too often).
+
+Next: detailed Slice 1 plan (data shape, blueprint, editor verbs,
+save/load endpoints), then implementation.
 
 ## What this project is
 
@@ -613,6 +632,155 @@ errors) confirmed clean before commit. Backup of 5.4.0 sits at
 **Parked for later (v0.10.8).** Panel IP allowlist via dynamic
 DNS — captured in the Phase 3 area, not currently needed. See
 the "Parked: Panel IP allowlist via dynamic DNS" subsection.
+
+### Phase 2 planning — first concrete page + slice plan (v0.10.14)
+
+Coming off the user's small 100% Kirby learning exercise
+(complete enough to move forward, not exhaustive). This slice
+records the first concrete page description and the slicing plan
+that fell out of it. No code yet.
+
+**The concrete page (the user's words, summarised).**
+- Primary surface is a **monopage**: chapters that would be separate
+  pages on a more usual site are merged vertically; a long scroll
+  reaches everything.
+- A few **secondary pages** (legal, policy) are necessary but
+  second-class — reached via small links at the bottom, not via a
+  menu (a menu implicitly signals first-class items).
+- **Menu existence is deferred** — depends on how the main page
+  designs out.
+- This is a **fine-art portfolio**, so photos are first-class; text
+  is equally first-class.
+- Main-page sections, top to bottom:
+  - **(a)** title (+ maybe subtitle/slogan) + hero image (rotating
+    later if wanted, not planned early)
+  - **(b)** some text below
+  - **(c)** several images with titles and short descriptions —
+    variable count (page is scrollable, so adding/removing is cheap)
+  - **(d)** blog-like paragraphs with or without smaller images —
+    but none of the standard blog properties (not a blog)
+  - **(e)** the not-a-blog parts may have **drill-down** — additional
+    text/images not initially visible (don't overload the page).
+    Author wants to avoid splitting into separate pages; if drill-down
+    feels worse in practice than expected, the fallback is small
+    separate pages with a back-link that returns to exact prior scroll
+    position
+  - **(f)** all sections should be **easily reorderable**
+  - **(g)** the description deliberately says nothing about
+    *positions* of items — that is the role of the foundational
+    rect-blocks
+  - **(h)** at the end, the few small technical links nobody reads
+
+**The architectural insight from (f)+(g).** A first instinct was to
+model the page as a flowing-HTML stack of chapter blocks (Kirby's
+native blocks field, reorderable in Panel). User corrected: rect-blocks
+have **absolute coords** on a tall canvas; chapters exist visually for
+author and visitor but technically any item can sit anywhere; the
+editor recalculates coords when the author rearranges. This is the
+whole point of having a rect-block layer — free placement, not
+constrained by HTML flow. It also matches Deco's coord world exactly,
+so the Deco↔HTML coexistence becomes seamless: both layers speak
+absolute coordinates.
+
+**Sub-decisions made in the planning conversation.**
+
+- **Drill-down behavior = overlay** (recommended, accepted). The
+  reveal sits over the page; nothing below shifts. Keeps the
+  absolute-coord model pure. **Push** (rest of page shifts down on
+  reveal) is parked; revisitable if overlay feels wrong in practice.
+  **Reserve-max-height** (rect pre-allocates expanded height) was
+  rejected because authors can't reliably predict expanded height.
+  Open sub-question for first real test: does the rest of the page
+  also freeze + darken while the overlay is open? Decide after
+  feeling it.
+- **Responsiveness: both modes available.** Per-breakpoint coords
+  (each rect carries `{ wide:{x,y,w,h}, medium:{...}, narrow:{...} }`)
+  AND responsive rules (one canonical coord + behavioral rules) —
+  author picks per rect / per page based on whether the result is
+  worth the extra work. Responsive rules are cheap to support, so
+  no reason to omit them. Slices 1–2 single-breakpoint to defer
+  the complexity.
+- **Chapter IDs = author-declared.** Each rect carries an optional
+  chapter ID; author groups rects into chapters explicitly.
+  Inference from spatial proximity was considered and rejected:
+  inference is guaranteed to break in at least some real cases
+  (artist places a small note rect between chapters, ambiguous
+  edges between chapters of similar size, etc.).
+- **Vocabulary fix.** "Hand-authored" in this project means
+  *author's hand manipulating objects on a canvas*, not
+  *typed into JSON by hand*. Rect coords are exclusively
+  canvas-authored. Recorded in the DECIDED block of the Phase 2
+  roadmap section.
+- **Second blueprint timing.** Multiple page blueprints are a
+  necessity (secondary pages and the monopage have different
+  designs), but late in Phase 2. Scaffolding is best prepared
+  early — Slice 1's data shape needs to be blueprint-agnostic
+  so adding a second blueprint later is a configuration change,
+  not a data-shape refactor.
+
+**The slicing plan.**
+
+1. **Slice 1 — Data shape + runtime template + minimum rect-editor
+   canvas.** Three pieces land together because they only make sense
+   together. Data: per-page list of rects
+   `{ id, kind, x, y, w, h, chapterId?, contentRef? }` + a chapter
+   list `[{ id, name }]` at page scope. Runtime: Kirby template
+   iterates rects, renders each as a `position:absolute` div with
+   stub content (kind-labeled coloured box, no real text/image yet);
+   container height = `max(y+h)`. Editor: a page surface
+   (working name `/dev/page/<page-id>`) that loads page JSON, lets
+   author add / move / resize / delete rects and assign kind +
+   chapter ID, saves back. **Initial kinds**: `text`, `image`,
+   `drilldown`, `deco-mount` (all stubs at this slice — content
+   editing is Slice 2). Outcome: one page exists end-to-end,
+   authored on canvas, rendered by Kirby. Stubs everywhere but
+   the spatial + structural model is real.
+2. **Slice 2 — Kirby Panel can edit rect content** (text fields,
+   image uploads). Positions stay in the data shape but aren't
+   edited in Panel — that remains the rect-editor's job. Two
+   surfaces, same data. Establishes the multi-surface story
+   early per the reentrancy principle.
+3. **Slice 3 — Typography tokens** (shared artifact #1). JSON →
+   PHP-emitted CSS classes → token select field on text rects.
+   Single source of truth, Deco doesn't read it yet.
+4. **Slice 4 — Deco bootstrapper + htmlKey slots** (shared artifacts
+   #2 + #3). `deco-mount` rects render as `<div data-deco="…">`;
+   JS bootstrapper mounts the Deco runtime per rect against the
+   right snapshot. Phase 1 `/dev/draw` accepts a parameter so the
+   editor opens against the rect's snapshot. End-to-end Deco
+   inside Kirby for the first time.
+5. **Slice 5 — textBlock content binding.** Resolves the deferred
+   sub-decision (Kirby field with Deco rendering vs Deco JSON with
+   Kirby referencing) once Slices 1–4 reveal which feels more
+   natural.
+6. **Slice 6 — Drill-down mechanism.** Overlay implementation
+   (push parked). Pure HTML/CSS/JS reveal inside the `drilldown`
+   rect kind. Watch-out for the parked fallback path
+   (separate-pages-with-back-link): preserving scroll on back
+   navigation is browser-level work, not Kirby — park unless the
+   fallback is actually invoked.
+7. **Slice 7 — Custom polish + UX iteration on the rect-editor.**
+   Whatever sharp edges Slices 1–6 surface.
+8. **Slice 8 — Responsiveness landed.** Per-breakpoint coords +
+   responsive rules; rect-editor learns to switch breakpoints
+   like Deco's class chips.
+9. **Slice 9+ — Second blueprint(s) for secondary pages.** Data
+   shapes from Slice 1 carry over; this is mostly a Kirby
+   blueprint exercise plus a small page-type selector in the
+   editor.
+
+**Behavioral artefact from this conversation.** I (Claude) initially
+proposed a Slice 1 with hand-typed JSON and no editor, deferring the
+rect-editor to a much later slice. User pushed back: the canvas is
+already a decided part of Phase 2 (HANDOFF mentions it under the
+DECIDED block); deferring it was the kind of high-leverage
+assumption that should have been confirmed first. The HANDOFF was
+not wrong but was under-specified — it did not say "exclusively
+canvas-authored," leaving room for the shortcut. The DECIDED block
+has been tightened in this same update; the lesson worth holding:
+when a planning sub-decision contradicts what looks like already-
+settled architecture, surface it as a question, don't quietly slice
+around it.
 
 ### Why `isBlockActive` instead of `bp <= 0` to gate contribution (v0.8.54, v0.8.67)
 
@@ -1821,7 +1989,16 @@ continue to handle responsive animation inside each region.
 The shared-artifact JSON files (rectangles, slot keys, typography
 tokens — see below) live in known paths, read by PHP at template
 render time AND by JS at Deco mount time. One source of truth,
-two readers — clean, not messy. Typography tokens generate CSS
+two readers — clean, not messy.
+
+**Rect coords are authored exclusively via the Phase-2 canvas
+editor — there is no hand-JSON stage.** This parallels Deco's
+authoring model: the canvas IS the editing surface, the JSON is
+its persistence format. "Hand-authored" in this project's
+vocabulary means *author's hand manipulating objects on a canvas*,
+NOT *typed into JSON by hand*. (Updated v0.10.14 — earlier wording
+left this ambiguous and a slicing proposal slipped a JSON-first
+shortcut past the rule; user corrected.) Typography tokens generate CSS
 classes (`.style-heading-xl` etc.) that the templates apply, and
 the Deco textBlock runtime reads the same JSON to render in-canvas
 text matching those tokens.
