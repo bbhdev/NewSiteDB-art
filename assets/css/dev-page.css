@@ -16,7 +16,7 @@
 body.page-editor {
   margin: 0;
   background: #1f2024;
-  color: #eaeaea;
+  color: #f0f0f0;
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   min-height: 100vh;
   display: flex;
@@ -46,13 +46,13 @@ body.page-editor {
 }
 
 .pe-version {
-  color: #888;
+  color: #b0b0b0;
   font-variant-numeric: tabular-nums;
 }
 
 .pe-page-picker select {
   background: #2a2c31;
-  color: #eaeaea;
+  color: #f0f0f0;
   border: 1px solid #3a3d44;
   border-radius: 3px;
   padding: 0.25rem 0.5rem;
@@ -60,14 +60,14 @@ body.page-editor {
 }
 
 .pe-class-label {
-  color: #aaa;
+  color: #c0c0c0;
   padding: 0.2rem 0.55rem;
   border: 1px solid #2c2e33;
   border-radius: 3px;
   background: #1b1c20;
 }
 .pe-class-label strong { color: #f0a060; font-weight: 600; }
-.pe-dims { color: #666; }
+.pe-dims { color: #909090; }
 
 .pe-tools, .pe-view {
   display: flex;
@@ -80,7 +80,7 @@ body.page-editor {
 button.pe-create-btn,
 button.pe-save {
   background: #2a2c31;
-  color: #eaeaea;
+  color: #f0f0f0;
   border: 1px solid #3a3d44;
   border-radius: 3px;
   padding: 0.3rem 0.75rem;
@@ -120,12 +120,12 @@ button.pe-save.is-flash {
          box-shadow: 0 0 0 0 rgba(76, 175, 106, 0.6); }
   60%  { background: #4caf6a; border-color: #4caf6a; color: #fff;
          box-shadow: 0 0 0 10px rgba(76, 175, 106, 0); }
-  100% { background: #2a2c31; border-color: #3a3d44; color: #eaeaea;
+  100% { background: #2a2c31; border-color: #3a3d44; color: #f0f0f0;
          box-shadow: 0 0 0 0 rgba(76, 175, 106, 0); }
 }
 
 .pe-status {
-  color: #888;
+  color: #b0b0b0;
   font-variant-numeric: tabular-nums;
   margin-left: 0.5rem;
 }
@@ -165,13 +165,13 @@ button.pe-save.is-flash {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #999;
+  color: #b8b8b8;
 }
 
 .pe-chapters { list-style: none; margin: 0; padding: 0; }
 .pe-empty {
   padding: 0.4rem 0.2rem;
-  color: #555;
+  color: #909090;
   font-style: italic;
   font-size: 0.85em;
 }
@@ -253,8 +253,29 @@ button.pe-save.is-flash {
   top: 0.25rem;
   right: 0.4rem;
   font-size: 0.65rem;
-  color: rgba(0, 0, 0, 0.55); /* editor chrome, not palette-bound */
+  color: rgba(0, 0, 0, 0.72); /* editor chrome, not palette-bound */
   font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Author note (v0.10.24) — rendered inside the rect just under the
+   kind label when the rect carries a non-empty `note`. Editor-only;
+   never emitted by the runtime. Style intentionally light-weight
+   (italic, medium-gray, single line ellipsis) so it reads as
+   meta-information about the rect rather than content. The rect's
+   own height is the cap — a very short rect that can't fit the note
+   simply hides what doesn't fit. */
+.pe-rect-note {
+  margin-top: 0.15rem;
+  max-width: 90%;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: rgba(0, 0, 0, 0.78);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
 }
 
@@ -309,10 +330,20 @@ button.pe-save.is-flash {
   border-bottom: 1px solid #232529;
 }
 .pe-chapters li:last-child { border-bottom: none; }
+/* Highlight the chapter the currently-selected rect belongs to.
+   Subtle accent-tinted background + an inset accent bar on the
+   leading edge — enough to draw the eye when scanning the chapter
+   list, not enough to compete with the rename input's focus ring
+   if the author starts editing the same row. (v0.10.25) */
+.pe-chapters li.is-current {
+  background: color-mix(in srgb, var(--pe-palette-accent, #ff5500) 14%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--pe-palette-accent, #ff5500);
+  border-radius: 0 3px 3px 0;
+}
 .pe-chapter-name {
   flex: 1;
   background: transparent;
-  color: #eaeaea;
+  color: #f0f0f0;
   border: 1px solid transparent;
   border-radius: 3px;
   padding: 0.15rem 0.3rem;
@@ -323,7 +354,7 @@ button.pe-save.is-flash {
 .pe-chapter-name:focus  { border-color: var(--pe-palette-accent, #ff5500);
                           outline: none; background: #1b1c20; }
 .pe-chapter-count {
-  color: #777;
+  color: #a8a8a8;
   font-variant-numeric: tabular-nums;
   font-size: 0.8em;
   padding: 0 0.2rem;
@@ -331,7 +362,7 @@ button.pe-save.is-flash {
 .pe-chapter-del,
 .pe-rect-del {
   background: transparent;
-  color: #888;
+  color: #b0b0b0;
   border: 1px solid transparent;
   border-radius: 3px;
   padding: 0.1rem 0.4rem;
@@ -351,7 +382,7 @@ button.pe-save.is-flash {
 .pe-input {
   flex: 1;
   background: #1b1c20;
-  color: #eaeaea;
+  color: #f0f0f0;
   border: 1px solid #2c2e33;
   border-radius: 3px;
   padding: 0.25rem 0.4rem;
@@ -367,7 +398,7 @@ button.pe-save.is-flash {
   margin-bottom: 0.4rem;
 }
 .pe-selection-row label {
-  color: #999;
+  color: #b8b8b8;
   font-size: 0.8em;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -380,8 +411,54 @@ button.pe-save.is-flash {
 }
 .pe-selection-row .pe-dim {
   font-variant-numeric: tabular-nums;
-  color: #aaa;
+  color: #c8c8c8;
   flex: 1;
+}
+
+/* Geometry numeric inputs (v0.10.27). Four small fields in one
+   row inside the selection panel; each has a single-letter key
+   (x / y / w / h) sitting above-left of the input so the eye
+   reads "this is the y value" without a longer label crowding
+   the row. Tab walks through them in DOM order. */
+.pe-geom-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  flex: 1;
+}
+/* v0.10.28 — when rendered without a left-side row label, take the
+   full panel width and add a little bottom margin so it doesn't
+   abut the next row. */
+.pe-geom-fields--standalone {
+  width: 100%;
+  margin-bottom: 0.4rem;
+}
+.pe-geom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.pe-geom-key {
+  font-size: 0.7em;
+  color: #909090;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-left: 0.15rem;
+}
+input.pe-geom-input {
+  width: 100%;
+  padding: 0.2rem 0.3rem;
+  font-variant-numeric: tabular-nums;
+  /* Hide the spinner buttons — keyboard editing is the primary
+     gesture and the spinners eat horizontal room in a narrow row. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input.pe-geom-input::-webkit-outer-spin-button,
+input.pe-geom-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .pe-selection-actions {
   margin-top: 0.6rem;

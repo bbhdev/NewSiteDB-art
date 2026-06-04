@@ -85,11 +85,27 @@ $rectsPath = $targetPage ? $targetPage->root() . '/rects.json' : null;
 $rectsData = ($rectsPath && is_file($rectsPath))
     ? (json_decode(file_get_contents($rectsPath), true) ?: [])
     : [];
-$schemaVersion = isset($rectsData['schemaVersion']) ? (int) $rectsData['schemaVersion'] : 1;
+$schemaVersion = isset($rectsData['schemaVersion']) ? (int) $rectsData['schemaVersion'] : 2;
 $chapters      = (isset($rectsData['chapters']) && is_array($rectsData['chapters']))
     ? $rectsData['chapters'] : [];
 $rects         = (isset($rectsData['rects']) && is_array($rectsData['rects']))
     ? $rectsData['rects'] : [];
+
+// v0.10.24 — Slice 2 step 1 migration: schemaVersion 1 → 2 adds an
+// optional `note` field per rect (editor-only author label, never
+// rendered at runtime). Read-time normalisation: any rect missing
+// `note` gets null. The file on disk stays at its current version
+// until the next save flushes it as v2. Forward-compat: rects from
+// a v2 file pass through unchanged.
+$rects = array_map(function ($r) {
+    if (!is_array($r)) return $r;
+    if (!array_key_exists('note', $r)) $r['note'] = null;
+    return $r;
+}, $rects);
+// Editor always emits the current schema version on save. We
+// declare 2 to JS so a save of a previously-v1 file writes back
+// as v2 transparently.
+$schemaVersion = 2;
 
 $v = option('version', 'dev');
 

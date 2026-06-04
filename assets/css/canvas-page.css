@@ -52,7 +52,7 @@ body.canvas-page-body {
   top: 0.25rem;
   right: 0.4rem;
   font-size: 0.65rem;
-  color: rgba(0, 0, 0, 0.55); /* runtime chrome, not palette-bound */
+  color: rgba(0, 0, 0, 0.72); /* runtime chrome, not palette-bound */
   font-variant-numeric: tabular-nums;
 }
 

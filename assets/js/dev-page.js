@@ -12,6 +12,18 @@
  *   (add/rename/delete in sidebar; assign selected rect to chapter
  *   via dropdown). Chapter delete unsets chapterId on member rects
  *   with a confirm dialog showing the affected count.
+ * Slice 2 step 1 (v0.10.24): per-rect author note. Editor-only
+ *   label authors can use to make a busy canvas navigable (e.g.
+ *   "hero photo", "intro paragraph", "drilldown to studio"). Stored
+ *   in rects.json under `note`, never rendered at runtime. Schema
+ *   bumped 1 → 2; v1 files are migrated on load (server-side) so
+ *   the editor only ever sees v2. New rects default to note=null.
+ * Slice 2 step 2 (v0.10.27): manual numeric x/y/w/h fields in the
+ *   selection panel (Enter/blur commit, Escape revert, clamped to
+ *   x≥0/y≥0/w≥MIN/h≥MIN) and shift-held corner-handle drag locks
+ *   the aspect ratio. The latter is generic — all rect kinds get
+ *   it, not just images. Image-specific "Match rect to image" is
+ *   a separate affordance landing in Slice 2 step 4.
  *
  * Vanilla JS, no module system, no build step. Mirrors dev-draw.js
  * in shape: reads embedded #editor-data JSON synchronously on load,
@@ -49,7 +61,15 @@
   state.rects    = Array.isArray(state.rects)    ? state.rects    : [];
   state.chapters = Array.isArray(state.chapters) ? state.chapters : [];
   state.canvas   = state.canvas   || { pageW: 1200, pageH: 800, classId: 'wide' };
-  state.schemaVersion = state.schemaVersion || 1;
+  state.schemaVersion = state.schemaVersion || 2;
+  // Client-side migration safety net. The template already
+  // normalises v1 → v2 at read time, but if a stale cached editor
+  // somehow loads a payload with missing `note` fields, default
+  // them here so the rest of the code never has to branch on
+  // presence-vs-null.
+  state.rects.forEach(function (r) {
+    if (r && typeof r === 'object' && !('note' in r)) r.note = null;
+  });
 
   // Step-2-local UI state: which rect is currently selected (or
   // null), and the active pointer drag if any.
@@ -134,7 +154,8 @@
       y:         pos.y,
       w:         size.w,
       h:         size.h,
-      chapterId: null
+      chapterId: null,
+      note:      null
     };
     state.rects.push(rect);
     selectedId = rect.id;
@@ -207,6 +228,57 @@
     members.forEach(function (r) { r.chapterId = null; });
     state.chapters = state.chapters.filter(function (x) { return x.id !== id; });
     markDirty();
+    render();
+  }
+
+  // Numeric-input commit for x/y/w/h. Surgical update: writes the
+  // value, updates only the rect's DOM element (left/top/width/
+  // height) and the status line. Skips the full render() so
+  // Tab-walking between the four fields keeps focus — render()
+  // would tear down and rebuild the selection panel, dropping the
+  // browser's pending focus move. Returns the clamped value (which
+  // may differ from the raw input) so the caller can reflect any
+  // clamp back into the field.
+  function setRectGeomField(rectId, field, rawValue) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return null;
+    const n = parseInt(String(rawValue).trim(), 10);
+    if (!Number.isFinite(n)) return null;
+    let next;
+    if (field === 'x')      next = Math.max(0, n);
+    else if (field === 'y') next = Math.max(0, n);
+    else if (field === 'w') next = Math.max(MIN_SIZE, n);
+    else if (field === 'h') next = Math.max(MIN_SIZE, n);
+    else return null;
+    if (r[field] !== next) {
+      r[field] = next;
+      markDirty();
+      // Sync only the affected rect's CSS — the chapter list,
+      // selection panel header, and other rects don't depend on
+      // geom and don't need a rerender.
+      const el = surface.querySelector('[data-rect-id="' + r.id + '"]');
+      if (el) {
+        el.style.left   = r.x + 'px';
+        el.style.top    = r.y + 'px';
+        el.style.width  = r.w + 'px';
+        el.style.height = r.h + 'px';
+      }
+      writeStatus();
+    }
+    return next;
+  }
+
+  function setRectNote(rectId, note) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return;
+    // Trim + treat empty string as null so on-disk shape stays
+    // tidy (null vs "" disambiguation is meaningless to authors).
+    const trimmed = (note == null ? '' : String(note)).trim();
+    const next    = trimmed === '' ? null : trimmed.slice(0, 120);
+    if (r.note === next) return;
+    r.note = next;
+    markDirty();
+    // Re-render touches the in-rect label + selection panel echo.
     render();
   }
 
@@ -378,6 +450,28 @@
           nh = Math.max(MIN_SIZE, drag.origH - dy);
           ny = drag.origY + (drag.origH - nh);
         }
+        // Shift on a corner handle locks the aspect ratio. Live
+        // check (not captured at pointerdown) so author can toggle
+        // mid-drag. The axis with the larger fractional change wins
+        // — felt right in practice: drag the corner mostly
+        // horizontally, width drives; drag it mostly vertically,
+        // height drives. Anchored corner (the one opposite the drag
+        // handle) stays fixed; x/y are recomputed for N/W edges so
+        // the locked aspect doesn't drift the anchor.
+        const isCorner = d.length === 2;
+        if (isCorner && ev.shiftKey && drag.origW > 0 && drag.origH > 0) {
+          const aspect = drag.origW / drag.origH;
+          const wRatio = nw / drag.origW;
+          const hRatio = nh / drag.origH;
+          if (wRatio >= hRatio) {
+            nh = Math.max(MIN_SIZE, Math.round(nw / aspect));
+          } else {
+            nw = Math.max(MIN_SIZE, Math.round(nh * aspect));
+          }
+          // Re-anchor x/y if the dragged corner is on the W/N side.
+          if (d.indexOf('w') >= 0) nx = drag.origX + (drag.origW - nw);
+          if (d.indexOf('n') >= 0) ny = drag.origY + (drag.origH - nh);
+        }
         r.x = Math.round(nx); r.y = Math.round(ny);
         r.w = Math.round(nw); r.h = Math.round(nh);
         const el = surface.querySelector('[data-rect-id="' + drag.id + '"]');
@@ -448,6 +542,17 @@
     label.textContent = rect.kind || '?';
     el.appendChild(label);
 
+    // Author note — editor-only, visible inside the rect when set.
+    // Rendered under the kind label so a glance at the canvas tells
+    // the author "ah, this rect is the studio-intro paragraph"
+    // without having to select it. Empty/null → no node, no space.
+    if (rect.note && typeof rect.note === 'string') {
+      const note = document.createElement('span');
+      note.className = 'pe-rect-note';
+      note.textContent = rect.note;
+      el.appendChild(note);
+    }
+
     const idTag = document.createElement('span');
     idTag.className = 'pe-rect-id';
     idTag.textContent = rect.id || '';
@@ -493,9 +598,19 @@
       ul.appendChild(li);
       return;
     }
+    // Which chapter does the currently-selected rect belong to?
+    // Used to mark that chapter's row as "current" — small affordance
+    // for navigability when the canvas has many rects across several
+    // chapters (v0.10.25).
+    const selectedRect = selectedId
+      ? state.rects.find(function (x) { return x.id === selectedId; })
+      : null;
+    const selectedChId = selectedRect ? selectedRect.chapterId : null;
+
     state.chapters.forEach(function (c) {
       const li = document.createElement('li');
       li.dataset.chapterId = c.id;
+      if (c.id === selectedChId) li.classList.add('is-current');
 
       const input = document.createElement('input');
       input.type = 'text';
@@ -569,10 +684,72 @@
     kindDim.textContent = r.kind;
     body.appendChild(row('Kind', kindDim));
 
-    const geomDim = document.createElement('span');
-    geomDim.className = 'pe-dim';
-    geomDim.textContent = r.x + ', ' + r.y + ' · ' + r.w + ' × ' + r.h;
-    body.appendChild(row('Geometry', geomDim));
+    // Geometry — four small numeric inputs (x / y / w / h). Tab
+    // walks between them; Enter or blur commits; Escape reverts
+    // the field to the rect's current value. Each field clamps
+    // independently (x≥0, y≥0, w≥MIN, h≥MIN). Authors use this
+    // for precise placement (e.g. "snap to x=120 exactly") that
+    // drag can't hit without zoom.
+    const geomBox = document.createElement('span');
+    geomBox.className = 'pe-geom-fields';
+    function geomField(key, value) {
+      const wrap = document.createElement('label');
+      wrap.className = 'pe-geom-field';
+      const lab = document.createElement('span');
+      lab.className = 'pe-geom-key';
+      lab.textContent = key;
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.className = 'pe-input pe-geom-input';
+      inp.value = String(value);
+      inp.step = '1';
+      inp.min = (key === 'w' || key === 'h') ? String(MIN_SIZE) : '0';
+      inp.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter')  { ev.preventDefault(); inp.blur(); }
+        if (ev.key === 'Escape') { inp.value = String(r[key]); inp.blur(); }
+      });
+      inp.addEventListener('blur', function () {
+        const clamped = setRectGeomField(r.id, key, inp.value);
+        // Re-display the canonical (post-clamp) value so the field
+        // never shows bad input or a pre-clamp number. If parse
+        // failed (clamped === null) or value was unchanged, fall
+        // back to the rect's current value.
+        inp.value = String(clamped !== null ? clamped : r[key]);
+      });
+      wrap.appendChild(lab);
+      wrap.appendChild(inp);
+      return wrap;
+    }
+    geomBox.appendChild(geomField('x', r.x));
+    geomBox.appendChild(geomField('y', r.y));
+    geomBox.appendChild(geomField('w', r.w));
+    geomBox.appendChild(geomField('h', r.h));
+    // v0.10.28 — geom fields render directly (no left-side row label).
+    // The four X/Y/W/H key labels above each input make the inline
+    // "Geometry" label redundant; dropping it gives the inputs the
+    // full row width and the values stop colliding with the focus
+    // ring of the active field.
+    geomBox.classList.add('pe-geom-fields--standalone');
+    body.appendChild(geomBox);
+
+    // Author note — short editor-only label. Commits on blur or
+    // Enter; Escape reverts to the saved value (same UX as the
+    // chapter-rename input). Empty input clears the note (stored
+    // as null on disk).
+    const noteInput = document.createElement('input');
+    noteInput.type = 'text';
+    noteInput.className = 'pe-input';
+    noteInput.maxLength = 120;
+    noteInput.placeholder = 'short author note (optional)';
+    noteInput.value = r.note || '';
+    noteInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter')  { ev.preventDefault(); noteInput.blur(); }
+      if (ev.key === 'Escape') { noteInput.value = r.note || ''; noteInput.blur(); }
+    });
+    noteInput.addEventListener('blur', function () {
+      setRectNote(r.id, noteInput.value);
+    });
+    body.appendChild(row('Note', noteInput));
 
     const chSel = document.createElement('select');
     chSel.className = 'pe-input';
