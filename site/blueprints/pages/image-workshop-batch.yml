@@ -1,0 +1,30 @@
+# Image workshop batch — Phase 2 Slice 2 workshop (v0.10.33).
+#
+# A single triage workspace: a pile of candidate images tested through
+# the Deco resize pipeline. Files use the shared `image` blueprint so
+# they carry the same alt / caption / preview / maxLongEdge fields as
+# canvas-page images — an image that passes triage here can be moved
+# into a canvas-page's library unchanged. The visual grid (original vs.
+# resized at a chosen long edge) is rendered by the
+# image-workshop-batch.php template at /dev/image-workshop/<slug>.
+
+title: Batch
+
+columns:
+  main:
+    width: 1/1
+    sections:
+      info:
+        type: info
+        headline: Triage view
+        text: >
+          Drop candidate images below, then open this batch's workshop
+          view at `/dev/image-workshop/{{ page.slug }}` to compare each
+          original against its resized derivative. Adjust the test long
+          edge in that view's toolbar. Originals are never modified by
+          the comparison.
+      files:
+        type: files
+        template: image
+        info: "{{ file.dimensions }} · {{ file.niceSize }}"
+        sortBy: filename asc

@@ -1,0 +1,38 @@
+# Image workshop container — Phase 2 Slice 2 workshop (v0.10.33).
+#
+# Out-of-workflow batch testbench for the Deco image-resize pipeline.
+# An author drops candidate images into a *batch* child page, then
+# visits /dev/image-workshop/<batch> to see every image's original
+# vs. its resized derivative side by side — triaging which survive
+# the resize and which need external (Photoshop) rework, in bulk and
+# early, before any image is committed to a real canvas-page library.
+#
+# This container just holds batches. Each batch is an
+# image-workshop-batch child. Disposable: lives under /dev (gitignored
+# content, editor-only, gated by the host auth config).
+
+title: Image workshop
+
+columns:
+  main:
+    width: 2/3
+    sections:
+      info:
+        type: info
+        headline: Image workshop
+        text: >
+          A scratch testbench, outside the canvas-page workflow. Create
+          one **batch** per design exploration, drop the candidate
+          images into it, then open
+          `/dev/image-workshop/<batch-slug>` to inspect every image's
+          original against a resized derivative at a chosen long-edge
+          size. Use it to find — early and in bulk — which images don't
+          survive the automatic resize and need external rework, so all
+          the Photoshop work happens in one pass instead of one image
+          at a time. Nothing here is published.
+      batches:
+        type: pages
+        headline: Batches
+        template: image-workshop-batch
+        create: image-workshop-batch
+        info: "{{ page.files.count }} image(s)"

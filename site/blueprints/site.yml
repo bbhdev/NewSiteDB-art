@@ -1,5 +1,17 @@
 title: Site
 
 sections:
+  # v0.10.34 — quick links to the front-end dev tools. These live
+  # outside the Panel (custom editor surfaces under /dev) so they
+  # don't otherwise surface as openable tools from the Panel; this
+  # info block gives a one-click jump from the Panel dashboard.
+  # Links open in a new tab so the author keeps their Panel session.
+  devtools:
+    type: info
+    headline: Dev tools
+    text: |
+      - (link: /dev/draw text: Draw editor target: _blank) — Deco line-art canvas
+      - (link: /dev/page text: Page editor target: _blank) — rect-block layout
+      - (link: /dev/image-workshop text: Image workshop target: _blank) — batch resize testbench
   pages:
     type: pages

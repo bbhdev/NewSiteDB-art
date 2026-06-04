@@ -4,7 +4,9 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.23):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.34):** Phase 1 complete (v0.9.0 milestone).
+Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
+out-of-workflow image workshop landed — see the Slice 2 entry below).
 Deployment infrastructure landed (v0.9.1–v0.9.14) — rsync deploy tooling,
 iCloud-placeholder pre-check, first-deploy checklist with diagnostics
 captured from the actual first live run, a working `/dev/draw` auth gate
@@ -181,8 +183,95 @@ template `canvas-page.php`, save endpoint, auth gate, all sharing
 Deco's per-page config + palette as common data (the
 "integrate, don't drift" principle held).
 
-Next: Slice 2 — Kirby Panel can edit rect content (real text/image,
-not stubs). Scoping/slicing conversation to start before any code.
+**Slice 2 — in progress (v0.10.24 → v0.10.34).** Real content +
+image pipeline. Landed so far:
+
+- **Step 1 — author note + rect-schema bump 1→2 (v0.10.24).** New
+  optional per-rect `note` field (editor-only label, never rendered
+  at runtime). Rect schema (the Phase-2 third version axis, distinct
+  from CONTENT_SCHEMA_VERSION and the SCHEMA_VERSION envelope) bumped
+  1→2. Read-time migration in both `page.php` (editor) and the save
+  route normalises missing `note` to null; editor always emits v2.
+- **UX iterations (v0.10.25–0.10.28).** Selected rect's chapter is
+  highlighted in the side panel (`.is-current`). Editor text contrast
+  raised to match Deco tier (`#eaeaea`→`#f0f0f0`, etc.) so /dev/draw
+  and /dev/page read identically. Manual numeric x/y/w/h inputs in
+  the selection panel (surgical update — no full re-render, Tab keeps
+  focus) + shift-drag corner aspect-lock (live shiftKey check). Geom
+  fields later given full panel width (dropped the redundant
+  "Geometry" left-label; X/Y/W/H key labels already identify them).
+- **Step 3 — image pipeline, preserve-originals model (v0.10.29).**
+  Architectural decision (judged via a Workflow panel earlier):
+  **keep source intact, derive lazily** via `$file->thumb()`. NO
+  destructive upload-time resize / no Kirby `create:` transform.
+  New `site/blueprints/files/image.yml` (mime image/* only; fields
+  alt, caption, maxLongEdge). New
+  `site/blueprints/pages/image-container.yml` — a locked-down leaf
+  page (slug `images`) that hosts a canvas-page's image files in a
+  per-page `content/<page>/images/` subdir. `canvas-page.yml` sidebar
+  switched from inline `files:` to a `children:` pages section
+  listing the image-container. **First `hooks` block in the project**
+  added to `config.php`: `page.create:after` auto-creates the
+  `images` child for any new `canvas-page` (filter:
+  `intendedTemplate()->name()`); `file.update:after` applies the
+  optional one-time `maxLongEdge` cap and clears the field so it
+  can't recur. `'thumbs' => ['quality' => 82]` set globally.
+- **Step 3.5 — preview-before-commit (v0.10.30→0.10.32).** Added
+  `previewLongEdge` + a `previewInfo` info block to `image.yml`: a
+  non-destructive trial. Author sets a trial long edge, clicks the
+  generated thumb link to inspect, then copies the value into
+  `maxLongEdge` to commit. Key correctness finding: `resize($n, $n)`
+  (same value both args) fits the image inside an n×n box — the LONG
+  EDGE binds, aspect preserved, NO crop — verified against Kirby
+  `Dimensions::fitWidthAndHeight` source. This is orientation-free, so
+  a single link replaces an earlier two-link (landscape/portrait)
+  design, and halves generated thumbs (resize is eager — it generates
+  to build the URL). The `maxLongEdge` commit hook was simplified to
+  the same `resize($max,$max)` call so preview and commit are
+  byte-identical. (Note: Kirby's media cache keeps preview thumbs;
+  harmless — gitignored, regenerable, orphaned on source change.)
+- **Image workshop — out-of-workflow batch testbench, Step A
+  (v0.10.33→0.10.34).** A SEPARATE triage tool at
+  `/dev/image-workshop`, distinct from the in-workflow per-file
+  preview. Author drops 10–20 candidate images into a *batch* child
+  page, then views a grid comparing each original vs. its resized
+  derivative at a chosen long edge — to find early & in bulk which
+  images don't survive the auto-resize and need external (Photoshop)
+  rework, so all the rework happens in one pass. Files:
+  `site/blueprints/pages/image-workshop.yml` (container) +
+  `image-workshop-batch.yml` (batch, files use the shared `image`
+  template) + `site/templates/image-workshop.php` (batch index) +
+  `image-workshop-batch.php` (the grid; editable size picker =
+  number input + datalist presets; busy overlay on size change since
+  resize generation blocks) + `assets/css/image-workshop.css`.
+  Index uses `childrenAndDrafts()` (Panel-created batches start as
+  drafts → `children()` would hide them). Resize uses the same
+  `resize($size,$size)` semantics as the commit hook, so the grid is
+  faithful to what a commit would produce.
+- **Auth gate generalised (v0.10.33).** The host-scoped gate in
+  `config.newsitedbart.bbh.fr.php` no longer enumerates surfaces
+  (`dev/draw`||`dev/page`||…) — it now gates `path === 'dev' ||
+  starts_with('dev/')`, covering the whole `/dev` tree (and any
+  future dev tool) in one rule. Trailing-slash match avoids false
+  positives on unrelated `dev*` slugs. **Requires manual SCP to the
+  live server** (config.*.php is rsync-excluded). Local dev untouched
+  (host-scoped filename doesn't match localhost).
+- **Panel dev-tools links (v0.10.34).** `site.yml` gained a "Dev
+  tools" info block on the Panel dashboard linking Draw / Page /
+  Image-workshop (new tab) — so the author never types a /dev URL by
+  hand to reach a tool.
+
+Next in Slice 2: **Step B** (image-workshop per-image verdict
+ok/rework/dropped + filter + copy-rework-filenames) and/or **Step 4**
+(canvas editor "Bind image…" picker + mismatch row with 3 resize
+strategies + image-first "Place image" flow) reading the per-page
+`images/` library via a `GET /api/page-images/(:any)` endpoint. Then
+**Step 5**: runtime renders real text + image via
+`$file->thumb(rect.w * dpr)`, per-rect `dpr` field, rect-schema bump
+2→3. **Canvas background** (color/image-scaled/image-tiled, schema
+2→3) is parked (option B) to land alongside the Step 4 image picker
+it reuses. **Image-workshop lightbox** (in-page full-derivative view
+instead of open-in-new-tab) queued for Step C polish.
 
 ## What this project is
 
@@ -657,6 +746,27 @@ play; future sessions should not confuse them:
 `~/.ssh/config` against the SSH backend). `REMOTE_PATH` is
 `/home/clients/94e3ce6271e3648b7b00d6c32be0a6e2/sites/newsitedbart.bbh.fr`
 — the account-hash directory is stable across the hosting plan.
+
+**Deploy-UX future work (not urgent — flagged by user v0.10.34).**
+Two improvements to fold in when the deploy tooling is next touched:
+
+1. **Host-scoped config push should not rely on memory.** Updating
+   the gate (`config.<SERVER_NAME>.php`) currently means a hand-typed
+   SCP the user has to re-derive each time. Fold it into the deploy
+   flow: e.g. `deploy.sh --host-config` (or a dedicated
+   `deploy/push-host-config.sh`) that SCPs the per-host config to
+   `$REMOTE_PATH/site/config/` and runs the logged-out `curl` 403
+   verification automatically. The file stays rsync-excluded for the
+   normal mirror; this is a deliberate, separate, one-command push.
+2. **Two-server (staging + production) deploy.** The user has set up
+   TWO test servers. `deploy.env` is currently single-target
+   (`REMOTE_HOST` + `REMOTE_PATH`). Generalise to named targets
+   (e.g. `deploy.sh staging` / `deploy.sh prod`, each with its own
+   host alias, REMOTE_PATH, and host-scoped `config.<name>.php`).
+   Each server has a distinct `SERVER_NAME`, so each needs its own
+   host-scoped config filename — the gate generalisation (v0.10.33)
+   already makes that file env-agnostic in content, only the filename
+   differs per host.
 
 **Process artifact.** During this slice the
 "clarify high-leverage assumptions before acting" rule was violated

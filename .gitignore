@@ -40,3 +40,17 @@ Thumbs.db
 
 # Local-only deploy target config (host/path) — never commit
 /deploy/deploy.env
+
+# Phase 2 rect-layout data — editor-authored (written by /dev/page/save),
+# same rationale as the Deco JSON above: ignored so pulls never collide
+# with locally-saved layouts. (Slice 1 intended these ignored; the rule
+# was missing until the Slice 2 commit.)
+/content/*/rects.json
+/content/*/*/rects.json
+
+# Image workshop = local stock of candidate images under test, not
+# source. Ignore every batch (drafts + published) and keep only the
+# container page record so /dev/image-workshop resolves on a fresh
+# checkout.
+/content/dev/image-workshop/*
+!/content/dev/image-workshop/image-workshop.txt

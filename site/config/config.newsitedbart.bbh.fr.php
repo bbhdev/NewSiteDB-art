@@ -107,12 +107,17 @@ return [
         header_remove('X-Powered-By');
 
         $path = $kirby->request()->path()->toString();
-        // v0.10.22 — Phase 2 Slice 1 step 6: extend the gate to cover
-        // /dev/page (the new rect-canvas editor) and its save endpoint
-        // /dev/page/save. Same logic as /dev/draw — neither write
-        // surface should be reachable without a Panel session on a
-        // public server.
-        if (str_starts_with($path, 'dev/draw') || str_starts_with($path, 'dev/page')) {
+        // v0.10.33 — generalised gate: protect the ENTIRE /dev tree
+        // rather than enumerating individual surfaces (dev/draw,
+        // dev/page, dev/image-workshop, …). Every page under /dev is an
+        // authoring/editor tool that must never be reachable without a
+        // Panel session on a public server; none is meant for public
+        // consumption. Matching `dev` exactly OR `dev/` as a prefix
+        // (note the trailing slash) avoids false positives on unrelated
+        // top-level slugs that merely begin with "dev" (e.g. a
+        // hypothetical "development-notes" page). This means no future
+        // dev tool needs to edit this rsync-excluded host-scoped file.
+        if ($path === 'dev' || str_starts_with($path, 'dev/')) {
             if ($kirby->user() === null) {
                 // Neutral 403 — do NOT name the framework, the admin surface,
                 // or hint at a login path. Knowing the stack lets an attacker
