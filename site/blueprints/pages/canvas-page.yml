@@ -38,6 +38,16 @@ columns:
   sidebar:
     width: 1/3
     sections:
-      files:
-        type: files
-        info: "{{ file.dimensions }}"
+      # v0.10.29 — image files now live on a child page (slug
+      # 'images', blueprint image-container) auto-created by the
+      # page.create:after hook in site/config/config.php. The
+      # sidebar lists that child page (and any other children,
+      # though canvas-page has none today) so authors can jump in
+      # to drop image source files. The canvas editor fetches the
+      # image list via GET /api/page-images/(:any) and shows a
+      # bind-image picker on image rects (Slice 2 step 4).
+      children:
+        type: pages
+        info: "{{ page.files.count }} file(s)"
+        templates:
+          - image-container

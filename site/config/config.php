@@ -117,6 +117,122 @@ return [
   'schemaVersion' => (int)(trim(@file_get_contents(__DIR__ . '/../../SCHEMA_VERSION')) ?: '1'),
 
   /*
+   * Thumb engine quality (v0.10.29 — Phase 2 Slice 2 step 3).
+   *
+   * Kirby defaults to JPEG quality 90 for thumbs. 82 is the
+   * empirically established sweet spot for web photography (close
+   * to visually identical at typical viewing sizes, ~25% smaller
+   * file). Phase 2's image-rect runtime will request thumbs at
+   * exact rect display dimensions (and per-rect dpr for retina);
+   * a single quality knob applied here keeps every derived size
+   * consistent without per-call configuration. Bump back to 88–90
+   * if banding appears on gradient-heavy photos.
+   */
+  'thumbs' => [
+    'quality' => 82,
+  ],
+
+  /*
+   * Hooks (v0.10.29 — Phase 2 Slice 2 step 3).
+   *
+   * 1) page.create:after — when a canvas-page is created in Panel,
+   *    auto-create its 'images' child page (blueprint:
+   *    image-container). This guarantees every canvas-page has a
+   *    well-known per-page image-library subdirectory at
+   *    content/<page>/images/ without the author having to remember
+   *    to add it. The canvas editor's bind-image picker (Slice 2
+   *    step 4) reads files from this child via /api/page-images/...
+   *
+   * 2) file.update:after — when an author sets the optional
+   *    `maxLongEdge` field on an image and saves, perform a one-
+   *    time downscale on the source file in place, then clear the
+   *    field so the resize doesn't recur. The architectural model
+   *    is preserve-originals-derive-lazily — this hook is the
+   *    explicit opt-out for the rare case where a 24MP source is
+   *    overkill and capping it permanently is the right call.
+   *    Implemented via the same GD/Imagick path Kirby's thumb
+   *    engine uses (via $file->thumb + replacement); safer than
+   *    hand-rolling image processing here.
+   */
+  'hooks' => [
+    'page.create:after' => function ($page) {
+      // Only auto-provision on canvas-page. Other blueprints are
+      // unaffected. Use intendedTemplate() so we see the slot the
+      // author chose in Panel even before any save flushes.
+      if ($page->intendedTemplate()->name() !== 'canvas-page') {
+        return;
+      }
+      // Guard against double-creation if the hook re-fires (e.g.
+      // duplicate page workflows).
+      if ($page->find('images')) {
+        return;
+      }
+      try {
+        Kirby\Cms\Page::create([
+          'parent'   => $page,
+          'slug'     => 'images',
+          'template' => 'image-container',
+          'content'  => [
+            'title' => 'Image library',
+          ],
+        ]);
+      } catch (\Throwable $e) {
+        // Don't fail the parent page creation if the child can't
+        // be made (e.g. permissions). The author can create the
+        // child manually with the same blueprint as a fallback.
+      }
+    },
+
+    'file.update:after' => function ($newFile, $oldFile) {
+      // Only act on files using the 'image' blueprint, and only
+      // when maxLongEdge has just been set to a positive integer.
+      if ($newFile->template() !== 'image') {
+        return;
+      }
+      $max = (int) $newFile->maxLongEdge()->value();
+      if ($max < 200) {
+        return;
+      }
+      // Compute the current long edge. If already at or below the
+      // cap, just clear the field and exit — no resize needed.
+      $dims = $newFile->dimensions();
+      $longEdge = max((int) $dims->width(), (int) $dims->height());
+      if ($longEdge <= $max) {
+        try {
+          $newFile->update(['maxLongEdge' => null]);
+        } catch (\Throwable $e) { /* swallow */ }
+        return;
+      }
+      try {
+        // Generate a downscaled copy at the requested long edge, then
+        // overwrite the original with its bytes. resize($max, $max)
+        // fits the image inside a $max-square box: the long edge binds
+        // and the short edge scales proportionally, no cropping —
+        // orientation-agnostic, identical to the Panel preview link
+        // (image.yml previewInfo) so what the author inspected is
+        // exactly what gets committed. Verified against Kirby's
+        // Dimensions::fitWidthAndHeight (no crop unless 'crop' set).
+        $thumb     = $newFile->resize($max, $max);
+        $thumbRoot = $thumb->root();
+        if ($thumbRoot && is_file($thumbRoot)) {
+          // Atomic replace: copy thumb bytes over the source.
+          $srcRoot = $newFile->root();
+          $tmp     = $srcRoot . '.tmp';
+          if (copy($thumbRoot, $tmp) && rename($tmp, $srcRoot)) {
+            // Clear the cap field so re-saving doesn't re-resize.
+            $newFile->update(['maxLongEdge' => null]);
+          } else {
+            @unlink($tmp);
+          }
+        }
+      } catch (\Throwable $e) {
+        // Swallow — the author still has the original; they can
+        // retry. Don't break the Panel update flow.
+      }
+    },
+  ],
+
+  /*
    * Routes for the /dev/draw editor.
    *
    *   POST /dev/draw/save  — persists, atomically per save, every
@@ -918,6 +1034,13 @@ HTML;
      *
      * Canvas dimensions are NOT in this payload (see HANDOFF Slice 1
      * step 1: dims come from Deco's existing per-page config).
+     *
+     * v0.10.24 — Slice 2 step 1: schemaVersion bumped 1 → 2 to add
+     * an optional `note` field per rect (editor-only author note,
+     * never rendered at runtime). Inbound schemaVersion may be 1 OR
+     * 2 — v1 payloads from older editor sessions are accepted and
+     * normalised on write (note defaults to null). Output is always
+     * written as v2.
      */
     [
       'pattern' => 'dev/page/save',
@@ -940,7 +1063,7 @@ HTML;
         };
 
         if (!is_string($pageId) || $pageId === ''
-            || $schemaVersion !== 1
+            || !is_int($schemaVersion) || ($schemaVersion !== 1 && $schemaVersion !== 2)
             || !is_array($chapters) || !is_array($rects)) {
           return $fail('Missing or invalid body fields.');
         }
@@ -995,14 +1118,38 @@ HTML;
               return $fail('Rect references unknown chapter: ' . $r['chapterId']);
             }
           }
+          // v0.10.24: optional `note` field — short author-only label
+          // surfaced in the editor for navigability. Plain string, no
+          // markup, capped at 120 chars. Null/missing both fine.
+          if (isset($r['note']) && $r['note'] !== null) {
+            if (!is_string($r['note'])) {
+              return $fail('Rect note must be a string or null.');
+            }
+            if (mb_strlen($r['note']) > 120) {
+              return $fail('Rect note exceeds 120 characters.');
+            }
+          }
         }
 
+        // Normalise on write: ensure each rect carries an explicit
+        // `note` key (null when unset) and a `chapterId` key (null
+        // when unset). Editor and runtime both tolerate missing keys
+        // — explicit nulls just make grepping a saved rects.json
+        // unambiguous.
+        $normRects = array_map(function ($r) {
+          $r['chapterId'] = $r['chapterId'] ?? null;
+          $r['note']      = (isset($r['note']) && $r['note'] !== '') ? $r['note'] : null;
+          return $r;
+        }, $rects);
+
         // Persist. Atomic write so a half-written file can never be
-        // read by the next editor load.
+        // read by the next editor load. schemaVersion always written
+        // as 2 (current); v1 inputs are accepted but upgraded on
+        // first save.
         $payload = [
-          'schemaVersion' => 1,
+          'schemaVersion' => 2,
           'chapters'      => $chapters,
-          'rects'         => $rects,
+          'rects'         => $normRects,
         ];
         $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 

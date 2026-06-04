@@ -1,0 +1,53 @@
+# Image container blueprint — Phase 2 Slice 2 step 3 (v0.10.29).
+#
+# A leaf page that exists only to host image files for its parent
+# canvas-page. One per canvas-page, auto-created by the
+# page.create:after hook in site/config/config.php (slug 'images').
+# Authors don't usually navigate to it directly — the canvas editor
+# fetches its file list via GET /api/page-images/(:any) (Slice 2
+# step 4).
+#
+# Why a child page (not files on the canvas-page itself):
+# - Each canvas-page gets a clean per-page /images/ subdirectory on
+#   disk (content/<page>/images/<file>), so 250 pages × 30 images
+#   each don't collide in a flat namespace.
+# - Kirby file UUIDs survive renames inside this container — the
+#   rect's contentRef can be a stable UUID across edits.
+# - The canvas-page blueprint stays focused on canvas authoring;
+#   the file management surface lives where the files live.
+
+title: Image library
+
+status:
+  default: true
+  listed: true
+
+options:
+  # This page is plumbing — authors shouldn't be able to delete it
+  # (would orphan its files) or change its slug (would break the
+  # API endpoint's parent lookup at content/<canvas-page>/images).
+  delete: false
+  changeSlug: false
+  changeTitle: false
+  changeStatus: false
+  changeTemplate: false
+
+columns:
+  main:
+    width: 1/1
+    sections:
+      info:
+        type: info
+        headline: Image library
+        text: >
+          Source images for the parent canvas page. Drop image files
+          here; the canvas editor lists them via its bind-image
+          picker. Originals are preserved — the runtime derives
+          display-size thumbs automatically. Use a file's
+          `maxLongEdge` field only when you want to cap a specific
+          source file's resolution.
+      files:
+        type: files
+        template: image
+        info: "{{ file.dimensions }} · {{ file.niceSize }}"
+        sortBy: filename asc
