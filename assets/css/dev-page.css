@@ -399,9 +399,12 @@ button.pe-save.is-flash {
   pointer-events: none;
   z-index: 2;
 }
-/* Sits just outside the 2px solid outline (which ends ~4px out). */
-.pe-rect.is-panning::before { inset: -5px; }
-.pe-rect.is-panning::after  { inset: -8px; }
+/* Both rings clear the solid selected outline (which ends ~4px out) so the
+   inner one isn't swallowed by it, and the two dotted bands are spaced a
+   visible 5px apart (v0.10.56). Band = [inset−2px … inset] out from the
+   rect edge: ::before 5–7px, ::after 12–14px → 5px gap between them. */
+.pe-rect.is-panning::before { inset: -7px; }
+.pe-rect.is-panning::after  { inset: -14px; }
 
 /* Tiny rects (v0.10.51) — a rect under 100px in either dimension can't
    hold its kind label + id inside without them overlapping/mangling, so

@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.55):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.56):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -611,8 +611,21 @@ from testing the upload slice:
 - *Panning outline.* Replaced the single dashed override with the user's
   design: the rect keeps its usual solid selected outline (inner line) and
   two concentric **dotted** rings are added just outside it via `::before`
-  (inset −5px) / `::after` (inset −8px), each 2px dotted accent, 3px apart —
-  reads as "moving". Removed on drag-end with the `is-panning` class.
+  / `::after`, each 2px dotted accent — reads as "moving". Removed on
+  drag-end with the `is-panning` class. *(v0.10.56:* respaced to inset
+  −7px / −14px — bands 5–7px and 12–14px out — so the inner ring clears
+  the 2–4px solid outline instead of being swallowed by it, and the two
+  dotted bands sit a visible 5px apart. The earlier −5/−8px put the inner
+  ring under the solid outline and the bands only ~1px apart, reading as
+  one ring.)*
+
+**Upload file-type filter (v0.10.56).** The picker's `Upload…` input had
+`accept="image/*"`, which let the OS picker offer `.heic` — then the
+server whitelist (jpg/jpeg/png/gif/webp/avif) rejected it, a confusing
+"offer-then-reject" UX. Synced `accept` to the exact server whitelist
+(extensions + MIME types) so unsupported types (notably HEIC, which the
+GD/Imagick thumb engine can't decode) are greyed out up front. The
+server whitelist remains the backstop.
 
 ## What this project is
 

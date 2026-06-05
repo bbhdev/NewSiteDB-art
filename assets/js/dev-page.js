@@ -514,7 +514,10 @@
     // exactly that), then the picker closes.
     const upInput = document.createElement('input');
     upInput.type = 'file';
-    upInput.accept = 'image/*';
+    // Match the server-side whitelist exactly (config.php upload route) so
+    // the OS picker greys out what the server would reject anyway — notably
+    // .heic, which the GD/Imagick thumb engine can't decode (v0.10.56).
+    upInput.accept = '.jpg,.jpeg,.png,.gif,.webp,.avif,image/jpeg,image/png,image/gif,image/webp,image/avif';
     upInput.style.display = 'none';
     const upBtn = document.createElement('button');
     upBtn.type = 'button';
