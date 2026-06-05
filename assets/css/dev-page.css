@@ -292,6 +292,52 @@ button.pe-save.is-flash {
   pointer-events: none;
 }
 
+/* Bound-image preview (step 4b) ───────────────────────────────
+   For an image-kind rect with a bound filename, the real image is
+   painted as an absolutely-positioned child filling the rect, behind
+   the editor chrome (kind label, id, note). object-fit:cover is the
+   Slice-2 default; step 4c makes the fit strategy author-selectable.
+   The chrome labels get a translucent dark pill when over an image so
+   they stay legible on any photo. */
+.pe-rect-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0; /* above the kind-colour background, below the chrome */
+}
+/* Lift the chrome above the image (a z-index:0 positioned image would
+   otherwise paint over non-positioned in-flow labels). */
+.pe-rect-label,
+.pe-rect-note { position: relative; z-index: 1; }
+.pe-rect.has-image .pe-rect-label {
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+.pe-rect.has-image .pe-rect-id {
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+}
+.pe-rect.has-image .pe-rect-note {
+  background: rgba(0, 0, 0, 0.45);
+  color: #f0f0f0;
+  border-radius: 3px;
+}
+/* Dangling binding: filename set but not present in the loaded
+   library (renamed / removed). Dashed red ring as the canvas cue;
+   the selection panel spells out "not found in library". */
+.pe-rect.is-img-missing {
+  outline: 2px dashed #d23b3b;
+  outline-offset: -2px;
+}
+
 /* Kind colours — backed by custom properties emitted from PHP
    (template <style>). Duplicated to canvas-page.css runtime when
    that lands in step 5. Once palette gains a kindColors map the
@@ -500,4 +546,137 @@ input.pe-geom-input::-webkit-inner-spin-button {
     calc(100% - 7px) 50%;
   background-size: 5px 5px;
   background-repeat: no-repeat;
+}
+
+/* ── Image binding (step 4b) — selection-panel "Image" row ──────── */
+.pe-image-bind {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+.pe-image-bound {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0.35rem;
+  min-width: 0;
+}
+.pe-image-bound.is-missing { border-color: #5a2c2c; background: #241b1b; }
+.pe-image-bound-thumb {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #111;
+}
+.pe-image-bound-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pe-image-bound-name {
+  font-size: 0.8rem;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-image-bound-sub { font-size: 0.7rem; color: #9a9a9a; }
+.pe-image-bound.is-missing .pe-image-bound-sub { color: #ff7766; }
+.pe-image-bind-actions { display: flex; gap: 0.4rem; }
+.pe-image-unbind {
+  background: #241b1b;
+  color: #ff8a7a;
+  border: 1px solid #5a2c2c;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.pe-image-unbind:hover { background: #2a1d1d; color: #ff7766; }
+
+/* ── Image picker overlay (step 4b) ─────────────────────────────── */
+.pe-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+.pe-picker {
+  background: #151515;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  width: min(900px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+.pe-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #2c2c2c;
+}
+.pe-picker-title { margin: 0; font-size: 1rem; color: #f0f0f0; flex: 1; }
+.pe-picker-close {
+  background: transparent;
+  border: none;
+  color: #bbb;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
+.pe-picker-close:hover { color: #fff; }
+.pe-picker-body { padding: 1rem; overflow: auto; }
+.pe-picker-error { color: #ff7766; margin-bottom: 0.75rem; font-size: 0.85rem; }
+.pe-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+.pe-picker-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 5px;
+  padding: 0.4rem;
+  cursor: pointer;
+  text-align: left;
+  color: #ddd;
+  font: inherit;
+}
+.pe-picker-cell:hover { border-color: var(--pe-palette-accent, #ff5500); background: #262626; }
+.pe-picker-cell.is-current {
+  border-color: var(--pe-palette-accent, #ff5500);
+  box-shadow: 0 0 0 1px var(--pe-palette-accent, #ff5500) inset;
+}
+.pe-picker-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #111;
+  display: block;
+}
+.pe-picker-cap {
+  font-size: 0.72rem;
+  color: #bbb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

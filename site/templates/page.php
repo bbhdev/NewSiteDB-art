@@ -91,21 +91,28 @@ $chapters      = (isset($rectsData['chapters']) && is_array($rectsData['chapters
 $rects         = (isset($rectsData['rects']) && is_array($rectsData['rects']))
     ? $rectsData['rects'] : [];
 
-// v0.10.24 — Slice 2 step 1 migration: schemaVersion 1 → 2 adds an
-// optional `note` field per rect (editor-only author label, never
-// rendered at runtime). Read-time normalisation: any rect missing
-// `note` gets null. The file on disk stays at its current version
-// until the next save flushes it as v2. Forward-compat: rects from
-// a v2 file pass through unchanged.
+// Read-time rect-schema migration (the Phase-2 third version axis,
+// distinct from CONTENT_SCHEMA_VERSION and the SCHEMA_VERSION
+// envelope). Normalises older on-disk shapes to the current one so
+// the editor + JS only ever see current-shape rects; the file on
+// disk stays at its stored version until the next save flushes it.
+//   v1 → v2 (v0.10.24): optional `note` (editor-only author label,
+//                       never rendered at runtime).
+//   v2 → v3 (v0.10.46): optional `image` (bound image filename,
+//                       resolved against the page's images/ child;
+//                       runtime <img> render lands in step 5).
+// Both default missing → null. Forward-compat: current-shape rects
+// pass through unchanged.
 $rects = array_map(function ($r) {
     if (!is_array($r)) return $r;
-    if (!array_key_exists('note', $r)) $r['note'] = null;
+    if (!array_key_exists('note',  $r)) $r['note']  = null;
+    if (!array_key_exists('image', $r)) $r['image'] = null;
     return $r;
 }, $rects);
-// Editor always emits the current schema version on save. We
-// declare 2 to JS so a save of a previously-v1 file writes back
-// as v2 transparently.
-$schemaVersion = 2;
+// Editor always emits the current schema version on save. Declaring 3
+// to JS means a save of a previously-v1/v2 file writes back as v3
+// transparently.
+$schemaVersion = 3;
 
 $v = option('version', 'dev');
 

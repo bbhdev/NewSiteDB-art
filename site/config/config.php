@@ -1114,7 +1114,8 @@ HTML;
         };
 
         if (!is_string($pageId) || $pageId === ''
-            || !is_int($schemaVersion) || ($schemaVersion !== 1 && $schemaVersion !== 2)
+            || !is_int($schemaVersion)
+            || ($schemaVersion !== 1 && $schemaVersion !== 2 && $schemaVersion !== 3)
             || !is_array($chapters) || !is_array($rects)) {
           return $fail('Missing or invalid body fields.');
         }
@@ -1180,6 +1181,27 @@ HTML;
               return $fail('Rect note exceeds 120 characters.');
             }
           }
+          // v0.10.46 (schema 3): optional `image` field — the bound
+          // image's bare filename, resolved at runtime against the
+          // page's `images/` child. Format-only validation: must be a
+          // filename (no path separators, no `..`), ≤255 chars, so the
+          // runtime resolver can never be steered outside the library
+          // dir. Existence is NOT checked — a binding may legitimately
+          // dangle if the file is later renamed/removed (the runtime
+          // degrades gracefully); the editor's library refresh surfaces
+          // the mismatch. Allowed on any kind for forward-compat (the
+          // editor only sets it on image rects).
+          if (isset($r['image']) && $r['image'] !== null) {
+            if (!is_string($r['image'])) {
+              return $fail('Rect image must be a string or null.');
+            }
+            if (mb_strlen($r['image']) > 255
+                || strpos($r['image'], '/')  !== false
+                || strpos($r['image'], '\\') !== false
+                || strpos($r['image'], '..') !== false) {
+              return $fail('Rect image must be a bare filename.');
+            }
+          }
         }
 
         // Normalise on write: ensure each rect carries an explicit
@@ -1190,15 +1212,16 @@ HTML;
         $normRects = array_map(function ($r) {
           $r['chapterId'] = $r['chapterId'] ?? null;
           $r['note']      = (isset($r['note']) && $r['note'] !== '') ? $r['note'] : null;
+          $r['image']     = (isset($r['image']) && $r['image'] !== '') ? $r['image'] : null;
           return $r;
         }, $rects);
 
         // Persist. Atomic write so a half-written file can never be
         // read by the next editor load. schemaVersion always written
-        // as 2 (current); v1 inputs are accepted but upgraded on
-        // first save.
+        // as 3 (current); v1/v2 inputs are accepted but upgraded on
+        // first save (v2→3 adds the optional per-rect `image` binding).
         $payload = [
-          'schemaVersion' => 2,
+          'schemaVersion' => 3,
           'chapters'      => $chapters,
           'rects'         => $normRects,
         ];

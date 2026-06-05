@@ -18,6 +18,14 @@
  *   in rects.json under `note`, never rendered at runtime. Schema
  *   bumped 1 → 2; v1 files are migrated on load (server-side) so
  *   the editor only ever sees v2. New rects default to note=null.
+ * Slice 2 step 4b (v0.10.46): image binding. Image-kind rects can be
+ *   bound to a file from the page's image library (the auto-created
+ *   `images` child, listed via GET dev/page/images/<pageId>). The
+ *   selection panel gains a "Bind image…" picker (modal thumb grid);
+ *   the bound filename is stored on the rect as `image` (rect-schema
+ *   2 → 3, additive). A bound rect previews the real image on the
+ *   canvas; a dangling binding (file since renamed/removed) is flagged.
+ *   The runtime <img> render lands in step 5.
  * Slice 2 step 2 (v0.10.27): manual numeric x/y/w/h fields in the
  *   selection panel (Enter/blur commit, Escape revert, clamped to
  *   x≥0/y≥0/w≥MIN/h≥MIN) and shift-held corner-handle drag locks
@@ -68,8 +76,19 @@
   // them here so the rest of the code never has to branch on
   // presence-vs-null.
   state.rects.forEach(function (r) {
-    if (r && typeof r === 'object' && !('note' in r)) r.note = null;
+    if (r && typeof r === 'object' && !('note' in r))  r.note  = null;
+    if (r && typeof r === 'object' && !('image' in r)) r.image = null;
   });
+
+  // Slice 2 step 4b: per-page image library, fetched once from
+  // GET dev/page/images/<pageId>. null = not yet loaded; [] =
+  // loaded-empty. imageByFilename indexes the list so renderRect and
+  // the binding UI can resolve a bound filename → {url, thumb, w, h}.
+  // Loaded asynchronously after first paint; a second render() runs
+  // when it arrives so bound image rects upgrade from stub → <img>.
+  let imageLibrary    = null;
+  let imageByFilename = {};
+  let imageLibError   = null;
 
   // Step-2-local UI state: which rect is currently selected (or
   // null), and the active pointer drag if any.
@@ -293,6 +312,169 @@
     r.chapterId = next;
     markDirty();
     render();
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // Image binding (Slice 2 step 4b).
+  // ────────────────────────────────────────────────────────────────
+  function setRectImage(rectId, filename) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return;
+    const next = (filename == null || filename === '') ? null : String(filename);
+    if (r.image === next) return;
+    r.image = next;
+    markDirty();
+    render();
+  }
+
+  // Fetch the page's image library once. Re-callable (the picker's
+  // refresh button) — always re-indexes and re-renders so freshly
+  // uploaded images appear without a full page reload.
+  function loadImageLibrary() {
+    return fetch('/dev/page/images/' + encodeURIComponent(state.pageId))
+      .then(function (res) { return res.json().catch(function () { return null; })
+        .then(function (json) { return { res: res, json: json }; }); })
+      .then(function (r) {
+        if (!r.res.ok || !r.json || r.json.ok !== true) {
+          imageLibError = (r.json && r.json.error) ? r.json.error : ('HTTP ' + r.res.status);
+          imageLibrary  = imageLibrary || [];
+          render();
+          return;
+        }
+        imageLibError   = null;
+        imageLibrary    = Array.isArray(r.json.images) ? r.json.images : [];
+        imageByFilename = {};
+        imageLibrary.forEach(function (img) {
+          if (img && img.filename) imageByFilename[img.filename] = img;
+        });
+        render();
+      })
+      .catch(function (err) {
+        imageLibError = (err && err.message) ? err.message : 'network';
+        imageLibrary  = imageLibrary || [];
+        render();
+      });
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // Image picker overlay (step 4b). A lightweight modal thumb grid
+  // over the canvas — pick a file to bind it to the active rect.
+  // Only one instance at a time; pickerEl tracks the live overlay so
+  // the global keydown handler can suppress canvas shortcuts (Delete,
+  // Escape-deselect) while it's open.
+  // ────────────────────────────────────────────────────────────────
+  let pickerEl = null;
+  function closeImagePicker() {
+    if (pickerEl && pickerEl.parentNode) pickerEl.parentNode.removeChild(pickerEl);
+    pickerEl = null;
+    document.removeEventListener('keydown', pickerKeydown, true);
+  }
+  function pickerKeydown(ev) {
+    // Capture phase + stopPropagation so the canvas-level handler
+    // never sees these while the picker owns the keyboard.
+    if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeImagePicker(); }
+  }
+  function openImagePicker(rectId) {
+    closeImagePicker();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pe-picker-overlay';
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay) closeImagePicker();
+    });
+
+    const modal = document.createElement('div');
+    modal.className = 'pe-picker';
+    overlay.appendChild(modal);
+
+    const head = document.createElement('div');
+    head.className = 'pe-picker-head';
+    const title = document.createElement('h3');
+    title.className = 'pe-picker-title';
+    title.textContent = 'Bind image';
+    head.appendChild(title);
+    const refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'pe-create-btn';
+    refresh.textContent = 'Refresh';
+    refresh.addEventListener('click', function () {
+      imageLibrary = null;
+      renderPickerBody();
+      loadImageLibrary().then(renderPickerBody);
+    });
+    head.appendChild(refresh);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'pe-picker-close';
+    close.title = 'Close (Esc)';
+    close.textContent = '×';
+    close.addEventListener('click', closeImagePicker);
+    head.appendChild(close);
+    modal.appendChild(head);
+
+    const bodyWrap = document.createElement('div');
+    bodyWrap.className = 'pe-picker-body';
+    modal.appendChild(bodyWrap);
+
+    function renderPickerBody() {
+      bodyWrap.innerHTML = '';
+      if (imageLibrary === null) {
+        const m = document.createElement('div');
+        m.className = 'pe-empty';
+        m.textContent = 'Loading…';
+        bodyWrap.appendChild(m);
+        return;
+      }
+      if (imageLibError) {
+        const m = document.createElement('div');
+        m.className = 'pe-picker-error';
+        m.textContent = 'Could not load library: ' + imageLibError;
+        bodyWrap.appendChild(m);
+      }
+      if (!imageLibrary.length) {
+        const m = document.createElement('div');
+        m.className = 'pe-empty';
+        m.textContent = 'No images in this page’s library yet. Upload images to '
+          + 'the page’s “Image library” child in the Panel, then Refresh.';
+        bodyWrap.appendChild(m);
+        return;
+      }
+      const grid = document.createElement('div');
+      grid.className = 'pe-picker-grid';
+      const r = state.rects.find(function (x) { return x.id === rectId; });
+      imageLibrary.forEach(function (img) {
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'pe-picker-cell';
+        if (r && r.image === img.filename) cell.classList.add('is-current');
+        const th = document.createElement('img');
+        th.className = 'pe-picker-thumb';
+        th.src = img.thumb;
+        th.alt = '';
+        th.loading = 'lazy';
+        cell.appendChild(th);
+        const cap = document.createElement('span');
+        cap.className = 'pe-picker-cap';
+        cap.textContent = img.filename;
+        cap.title = img.filename + ' · ' + img.width + '×' + img.height + ' · ' + img.size;
+        cell.appendChild(cap);
+        cell.addEventListener('click', function () {
+          setRectImage(rectId, img.filename);
+          closeImagePicker();
+        });
+        grid.appendChild(cell);
+      });
+      bodyWrap.appendChild(grid);
+    }
+
+    document.body.appendChild(overlay);
+    pickerEl = overlay;
+    document.addEventListener('keydown', pickerKeydown, true);
+
+    renderPickerBody();
+    // Kick a load if the library was never fetched (or a prior fetch
+    // errored and left it empty); the picker repaints when it lands.
+    if (imageLibrary === null) loadImageLibrary().then(renderPickerBody);
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -537,6 +719,29 @@
     el.style.width    = (rect.w | 0) + 'px';
     el.style.height   = (rect.h | 0) + 'px';
 
+    // Bound-image preview (step 4b). For an image-kind rect that
+    // carries a filename, paint the real image behind the labels so
+    // the binding is visible on the canvas. Three states:
+    //   - library loaded + filename found → <img> (object-fit:cover).
+    //   - library loaded + filename absent → .is-img-missing (dangling
+    //     binding, e.g. the file was renamed/removed) → red flag.
+    //   - library not loaded yet → no img; the stub shows until the
+    //     async fetch resolves and triggers a re-render.
+    if (rect.kind === 'image' && rect.image) {
+      const found = imageByFilename[rect.image];
+      if (found && found.url) {
+        const img = document.createElement('img');
+        img.className = 'pe-rect-img';
+        img.src = found.url;
+        img.alt = found.alt || '';
+        img.draggable = false;
+        el.appendChild(img);
+        el.classList.add('has-image');
+      } else if (imageLibrary !== null) {
+        el.classList.add('is-img-missing');
+      }
+    }
+
     const label = document.createElement('span');
     label.className = 'pe-rect-label';
     label.textContent = rect.kind || '?';
@@ -683,6 +888,68 @@
     kindDim.className = 'pe-dim';
     kindDim.textContent = r.kind;
     body.appendChild(row('Kind', kindDim));
+
+    // Image binding (step 4b) — only for image-kind rects. Shows the
+    // current binding with a thumb + filename and Change/Unbind, or a
+    // "Bind image…" button when unbound. A dangling binding (filename
+    // not in the loaded library) is flagged so the author notices.
+    if (r.kind === 'image') {
+      const bind = document.createElement('div');
+      bind.className = 'pe-image-bind';
+
+      if (r.image) {
+        const found = imageByFilename[r.image];
+        const card  = document.createElement('div');
+        card.className = 'pe-image-bound' + (found ? '' : ' is-missing');
+
+        if (found && found.thumb) {
+          const th = document.createElement('img');
+          th.className = 'pe-image-bound-thumb';
+          th.src = found.thumb;
+          th.alt = '';
+          card.appendChild(th);
+        }
+        const meta = document.createElement('div');
+        meta.className = 'pe-image-bound-meta';
+        const name = document.createElement('span');
+        name.className = 'pe-image-bound-name';
+        name.textContent = r.image;
+        name.title = r.image;
+        meta.appendChild(name);
+        const sub = document.createElement('span');
+        sub.className = 'pe-image-bound-sub';
+        sub.textContent = found
+          ? (found.width + '×' + found.height + ' · ' + found.size)
+          : (imageLibrary === null ? 'loading library…' : 'not found in library');
+        meta.appendChild(sub);
+        card.appendChild(meta);
+        bind.appendChild(card);
+
+        const acts = document.createElement('div');
+        acts.className = 'pe-image-bind-actions';
+        const change = document.createElement('button');
+        change.type = 'button';
+        change.className = 'pe-create-btn';
+        change.textContent = 'Change…';
+        change.addEventListener('click', function () { openImagePicker(r.id); });
+        const unbind = document.createElement('button');
+        unbind.type = 'button';
+        unbind.className = 'pe-image-unbind';
+        unbind.textContent = 'Unbind';
+        unbind.addEventListener('click', function () { setRectImage(r.id, null); });
+        acts.appendChild(change);
+        acts.appendChild(unbind);
+        bind.appendChild(acts);
+      } else {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pe-create-btn pe-image-bind-open';
+        btn.textContent = 'Bind image…';
+        btn.addEventListener('click', function () { openImagePicker(r.id); });
+        bind.appendChild(btn);
+      }
+      body.appendChild(row('Image', bind));
+    }
 
     // Geometry — four small numeric inputs (x / y / w / h). Tab
     // walks between them; Enter or blur commits; Escape reverts
@@ -880,6 +1147,11 @@
   // field — otherwise typing in the chapter rename input would delete
   // the selected rect on Backspace.
   document.addEventListener('keydown', function (ev) {
+    // While the image picker owns the screen, the canvas shortcuts
+    // (Delete-rect, Escape-deselect) must not fire. The picker's own
+    // capture-phase handler deals with Escape; everything else is a
+    // no-op until it closes.
+    if (pickerEl) return;
     if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) {
       ev.preventDefault();
       doSave();
@@ -909,6 +1181,12 @@
 
   render();
   syncSaveButton();
+
+  // Kick the image-library fetch after first paint. Bound image rects
+  // upgrade stub → <img> when it resolves; the binding UI and picker
+  // reuse the same cached list. Fire-and-forget — render() is called
+  // inside loadImageLibrary() on completion.
+  loadImageLibrary();
 
   // Expose for console-poking during early-stage debugging only.
   // Removed once step 4 surfaces this through real UI.

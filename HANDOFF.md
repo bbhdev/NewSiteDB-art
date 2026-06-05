@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.44):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.46):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -286,16 +286,44 @@ image pipeline. Landed so far:
     opening a preset menu whose choice only *fills* the field, then
     Apply commits (no auto-submit).
 
-Next in Slice 2: **Step 4**
-(canvas editor "Bind image…" picker + mismatch row with 3 resize
-strategies + image-first "Place image" flow) reading the per-page
-`images/` library via a `GET /api/page-images/(:any)` endpoint. Then
-**Step 5**: runtime renders real text + image via
-`$file->thumb(rect.w * dpr)`, per-rect `dpr` field, rect-schema bump
-2→3. **Canvas background** (color/image-scaled/image-tiled, schema
-2→3) is parked (option B) to land alongside the Step 4 image picker
-it reuses. **Image-workshop lightbox** (in-page full-derivative view
-instead of open-in-new-tab) queued for Step C polish.
+**Slice 2 Step 4 — image binding (v0.10.45→0.10.46).** Lets a canvas
+`image` rect carry a bound image filename, resolved against the page's
+`images/` library, previewed in-rect in the editor. Two sub-slices:
+  - *4a — listing endpoint (v0.10.45).* `GET dev/page/images/(:all)`
+    (in `config.php`, alongside `dev/page/save`). Returns
+    `{ok, page, imagesPage, images:[{filename,url,thumb,width,height,
+    ratio,size,alt}]}` with eager 240px thumbs. **Placed under `dev/`,
+    NOT `/api/`, deliberately** — the host-scoped auth gate covers the
+    whole `/dev` tree, so an `/api/` route would have been unauthenticated.
+    The per-page `images/` child is a Panel-created draft → resolved via
+    `$page->childrenAndDrafts()->findBy('slug','images')` (plain
+    `children()` would miss it). Page-id validated `~^[a-z0-9][a-z0-9/_-]*$~i`;
+    unknown page → 404, no library → `imagesPage:null, images:[]`.
+  - *4b — picker + rect-schema bump 2→3 (v0.10.46).* New optional
+    `image` rect field (bare filename, ≤255, no `/ \ ..`). **Rect-schema
+    third axis bumped v2→v3** (user-authorized) with read-time migration
+    in BOTH `page.php` (editor template) and the `dev/page/save` route —
+    older files default `image`→null and upgrade to v3 on first save; the
+    editor always emits v3. Editor UI: a "Bind image…" picker (modal thumb
+    grid, capture-phase Escape, refresh) on selected image rects, with
+    Change…/Unbind; bound rects render an in-rect `<img class="pe-rect-img">`
+    (absolute inset:0, object-fit:cover, z-index:0) with labels lifted to
+    z-index:1 as translucent dark pills for legibility over the photo; a
+    rect whose bound file is missing from the library shows a dashed-red
+    `is-img-missing` outline. The library is fetched async on load via 4a's
+    endpoint into `imageByFilename`; render re-runs when it arrives.
+    Verified end-to-end through a reload: on-disk `rects.json` writes
+    `schemaVersion:3`, the bound filename (leading spaces preserved)
+    survives, and the in-rect `<img>` re-decodes cold.
+
+Still in Slice 2: **Step 4c** (deferred) — mismatch row with 3 resize
+strategies (rect↔image aspect handling, likely a `rect.fit` field) +
+image-first "Place image" flow. Then **Step 5**: runtime
+`canvas-page.php` renders real text + image via
+`$file->thumb(rect.w * dpr)`, per-rect `dpr` field. **Canvas background**
+(color/image-scaled/image-tiled) is parked (option B) to land alongside
+the Step 4 picker it reuses. **Image-workshop lightbox** (in-page
+full-derivative view instead of open-in-new-tab) queued for Step C polish.
 
 **Navigation cleanup batch (v0.10.39 → v0.10.43).** Done before
 resuming Slice 2 feature work because hopping between the three dev
