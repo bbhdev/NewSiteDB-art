@@ -1,6 +1,6 @@
 /*
- * /dev/image-workshop styling — Phase 2 Slice 2 workshop Step A
- * (v0.10.33).
+ * /dev/image-workshop styling — Phase 2 Slice 2 workshop Steps A + B
+ * (v0.10.35; verdict bar / toggle / card tints added in B).
  *
  * Shares the dark dev-tool chrome of /dev/draw and /dev/page (same
  * background, accent orange, toolbar shape) so the three editor
@@ -76,6 +76,58 @@ body.iw-body {
   font-variant-numeric: tabular-nums;
 }
 .iw-sizeinput:focus { border-color: #f0a060; outline: none; }
+
+/* Type-or-pick combo: number field + disclosure caret + preset menu. */
+.iw-sizecombo {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+.iw-sizecombo .iw-sizeinput {
+  width: 5rem;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.iw-sizecaret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  background: #34373d;
+  color: #d0d0d0;
+  border: 1px solid #3a3d44;
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+  font-size: 0.7em;
+  cursor: pointer;
+}
+.iw-sizecaret:hover { background: #3d4046; color: #f0f0f0; }
+.iw-sizecaret[aria-expanded="true"] { background: #f0a060; color: #16171a; border-color: #f0a060; }
+.iw-sizemenu {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: #26282d;
+  border: 1px solid #3a3d44;
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+.iw-sizemenu[hidden] { display: none; }
+.iw-sizeopt {
+  padding: 0.3rem 0.6rem;
+  border-radius: 3px;
+  color: #e0e0e0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.iw-sizeopt:hover { background: #f0a060; color: #16171a; }
 .iw-apply {
   background: #f0a060;
   color: #16171a;
@@ -252,3 +304,164 @@ body.iw-body {
   font-variant-numeric: tabular-nums;
   margin-left: auto;
 }
+
+/* Verdict triage bar (Step B) ──────────────────────────────────── */
+
+/* Verdict accents, reused by filter chips, toggle buttons, card tints. */
+:root {
+  --iw-ok:      #5cb874;
+  --iw-rework:  #e0a83e;
+  --iw-dropped: #d06a6a;
+}
+
+.iw-subbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  background: #1a1b1f;
+  border-bottom: 1px solid #2c2e33;
+  position: sticky;
+  top: 2.75rem; /* sits just under the main toolbar */
+  z-index: 4;
+}
+.iw-subbar .iw-sizeform { gap: 0.5rem; }
+/* Thin vertical divider between the size picker and the verdict filter
+   group within the single control bar. */
+.iw-subbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4rem;
+  background: #34373d;
+}
+.iw-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.iw-filter-label {
+  color: #c0c0c0;
+  text-transform: uppercase;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  margin-right: 0.2rem;
+}
+.iw-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #26282d;
+  color: #d0d0d0;
+  border: 1px solid #3a3d44;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  font: inherit;
+  font-size: 0.82em;
+  cursor: pointer;
+}
+.iw-filter:hover { background: #2e3137; }
+.iw-filter.is-active {
+  background: #f0a060;
+  color: #16171a;
+  border-color: #f0a060;
+  font-weight: 600;
+}
+.iw-filter-n {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+  opacity: 0.85;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 999px;
+  padding: 0 0.4em;
+  min-width: 1.2em;
+  text-align: center;
+}
+.iw-filter.is-active .iw-filter-n { background: rgba(0, 0, 0, 0.18); }
+/* Dot before the verdict-specific chips so the colour reads even when
+   inactive. */
+.iw-filter--ok::before,
+.iw-filter--rework::before,
+.iw-filter--dropped::before {
+  content: "";
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  display: inline-block;
+}
+.iw-filter--ok::before      { background: var(--iw-ok); }
+.iw-filter--rework::before  { background: var(--iw-rework); }
+.iw-filter--dropped::before { background: var(--iw-dropped); }
+
+.iw-subbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+.iw-savestate {
+  color: #80c890;
+  font-size: 0.8em;
+  min-width: 5rem;
+  text-align: right;
+}
+.iw-savestate.is-error { color: #e88; }
+.iw-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #2a2c31;
+  color: #f0f0f0;
+  border: 1px solid #3a3d44;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.iw-copy:hover:not(:disabled) { background: #33363c; border-color: var(--iw-rework); }
+.iw-copy:disabled { opacity: 0.4; cursor: default; }
+.iw-copy-n {
+  font-variant-numeric: tabular-nums;
+  background: var(--iw-rework);
+  color: #1f2024;
+  border-radius: 999px;
+  padding: 0 0.45em;
+  font-weight: 600;
+  min-width: 1.2em;
+  text-align: center;
+}
+
+/* Card verdict tint — a left accent stripe keyed to the verdict, so
+   the grid reads at a glance even before filtering. */
+.iw-card[data-verdict="ok"]      { border-left: 3px solid var(--iw-ok); }
+.iw-card[data-verdict="rework"]  { border-left: 3px solid var(--iw-rework); }
+.iw-card[data-verdict="dropped"] { border-left: 3px solid var(--iw-dropped); }
+.iw-card[data-verdict="dropped"] { opacity: 0.72; } /* dropped reads as de-emphasised */
+.iw-card[hidden] { display: none; }
+
+/* Verdict toggle (per card) ───────────────────────────────────── */
+
+.iw-verdict {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: #33363c;
+  border-top: 1px solid #33363c;
+}
+.iw-vbtn {
+  background: #202227;
+  color: #b0b0b0;
+  border: none;
+  padding: 0.4rem 0.3rem;
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.iw-vbtn:hover { background: #2a2c31; color: #e8e8e8; }
+.iw-vbtn[aria-pressed="true"] { color: #16171a; }
+.iw-vbtn--ok[aria-pressed="true"]      { background: var(--iw-ok); }
+.iw-vbtn--rework[aria-pressed="true"]  { background: var(--iw-rework); }
+.iw-vbtn--dropped[aria-pressed="true"] { background: var(--iw-dropped); }

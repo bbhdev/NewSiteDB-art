@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.34):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.38):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 Deployment infrastructure landed (v0.9.1–v0.9.14) — rsync deploy tooling,
@@ -183,7 +183,7 @@ template `canvas-page.php`, save endpoint, auth gate, all sharing
 Deco's per-page config + palette as common data (the
 "integrate, don't drift" principle held).
 
-**Slice 2 — in progress (v0.10.24 → v0.10.34).** Real content +
+**Slice 2 — in progress (v0.10.24 → v0.10.38).** Real content +
 image pipeline. Landed so far:
 
 - **Step 1 — author note + rect-schema bump 1→2 (v0.10.24).** New
@@ -260,9 +260,29 @@ image pipeline. Landed so far:
   tools" info block on the Panel dashboard linking Draw / Page /
   Image-workshop (new tab) — so the author never types a /dev URL by
   hand to reach a tool.
+- **Image workshop — Step B: verdict triage (v0.10.35→0.10.38).**
+  Each batch-grid card carries an `OK / Rework / Dropped` toggle
+  (re-click the active one to clear). Verdicts persist to a per-batch
+  sidecar `content/dev/image-workshop/<batch>/verdicts.json`
+  (`{schemaVersion, verdicts:{filename→verdict}}`, gitignored as batch
+  stock) via `POST dev/image-workshop/save` — full validation + atomic
+  tmp+rename, mirroring `dev/page/save`; the batch resolves through
+  `childrenAndDrafts()` since batches are drafts. A filter bar
+  (All/Unrated/OK/Rework/Dropped, live counts) narrows the grid
+  client-side; "Copy rework filenames" yields the newline list for the
+  bulk Photoshop handoff. Cards tint by verdict (left stripe; dropped
+  dims). Save is debounced 450ms with a Saving…/Saved ✓ indicator.
+  Verdicts are author judgement only — they never touch source files.
+  - *Size-picker fixes folded in here (v0.10.36→38):* the Step-B sticky
+    verdict bar covered the toolbar size input's datalist popup, so the
+    size picker moved into that single control bar; the
+    `number+datalist` combobox (a browser filters its presets down to
+    the pre-filled value, hiding the rest) was then replaced by a
+    standard type-or-pick combo — number field + disclosure caret
+    opening a preset menu whose choice only *fills* the field, then
+    Apply commits (no auto-submit).
 
-Next in Slice 2: **Step B** (image-workshop per-image verdict
-ok/rework/dropped + filter + copy-rework-filenames) and/or **Step 4**
+Next in Slice 2: **Step 4**
 (canvas editor "Bind image…" picker + mismatch row with 3 resize
 strategies + image-first "Place image" flow) reading the per-page
 `images/` library via a `GET /api/page-images/(:any)` endpoint. Then

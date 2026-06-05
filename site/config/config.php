@@ -1166,6 +1166,95 @@ HTML;
           'application/json'
         );
       }
+    ],
+
+    /**
+     * v0.10.35 — Image-workshop verdict persistence (Slice 2 step B).
+     *
+     *   POST dev/image-workshop/save
+     *   body: { batch: "<batch page id>", verdicts: { "<filename>": "ok|rework|dropped", ... } }
+     *
+     * Stores triage verdicts for a workshop batch in a per-batch sidecar
+     * content/<batch>/verdicts.json. Mirrors dev/page/save: full-shape
+     * validation, atomic tmp+rename write. Batches are Panel DRAFTS, so
+     * the page is resolved via the container's childrenAndDrafts() (a
+     * plain kirby()->page() would miss drafts).
+     *
+     * The verdict map is authoritative-by-replacement: the client always
+     * sends the complete current map, and entries cleared in the UI are
+     * simply absent (or null) and dropped on write — so a verdicts.json
+     * only ever holds files that currently carry a verdict.
+     */
+    [
+      'pattern' => 'dev/image-workshop/save',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $body  = $kirby->request()->body()->toArray();
+
+        $batchId  = $body['batch']    ?? null;
+        $verdicts = $body['verdicts'] ?? null;
+
+        $fail = function (string $msg, int $code = 400) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => $msg]),
+            'application/json',
+            $code
+          );
+        };
+
+        if (!is_string($batchId) || $batchId === '' || !is_array($verdicts)) {
+          return $fail('Missing or invalid body fields.');
+        }
+
+        // Resolve the batch page, including drafts (Panel-created batches
+        // start as drafts). Scope the lookup to the workshop container so
+        // an arbitrary page id can't be targeted.
+        $container = $kirby->page('dev/image-workshop');
+        $batchPage = $container ? $container->childrenAndDrafts()->find($batchId) : null;
+        if (!$batchPage || $batchPage->intendedTemplate()->name() !== 'image-workshop-batch') {
+          return $fail('Unknown image-workshop batch: ' . $batchId, 404);
+        }
+
+        // Validate against the batch's actual files + the 3-value enum.
+        // Drop empty/null verdicts (an "unset" in the UI).
+        $allowed   = ['ok', 'rework', 'dropped'];
+        $fileNames = $batchPage->files()->pluck('filename');
+        $clean     = [];
+        foreach ($verdicts as $fname => $verdict) {
+          if (!is_string($fname)) {
+            return $fail('Verdict key is not a filename string.');
+          }
+          if ($verdict === null || $verdict === '') {
+            continue; // cleared — omit from the saved map
+          }
+          if (!is_string($verdict) || !in_array($verdict, $allowed, true)) {
+            return $fail('Invalid verdict for ' . $fname . ': ' . (is_string($verdict) ? $verdict : gettype($verdict)));
+          }
+          if (!in_array($fname, $fileNames, true)) {
+            return $fail('Unknown file in batch: ' . $fname);
+          }
+          $clean[$fname] = $verdict;
+        }
+
+        $payload = [
+          'schemaVersion' => 1,
+          'verdicts'      => (object) $clean, // {} not [] when empty
+        ];
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+
+        $target = $batchPage->root() . '/verdicts.json';
+        $tmp    = $target . '.tmp';
+        if (file_put_contents($tmp, $json) === false || !rename($tmp, $target)) {
+          @unlink($tmp);
+          return $fail('Failed to write verdicts.json.', 500);
+        }
+
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'count' => count($clean)]),
+          'application/json'
+        );
+      }
     ]
   ]
 ];

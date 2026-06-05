@@ -1,11 +1,23 @@
 <?php
 /**
  * /dev/image-workshop/<batch> grid view — Phase 2 Slice 2 workshop
- * Step A (v0.10.33).
+ * Steps A + B (v0.10.35).
  *
- * Pure-inspection triage grid. For every image in the batch, renders
- * the original alongside a resized derivative at a chosen long-edge
- * size, with dimensions + file size + open-in-new-tab links for both.
+ * v0.10.36 — fix: size picker moved from the top toolbar into the
+ * single control bar, so its dropdown is no longer hidden behind the
+ * sticky verdict subbar.
+ * v0.10.37 — fix: replaced the type=number + datalist combobox (which a
+ * browser filters down to options matching the pre-filled value, hiding
+ * all other presets) with an explicit <select> of presets that all show,
+ * beside the number field for custom entry.
+ * v0.10.38 — UX: standard type-or-pick combo. Number field + disclosure
+ * caret opening a preset menu; choosing a preset only FILLS the field
+ * (no auto-submit), then the user clicks Apply. Replaces the <select>
+ * (which showed its own value and executed immediately — confusing).
+ *
+ * Triage grid. For every image in the batch, renders the original
+ * alongside a resized derivative at a chosen long-edge size, with
+ * dimensions + file size + open-in-new-tab links for both.
  *
  * Resize semantics mirror the canvas-page runtime and the maxLongEdge
  * commit hook exactly: $file->resize($size, $size) fits the image
@@ -21,9 +33,12 @@
  * the batch. Changing the size regenerates at the new size (the old
  * size stays cached).
  *
- * Step B adds per-image verdict (ok / rework / dropped) + filter +
- * copy-filenames; Step C adds multi-size columns. Step A is inspection
- * only.
+ * Step B (v0.10.35) — per-image VERDICT triage: each card carries an
+ * ok / rework / dropped toggle, persisted to a per-batch sidecar
+ * (verdicts.json) via POST dev/image-workshop/save. A filter bar narrows
+ * the grid by verdict, and "Copy rework filenames" yields the bulk
+ * Photoshop-handoff list. Verdicts are author judgement, never touch the
+ * source files.
  */
 $v = option('version', 'dev');
 
@@ -38,6 +53,27 @@ $images = $page->images()->sortBy('filename', 'asc');
 // Preset sizes offered in the datalist (author can still type any
 // value in the number input).
 $presets = [800, 1000, 1200, 1600, 2400];
+
+// Load existing verdicts sidecar (written by dev/image-workshop/save).
+// Shape: { schemaVersion, verdicts: { "<filename>": "ok|rework|dropped" } }.
+$verdictsPath = $page->root() . '/verdicts.json';
+$verdicts     = [];
+if (is_file($verdictsPath)) {
+  $decoded = json_decode(file_get_contents($verdictsPath), true);
+  if (is_array($decoded) && isset($decoded['verdicts']) && is_array($decoded['verdicts'])) {
+    $verdicts = $decoded['verdicts'];
+  }
+}
+
+$verdictKinds = ['ok', 'rework', 'dropped'];
+
+// Counts per verdict, for the filter-bar badges.
+$counts = ['ok' => 0, 'rework' => 0, 'dropped' => 0, 'unrated' => 0];
+foreach ($images as $img) {
+  $vv = $verdicts[$img->filename()] ?? '';
+  if (in_array($vv, $verdictKinds, true)) { $counts[$vv]++; }
+  else                                    { $counts['unrated']++; }
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -52,22 +88,55 @@ $presets = [800, 1000, 1200, 1600, 2400];
     <a class="iw-back" href="<?= $page->parent()->url() ?>" title="Back to batches">‹ Batches</a>
     <span class="iw-brand"><?= esc($page->title()) ?></span>
     <span class="iw-count"><?= $images->count() ?> image(s)</span>
+    <span class="iw-version">v<?= esc($v) ?></span>
+  </header>
 
+  <!-- Single control bar: size picker (always) + verdict filter/copy
+       (only when the batch has images). The size picker lives HERE, not
+       in the top toolbar: when it was in the toolbar its datalist popup
+       opened downward straight into this sticky opaque bar, which hid
+       the dropdown (v0.10.35 regression). With the input inside the bar,
+       the popup opens into the grid below — nothing opaque covers it. -->
+  <div class="iw-subbar">
     <form method="get" class="iw-sizeform" action="<?= $page->url() ?>">
       <label class="iw-sizelabel" for="iw-size">Test long edge (px)</label>
-      <input type="number" id="iw-size" name="size" class="iw-sizeinput"
-             min="200" max="8000" step="10" value="<?= $size ?>"
-             list="iw-size-presets" inputmode="numeric">
-      <datalist id="iw-size-presets">
-        <?php foreach ($presets as $p): ?>
-          <option value="<?= $p ?>"></option>
-        <?php endforeach; ?>
-      </datalist>
+      <!-- Type-or-pick combo: the number field holds the value; the
+           disclosure caret opens a preset list whose choice only FILLS
+           the field (no submit). Apply commits. -->
+      <div class="iw-sizecombo">
+        <input type="number" id="iw-size" name="size" class="iw-sizeinput"
+               min="200" max="8000" step="10" value="<?= $size ?>"
+               inputmode="numeric" autocomplete="off">
+        <button type="button" class="iw-sizecaret" id="iw-sizecaret"
+                aria-haspopup="listbox" aria-expanded="false" aria-controls="iw-sizemenu"
+                aria-label="Choose a preset size">▾</button>
+        <ul class="iw-sizemenu" id="iw-sizemenu" role="listbox" hidden>
+          <?php foreach ($presets as $p): ?>
+            <li class="iw-sizeopt" role="option" data-value="<?= $p ?>" tabindex="-1"><?= $p ?> px</li>
+          <?php endforeach; ?>
+        </ul>
+      </div>
       <button type="submit" class="iw-apply">Apply</button>
     </form>
 
-    <span class="iw-version">v<?= esc($v) ?></span>
-  </header>
+    <?php if ($images->count() > 0): ?>
+    <span class="iw-subbar-sep" aria-hidden="true"></span>
+    <div class="iw-filterbar" role="group" aria-label="Filter by verdict">
+      <span class="iw-filter-label">Show</span>
+      <button type="button" class="iw-filter is-active" data-filter="all">All <span class="iw-filter-n"><?= $images->count() ?></span></button>
+      <button type="button" class="iw-filter" data-filter="unrated">Unrated <span class="iw-filter-n" data-count="unrated"><?= $counts['unrated'] ?></span></button>
+      <button type="button" class="iw-filter iw-filter--ok"      data-filter="ok">OK <span class="iw-filter-n" data-count="ok"><?= $counts['ok'] ?></span></button>
+      <button type="button" class="iw-filter iw-filter--rework"  data-filter="rework">Rework <span class="iw-filter-n" data-count="rework"><?= $counts['rework'] ?></span></button>
+      <button type="button" class="iw-filter iw-filter--dropped" data-filter="dropped">Dropped <span class="iw-filter-n" data-count="dropped"><?= $counts['dropped'] ?></span></button>
+    </div>
+    <div class="iw-subbar-actions">
+      <span class="iw-savestate" id="iw-savestate" aria-live="polite"></span>
+      <button type="button" class="iw-copy" id="iw-copy" title="Copy newline-separated filenames of every image marked Rework">
+        Copy rework filenames <span class="iw-copy-n" id="iw-copy-n"><?= $counts['rework'] ?></span>
+      </button>
+    </div>
+    <?php endif; ?>
+  </div>
 
   <!-- Long-operation feedback. Changing the test size regenerates a
        derivative for every image at the new size; on first request
@@ -92,7 +161,7 @@ $presets = [800, 1000, 1200, 1600, 2400];
         <a href="<?= $page->panel()->url() ?>">Panel</a>, then reload.
       </p>
     <?php else: ?>
-      <div class="iw-grid">
+      <div class="iw-grid" id="iw-grid">
         <?php foreach ($images as $img): ?>
           <?php
             $ow = $img->width();
@@ -105,8 +174,11 @@ $presets = [800, 1000, 1200, 1600, 2400];
             $origLong = max($ow, $oh);
             $pct = $origLong > 0 ? round(($size <= $origLong ? $size : $origLong) / $origLong * 100) : 100;
             $noShrink = $size >= $origLong;
+            // Current verdict for this file ('' when unrated).
+            $verdict = $verdicts[$img->filename()] ?? '';
+            if (!in_array($verdict, $verdictKinds, true)) { $verdict = ''; }
           ?>
-          <article class="iw-card">
+          <article class="iw-card" data-filename="<?= esc($img->filename()) ?>" data-verdict="<?= esc($verdict) ?>">
             <div class="iw-card-head">
               <span class="iw-fname" title="<?= esc($img->filename()) ?>"><?= esc($img->filename()) ?></span>
             </div>
@@ -139,6 +211,14 @@ $presets = [800, 1000, 1200, 1600, 2400];
                 </figcaption>
               </figure>
             </div>
+
+            <!-- Verdict toggle (Step B). Click the active one again to
+                 clear back to unrated. -->
+            <div class="iw-verdict" role="group" aria-label="Verdict for <?= esc($img->filename()) ?>">
+              <button type="button" class="iw-vbtn iw-vbtn--ok"      data-verdict="ok"<?=      $verdict === 'ok'      ? ' aria-pressed="true"' : '' ?>>OK</button>
+              <button type="button" class="iw-vbtn iw-vbtn--rework"  data-verdict="rework"<?=  $verdict === 'rework'  ? ' aria-pressed="true"' : '' ?>>Rework</button>
+              <button type="button" class="iw-vbtn iw-vbtn--dropped" data-verdict="dropped"<?= $verdict === 'dropped' ? ' aria-pressed="true"' : '' ?>>Dropped</button>
+            </div>
           </article>
         <?php endforeach; ?>
       </div>
@@ -146,22 +226,200 @@ $presets = [800, 1000, 1200, 1600, 2400];
   </main>
 
   <script>
-    // Show the busy overlay on size-form submit. Vanilla, no build
-    // step (matches /dev/draw + /dev/page). Message names the image
-    // count + target size so the author knows what's happening.
+    // Size picker (type-or-pick combo) + busy overlay. Vanilla, no build
+    // step.
     (function () {
       var form  = document.querySelector('.iw-sizeform');
       var busy  = document.getElementById('iw-busy');
       var msg   = document.getElementById('iw-busy-msg');
       var input = document.getElementById('iw-size');
+      var caret = document.getElementById('iw-sizecaret');
+      var menu  = document.getElementById('iw-sizemenu');
       var count = <?= (int) $images->count() ?>;
-      if (!form || !busy) return;
-      form.addEventListener('submit', function () {
-        var sz = input ? input.value : '';
-        msg.textContent = 'Generating ' + count + ' derivative' +
-          (count === 1 ? '' : 's') + ' at ' + sz + ' px…';
-        busy.hidden = false;
+      if (!form) return;
+
+      // Disclosure combo: caret toggles the preset list; choosing an
+      // option only fills the input (the standard pattern — no auto-
+      // submit). The user then clicks Apply.
+      if (caret && menu && input) {
+        var opts = Array.prototype.slice.call(menu.querySelectorAll('.iw-sizeopt'));
+
+        function openMenu() {
+          menu.hidden = false;
+          caret.setAttribute('aria-expanded', 'true');
+          document.addEventListener('click', onDocClick, true);
+          document.addEventListener('keydown', onKey, true);
+        }
+        function closeMenu() {
+          menu.hidden = true;
+          caret.setAttribute('aria-expanded', 'false');
+          document.removeEventListener('click', onDocClick, true);
+          document.removeEventListener('keydown', onKey, true);
+        }
+        function toggleMenu() { menu.hidden ? openMenu() : closeMenu(); }
+        function onDocClick(e) {
+          if (!menu.contains(e.target) && e.target !== caret) closeMenu();
+        }
+        function onKey(e) {
+          if (e.key === 'Escape') { closeMenu(); input.focus(); }
+        }
+        function pick(value) {
+          input.value = value;   // fill only — do NOT submit
+          closeMenu();
+          input.focus();
+        }
+
+        caret.addEventListener('click', function (e) { e.preventDefault(); toggleMenu(); });
+        opts.forEach(function (li) {
+          li.addEventListener('click', function () { pick(li.getAttribute('data-value')); });
+        });
+      }
+
+      if (busy) {
+        form.addEventListener('submit', function () {
+          var sz = input ? input.value : '';
+          msg.textContent = 'Generating ' + count + ' derivative' +
+            (count === 1 ? '' : 's') + ' at ' + sz + ' px…';
+          busy.hidden = false;
+        });
+      }
+    })();
+
+    // Verdict triage (Step B): per-card toggle, client-side filter,
+    // copy-rework, debounced persistence.
+    (function () {
+      var grid = document.getElementById('iw-grid');
+      if (!grid) return;
+
+      var SAVE_URL = <?= json_encode(url('dev/image-workshop/save')) ?>;
+      var BATCH_ID = <?= json_encode($page->id()) ?>;
+      var KINDS    = ['ok', 'rework', 'dropped'];
+
+      var cards     = Array.prototype.slice.call(grid.querySelectorAll('.iw-card'));
+      var filterBtns= Array.prototype.slice.call(document.querySelectorAll('.iw-filter'));
+      var saveState = document.getElementById('iw-savestate');
+      var copyBtn   = document.getElementById('iw-copy');
+      var copyN     = document.getElementById('iw-copy-n');
+
+      // Seed in-memory verdict map from the rendered DOM (source of truth
+      // on load is what the server wrote).
+      var verdicts = {};
+      cards.forEach(function (card) {
+        var v = card.getAttribute('data-verdict') || '';
+        if (KINDS.indexOf(v) !== -1) verdicts[card.getAttribute('data-filename')] = v;
       });
+
+      // ── Counts + copy-button badge ───────────────────────────────
+      function recount() {
+        var c = { ok: 0, rework: 0, dropped: 0, unrated: 0 };
+        cards.forEach(function (card) {
+          var v = card.getAttribute('data-verdict') || '';
+          if (KINDS.indexOf(v) !== -1) c[v]++; else c.unrated++;
+        });
+        filterBtns.forEach(function (b) {
+          var key = b.getAttribute('data-filter');
+          var n   = b.querySelector('.iw-filter-n');
+          if (!n) return;
+          if (key === 'all') n.textContent = cards.length;
+          else if (c.hasOwnProperty(key)) n.textContent = c[key];
+        });
+        if (copyN) copyN.textContent = c.rework;
+        if (copyBtn) copyBtn.disabled = c.rework === 0;
+      }
+
+      // ── Persistence (debounced; sends the whole map) ─────────────
+      var saveTimer = null;
+      function flash(msg, isErr) {
+        if (!saveState) return;
+        saveState.textContent = msg;
+        saveState.classList.toggle('is-error', !!isErr);
+      }
+      function scheduleSave() {
+        flash('Saving…', false);
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(doSave, 450);
+      }
+      function doSave() {
+        fetch(SAVE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch: BATCH_ID, verdicts: verdicts })
+        }).then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j && j.ok) { flash('Saved ✓', false); }
+            else { flash('Save failed: ' + ((j && j.error) || 'unknown'), true); }
+          })
+          .catch(function () { flash('Save failed (network)', true); });
+      }
+
+      // ── Verdict toggle ───────────────────────────────────────────
+      grid.addEventListener('click', function (e) {
+        var btn = e.target.closest('.iw-vbtn');
+        if (!btn) return;
+        var card = btn.closest('.iw-card');
+        if (!card) return;
+        var fname   = card.getAttribute('data-filename');
+        var picked  = btn.getAttribute('data-verdict');
+        var current = card.getAttribute('data-verdict') || '';
+        var next    = (current === picked) ? '' : picked; // re-click clears
+
+        card.setAttribute('data-verdict', next);
+        // Reflect aria-pressed on the three buttons in this card.
+        card.querySelectorAll('.iw-vbtn').forEach(function (b) {
+          if (b.getAttribute('data-verdict') === next) b.setAttribute('aria-pressed', 'true');
+          else b.removeAttribute('aria-pressed');
+        });
+
+        if (next) verdicts[fname] = next; else delete verdicts[fname];
+
+        recount();
+        applyFilter(); // a now-filtered-out card hides immediately
+        scheduleSave();
+      });
+
+      // ── Filtering (client-side) ──────────────────────────────────
+      var activeFilter = 'all';
+      function applyFilter() {
+        cards.forEach(function (card) {
+          var v = card.getAttribute('data-verdict') || '';
+          var show;
+          if (activeFilter === 'all')          show = true;
+          else if (activeFilter === 'unrated') show = (KINDS.indexOf(v) === -1);
+          else                                 show = (v === activeFilter);
+          card.hidden = !show;
+        });
+      }
+      filterBtns.forEach(function (b) {
+        b.addEventListener('click', function () {
+          activeFilter = b.getAttribute('data-filter');
+          filterBtns.forEach(function (x) { x.classList.toggle('is-active', x === b); });
+          applyFilter();
+        });
+      });
+
+      // ── Copy rework filenames ────────────────────────────────────
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function () {
+          var names = cards
+            .filter(function (c) { return c.getAttribute('data-verdict') === 'rework'; })
+            .map(function (c) { return c.getAttribute('data-filename'); });
+          if (!names.length) { flash('No images marked Rework', false); return; }
+          var text = names.join('\n');
+          var done = function () { flash('Copied ' + names.length + ' filename' + (names.length === 1 ? '' : 's') + ' ✓', false); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+          } else { fallbackCopy(text, done); }
+        });
+      }
+      function fallbackCopy(text, done) {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (err) { flash('Copy failed', true); }
+        document.body.removeChild(ta);
+      }
+
+      recount();
     })();
   </script>
   <!-- v<?= $v ?> -->
