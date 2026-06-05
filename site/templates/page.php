@@ -112,6 +112,15 @@ $rects = array_map(function ($r) {
     // is normalised here the same way the save route does. Any absent or
     // unexpected value collapses to 'cover' = the pre-4c render.
     $r['fit'] = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
+    // v0.10.50: `focusX`/`focusY` (0–100, default 50) drive the bound
+    // image's object-position. Additive within schema v3 — 50/50 == the
+    // pre-4d centred crop. Clamp to an int in [0,100] exactly as the save
+    // route does; missing/garbage collapses to 50 (centred).
+    foreach (['focusX', 'focusY'] as $fk) {
+        $fv = $r[$fk] ?? 50;
+        $fv = is_numeric($fv) ? (int) round((float) $fv) : 50;
+        $r[$fk] = max(0, min(100, $fv));
+    }
     return $r;
 }, $rects);
 // Editor always emits the current schema version on save. Declaring 3

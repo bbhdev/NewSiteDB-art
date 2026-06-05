@@ -94,6 +94,14 @@
     // bound image fills a rect with a different aspect ratio. Additive
     // within schema v3 — default to the behaviour-preserving 'cover'.
     if (r && typeof r === 'object' && r.fit !== 'contain') r.fit = 'cover';
+    // v0.10.50: `focusX`/`focusY` (0–100, default 50) drive the bound
+    // image's object-position so the author can choose which part of a
+    // cover-cropped image is visible. Additive within schema v3 —
+    // default 50/50 == centred == the prior behaviour.
+    if (r && typeof r === 'object') {
+      r.focusX = clampFocus(r.focusX);
+      r.focusY = clampFocus(r.focusY);
+    }
   });
 
   // Slice 2 step 4b: per-page image library, fetched once from
@@ -110,6 +118,16 @@
   // null), and the active pointer drag if any.
   let selectedId = null;
   let drag = null; // { id, pointerId, startX, startY, origX, origY, moved }
+  let focusDrag = null; // focal-dot drag (step 4d); independent of `drag`
+
+  // Clamp an image focus coordinate to an integer in [0,100], with a
+  // 50 (centred) fallback for missing/garbage input. Used by the
+  // bootstrap normaliser and the focal-dot drag (step 4d).
+  function clampFocus(v) {
+    const n = Math.round(Number(v));
+    if (!isFinite(n)) return 50;
+    return Math.max(0, Math.min(100, n));
+  }
 
   // Step 3: dirty tracking. Every mutation (add / drag commit /
   // later resize / delete / chapter ops) calls markDirty(); a
@@ -196,7 +214,9 @@
       // normaliser only runs on load; a freshly added rect would
       // otherwise lack them until its first save round-trip).
       image:     null,
-      fit:       'cover'
+      fit:       'cover',
+      focusX:    50,
+      focusY:    50
     };
     state.rects.push(rect);
     selectedId = rect.id;
@@ -230,7 +250,9 @@
       chapterId: null,
       note:      null,
       image:     String(filename),
-      fit:       'cover'
+      fit:       'cover',
+      focusX:    50,
+      focusY:    50
     };
     state.rects.push(rect);
     selectedId = rect.id;
@@ -804,6 +826,108 @@
   // (handful of rects); a diff-render arrives in step 4 if perf
   // demands.
   // ────────────────────────────────────────────────────────────────
+  // Focal-dot pan control (step 4d). Appended to a selected, cover-mode
+  // image rect that has a real aspect mismatch (i.e. the cover crop
+  // actually hides part of the image). The dot drags along the single
+  // overflow axis — the other axis is locked because object-position on
+  // a non-overflowing axis has no visible effect. On a small rect the
+  // dot detaches to just outside the top-left corner so it doesn't fight
+  // the resize handles, and switches from absolute (dot-follows-pointer)
+  // to relative (drag-delta) mapping.
+  const FOCUS_DOT_MIN = 70; // rect min-dimension below which the dot detaches
+
+  function maybeAddFocusDot(el, img, rect, imgRatio) {
+    const rw = rect.w | 0, rh = rect.h | 0;
+    const rectRatio = rh > 0 ? rw / rh : 0;
+    if (rectRatio <= 0) return;
+    // Same >0.5% relative-difference threshold the Fit panel uses — below
+    // it the crop hides nothing worth panning, so no dot.
+    if (Math.abs(rectRatio - imgRatio) / imgRatio <= 0.005) return;
+    // Cover scales to the larger ratio: an image wider than the rect
+    // overflows horizontally (pan X); a taller one overflows vertically
+    // (pan Y). Exactly one axis overflows in cover mode.
+    const axis = imgRatio > rectRatio ? 'x' : 'y';
+    const detached = Math.min(rw, rh) < FOCUS_DOT_MIN;
+
+    const dot = document.createElement('div');
+    dot.className = 'pe-focus-dot pe-focus-dot--' + axis +
+                    (detached ? ' is-detached' : '');
+    dot.title = 'Drag to choose which part of the image shows';
+
+    if (detached) {
+      // Parked just outside the top-left, off the corner along the top
+      // edge. Relative mapping → its resting spot stays fixed during drag.
+      dot.style.left = '14px';
+      dot.style.top  = '-22px';
+    } else if (axis === 'x') {
+      dot.style.left = clampFocus(rect.focusX) + '%';
+      dot.style.top  = '50%';
+    } else {
+      dot.style.left = '50%';
+      dot.style.top  = clampFocus(rect.focusY) + '%';
+    }
+
+    dot.addEventListener('pointerdown', function (ev) {
+      ev.stopPropagation();   // don't let the surface treat this as a rect move
+      ev.preventDefault();
+      const box = el.getBoundingClientRect();
+      const axisSize = axis === 'x' ? box.width : box.height;
+      // Relative mapping needs a comfortable sweep even on a tiny rect, so
+      // the range floors at 140px of pointer travel for a full 0→100 pan.
+      focusDrag = {
+        rectId:      rect.id,
+        pointerId:   ev.pointerId,
+        axis:        axis,
+        detached:    detached,
+        startClient: axis === 'x' ? ev.clientX : ev.clientY,
+        startFocus:  axis === 'x' ? clampFocus(rect.focusX) : clampFocus(rect.focusY),
+        box:         box,
+        range:       detached ? Math.max(axisSize, 140) : axisSize,
+        dirty:       false
+      };
+      try { dot.setPointerCapture(ev.pointerId); } catch (e) {}
+    });
+
+    dot.addEventListener('pointermove', function (ev) {
+      if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return;
+      const r = state.rects.find(function (x) { return x.id === focusDrag.rectId; });
+      if (!r) return;
+      let f;
+      if (focusDrag.detached) {
+        const cur = focusDrag.axis === 'x' ? ev.clientX : ev.clientY;
+        f = focusDrag.startFocus +
+            (cur - focusDrag.startClient) / focusDrag.range * 100;
+      } else if (focusDrag.axis === 'x') {
+        f = (ev.clientX - focusDrag.box.left) / focusDrag.box.width * 100;
+      } else {
+        f = (ev.clientY - focusDrag.box.top) / focusDrag.box.height * 100;
+      }
+      f = clampFocus(f);
+      if (f !== focusDrag.startFocus) focusDrag.dirty = true;
+      if (focusDrag.axis === 'x') r.focusX = f; else r.focusY = f;
+      // Imperative live update — a full render() here would destroy the
+      // dot mid-drag and drop its pointer capture.
+      img.style.objectPosition =
+        clampFocus(r.focusX) + '% ' + clampFocus(r.focusY) + '%';
+      if (!focusDrag.detached) {
+        if (focusDrag.axis === 'x') dot.style.left = clampFocus(r.focusX) + '%';
+        else                        dot.style.top  = clampFocus(r.focusY) + '%';
+      }
+    });
+
+    function endFocusDrag(ev) {
+      if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return;
+      const changed = focusDrag.dirty === true;
+      focusDrag = null;
+      if (changed) markDirty();
+      render(); // canonical re-render — rebuilds the dot at the new spot
+    }
+    dot.addEventListener('pointerup', endFocusDrag);
+    dot.addEventListener('pointercancel', endFocusDrag);
+
+    el.appendChild(dot);
+  }
+
   function renderRect(rect) {
     const el = document.createElement('div');
     el.className = 'pe-rect pe-rect--' + (rect.kind || 'unknown');
@@ -832,10 +956,23 @@
         img.src = found.url;
         img.alt = found.alt || '';
         img.draggable = false;
+        // v0.10.50: object-position lets the author choose which part of
+        // a cover-cropped image shows. Stored as focusX/focusY (0–100).
+        const fx = clampFocus(rect.focusX), fy = clampFocus(rect.focusY);
+        img.style.objectPosition = fx + '% ' + fy + '%';
         el.appendChild(img);
         el.classList.add('has-image');
         // v0.10.47: data-fit drives object-fit in CSS (cover|contain).
         el.dataset.fit = (rect.fit === 'contain') ? 'contain' : 'cover';
+        // v0.10.50: focal-dot pan control — only on the selected rect, in
+        // cover mode, and only when the image actually has hidden parts to
+        // pan to (the rect/image aspect ratios differ). A contained or
+        // ratio-matched image has nothing hidden, so the dot would be a
+        // no-op affordance — we suppress it.
+        if (rect.id === selectedId && (rect.fit || 'cover') === 'cover' &&
+            found.ratio > 0) {
+          maybeAddFocusDot(el, img, rect, found.ratio);
+        }
       } else if (imageLibrary !== null) {
         el.classList.add('is-img-missing');
       }

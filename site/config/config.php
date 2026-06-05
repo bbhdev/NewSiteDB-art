@@ -1214,6 +1214,18 @@ HTML;
               return $fail("Rect fit must be 'cover' or 'contain'.");
             }
           }
+          // v0.10.50: optional `focusX`/`focusY` (image object-position,
+          // 0–100). Additive within schema v3 with a behaviour-preserving
+          // default of 50 (centred), so NOT a schema bump. Reject out-of-
+          // range / non-numeric values so a bug surfaces rather than
+          // silently clamping to an unexpected crop.
+          foreach (['focusX', 'focusY'] as $fk) {
+            if (isset($r[$fk]) && $r[$fk] !== null) {
+              if (!is_numeric($r[$fk]) || $r[$fk] < 0 || $r[$fk] > 100) {
+                return $fail("Rect $fk must be a number in 0..100.");
+              }
+            }
+          }
         }
 
         // Normalise on write: ensure each rect carries an explicit
@@ -1226,6 +1238,12 @@ HTML;
           $r['note']      = (isset($r['note']) && $r['note'] !== '') ? $r['note'] : null;
           $r['image']     = (isset($r['image']) && $r['image'] !== '') ? $r['image'] : null;
           $r['fit']       = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
+          // v0.10.50: image focus — clamp to int 0..100, default 50.
+          foreach (['focusX', 'focusY'] as $fk) {
+            $fv = $r[$fk] ?? 50;
+            $fv = is_numeric($fv) ? (int) round((float) $fv) : 50;
+            $r[$fk] = max(0, min(100, $fv));
+          }
           return $r;
         }, $rects);
 

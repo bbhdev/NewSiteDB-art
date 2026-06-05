@@ -336,6 +336,42 @@ button.pe-save.is-flash {
   color: #f0f0f0;
   border-radius: 3px;
 }
+/* Focal-dot pan control (step 4d, v0.10.50) — a draggable handle that
+   sets the bound image's object-position so the author chooses which
+   part of a cover-cropped image is visible. Rendered only on a
+   selected, cover-mode image rect whose aspect ratio differs from the
+   image's (i.e. the crop actually hides something). The dot slides
+   along the single overflow axis; on a small rect it detaches just
+   outside the top-left so it doesn't collide with the resize handles. */
+.pe-focus-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  border: 2px solid var(--pe-palette-accent, #ff5500);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
+  z-index: 3; /* above the image (0) and the chrome labels (1) */
+  cursor: grab;
+  touch-action: none;
+}
+.pe-focus-dot:active { cursor: grabbing; }
+/* Axis hint: a short bar through the dot showing the drag direction. */
+.pe-focus-dot::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--pe-palette-accent, #ff5500);
+  border-radius: 2px;
+}
+.pe-focus-dot--x::after { width: 10px; height: 2px; }
+.pe-focus-dot--y::after { width: 2px;  height: 10px; }
+.pe-focus-dot.is-detached {
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), 0 1px 5px rgba(0, 0, 0, 0.65);
+}
+
 /* Dangling binding: filename set but not present in the loaded
    library (renamed / removed). Dashed red ring as the canvas cue;
    the selection panel spells out "not found in library". */

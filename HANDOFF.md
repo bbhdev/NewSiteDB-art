@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.49):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.50):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -347,7 +347,8 @@ mismatch. `openImagePicker(rectId)` gained a null-rectId branch
 `fit:'cover'` so every rect carries the full current shape from birth
 (the bootstrap normaliser only runs on load). This completes the Step 4
 image arc: **4a** listing endpoint → **4b** binding + picker → **4c-i**
-fit handling → **4c-ii** image-first placement.
+fit handling → **4c-ii** image-first placement → **4d** focal-dot pan
+(`object-position`; see the dedicated 4d entry below for the full design).
 
 Next: **Step 5** — runtime
 `canvas-page.php` renders real text + image via
@@ -473,6 +474,47 @@ or the bound-image card — no longer pushes its label downward between
 renders. (4) **Discreet row separators** (`.pe-selection-row +
 .pe-selection-row` 1px #26282d top border) added to the page side panel,
 mirroring the draw sidebar's section dividers.
+
+**Slice 2 Step 4d — image focal-dot pan (v0.10.50).** Lets the author
+choose *which part* of a cover-cropped image is visible (the missing
+half of "cover crops well but I can't pick the crop"). Data: two new
+per-rect fields **`focusX` / `focusY`** (ints 0–100, default 50 =
+centred), applied as the bound image's CSS `object-position`. **Additive
+within schema v3 — NO bump** (50/50 reproduces the pre-4d centred crop
+exactly; same reasoning as `fit` in 4c-i). Normalised identically in
+three places: JS bootstrap (`clampFocus`), `page.php` read-time map, and
+the `dev/page/save` route (validate 0–100 + clamp in normRects).
+
+UI is a **draggable focal dot** (`.pe-focus-dot`) appended in
+`renderRect` to a rect that is **selected AND `fit:'cover'` AND has a
+real aspect mismatch** (same >0.5% rel-diff test the Fit panel uses).
+Rationale for the gate: in contain mode, or when rect/image ratios
+match, *nothing is hidden*, so a pan control would be a no-op affordance
+— suppressed. The dot slides along the **single overflow axis** only
+(`maybeAddFocusDot` computes `axis = imgRatio > rectRatio ? 'x' : 'y'`;
+in cover exactly one axis overflows, the other is locked because
+object-position on a non-overflowing axis has no effect — class
+`pe-focus-dot--x` / `--y` shows a directional bar).
+
+Two drag mappings (the small-rect refinement the user asked for):
+- **Large rect** (min dim ≥ `FOCUS_DOT_MIN` = 70px): dot rendered *on*
+  the image at the focus point; **absolute** mapping (focus% = pointer
+  position relative to the rect box) so the dot follows the finger.
+- **Small rect** (min dim < 70): dot **detaches** to just outside the
+  top-left corner (`left:14px; top:-22px` — off the corner, not on the
+  "angle"), so it never collides with the resize handles; **relative**
+  (drag-delta) mapping with the sweep range floored at 140px so a tiny
+  rect still gets fine control. (`.pe-rect` has no `overflow:hidden`, so
+  the detached dot is visible outside the box.)
+
+Drag uses pointer capture on the dot + `ev.stopPropagation()` on
+pointerdown so the surface's rect-move handler never fires; `focusDrag`
+state is independent of the rect-move `drag`. During the gesture the
+image's `objectPosition` and the dot position are updated **imperatively
+(no `render()`)** — a full render would destroy the dot element and drop
+its pointer capture mid-drag; `markDirty()` + canonical `render()` run
+once on pointerup, and only if the focus actually changed (so a bare
+click on the dot doesn't dirty the doc).
 
 ## What this project is
 
