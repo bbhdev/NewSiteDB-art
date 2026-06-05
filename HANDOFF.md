@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.53):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.54):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -561,6 +561,34 @@ rather than a live position readout:
   the dot, matching the lifted tiny chrome). Both labels are
   `pointer-events:none`, so the type is now legible over the dot *and* the
   dot stays fully grabbable through them.
+
+**In-editor image upload — minimal slice (v0.10.54).** Until now, adding an
+image to a page's library meant dropping a file into
+`content/<page>/_drafts/images/` on disk — fine locally, but post-deploy it
+would force parallel FTP work. Added a direct upload path inside the image
+picker:
+- *Route* `dev/page/upload-image` (POST, in `config.php`, right after the
+  `dev/page/images/(:all)` GET). Reads `$_POST['page']` + `$_FILES['file']`.
+  Validates: page-id regex, `UPLOAD_ERR_OK`, 25 MB cap, extension whitelist
+  (`jpg jpeg png gif webp avif`), `@getimagesize()` sanity. Resolves the
+  per-page library via `$page->childrenAndDrafts()->findBy('slug','images')`
+  and writes with **`move_uploaded_file()` straight into `$imgPage->root()`** —
+  *not* `$page->createFile()`. Rationale: the dev route runs with no Panel
+  user, so Kirby's `createFile` permission checks would reject it; we validate
+  by hand and write the raw file instead. `$imgPage->root()` correctly resolves
+  the draft path (`content/<page>/_drafts/images/`).
+- *Clash policy:* **auto-rename** (Kirby default) — a `while
+  (file_exists(...))` loop appends `-1`, `-2`, … to the sanitized basename.
+- *Picker UI:* an `Upload…` button (`.pe-create-btn`) + hidden `<input
+  type=file>` in the picker header. On success it reloads the image library,
+  then either `placeImageRect(newName)` (place-mode) or `setRectImage(...)`
+  and closes the picker. Failures surface in a `uploadError` line in the
+  picker body; the empty-state text now points at `Upload…`.
+- Verified server-side via curl (valid upload, auto-rename on re-upload,
+  `.bmp` rejected, fake-`.png` rejected) and client-side via an injected
+  `File`. Deferred follow-up (recorded in memory): transfer an image from the
+  **image workshop** (`dev/image-workshop/*` batch/triage subsystem) into a
+  page via a page-target dropdown.
 
 ## What this project is
 

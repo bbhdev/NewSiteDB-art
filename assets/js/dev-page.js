@@ -113,6 +113,7 @@
   let imageLibrary    = null;
   let imageByFilename = {};
   let imageLibError   = null;
+  let uploadError     = null; // last in-editor upload failure (v0.10.54)
 
   // Step-2-local UI state: which rect is currently selected (or
   // null), and the active pointer drag if any.
@@ -475,6 +476,7 @@
   function closeImagePicker() {
     if (pickerEl && pickerEl.parentNode) pickerEl.parentNode.removeChild(pickerEl);
     pickerEl = null;
+    uploadError = null; // don't carry a stale upload error into the next open
     document.removeEventListener('keydown', pickerKeydown, true);
   }
   function pickerKeydown(ev) {
@@ -505,6 +507,64 @@
     title.className = 'pe-picker-title';
     title.textContent = placeMode ? 'Place image' : 'Bind image';
     head.appendChild(title);
+    // Upload (v0.10.54): drop a new image straight into the page's image
+    // library without a Panel round-trip. A hidden file input drives a
+    // styled button; on success the library is re-fetched and the new
+    // image is immediately placed/bound (the user opened the picker to do
+    // exactly that), then the picker closes.
+    const upInput = document.createElement('input');
+    upInput.type = 'file';
+    upInput.accept = 'image/*';
+    upInput.style.display = 'none';
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'pe-create-btn';
+    upBtn.textContent = 'Upload…';
+    upBtn.addEventListener('click', function () {
+      if (upBtn.disabled) return;
+      upInput.value = ''; // allow re-picking the same file after an error
+      upInput.click();
+    });
+    upInput.addEventListener('change', function () {
+      const file = upInput.files && upInput.files[0];
+      if (!file) return;
+      uploadImage(file, upBtn);
+    });
+    head.appendChild(upBtn);
+    head.appendChild(upInput);
+
+    function uploadImage(file, btn) {
+      btn.disabled = true;
+      const restore = btn.textContent;
+      btn.textContent = 'Uploading…';
+      if (uploadError) { uploadError = null; renderPickerBody(); }
+      const fd = new FormData();
+      fd.append('page', state.pageId);
+      fd.append('file', file);
+      fetch('/dev/page/upload-image', { method: 'POST', body: fd })
+        .then(function (res) { return res.json().then(function (j) { return { ok: res.ok, json: j }; }); })
+        .then(function (r) {
+          if (!r.ok || !r.json || !r.json.ok) {
+            throw new Error((r.json && r.json.error) || ('HTTP ' + (r.ok ? '?' : 'error')));
+          }
+          const newName = r.json.filename;
+          // Re-fetch the library so the new file is known, then place/bind
+          // it exactly as a cell click would, and close.
+          imageLibrary = null;
+          return loadImageLibrary().then(function () {
+            if (placeMode) placeImageRect(newName);
+            else           setRectImage(rectId, newName);
+            closeImagePicker();
+          });
+        })
+        .catch(function (err) {
+          uploadError = String(err && err.message ? err.message : err);
+          btn.disabled = false;
+          btn.textContent = restore;
+          renderPickerBody();
+        });
+    }
+
     const refresh = document.createElement('button');
     refresh.type = 'button';
     refresh.className = 'pe-create-btn';
@@ -543,11 +603,17 @@
         m.textContent = 'Could not load library: ' + imageLibError;
         bodyWrap.appendChild(m);
       }
+      if (uploadError) {
+        const m = document.createElement('div');
+        m.className = 'pe-picker-error';
+        m.textContent = 'Upload failed: ' + uploadError;
+        bodyWrap.appendChild(m);
+      }
       if (!imageLibrary.length) {
         const m = document.createElement('div');
         m.className = 'pe-empty';
-        m.textContent = 'No images in this page’s library yet. Upload images to '
-          + 'the page’s “Image library” child in the Panel, then Refresh.';
+        m.textContent = 'No images in this page’s library yet. Use “Upload…” above '
+          + '(or add them in the Panel), then they appear here.';
         bodyWrap.appendChild(m);
         return;
       }

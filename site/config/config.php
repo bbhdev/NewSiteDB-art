@@ -1359,6 +1359,101 @@ HTML;
     ],
 
     /**
+     * v0.10.54 — In-editor image upload (Slice 2, upload step).
+     *
+     *   POST dev/page/upload-image   (multipart/form-data)
+     *   form fields: page=<canvas page id>, file=<the image>
+     *   → { ok, filename }  |  { ok:false, error }
+     *
+     * Writes the uploaded image straight into the canvas page's
+     * auto-created `images` child — the same directory a local file-drop
+     * or a Panel upload lands in ("three doors, one storage") — then the
+     * editor re-lists the library via the existing GET
+     * dev/page/images/<id> and the new image becomes bindable, no Panel
+     * round-trip.
+     *
+     * Raw filesystem write into $imgPage->root() (mirrors how
+     * dev/page/save writes rects.json) rather than $page->createFile():
+     * this route runs WITHOUT a Panel user in local dev, and createFile()'s
+     * permission checks would reject it. Validation is therefore done here
+     * — extension whitelist, size cap, and a getimagesize() sanity check so
+     * a renamed non-image can't slip through. Filename clashes auto-rename
+     * (suffix -1, -2, …) so an upload never silently overwrites an
+     * already-bound image (the user's chosen clash policy).
+     *
+     * Under the `dev/page` prefix → inherits the host-scoped auth gate.
+     */
+    [
+      'pattern' => 'dev/page/upload-image',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+
+        $pageId = $_POST['page'] ?? null;
+        if (!is_string($pageId) || !preg_match('~^[a-z0-9][a-z0-9/_-]*$~i', $pageId)) {
+          return $json(['ok' => false, 'error' => 'Invalid or missing page id.'], 400);
+        }
+
+        $page = $kirby->page($pageId);
+        if (!$page) {
+          return $json(['ok' => false, 'error' => 'Unknown page: ' . $pageId], 404);
+        }
+
+        // The per-page image library is a draft → childrenAndDrafts().
+        $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
+        if (!$imgPage) {
+          return $json(['ok' => false, 'error' => 'This page has no image library.'], 404);
+        }
+
+        $file = $_FILES['file'] ?? null;
+        if (!is_array($file) || !isset($file['tmp_name'])
+            || ($file['error'] ?? 1) !== UPLOAD_ERR_OK) {
+          return $json(['ok' => false, 'error' => 'No file uploaded, or upload failed.'], 400);
+        }
+
+        // Size cap — 25 MB.
+        if (($file['size'] ?? 0) > 25 * 1024 * 1024) {
+          return $json(['ok' => false, 'error' => 'File too large (max 25 MB).'], 400);
+        }
+
+        // Extension whitelist + content sanity (must decode as an image).
+        $allowedExt = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'];
+        $origName   = (string) ($file['name'] ?? '');
+        $ext        = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowedExt, true)) {
+          return $json(['ok' => false, 'error' => 'Unsupported file type: .' . $ext], 400);
+        }
+        if (@getimagesize($file['tmp_name']) === false) {
+          return $json(['ok' => false, 'error' => 'File is not a valid image.'], 400);
+        }
+
+        // Safe base name: strip path, lowercase, keep [a-z0-9_-], collapse.
+        $base = strtolower(pathinfo($origName, PATHINFO_FILENAME));
+        $base = preg_replace('/[^a-z0-9_-]+/', '-', $base);
+        $base = trim($base, '-_');
+        if ($base === '') $base = 'image';
+
+        $dir      = $imgPage->root();
+        $filename = $base . '.' . $ext;
+        // Auto-rename on clash so an existing binding is never overwritten.
+        $n = 1;
+        while (file_exists($dir . '/' . $filename)) {
+          $filename = $base . '-' . $n . '.' . $ext;
+          $n++;
+        }
+
+        if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $filename)) {
+          return $json(['ok' => false, 'error' => 'Could not write the uploaded file.'], 500);
+        }
+
+        return $json(['ok' => true, 'filename' => $filename]);
+      }
+    ],
+
+    /**
      * v0.10.35 — Image-workshop verdict persistence (Slice 2 step B).
      *
      *   POST dev/image-workshop/save
