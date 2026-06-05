@@ -107,6 +107,11 @@ $rects = array_map(function ($r) {
     if (!is_array($r)) return $r;
     if (!array_key_exists('note',  $r)) $r['note']  = null;
     if (!array_key_exists('image', $r)) $r['image'] = null;
+    // v0.10.47: `fit` is additive within schema v3 (behaviour-preserving
+    // default 'cover'), so it does NOT advance the schema version — it
+    // is normalised here the same way the save route does. Any absent or
+    // unexpected value collapses to 'cover' = the pre-4c render.
+    $r['fit'] = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
     return $r;
 }, $rects);
 // Editor always emits the current schema version on save. Declaring 3

@@ -26,6 +26,12 @@
  *   2 → 3, additive). A bound rect previews the real image on the
  *   canvas; a dangling binding (file since renamed/removed) is flagged.
  *   The runtime <img> render lands in step 5.
+ * Slice 2 step 4c (v0.10.47): image-fit handling for aspect mismatch.
+ *   New optional `fit` field ('cover' default | 'contain'), additive
+ *   within schema v3 (no bump). The selection panel gains a Cover/
+ *   Contain toggle plus, when the rect and image aspect ratios differ,
+ *   an aspect readout and a "Match rect to image" action (keeps width,
+ *   adjusts height). renderRect drives object-fit via data-fit.
  * Slice 2 step 2 (v0.10.27): manual numeric x/y/w/h fields in the
  *   selection panel (Enter/blur commit, Escape revert, clamped to
  *   x≥0/y≥0/w≥MIN/h≥MIN) and shift-held corner-handle drag locks
@@ -78,6 +84,10 @@
   state.rects.forEach(function (r) {
     if (r && typeof r === 'object' && !('note' in r))  r.note  = null;
     if (r && typeof r === 'object' && !('image' in r)) r.image = null;
+    // v0.10.47: `fit` ('cover' default | 'contain') controls how a
+    // bound image fills a rect with a different aspect ratio. Additive
+    // within schema v3 — default to the behaviour-preserving 'cover'.
+    if (r && typeof r === 'object' && r.fit !== 'contain') r.fit = 'cover';
   });
 
   // Slice 2 step 4b: per-page image library, fetched once from
@@ -323,6 +333,36 @@
     const next = (filename == null || filename === '') ? null : String(filename);
     if (r.image === next) return;
     r.image = next;
+    markDirty();
+    render();
+  }
+
+  // Slice 2 step 4c: image-fit handling for aspect mismatch.
+  // `fit` is 'cover' (fill the rect, crop overflow) or 'contain'
+  // (fit the whole image inside, letterbox the remainder).
+  function setRectFit(rectId, mode) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return;
+    const next = mode === 'contain' ? 'contain' : 'cover';
+    if (r.fit === next) return;
+    r.fit = next;
+    markDirty();
+    render();
+  }
+
+  // "Match rect to image": eliminate the aspect mismatch by resizing the
+  // rect to the bound image's ratio. Width is the layout-driven axis, so
+  // we KEEP width and recompute height = round(w / ratio); the author can
+  // re-drag afterwards. No-op if the image isn't in the loaded library
+  // (we have no ratio to match) or the height wouldn't actually change.
+  function matchRectToImage(rectId) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r || !r.image) return;
+    const found = imageByFilename[r.image];
+    if (!found || !found.ratio || found.ratio <= 0) return;
+    const newH = Math.max(MIN_SIZE, Math.round((r.w | 0) / found.ratio));
+    if (newH === (r.h | 0)) return;
+    r.h = newH;
     markDirty();
     render();
   }
@@ -737,6 +777,8 @@
         img.draggable = false;
         el.appendChild(img);
         el.classList.add('has-image');
+        // v0.10.47: data-fit drives object-fit in CSS (cover|contain).
+        el.dataset.fit = (rect.fit === 'contain') ? 'contain' : 'cover';
       } else if (imageLibrary !== null) {
         el.classList.add('is-img-missing');
       }
@@ -949,6 +991,58 @@
         bind.appendChild(btn);
       }
       body.appendChild(row('Image', bind));
+
+      // Fit controls (step 4c) — only meaningful once a bound image is
+      // actually resolved in the library (we need its real dimensions).
+      // Always offer the Cover/Contain toggle; surface the aspect-ratio
+      // mismatch readout + "Match rect to image" only when the ratios
+      // actually differ, so a well-matched rect stays uncluttered.
+      const fitFound = r.image ? imageByFilename[r.image] : null;
+      if (fitFound && fitFound.ratio > 0) {
+        const rectRatio = (r.h | 0) > 0 ? (r.w | 0) / (r.h | 0) : 0;
+        const imgRatio  = fitFound.ratio;
+        // Relative difference; >0.5% counts as a visible mismatch.
+        const mismatch = rectRatio > 0 &&
+          Math.abs(rectRatio - imgRatio) / imgRatio > 0.005;
+
+        const fitBox = document.createElement('div');
+        fitBox.className = 'pe-fit';
+
+        // Segmented Cover / Contain toggle.
+        const seg = document.createElement('div');
+        seg.className = 'pe-fit-seg';
+        [['cover', 'Cover', 'Fill the rect, cropping overflow'],
+         ['contain', 'Contain', 'Fit the whole image, letterboxing the rest']
+        ].forEach(function (opt) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'pe-fit-opt' + ((r.fit || 'cover') === opt[0] ? ' is-active' : '');
+          b.textContent = opt[1];
+          b.title = opt[2];
+          b.addEventListener('click', function () { setRectFit(r.id, opt[0]); });
+          seg.appendChild(b);
+        });
+        fitBox.appendChild(seg);
+
+        if (mismatch) {
+          const note = document.createElement('div');
+          note.className = 'pe-fit-mismatch';
+          const fmt = function (x) { return (Math.round(x * 100) / 100).toFixed(2); };
+          note.textContent = 'Aspect: rect ' + fmt(rectRatio) +
+            ' vs image ' + fmt(imgRatio);
+          fitBox.appendChild(note);
+
+          const match = document.createElement('button');
+          match.type = 'button';
+          match.className = 'pe-create-btn pe-fit-match';
+          match.textContent = 'Match rect to image';
+          match.title = 'Resize the rect to the image ratio (keeps width, adjusts height)';
+          match.addEventListener('click', function () { matchRectToImage(r.id); });
+          fitBox.appendChild(match);
+        }
+
+        body.appendChild(row('Fit', fitBox));
+      }
     }
 
     // Geometry — four small numeric inputs (x / y / w / h). Tab

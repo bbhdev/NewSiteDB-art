@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.46):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.47):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -316,9 +316,29 @@ image pipeline. Landed so far:
     `schemaVersion:3`, the bound filename (leading spaces preserved)
     survives, and the in-rect `<img>` re-decodes cold.
 
-Still in Slice 2: **Step 4c** (deferred) — mismatch row with 3 resize
-strategies (rect↔image aspect handling, likely a `rect.fit` field) +
-image-first "Place image" flow. Then **Step 5**: runtime
+**Slice 2 Step 4c-i — image-fit handling (v0.10.47).** Handles the
+aspect mismatch between a bound image and its rect. New optional
+`rect.fit` field, `'cover'` (default, fill+crop) | `'contain'`
+(fit+letterbox). **NOT a schema bump** — additive within v3 with a
+behaviour-preserving default, so an old v3 file renders identically;
+`fit` is normalised at read time (page.php), validated + normalised on
+save (config.php), and defaulted in the JS bootstrap, while
+`schemaVersion` stays 3. (This is the schema protocol's "additive
+optional field, no bump" case, in contrast to `note`/`image` which were
+bumped more conservatively.) Editor UI (selection panel): a Cover/
+Contain segmented toggle (shown whenever the bound file resolves in the
+library); when the rect and image aspect ratios differ by >0.5%, an
+"Aspect: rect R vs image R" readout plus a **Match rect to image**
+action that resizes the rect to the image ratio (keeps width, recomputes
+height, clamped to MIN_SIZE) — after which the mismatch readout + button
+self-hide. `renderRect` drives `object-fit` via a `data-fit` attribute;
+`contain` letterbox bands get a neutral `#14171c` backdrop so the image
+reads as framed, not tinted. Verified end-to-end (toggle, match, save,
+reload) — `fit` persists at schema v3.
+
+Still in Slice 2: **Step 4c-ii** (deferred) — image-first "Place image"
+flow (pick an image first → new rect created already bound and sized to
+the image's aspect). Then **Step 5**: runtime
 `canvas-page.php` renders real text + image via
 `$file->thumb(rect.w * dpr)`, per-rect `dpr` field. **Canvas background**
 (color/image-scaled/image-tiled) is parked (option B) to land alongside

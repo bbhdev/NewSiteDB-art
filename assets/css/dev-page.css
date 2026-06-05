@@ -309,6 +309,12 @@ button.pe-save.is-flash {
   user-select: none;
   z-index: 0; /* above the kind-colour background, below the chrome */
 }
+/* v0.10.47: fit mode driven by the rect's data-fit attribute. 'contain'
+   fits the whole image inside, letterboxing the remainder — the bands
+   show a neutral dark backdrop rather than the kind colour so the image
+   reads as a framed photo, not a tinted one. */
+.pe-rect[data-fit="contain"] .pe-rect-img { object-fit: contain; }
+.pe-rect[data-fit="contain"].has-image    { background: #14171c; }
 /* Lift the chrome above the image (a z-index:0 positioned image would
    otherwise paint over non-positioned in-flow labels). */
 .pe-rect-label,
@@ -600,6 +606,37 @@ input.pe-geom-input::-webkit-inner-spin-button {
   cursor: pointer;
 }
 .pe-image-unbind:hover { background: #2a1d1d; color: #ff7766; }
+
+/* ── Image fit controls (step 4c) ───────────────────────────────── */
+.pe-fit { display: flex; flex-direction: column; gap: 0.4rem; }
+/* Segmented Cover / Contain toggle. */
+.pe-fit-seg {
+  display: inline-flex;
+  border: 1px solid #3a3f47;
+  border-radius: 5px;
+  overflow: hidden;
+  align-self: flex-start;
+}
+.pe-fit-opt {
+  background: #1b1e24;
+  color: #b9c0c9;
+  border: 0;
+  border-right: 1px solid #3a3f47;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.pe-fit-opt:last-child { border-right: 0; }
+.pe-fit-opt:hover { background: #242931; }
+.pe-fit-opt.is-active {
+  background: var(--pe-palette-accent, #3b82f6);
+  color: #fff;
+}
+.pe-fit-mismatch {
+  font-size: 0.72rem;
+  color: #e0a96d;
+}
+.pe-fit-match { align-self: flex-start; }
 
 /* ── Image picker overlay (step 4b) ─────────────────────────────── */
 .pe-picker-overlay {

@@ -1202,6 +1202,18 @@ HTML;
               return $fail('Rect image must be a bare filename.');
             }
           }
+          // v0.10.47: optional `fit` field — how a bound image fills
+          // its rect when their aspect ratios differ. 'cover' (default,
+          // fill+crop) or 'contain' (fit+letterbox). Additive with a
+          // behaviour-preserving default, so NOT a schema bump: a v3
+          // file without `fit` renders exactly as before. Anything other
+          // than the two allowed values is rejected (rather than
+          // silently coerced) so a typo surfaces instead of masking.
+          if (isset($r['fit']) && $r['fit'] !== null) {
+            if ($r['fit'] !== 'cover' && $r['fit'] !== 'contain') {
+              return $fail("Rect fit must be 'cover' or 'contain'.");
+            }
+          }
         }
 
         // Normalise on write: ensure each rect carries an explicit
@@ -1213,6 +1225,7 @@ HTML;
           $r['chapterId'] = $r['chapterId'] ?? null;
           $r['note']      = (isset($r['note']) && $r['note'] !== '') ? $r['note'] : null;
           $r['image']     = (isset($r['image']) && $r['image'] !== '') ? $r['image'] : null;
+          $r['fit']       = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
           return $r;
         }, $rects);
 
