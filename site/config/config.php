@@ -1403,9 +1403,28 @@ HTML;
         }
 
         // The per-page image library is a draft → childrenAndDrafts().
+        // It's auto-created by the page.create:after hook, but ONLY for
+        // canvas-page pages. A page authored under a different template
+        // (or created before the hook existed) won't have one — so we
+        // lazily provision it here at the filesystem level rather than
+        // erroring. Page::create would hit permission checks (this route
+        // runs with no Panel user — the same reason we move_uploaded_file
+        // rather than createFile below), so we mkdir the draft directly
+        // and drop an image-container content file so Panel recognises it
+        // as a page. A subsequent dev/page/images refetch (fresh request,
+        // re-reads disk) then sees the new child.
         $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
-        if (!$imgPage) {
-          return $json(['ok' => false, 'error' => 'This page has no image library.'], 404);
+        if ($imgPage) {
+          $dir = $imgPage->root();
+        } else {
+          $dir = $page->root() . '/_drafts/images';
+          if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            return $json(['ok' => false, 'error' => 'Could not create the image library.'], 500);
+          }
+          $containerTxt = $dir . '/image-container.txt';
+          if (!file_exists($containerTxt)) {
+            @file_put_contents($containerTxt, "Title: Image library\n");
+          }
         }
 
         $file = $_FILES['file'] ?? null;
@@ -1436,7 +1455,6 @@ HTML;
         $base = trim($base, '-_');
         if ($base === '') $base = 'image';
 
-        $dir      = $imgPage->root();
         $filename = $base . '.' . $ext;
         // Auto-rename on clash so an existing binding is never overwritten.
         $n = 1;

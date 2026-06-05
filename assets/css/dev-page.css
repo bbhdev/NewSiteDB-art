@@ -378,17 +378,30 @@ button.pe-save.is-flash {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), 0 1px 5px rgba(0, 0, 0, 0.65);
 }
 
-/* Active pan (v0.10.52). The dot is only a grab handle; once the drag
-   starts it's hidden and the live image crop becomes the sole feedback,
-   so the dot can never get stranded outside the rect. The outline flips
-   to a dashed accent to confirm "you're panning". This wins over
-   .pe-rect.is-selected's solid outline by appearing later in the file. */
+/* Active pan (v0.10.52, rings v0.10.55). The dot is only a grab handle;
+   once the drag starts it's hidden and the live image crop becomes the
+   sole feedback, so the dot can never get stranded outside the rect.
+   The rect keeps its usual solid selected outline (the inner line — we
+   deliberately do NOT override it); on top, two concentric dotted rings
+   are added just outside it, each 3px larger than the last, to read as
+   "you're panning / this is moving". Everything returns to normal when
+   the drag ends and the .is-panning class is removed. */
 .pe-rect.is-panning > .pe-focus-dot { opacity: 0; }
 .pe-rect.is-panning {
-  outline: 3px dashed var(--pe-palette-accent, #ff5500);
-  outline-offset: 2px;
   cursor: grabbing;
 }
+.pe-rect.is-panning::before,
+.pe-rect.is-panning::after {
+  content: "";
+  position: absolute;
+  border: 2px dotted var(--pe-palette-accent, #ff5500);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+}
+/* Sits just outside the 2px solid outline (which ends ~4px out). */
+.pe-rect.is-panning::before { inset: -5px; }
+.pe-rect.is-panning::after  { inset: -8px; }
 
 /* Tiny rects (v0.10.51) — a rect under 100px in either dimension can't
    hold its kind label + id inside without them overlapping/mangling, so

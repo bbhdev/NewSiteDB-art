@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.54):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.55):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -589,6 +589,30 @@ picker:
   `File`. Deferred follow-up (recorded in memory): transfer an image from the
   **image workshop** (`dev/image-workshop/*` batch/triage subsystem) into a
   page via a page-target dropdown.
+
+**Upload library auto-provision + panning rings (v0.10.55).** Two fixes
+from testing the upload slice:
+- *"This page has no image library."* The upload (and picker) assume an
+  `images` child exists, but the `page.create:after` hook only creates one
+  for **canvas-page**-blueprint pages. A page authored under another
+  template (e.g. "Test page", template `test`) — or created before the hook
+  existed — has none, so upload errored. Fix: the `dev/page/upload-image`
+  route now **lazily provisions** the child when missing — `mkdir
+  content/<page>/_drafts/images/` + a `Title: Image library`
+  `image-container.txt` — at the filesystem level (Page::create would hit
+  permission checks with no Panel user, same reason we move_uploaded_file
+  rather than createFile). A subsequent `dev/page/images` refetch is a fresh
+  request that re-reads disk and sees the new child. Verified end-to-end via
+  curl against slug `test` (created the child, listed the file with a
+  generated thumb); test artifacts cleaned up. Note for users: a Panel
+  *Files* upload on a page lands in that page's **own** files, NOT the
+  `images` child the editor reads — use the picker's `Upload…` button
+  instead (it targets the right place and provisions the library if needed).
+- *Panning outline.* Replaced the single dashed override with the user's
+  design: the rect keeps its usual solid selected outline (inner line) and
+  two concentric **dotted** rings are added just outside it via `::before`
+  (inset −5px) / `::after` (inset −8px), each 2px dotted accent, 3px apart —
+  reads as "moving". Removed on drag-end with the `is-panning` class.
 
 ## What this project is
 
