@@ -80,7 +80,9 @@ body.editor {
   letter-spacing: 0.02em;
   margin-right: 0.5rem;
 }
-.ed-brand-mark { color: #e4e4e4; }
+/* Orange brand mark — consistent with Page (.pe-brand-mark) and
+   Image-workshop (.iw-brand), both #f0a060. */
+.ed-brand-mark { color: #f0a060; }
 .ed-page-picker select {
   background: #2a2a2a;
   color: #e4e4e4;

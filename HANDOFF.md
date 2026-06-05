@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.48):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.49):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -459,6 +459,20 @@ offline reliability for a small fixed icon set. (A subset variable
 font is the right call ONLY if the icon count later grows to 30+.)
 Natural slice: pick the set → build the sprite → swap glyph buttons
 one surface at a time (draw → page → image-workshop).
+
+**Cross-editor UI consistency polish (v0.10.49).** Small fixes from a
+testing pass: (1) **Draw brand mark now orange** (`.ed-brand-mark`
+#f0a060) to match Page (`.pe-brand-mark`) and Image-workshop
+(`.iw-brand`) — keep all three top-left labels the same orange; don't
+revert Draw to grey. (2) **Plain `s` saves the page editor** (outside
+text fields), mirroring the draw editor's bare-key save; Cmd/Ctrl+S
+already worked. (3) **Page selection-panel rows are flush-top**
+(`.pe-selection-row` `align-items: flex-start`) so a row that grows
+taller on demand — the FIT row gaining the "Match rect to image" button,
+or the bound-image card — no longer pushes its label downward between
+renders. (4) **Discreet row separators** (`.pe-selection-row +
+.pe-selection-row` 1px #26282d top border) added to the page side panel,
+mirroring the draw sidebar's section dividers.
 
 ## What this project is
 

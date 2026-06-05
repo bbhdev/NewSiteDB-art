@@ -1314,6 +1314,13 @@
       t.tagName === 'SELECT' || (t.isContentEditable === true)
     );
     if (inField) return;
+    // Plain "s" saves (outside text fields), mirroring the draw editor.
+    // Cmd/Ctrl+S above works everywhere; this is the quick bare-key form.
+    if (ev.key === 's' || ev.key === 'S') {
+      ev.preventDefault();
+      doSave();
+      return;
+    }
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
       if (selectedId) {
         ev.preventDefault();

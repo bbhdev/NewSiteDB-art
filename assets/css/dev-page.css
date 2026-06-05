@@ -458,9 +458,20 @@ button.pe-save.is-flash {
 
 .pe-selection-row {
   display: flex;
-  align-items: center;
+  /* flush-top, not centred: a row whose value grows taller on demand
+     (e.g. FIT gaining the "Match rect to image" button, or the bound-
+     image card) must not push its label down — the label stays pinned
+     at the top so it never moves between renders. */
+  align-items: flex-start;
   gap: 0.4rem;
   margin-bottom: 0.4rem;
+}
+/* Discreet separators between rows (mirrors the draw sidebar). The line
+   sits above every row but the first, so each property reads as its own
+   little section without heavy chrome. */
+.pe-selection-row + .pe-selection-row {
+  border-top: 1px solid #26282d;
+  padding-top: 0.4rem;
 }
 .pe-selection-row label {
   color: #b8b8b8;
