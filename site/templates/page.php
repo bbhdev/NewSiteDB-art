@@ -228,6 +228,13 @@ $payload = json_encode([
         <option value="deco-mount">+ Deco mount</option>
       </select>
     </label>
+    <!-- Step 4c-ii: image-first flow. Opens the image picker directly;
+         choosing a file creates a new image rect already bound and
+         sized to that image's aspect ratio. -->
+    <button type="button" id="place-image-btn" class="pe-create-btn"
+            title="Pick an image first — creates a rect already bound and sized to it">
+      + Place image…
+    </button>
   </div>
 
   <div class="pe-view" role="toolbar" aria-label="Save and status">

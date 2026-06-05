@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.47):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.48):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -336,9 +336,20 @@ self-hide. `renderRect` drives `object-fit` via a `data-fit` attribute;
 reads as framed, not tinted. Verified end-to-end (toggle, match, save,
 reload) — `fit` persists at schema v3.
 
-Still in Slice 2: **Step 4c-ii** (deferred) — image-first "Place image"
-flow (pick an image first → new rect created already bound and sized to
-the image's aspect). Then **Step 5**: runtime
+**Slice 2 Step 4c-ii — image-first "Place image" flow (v0.10.48).**
+A "+ Place image…" toolbar button (beside "+ Add rect") opens the image
+picker in *create mode* (title "Place image"); choosing a file creates a
+new image rect already bound AND sized to the image's aspect ratio
+(default width, height = round(w / ratio)) so it lands with zero
+mismatch. `openImagePicker(rectId)` gained a null-rectId branch
+(`placeMode`) that routes the cell click to `placeImageRect()` instead of
+`setRectImage()`. `addRect` now also initialises `image:null` /
+`fit:'cover'` so every rect carries the full current shape from birth
+(the bootstrap normaliser only runs on load). This completes the Step 4
+image arc: **4a** listing endpoint → **4b** binding + picker → **4c-i**
+fit handling → **4c-ii** image-first placement.
+
+Next: **Step 5** — runtime
 `canvas-page.php` renders real text + image via
 `$file->thumb(rect.w * dpr)`, per-rect `dpr` field. **Canvas background**
 (color/image-scaled/image-tiled) is parked (option B) to land alongside

@@ -32,6 +32,12 @@
  *   Contain toggle plus, when the rect and image aspect ratios differ,
  *   an aspect readout and a "Match rect to image" action (keeps width,
  *   adjusts height). renderRect drives object-fit via data-fit.
+ * Slice 2 step 4c-ii (v0.10.48): image-first "Place image" flow. A
+ *   "+ Place image…" toolbar button opens the picker in create mode;
+ *   choosing a file creates a new image rect already bound AND sized to
+ *   the image's aspect ratio (no mismatch on landing). addRect now also
+ *   initialises image:null / fit:'cover' so every rect carries the full
+ *   current shape from birth.
  * Slice 2 step 2 (v0.10.27): manual numeric x/y/w/h fields in the
  *   selection panel (Enter/blur commit, Escape revert, clamped to
  *   x≥0/y≥0/w≥MIN/h≥MIN) and shift-held corner-handle drag locks
@@ -184,7 +190,47 @@
       w:         size.w,
       h:         size.h,
       chapterId: null,
-      note:      null
+      note:      null,
+      // Initialise the image-binding keys explicitly so every rect
+      // carries the full current shape from birth (the bootstrap
+      // normaliser only runs on load; a freshly added rect would
+      // otherwise lack them until its first save round-trip).
+      image:     null,
+      fit:       'cover'
+    };
+    state.rects.push(rect);
+    selectedId = rect.id;
+    markDirty();
+    render();
+  }
+
+  // Slice 2 step 4c-ii: image-first "Place image" flow. Instead of
+  // add-empty-image-rect → bind, the author picks an image first and
+  // gets a new image rect already bound AND sized to the image's aspect
+  // ratio (default width, height = round(w / ratio)) — so it lands with
+  // no mismatch. Falls back to the default image-rect size if the file
+  // isn't in the loaded library (shouldn't happen — the picker only
+  // offers library images — but stays safe).
+  function placeImageRect(filename) {
+    if (filename == null || filename === '') return;
+    const found = imageByFilename[String(filename)];
+    let w = DEFAULT_SIZE.image.w;
+    let h = DEFAULT_SIZE.image.h;
+    if (found && found.ratio > 0) {
+      h = Math.max(MIN_SIZE, Math.round(w / found.ratio));
+    }
+    const pos  = nextSpawnXY(w, h);
+    const rect = {
+      id:        newRectId(),
+      kind:      'image',
+      x:         pos.x,
+      y:         pos.y,
+      w:         w,
+      h:         h,
+      chapterId: null,
+      note:      null,
+      image:     String(filename),
+      fit:       'cover'
     };
     state.rects.push(rect);
     selectedId = rect.id;
@@ -414,8 +460,12 @@
     // never sees these while the picker owns the keyboard.
     if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeImagePicker(); }
   }
+  // rectId === null → "place" mode: clicking a cell creates a new image
+  // rect already bound to that file (step 4c-ii). Otherwise → "bind"
+  // mode: the click sets the existing rect's image.
   function openImagePicker(rectId) {
     closeImagePicker();
+    const placeMode = (rectId == null);
 
     const overlay = document.createElement('div');
     overlay.className = 'pe-picker-overlay';
@@ -431,7 +481,7 @@
     head.className = 'pe-picker-head';
     const title = document.createElement('h3');
     title.className = 'pe-picker-title';
-    title.textContent = 'Bind image';
+    title.textContent = placeMode ? 'Place image' : 'Bind image';
     head.appendChild(title);
     const refresh = document.createElement('button');
     refresh.type = 'button';
@@ -499,7 +549,8 @@
         cap.title = img.filename + ' · ' + img.width + '×' + img.height + ' · ' + img.size;
         cell.appendChild(cap);
         cell.addEventListener('click', function () {
-          setRectImage(rectId, img.filename);
+          if (placeMode) placeImageRect(img.filename);
+          else           setRectImage(rectId, img.filename);
           closeImagePicker();
         });
         grid.appendChild(cell);
@@ -544,6 +595,12 @@
       addRect(kind);
       addSelect.value = '';
     });
+  }
+
+  // Place-image button (step 4c-ii): opens the picker in create mode.
+  const placeBtn = document.getElementById('place-image-btn');
+  if (placeBtn) {
+    placeBtn.addEventListener('click', function () { openImagePicker(null); });
   }
 
   // ────────────────────────────────────────────────────────────────
