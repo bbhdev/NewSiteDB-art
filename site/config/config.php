@@ -133,6 +133,57 @@ return [
   ],
 
   /*
+   * Panel left-sidebar menu (v0.10.39 — Phase 2 nav cleanup).
+   *
+   * Replaces the former dashboard info-section ("Dev tools") with
+   * proper sidebar entries — the standard place for navigation in the
+   * Panel. We list the default core areas first (site / languages /
+   * users / system; languages is silently skipped on single-language
+   * installs), then a separator, then the three dev-tool links.
+   *
+   * Kirby's native sidebar menu is a FLAT list of <k-button>s and
+   * <hr> separators (see kirby/src/Panel/Menu.php) — it has no
+   * concept of a titled sub-group. A literal "DEV" heading row would
+   * require overriding the Panel's Vue menu component, which is
+   * fragile across Kirby updates. The separator delineates the dev
+   * group instead; the entries use the same button component as the
+   * core areas, so the visual style matches exactly.
+   *
+   * Links are built as absolute site URLs (with host) so the Panel
+   * SPA treats them as external and does a normal same-tab navigation
+   * to the front-end dev tool. Each tool carries a "‹ Panel" link
+   * back (see draw.php / page.php / image-workshop.php), closing the
+   * loop without piling up browser tabs.
+   */
+  'panel' => [
+    'menu' => function ($kirby) {
+      $base = $kirby->url();
+      return [
+        'site',
+        'languages',
+        'users',
+        'system',
+        '-',
+        'dev-draw' => [
+          'label' => 'Draw editor',
+          'icon'  => 'brush',
+          'link'  => $base . '/dev/draw',
+        ],
+        'dev-page' => [
+          'label' => 'Page editor',
+          'icon'  => 'template',
+          'link'  => $base . '/dev/page',
+        ],
+        'dev-image-workshop' => [
+          'label' => 'Image workshop',
+          'icon'  => 'images',
+          'link'  => $base . '/dev/image-workshop',
+        ],
+      ];
+    },
+  ],
+
+  /*
    * Hooks (v0.10.29 — Phase 2 Slice 2 step 3).
    *
    * 1) page.create:after — when a canvas-page is created in Panel,

@@ -179,8 +179,8 @@ $payload = json_encode([
 
 <header class="pe-toolbar">
   <div class="pe-brand">
+    <a class="pe-back" href="<?= esc(kirby()->url() . '/' . kirby()->option('panel.slug', 'panel')) ?>" title="Back to the Kirby Panel">‹ Panel</a>
     <span class="pe-brand-mark">Page</span>
-    <span class="pe-version">v<?= esc($v) ?></span>
     <label class="pe-page-picker" title="Switch target page (reloads the editor)">
       <select id="page-select">
         <?php foreach ($pageOptions as $opt): ?>
@@ -227,6 +227,7 @@ $payload = json_encode([
   </div>
 
   <div class="pe-spacer"></div>
+  <span class="pe-version">v<?= esc($v) ?></span>
 </header>
 
 <div class="pe-body">

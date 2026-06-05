@@ -27,6 +27,7 @@ $batches = $page->childrenAndDrafts()->sortBy('title', 'asc');
 </head>
 <body class="iw-body">
   <header class="iw-toolbar">
+    <a class="iw-back" href="<?= esc(kirby()->url() . '/' . kirby()->option('panel.slug', 'panel')) ?>" title="Back to the Kirby Panel">‹ Panel</a>
     <span class="iw-brand">Image workshop</span>
     <span class="iw-version">v<?= esc($v) ?></span>
   </header>

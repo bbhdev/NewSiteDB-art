@@ -4,9 +4,13 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.38):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.44):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
+A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
+links into the Panel sidebar, added "‹ Panel" back-links to all
+three editors, and tidied the draw toolbar (see the nav-cleanup
+entry below).
 Deployment infrastructure landed (v0.9.1–v0.9.14) — rsync deploy tooling,
 iCloud-placeholder pre-check, first-deploy checklist with diagnostics
 captured from the actual first live run, a working `/dev/draw` auth gate
@@ -292,6 +296,110 @@ strategies + image-first "Place image" flow) reading the per-page
 2→3) is parked (option B) to land alongside the Step 4 image picker
 it reuses. **Image-workshop lightbox** (in-page full-derivative view
 instead of open-in-new-tab) queued for Step C polish.
+
+**Navigation cleanup batch (v0.10.39 → v0.10.43).** Done before
+resuming Slice 2 feature work because hopping between the three dev
+surfaces (`/dev/draw`, `/dev/page`, `/dev/image-workshop`) was
+friction-heavy during dev and needs doing for a finished product
+anyway. Five things landed:
+
+- **Dev links moved to the Panel left sidebar (v0.10.39).** The
+  former "Dev tools" dashboard info-section (added v0.10.34) was
+  removed from `site.yml` and re-homed as a `panel.menu` config in
+  `config.php` — three custom entries (Draw editor / Page editor /
+  Image workshop), delineated from the native areas (`site`,
+  `users`, `system`, …) by a `'-'` separator. **Kirby 5.4's
+  `panel.menu` is a FLAT list** (verified in
+  `kirby/src/Panel/Menu.php`): entries are area-IDs, `'-'`
+  separators, or custom `id => [label, icon, link, …]` maps. **There
+  is no native titled-subgroup / group-heading support** — a literal
+  "DEV" heading would require overriding the Vue menu component
+  (fragile across updates). The separator is the chosen delineation.
+  Links use absolute URLs (with host) so the Panel treats them as
+  external and navigates **same-tab** (deliberate — the editors now
+  carry a "‹ Panel" back-link, so same-tab is a clean there-and-back
+  loop; `target:'_blank'` was intentionally NOT used). Icons:
+  `brush` / `template` / `images` (Kirby names, no `icon-` prefix,
+  verified present in `panel/dist/img/icons.svg`). Note: setting
+  `panel.menu` REPLACES default area ordering; missing areas (e.g.
+  `languages` on this single-lang site) are silently skipped by Kirby.
+- **Back-links on all three editors (v0.10.39).** Each editor gained
+  a "‹ Panel" pill linking to `kirby()->url() . '/' .
+  option('panel.slug','panel')`: `.ed-back` (draw, first child of
+  `.ed-brand`), `.pe-back` (page, first child of `.pe-brand`),
+  `.iw-back` (image-workshop, first child of `.iw-toolbar`). Image
+  workshop was previously "a one-way trip"; the batch grid already
+  had `‹ Batches` → index, so the full chain is batch → index →
+  Panel.
+- **Draw brand renamed "Lines" → "Draw" (v0.10.40)** — top-left
+  `.ed-brand-mark` label, matching the route name.
+- **Version label flush-right in draw + page (v0.10.40→0.10.42)** —
+  to match image-workshop's flush-right version (the better
+  location). Page was trivial (`.pe-spacer{flex:1}` + version after
+  it). **Draw needed an absolute-positioned solution**: the draw
+  toolbar's natural width overflows the viewport even on a ~1728px
+  16" MBP, so a `margin-left:auto` version landed off-screen right.
+  Fix: `.ed-toolbar` got `flex-wrap:wrap` + a reserved right gutter
+  (`padding-right:4.75rem`), and `.ed-version` is
+  `position:absolute; top:0.7rem; right:0.85rem` — pinned to the
+  right edge in that gutter regardless of content width (verified
+  robust at 1728 and 1280, where the toolbar wraps but the version
+  stays pinned, no overlap).
+- **Draw zoom + undo/redo moved toolbar → sidebar top (v0.10.43).**
+  After the version fix the draw toolbar had become a wasteful
+  near-empty second row. Per the user's idea, `.ed-zoom` and
+  `.ed-undo` were relocated out of `.ed-toolbar` into a new
+  `.ed-panel--controls` section at the top of the scrollable
+  `.ed-sidebar` (zoom left, undo/redo pushed right via
+  `margin-left:auto`). The toolbar's natural width dropped to
+  ~1470px → single row at the user's window width again (graceful
+  wrap retained as the narrow-window fallback). JS bindings survive
+  the move (zoom/undo buttons bound by ID, which DOM relocation
+  preserves).
+
+**Top-row UX — flagged for later (user, v0.10.43).** When the
+project is near completion, the draw editor's top toolbar row
+"merits being optimised UX wise." Not urgent; recorded here so it
+isn't lost. (The current single-row state is the baseline; the open
+question is the overall layout/affordance design of that row, not a
+specific bug.)
+
+**"DEV" sidebar heading — resolved (keep as-is).** The sidebar dev
+links stay delineated by the `'-'` separator only, with NO "DEV"
+heading. Decided against the Vue menu-component override (option c):
+overriding CMS internals for cosmetics is a slippery slope and the
+separator reads clearly enough. General principle reaffirmed by the
+user here: **don't touch any part of the CMS** unless genuinely
+necessary — it's nearly always a bad trade.
+
+**Version vertical-centre fix (v0.10.44).** Draw's flush-right
+`.ed-version` switched from a fixed `top:0.7rem` (which read as
+"flush up" against the screen edge) to `top:50%` +
+`translateY(-50%)`, so it centres on the toolbar row aligned with
+Save/settings/info — matching the page editor. Verified: version
+centre Y = 24px, same as the other toolbar items, single 49px row.
+
+**Icon-set UI optim — flagged for later (user, v0.10.44).** During
+the near-end-of-project UI pass, consider replacing the ad-hoc
+Unicode glyph buttons (`↶ ↷ ‹ − +`) and other chrome with a real
+icon set for a cleaner, consistent UI. Explored: Google **Material
+Symbols** (Apache-2.0, free commercial use) — you do NOT need the
+500 MB repo; each icon's SVG is ~1–2 KB and downloadable
+individually (per-icon from fonts.google.com/icons or raw-fetched
+from `google/material-design-icons`). Recommended approach when the
+time comes: build a project-owned SVG **sprite** (`assets/img/
+ui-icons.svg`, each icon a `<symbol id>`, referenced via
+`<use href="…#id">`), mirroring the Kirby Panel's existing
+`icons.svg` pattern — `currentColor`-themeable, one cached request,
+zero build step, zero runtime/CDN dependency. **Trap to avoid:**
+`npm install material-symbols` or loading the full Material Symbols
+variable font from Google's CDN — both reintroduce the bloat (and
+the CDN adds a third-party runtime dependency on a production-
+hardened site). Static SVGs we own win on size, privacy, and
+offline reliability for a small fixed icon set. (A subset variable
+font is the right call ONLY if the icon count later grows to 30+.)
+Natural slice: pick the set → build the sprite → swap glyph buttons
+one surface at a time (draw → page → image-workshop).
 
 ## What this project is
 

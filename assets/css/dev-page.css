@@ -50,6 +50,19 @@ body.page-editor {
   font-variant-numeric: tabular-nums;
 }
 
+.pe-back {
+  color: #cfcfcf;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9em;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #3a3d44;
+  border-radius: 4px;
+  background: #2a2c31;
+  white-space: nowrap;
+}
+.pe-back:hover { color: #fff; border-color: #555a63; background: #33363d; }
+
 .pe-page-picker select {
   background: #2a2c31;
   color: #f0f0f0;

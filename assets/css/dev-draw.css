@@ -38,12 +38,39 @@ body.editor {
 .ed-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;          /* v0.10.41: the toolbar's natural width
+                               (~1670px) overflows most laptop windows,
+                               which clipped the rightmost controls
+                               (Save/settings) off-screen. Wrapping drops
+                               overflow to a second row instead of hiding
+                               it. */
   gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  row-gap: 0.4rem;
+  /* v0.10.42: reserve a right-edge gutter for the absolutely-positioned
+     version label (see .ed-version). A flush-right version via
+     margin-left:auto is fragile on this crowded toolbar — it lands at
+     the extreme corner, falls off-screen when content overflows, or
+     orphans alone on a wrapped second row. Pinning it top-right in a
+     reserved gutter keeps it always visible and readable as a label,
+     regardless of how wide the toolbar's controls get. */
+  position: relative;
+  padding: 0.5rem 4.75rem 0.5rem 0.75rem;
   background: #1a1a1a;
   border-bottom: 1px solid #444;
   flex-shrink: 0;
   min-height: 48px;
+}
+.ed-version {
+  position: absolute;
+  /* v0.10.44: vertically centre the label on the toolbar row (was a
+     fixed top:0.7rem, which read as "flush up" against the screen edge
+     rather than aligned with Save/settings). top:50% + translateY
+     centres it on the single row; on a wrapped narrow window it centres
+     across both rows, an acceptable fallback. */
+  top: 50%;
+  transform: translateY(-50%);
+  right: 0.85rem;
+  margin: 0;
 }
 .ed-brand {
   display: flex;
@@ -156,6 +183,18 @@ body.editor {
   font-size: 0.85em;
   font-family: ui-monospace, monospace;
 }
+.ed-back {
+  color: #b9b9b9;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9em;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  background: #2a2a2a;
+  white-space: nowrap;
+}
+.ed-back:hover { color: #fff; border-color: #555; background: #333; }
 .ed-tools {
   display: flex;
   gap: 0.25rem;
@@ -236,6 +275,18 @@ body.editor {
   border-left: 1px solid #444;
 }
 .ed-undo button { font-weight: 600; font-size: 1.1em; }
+
+/* v0.10.43: zoom + undo relocated into a sidebar control row. Lay them
+   out across the panel width — zoom left, undo pushed right — and drop
+   the toolbar-divider border/padding the zoom group carried in its old
+   toolbar context. */
+.ed-panel--controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.ed-panel--controls .ed-zoom { padding-left: 0; border-left: none; }
+.ed-panel--controls .ed-undo { margin-left: auto; }
 
 .ed-view {
   display: flex;

@@ -30,6 +30,18 @@ body.iw-body {
   top: 0;
   z-index: 5;
 }
+.iw-back {
+  color: #cfcfcf;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9em;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #2c2e33;
+  border-radius: 4px;
+  background: #1f2125;
+  white-space: nowrap;
+}
+.iw-back:hover { color: #fff; border-color: #4a4d54; background: #292c31; }
 .iw-brand {
   font-weight: 700;
   letter-spacing: 0.04em;
