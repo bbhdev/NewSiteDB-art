@@ -855,10 +855,16 @@
     dot.title = 'Drag to choose which part of the image shows';
 
     if (detached) {
-      // Parked just outside the top-left, off the corner along the top
-      // edge. Relative mapping → its resting spot stays fixed during drag.
-      dot.style.left = '14px';
-      dot.style.top  = '-22px';
+      // Parked just outside the rect, vertically centred on the right
+      // edge. A rect small enough to detach the dot (<70px) is always
+      // also `is-tiny` (<100px), so its kind/id chrome has been lifted
+      // out to the top-left-above zone — parking the dot on the right
+      // keeps the two from colliding. Relative mapping → its resting
+      // spot stays fixed during the drag. The +17px clears the dot's own
+      // half-width (it's centred on its anchor via translate(-50%)), so
+      // its near edge lands ~8px outside the rect.
+      dot.style.left = 'calc(100% + 17px)';
+      dot.style.top  = '50%';
     } else if (axis === 'x') {
       dot.style.left = clampFocus(rect.focusX) + '%';
       dot.style.top  = '50%';
@@ -939,6 +945,12 @@
     el.style.top      = (rect.y | 0) + 'px';
     el.style.width    = (rect.w | 0) + 'px';
     el.style.height   = (rect.h | 0) + 'px';
+
+    // v0.10.51: a rect under 100px in either dimension is too small to
+    // hold its kind label + id without them overlapping/mangling. Tag it
+    // `is-tiny` so the CSS lifts the chrome OUT, stacked above the rect
+    // — the same "detach when small" idea as the focal dot.
+    if (Math.min(rect.w | 0, rect.h | 0) < 100) el.classList.add('is-tiny');
 
     // Bound-image preview (step 4b). For an image-kind rect that
     // carries a filename, paint the real image behind the labels so

@@ -372,6 +372,41 @@ button.pe-save.is-flash {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), 0 1px 5px rgba(0, 0, 0, 0.65);
 }
 
+/* Tiny rects (v0.10.51) — a rect under 100px in either dimension can't
+   hold its kind label + id inside without them overlapping/mangling, so
+   lift them OUT: stacked just above the rect, left-aligned, each on its
+   own pill (kind directly above the top edge, id one line higher). The
+   optional note is suppressed (secondary meta, would add a cramped third
+   line). Same "detach when small" idea as the focal dot. Pills carry
+   their own dark background so they read on any canvas colour or photo.
+   Specificity (0,3,0) matches the .has-image label/id rules; this block
+   is later in the file so it wins for tiny image rects too. */
+.pe-rect.is-tiny > .pe-rect-label,
+.pe-rect.is-tiny > .pe-rect-id {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: auto;
+  bottom: 100%;
+  max-width: none;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
+}
+/* kind sits directly above the top edge; id one fixed line higher.
+   The id step is a fixed px (not em — the id's font is smaller, so an
+   em step wouldn't clear the taller kind pill above it). line-height is
+   pinned so both pills have a predictable height for the stack math. */
+.pe-rect.is-tiny > .pe-rect-label,
+.pe-rect.is-tiny > .pe-rect-id    { line-height: 1.5; }
+.pe-rect.is-tiny > .pe-rect-label { margin-bottom: 2px; }
+.pe-rect.is-tiny > .pe-rect-id    { margin-bottom: 22px; }
+.pe-rect.is-tiny > .pe-rect-note  { display: none; }
+
 /* Dangling binding: filename set but not present in the loaded
    library (renamed / removed). Dashed red ring as the canvas cue;
    the selection panel spells out "not found in library". */

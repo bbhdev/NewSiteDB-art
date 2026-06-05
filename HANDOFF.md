@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.50):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.51):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -515,6 +515,24 @@ image's `objectPosition` and the dot position are updated **imperatively
 its pointer capture mid-drag; `markDirty()` + canonical `render()` run
 once on pointerup, and only if the focus actually changed (so a bare
 click on the dot doesn't dirty the doc).
+
+**Tiny-rect chrome lift (v0.10.51).** A rect under 100px in either
+dimension can't hold its kind label + id inside without them
+overlapping/mangling, so `renderRect` tags it `is-tiny` and the CSS
+lifts the chrome OUT: kind + id become two left-aligned dark pills
+stacked just above the rect (kind directly above the top edge, id one
+fixed 22px step higher — a px step, not em, because the id's smaller
+font would otherwise not clear the taller kind pill). The optional note
+is hidden for tiny rects (secondary meta, would add a cramped third
+line). Threshold 100 is independent of the focal dot's detach threshold
+(70). **Coordination:** a rect small enough to detach the dot (<70) is
+always also `is-tiny` (<100), so its chrome already occupies the
+top-left-above zone — therefore the *detached* focal dot was moved from
+its original top-left parking to **outside the right edge, vertically
+centred** (`left: calc(100% + 17px)`; the +17 clears the dot's own
+half-width so its near edge sits ~8px past the rect). Non-detached dots
+(rects 70–100px) stay inside on the image, so they never meet the
+external chrome (which is above the rect).
 
 ## What this project is
 
