@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.51):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.52):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -496,25 +496,15 @@ in cover exactly one axis overflows, the other is locked because
 object-position on a non-overflowing axis has no effect — class
 `pe-focus-dot--x` / `--y` shows a directional bar).
 
-Two drag mappings (the small-rect refinement the user asked for):
-- **Large rect** (min dim ≥ `FOCUS_DOT_MIN` = 70px): dot rendered *on*
-  the image at the focus point; **absolute** mapping (focus% = pointer
-  position relative to the rect box) so the dot follows the finger.
-- **Small rect** (min dim < 70): dot **detaches** to just outside the
-  top-left corner (`left:14px; top:-22px` — off the corner, not on the
-  "angle"), so it never collides with the resize handles; **relative**
-  (drag-delta) mapping with the sweep range floored at 140px so a tiny
-  rect still gets fine control. (`.pe-rect` has no `overflow:hidden`, so
-  the detached dot is visible outside the box.)
-
 Drag uses pointer capture on the dot + `ev.stopPropagation()` on
 pointerdown so the surface's rect-move handler never fires; `focusDrag`
 state is independent of the rect-move `drag`. During the gesture the
-image's `objectPosition` and the dot position are updated **imperatively
-(no `render()`)** — a full render would destroy the dot element and drop
-its pointer capture mid-drag; `markDirty()` + canonical `render()` run
-once on pointerup, and only if the focus actually changed (so a bare
-click on the dot doesn't dirty the doc).
+image's `objectPosition` is updated **imperatively (no `render()`)** — a
+full render would destroy the dot element and drop its pointer capture
+mid-drag; `markDirty()` + canonical `render()` run once on pointerup, and
+only if the focus actually changed (so a bare click on the dot doesn't
+dirty the doc). See the v0.10.52 entry below for the current grab-handle
+model and the two-bug fix that produced it.
 
 **Tiny-rect chrome lift (v0.10.51).** A rect under 100px in either
 dimension can't hold its kind label + id inside without them
@@ -524,15 +514,37 @@ stacked just above the rect (kind directly above the top edge, id one
 fixed 22px step higher — a px step, not em, because the id's smaller
 font would otherwise not clear the taller kind pill). The optional note
 is hidden for tiny rects (secondary meta, would add a cramped third
-line). Threshold 100 is independent of the focal dot's detach threshold
-(70). **Coordination:** a rect small enough to detach the dot (<70) is
-always also `is-tiny` (<100), so its chrome already occupies the
-top-left-above zone — therefore the *detached* focal dot was moved from
-its original top-left parking to **outside the right edge, vertically
-centred** (`left: calc(100% + 17px)`; the +17 clears the dot's own
-half-width so its near edge sits ~8px past the rect). Non-detached dots
-(rects 70–100px) stay inside on the image, so they never meet the
-external chrome (which is above the rect).
+line). The *detached* focal dot is parked **outside the right edge,
+vertically centred** (`left: calc(100% + 17px)`; the +17 clears the dot's
+own half-width so its near edge sits ~8px past the rect) so it never
+collides with the lifted chrome (which is above the rect).
+
+**Focal-dot model rework + two-bug fix (v0.10.52).** Two defects in the
+4d/4.51 dot, both fixed by treating the dot as a pure **grab handle**
+rather than a live position readout:
+
+1. *Dot stranded outside the rect during a pan, never reappearing.* The
+   old large-rect path used **absolute** mapping (dot follows the
+   pointer); dragging the finger past the rect edge pinned the dot at the
+   clamped edge, half-clipped and hard to re-grab. **Fix:** on
+   pointerdown the rect gets `.is-panning`, which (CSS) **hides the dot**
+   (`opacity:0`) and flips the outline to a **dashed accent** — the live
+   image crop is now the sole feedback, so the dot can't be stranded. It
+   reappears at the committed focal point on pointerup (render() rebuilds
+   it). Mapping is now **relative** (drag-delta, range floored at 140px)
+   in *both* attached and detached cases — unified, and what makes
+   hide-during-drag possible (no need to keep the dot under the finger).
+   At rest the attached dot is **inset-clamped** by its 10px radius so it
+   never half-clips off an edge at focus 0/100.
+
+2. *Dot not moved outside the rect for small images.* The detach cutoff
+   (was `FOCUS_DOT_MIN = 70`) differed from the chrome-lift cutoff (100),
+   so a **70–100px** rect lifted its chrome but kept the dot **inside** —
+   read as "the dot isn't moved out for small images." **Fix:** one
+   shared `TINY_MAX = 100` governs *both* `is-tiny` (chrome) and the dot
+   detach, so `detached ⟺ is-tiny`. Small ⇒ chrome out (top-left-above)
+   **and** dot out (right edge), together; large (≥100 both dims) ⇒ both
+   inside. The standalone 70px threshold is gone.
 
 ## What this project is
 

@@ -372,6 +372,18 @@ button.pe-save.is-flash {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), 0 1px 5px rgba(0, 0, 0, 0.65);
 }
 
+/* Active pan (v0.10.52). The dot is only a grab handle; once the drag
+   starts it's hidden and the live image crop becomes the sole feedback,
+   so the dot can never get stranded outside the rect. The outline flips
+   to a dashed accent to confirm "you're panning". This wins over
+   .pe-rect.is-selected's solid outline by appearing later in the file. */
+.pe-rect.is-panning > .pe-focus-dot { opacity: 0; }
+.pe-rect.is-panning {
+  outline: 3px dashed var(--pe-palette-accent, #ff5500);
+  outline-offset: 2px;
+  cursor: grabbing;
+}
+
 /* Tiny rects (v0.10.51) — a rect under 100px in either dimension can't
    hold its kind label + id inside without them overlapping/mangling, so
    lift them OUT: stacked just above the rect, left-aligned, each on its

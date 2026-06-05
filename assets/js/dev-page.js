@@ -826,15 +826,25 @@
   // (handful of rects); a diff-render arrives in step 4 if perf
   // demands.
   // ────────────────────────────────────────────────────────────────
+  // A rect whose smaller side is below this lifts its kind/id chrome out
+  // above the rect (CSS `.is-tiny`) AND detaches the focal dot to just
+  // outside the rect. One shared threshold so "small image" behaves
+  // consistently: both chrome and dot move out together (previously the
+  // dot used a separate 70px cutoff, so a 70–100px rect lifted its chrome
+  // but kept the dot inside — read as "the dot isn't moved out").
+  const TINY_MAX = 100;
+
   // Focal-dot pan control (step 4d). Appended to a selected, cover-mode
   // image rect that has a real aspect mismatch (i.e. the cover crop
   // actually hides part of the image). The dot drags along the single
   // overflow axis — the other axis is locked because object-position on
-  // a non-overflowing axis has no visible effect. On a small rect the
-  // dot detaches to just outside the top-left corner so it doesn't fight
-  // the resize handles, and switches from absolute (dot-follows-pointer)
-  // to relative (drag-delta) mapping.
-  const FOCUS_DOT_MIN = 70; // rect min-dimension below which the dot detaches
+  // a non-overflowing axis has no visible effect. The dot is a *grab
+  // handle*, not a live position readout: during the drag it's hidden and
+  // the rect outline switches to a "panning" style, with the live image
+  // crop as the sole feedback (so the dot can never get stranded outside
+  // the rect — Bug: it used to track the pointer to the edge and vanish).
+  // It reappears at the committed focal point on pointerup via render().
+  // Mapping is relative (drag-delta) in both attached and detached cases.
 
   function maybeAddFocusDot(el, img, rect, imgRatio) {
     const rw = rect.w | 0, rh = rect.h | 0;
@@ -847,7 +857,7 @@
     // overflows horizontally (pan X); a taller one overflows vertically
     // (pan Y). Exactly one axis overflows in cover mode.
     const axis = imgRatio > rectRatio ? 'x' : 'y';
-    const detached = Math.min(rw, rh) < FOCUS_DOT_MIN;
+    const detached = Math.min(rw, rh) < TINY_MAX;
 
     const dot = document.createElement('div');
     dot.className = 'pe-focus-dot pe-focus-dot--' + axis +
@@ -856,21 +866,28 @@
 
     if (detached) {
       // Parked just outside the rect, vertically centred on the right
-      // edge. A rect small enough to detach the dot (<70px) is always
-      // also `is-tiny` (<100px), so its kind/id chrome has been lifted
-      // out to the top-left-above zone — parking the dot on the right
-      // keeps the two from colliding. Relative mapping → its resting
-      // spot stays fixed during the drag. The +17px clears the dot's own
-      // half-width (it's centred on its anchor via translate(-50%)), so
-      // its near edge lands ~8px outside the rect.
+      // edge. A detached dot means the rect is `is-tiny`, so its kind/id
+      // chrome has been lifted out to the top-left-above zone — parking
+      // the dot on the right keeps the two from colliding. The +17px
+      // clears the dot's own half-width (it's centred on its anchor via
+      // translate(-50%)), so its near edge lands ~8px outside the rect.
       dot.style.left = 'calc(100% + 17px)';
       dot.style.top  = '50%';
-    } else if (axis === 'x') {
-      dot.style.left = clampFocus(rect.focusX) + '%';
-      dot.style.top  = '50%';
     } else {
-      dot.style.left = '50%';
-      dot.style.top  = clampFocus(rect.focusY) + '%';
+      // Attached: rest at the focal point, but inset by the dot's radius
+      // so it never half-clips off an edge at focus 0/100 (which made it
+      // hard to grab again). The non-overflow axis stays centred.
+      const insetX = rw > 0 ? (10 / rw) * 100 : 0;
+      const insetY = rh > 0 ? (10 / rh) * 100 : 0;
+      if (axis === 'x') {
+        const px = Math.max(insetX, Math.min(100 - insetX, clampFocus(rect.focusX)));
+        dot.style.left = px + '%';
+        dot.style.top  = '50%';
+      } else {
+        const py = Math.max(insetY, Math.min(100 - insetY, clampFocus(rect.focusY)));
+        dot.style.left = '50%';
+        dot.style.top  = py + '%';
+      }
     }
 
     dot.addEventListener('pointerdown', function (ev) {
@@ -878,19 +895,24 @@
       ev.preventDefault();
       const box = el.getBoundingClientRect();
       const axisSize = axis === 'x' ? box.width : box.height;
-      // Relative mapping needs a comfortable sweep even on a tiny rect, so
-      // the range floors at 140px of pointer travel for a full 0→100 pan.
+      // Relative (drag-delta) mapping in every case: full 0→100 pan over
+      // `range` px of pointer travel, floored at 140px so even a tiny rect
+      // sweeps comfortably. Relative (not absolute "dot follows pointer")
+      // is what lets us hide the dot during the drag — there's no need to
+      // keep it under the finger.
       focusDrag = {
         rectId:      rect.id,
         pointerId:   ev.pointerId,
         axis:        axis,
-        detached:    detached,
         startClient: axis === 'x' ? ev.clientX : ev.clientY,
         startFocus:  axis === 'x' ? clampFocus(rect.focusX) : clampFocus(rect.focusY),
-        box:         box,
-        range:       detached ? Math.max(axisSize, 140) : axisSize,
+        range:       Math.max(axisSize, 140),
         dirty:       false
       };
+      // Enter panning mode: CSS hides the dot and restyles the outline so
+      // the live image crop is the sole, unambiguous feedback. The dot can
+      // no longer get stranded outside the rect because it isn't shown.
+      el.classList.add('is-panning');
       try { dot.setPointerCapture(ev.pointerId); } catch (e) {}
     });
 
@@ -898,35 +920,26 @@
       if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return;
       const r = state.rects.find(function (x) { return x.id === focusDrag.rectId; });
       if (!r) return;
-      let f;
-      if (focusDrag.detached) {
-        const cur = focusDrag.axis === 'x' ? ev.clientX : ev.clientY;
-        f = focusDrag.startFocus +
-            (cur - focusDrag.startClient) / focusDrag.range * 100;
-      } else if (focusDrag.axis === 'x') {
-        f = (ev.clientX - focusDrag.box.left) / focusDrag.box.width * 100;
-      } else {
-        f = (ev.clientY - focusDrag.box.top) / focusDrag.box.height * 100;
-      }
-      f = clampFocus(f);
+      const cur = focusDrag.axis === 'x' ? ev.clientX : ev.clientY;
+      const f = clampFocus(
+        focusDrag.startFocus + (cur - focusDrag.startClient) / focusDrag.range * 100
+      );
       if (f !== focusDrag.startFocus) focusDrag.dirty = true;
       if (focusDrag.axis === 'x') r.focusX = f; else r.focusY = f;
-      // Imperative live update — a full render() here would destroy the
-      // dot mid-drag and drop its pointer capture.
+      // Imperative live crop update — a full render() here would destroy
+      // the dot mid-drag and drop its pointer capture. The dot itself is
+      // hidden (is-panning), so there's nothing to reposition.
       img.style.objectPosition =
         clampFocus(r.focusX) + '% ' + clampFocus(r.focusY) + '%';
-      if (!focusDrag.detached) {
-        if (focusDrag.axis === 'x') dot.style.left = clampFocus(r.focusX) + '%';
-        else                        dot.style.top  = clampFocus(r.focusY) + '%';
-      }
     });
 
     function endFocusDrag(ev) {
       if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return;
       const changed = focusDrag.dirty === true;
       focusDrag = null;
+      el.classList.remove('is-panning'); // belt-and-braces; render() rebuilds anyway
       if (changed) markDirty();
-      render(); // canonical re-render — rebuilds the dot at the new spot
+      render(); // canonical re-render — rebuilds the dot at the new focal point
     }
     dot.addEventListener('pointerup', endFocusDrag);
     dot.addEventListener('pointercancel', endFocusDrag);
@@ -950,7 +963,7 @@
     // hold its kind label + id without them overlapping/mangling. Tag it
     // `is-tiny` so the CSS lifts the chrome OUT, stacked above the rect
     // — the same "detach when small" idea as the focal dot.
-    if (Math.min(rect.w | 0, rect.h | 0) < 100) el.classList.add('is-tiny');
+    if (Math.min(rect.w | 0, rect.h | 0) < TINY_MAX) el.classList.add('is-tiny');
 
     // Bound-image preview (step 4b). For an image-kind rect that
     // carries a filename, paint the real image behind the labels so
