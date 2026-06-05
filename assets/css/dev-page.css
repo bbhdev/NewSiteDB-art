@@ -336,6 +336,12 @@ button.pe-save.is-flash {
   color: #f0f0f0;
   border-radius: 3px;
 }
+/* v0.10.53: keep the kind label + id legible ABOVE the focal dot (z:3)
+   when they overlap. The type is information; the dot is just a handle —
+   and since both labels are pointer-events:none, the dot underneath stays
+   fully grabbable through them. (z:4 matches the lifted tiny-rect chrome.) */
+.pe-rect.has-image > .pe-rect-label,
+.pe-rect.has-image > .pe-rect-id { z-index: 4; }
 /* Focal-dot pan control (step 4d, v0.10.50) — a draggable handle that
    sets the bound image's object-position so the author chooses which
    part of a cover-cropped image is visible. Rendered only on a

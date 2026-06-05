@@ -781,6 +781,8 @@
           el.style.top    = r.y + 'px';
           el.style.width  = r.w + 'px';
           el.style.height = r.h + 'px';
+          // Live chrome/dot detach as the size crosses TINY_MAX (v0.10.53).
+          refreshSizeChrome(el, r);
         }
       } else {
         r.x = Math.round(drag.origX + dx);
@@ -945,6 +947,27 @@
     dot.addEventListener('pointercancel', endFocusDrag);
 
     el.appendChild(dot);
+  }
+
+  // Live-refresh the size-dependent chrome on an existing rect node WITHOUT
+  // a full render() — used during a resize drag so the kind/id chrome lift
+  // and the focal-dot detach track the size as the handle moves, instead of
+  // snapping into place only on pointerup. (A full render() would destroy
+  // the resize handle mid-drag and drop its pointer capture.) Mirrors the
+  // is-tiny + maybeAddFocusDot logic in renderRect.
+  function refreshSizeChrome(el, rect) {
+    if (Math.min(rect.w | 0, rect.h | 0) < TINY_MAX) el.classList.add('is-tiny');
+    else el.classList.remove('is-tiny');
+    const old = el.querySelector('.pe-focus-dot');
+    if (old) old.remove();
+    if (rect.id === selectedId && rect.kind === 'image' && rect.image &&
+        (rect.fit || 'cover') === 'cover') {
+      const found = imageByFilename[rect.image];
+      const img = el.querySelector('.pe-rect-img');
+      if (found && found.ratio > 0 && img) {
+        maybeAddFocusDot(el, img, rect, found.ratio);
+      }
+    }
   }
 
   function renderRect(rect) {

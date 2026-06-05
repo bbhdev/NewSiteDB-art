@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.52):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.53):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -545,6 +545,22 @@ rather than a live position readout:
    detach, so `detached ⟺ is-tiny`. Small ⇒ chrome out (top-left-above)
    **and** dot out (right edge), together; large (≥100 both dims) ⇒ both
    inside. The standalone 70px threshold is gone.
+
+**Live resize chrome + dot/type z-order (v0.10.53).** Two follow-ups:
+- *Chrome/dot lagged a resize.* `is-tiny` and the focal-dot detach were
+  only recomputed by the canonical `render()` on pointerup, so while
+  resizing a rect across the 100px line the type/id and dot snapped out
+  only after release. Added `refreshSizeChrome(el, rect)` — mirrors the
+  `is-tiny` + `maybeAddFocusDot` logic but mutates the existing node — and
+  call it from the resize branch of the surface `pointermove`. (Can't
+  `render()` mid-resize: it would destroy the handle and drop its pointer
+  capture, same constraint as the focus drag.) Now the chrome lifts and
+  the dot detaches *live* as the handle crosses the threshold.
+- *Dot drawn over the type.* The dot (z:3) painted over the kind/id chrome
+  (z:1). Raised `.pe-rect.has-image > .pe-rect-label/-id` to **z:4** (above
+  the dot, matching the lifted tiny chrome). Both labels are
+  `pointer-events:none`, so the type is now legible over the dot *and* the
+  dot stays fully grabbable through them.
 
 ## What this project is
 
