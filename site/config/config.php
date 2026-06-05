@@ -1220,6 +1220,91 @@ HTML;
     ],
 
     /**
+     * v0.10.45 — Per-page image library listing (Slice 2 step 4a).
+     *
+     *   GET dev/page/images/(:all)
+     *   → { ok, page, imagesPage, images: [ {filename, url, thumb,
+     *        width, height, ratio, size, alt}, … ] }
+     *
+     * Read-only enumeration of the canvas-page's image library — the
+     * auto-created `images` child page (image-container blueprint,
+     * provisioned by the page.create:after hook). The canvas editor's
+     * "Bind image…" picker (step 4b) fetches this to populate its
+     * chooser; the runtime renderer (step 5) resolves a rect's bound
+     * filename against the same child.
+     *
+     * Placed under `dev/` (NOT `/api/…` as the original slice sketch
+     * had it) so it inherits the host-scoped auth gate
+     * (config.<host>.php gates `dev` + `dev/`) for free — otherwise it
+     * would be an unauthenticated file-enumeration surface on the
+     * production-hardened site. "Integrate, don't drift."
+     *
+     * The `images` child is a Panel DRAFT (Page::create defaults to
+     * draft), so it's resolved via childrenAndDrafts(), exactly as the
+     * image-workshop batch routes resolve their draft batches — a plain
+     * $page->find('images') / children()->find() would miss it.
+     *
+     * Thumbs are generated eagerly at 240px width to build the picker
+     * grid URLs; Kirby caches them after first request (gitignored,
+     * regenerable), so repeat calls are cheap.
+     */
+    [
+      'pattern' => 'dev/page/images/(:all)',
+      'method'  => 'GET',
+      'action'  => function (string $pageId) {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+
+        // Page ids are lowercase slugs joined by '/'. Reject anything
+        // else before touching the page tree.
+        if (!preg_match('~^[a-z0-9][a-z0-9/_-]*$~i', $pageId)) {
+          return $json(['ok' => false, 'error' => 'Invalid page id.'], 400);
+        }
+
+        $page = $kirby->page($pageId);
+        if (!$page) {
+          return $json(['ok' => false, 'error' => 'Unknown page: ' . $pageId], 404);
+        }
+
+        // Resolve the per-page image library child (slug 'images').
+        // It's a draft → childrenAndDrafts(). findBy('slug', …) avoids
+        // having to reconstruct the full nested id.
+        $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
+
+        $images = [];
+        if ($imgPage) {
+          foreach ($imgPage->images() as $f) {
+            $dims = $f->dimensions();
+            $w    = (int) $dims->width();
+            $h    = (int) $dims->height();
+            $images[] = [
+              'filename' => $f->filename(),
+              'url'      => $f->url(),
+              // 240px-wide derivative for the picker grid. Long-edge
+              // semantics aren't needed here — the picker just wants a
+              // small consistent preview.
+              'thumb'    => $f->thumb(['width' => 240])->url(),
+              'width'    => $w,
+              'height'   => $h,
+              'ratio'    => $h > 0 ? round($w / $h, 4) : 0,
+              'size'     => $f->niceSize(),
+              'alt'      => $f->alt()->value(),
+            ];
+          }
+        }
+
+        return $json([
+          'ok'         => true,
+          'page'       => $page->id(),
+          'imagesPage' => $imgPage ? $imgPage->id() : null,
+          'images'     => $images,
+        ]);
+      }
+    ],
+
+    /**
      * v0.10.35 — Image-workshop verdict persistence (Slice 2 step B).
      *
      *   POST dev/image-workshop/save
