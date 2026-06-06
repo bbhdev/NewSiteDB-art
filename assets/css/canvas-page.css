@@ -63,6 +63,18 @@ body.canvas-page-body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Slice T1: real text content on a text rect at runtime. Inherits the
+   rect's font, including any .ty-<id> typography token (class on the
+   parent .rect; font properties inherit) — do NOT set font-size/family
+   here. pre-wrap preserves the author's newlines + spacing; the node
+   clips to the rect so overflow can't escape the layout box. */
+.rect-text {
+  width: 100%;
+  white-space: pre-wrap;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 .rect--text       { background: var(--cp-kind-text); }
 .rect--image      { background: var(--cp-kind-image); }
 .rect--drilldown  { background: var(--cp-kind-drilldown); }

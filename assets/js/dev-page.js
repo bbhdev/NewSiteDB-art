@@ -497,6 +497,22 @@
     render();
   }
 
+  // Slice T1: plain-text body content for a text rect. Whitespace WITHIN
+  // the content is preserved verbatim (the rect renders it pre-wrap), but
+  // a wholly-blank value collapses to null so an "empty" text rect stores
+  // no content and falls back to its stub — mirrors setRectNote's null
+  // discipline. Capped at 5000 chars to match the save-route guard.
+  function setRectText(rectId, text) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return;
+    const raw  = (text == null ? '' : String(text));
+    const next = raw.trim() === '' ? null : raw.slice(0, 5000);
+    if ((r.text || null) === next) return;
+    r.text = next;
+    markDirty();
+    render();
+  }
+
   // "Match rect to image": eliminate the aspect mismatch by resizing the
   // rect to the bound image's ratio. Width is the layout-driven axis, so
   // we KEEP width and recompute height = round(w / ratio); the author can
@@ -1278,6 +1294,21 @@
       el.appendChild(note);
     }
 
+    // Slice T1: real text content for a text rect, rendered behind the
+    // editor chrome (kind/z badge + note + id) so the author sees the
+    // actual copy on the canvas, in the rect's typography face (the
+    // .ty-<id> class on `el` cascades to this child). Whitespace +
+    // newlines are preserved via CSS white-space:pre-wrap. textContent
+    // (never innerHTML) — no markup is interpreted at this slice. Empty
+    // text → no node; the kind stub label stands in, same as before.
+    if (rect.kind === 'text' && rect.text) {
+      const txt = document.createElement('div');
+      txt.className = 'pe-rect-text';
+      txt.textContent = rect.text;
+      el.appendChild(txt);
+      el.classList.add('has-text');
+    }
+
     const idTag = document.createElement('span');
     idTag.className = 'pe-rect-id';
     idTag.textContent = rect.id || '';
@@ -1833,6 +1864,31 @@
       typoWrap.appendChild(prev);
 
       body.appendChild(row('Type', typoWrap));
+
+      // Slice T1: plain-text body content. A multiline textarea kept in a
+      // plain, comfortable editing face (NOT the rect's typography token —
+      // a 48px heading token would make this narrow-panel field unusable;
+      // the live canvas already shows the styled result). Commits on blur
+      // and on Cmd/Ctrl+Enter (plain Enter inserts a newline — the textarea
+      // IS the place where Enter must mean newline, not submit). Escape
+      // reverts to the saved value. Empty/whitespace clears to null.
+      const textArea = document.createElement('textarea');
+      textArea.className = 'pe-input pe-rect-textarea';
+      textArea.rows = 4;
+      textArea.maxLength = 5000;
+      textArea.placeholder = 'text content (optional)';
+      textArea.value = r.text || '';
+      textArea.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+          ev.preventDefault(); textArea.blur();
+        } else if (ev.key === 'Escape') {
+          ev.preventDefault(); textArea.value = r.text || ''; textArea.blur();
+        }
+      });
+      textArea.addEventListener('blur', function () {
+        setRectText(r.id, textArea.value);
+      });
+      body.appendChild(row('Text', textArea));
     }
 
     // Geometry — four small numeric inputs (x / y / w / h). Tab

@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.81):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.82):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -49,6 +49,12 @@ token preview modal (v0.10.78), and **3b-3 (per-token field editor —
 family picker + size/weight/lineHeight/letterSpacing/italic, v0.10.79)**
 landed. **Typography authoring is now feature-complete.** See the
 Slice 3a / 3b entries below.
+**Slice T1 (plain-text content on text rects, v0.10.82) landed** —
+text rects now carry author-entered body copy (textarea-first), styled
+by their typography token, rendered on both editor canvas and runtime.
+See the Slice T1 entry below. A **rich/fine-grained text-styling
+discussion is PARKED** (prepared-styles model — see the ⏸ callout near
+the Slice T1 entry).
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -1144,6 +1150,78 @@ on-canvas (no hand-JSON). Reuses the existing route; no schema change.
 - *Next:* priority #3 — real text content on text rects (the `ty-<id>` class
   already styles whatever text goes in). Then the parked drilldown
   restructure (see the callout below).
+
+**Slice T1 — plain-text content on text rects (v0.10.82).** Priority #3,
+first slice: a text rect can now carry author-entered body copy, rendered in
+its typography face on both editor canvas and the public page. Four layers,
+all additive within schema **v3 (NO bump — `typographyId` precedent)**:
+- *Save route* (`dev/page/save`, `config.php`): optional `text` field —
+  string, ≤5000 chars, format-only validation. Normalised on write:
+  whitespace-only collapses to `null` (so an "empty" text rect stores no
+  content), but whitespace **within** non-empty copy is preserved verbatim
+  (newlines + runs of spaces matter — the rect renders pre-wrap).
+- *Editor panel* (`dev-page.js`): a multiline `<textarea>` (`.pe-rect-textarea`)
+  under the Type row, text-kind only. Commits on **blur and Cmd/Ctrl+Enter**;
+  plain Enter inserts a newline (the textarea is the one place Enter must mean
+  newline, not submit — note the user's standing gripe about send-key UX).
+  Escape reverts. `setRectText` mirrors `setRectNote`'s null discipline + caps
+  at 5000. Deliberately **NOT** styled with the rect's `.ty-<id>` token — a
+  48px heading token would make the narrow-panel field unusable; the live
+  canvas already shows the styled result.
+- *Editor canvas* (`renderRect`): a `.pe-rect-text` div behind the chrome
+  (kind/z badge + note + id), `textContent` (never innerHTML), pre-wrap. The
+  `.ty-<id>` class on the parent rect cascades its font down (font props
+  inherit) — so DO NOT set font-size/family on `.pe-rect-text` or the token
+  face is lost. Empty text → no node, kind stub stands in. `.has-text` hook.
+- *Runtime* (`canvas-page.php`): emits `<div class="rect-text"><?= esc($text) ?></div>`
+  with pre-wrap; falls back to the stub label/id when empty. Same inherit-the-
+  ty-font discipline in `canvas-page.css`.
+- ⚠ **Gotcha found + fixed (the valuable bit): `</script>` breakout in the
+  editor template.** `page.php` embeds the rects blob verbatim inside
+  `<script id="editor-data" type="application/json">…</script>`, with
+  `JSON_UNESCAPED_SLASHES`. Free-form body text is the first field that can
+  realistically contain the literal `</script>` — which closed the script
+  element early and made the WHOLE editor-data blob unparseable (`JSON.parse`
+  → "Unterminated string", editor loads 0 rects). Fix: after `json_encode`,
+  `str_replace('<', '<', $payload)` — the `<` JSON escape prevents
+  any `</script>`/`<!--`/`<script` breakout while staying valid JSON
+  (`JSON.parse` decodes it back to `<`). The runtime template was never
+  affected — it renders via `esc()`, not a JSON blob. This is a general
+  trap for any future free-form string field surfaced through the editor's
+  JSON island; the escape now guards all of them.
+- *Verified* end-to-end in preview: textarea authoring → pre-wrap on canvas
+  → save → `rects.json` shows `text` with preserved `\n`+spaces, other rects
+  `null`, schema still 3 → runtime renders pre-wrap → an `<b>…<script>…`
+  payload renders as literal escaped text (no injection) AND round-trips
+  cleanly back through the hardened editor JSON.
+- *Deferred (named):* **T2** inline on-canvas editing (contenteditable /
+  WYSIWYG — this is the tablet-first-class editing path); **T3** overflow /
+  vertical-alignment options. Rich inline styled runs are now superseded by
+  the parked discussion below.
+
+> **⏸ Parked discussion — rich / fine-grained text styling (NOT started).**
+> Raised by the user alongside T1 approval, explicitly "to be planned for a
+> little later." The need: "achieve complete and fine-grained text styling,
+> as HTML does and therefore is expected on the web." Diving into page code
+> to add manual styling is the **worst case** to avoid. The user's proposed
+> direction (to be worked up into a real plan, not yet decided):
+> 1. **Prepared-styles model — treat styling like colours/typography.**
+>    Author *prepares* named styles, *saves* them, and in content can then
+>    *only apply prepared styles* (governable, no raw code). This is the
+>    leading idea and rhymes with the existing palette + typography-token
+>    architecture.
+> 2. **Inserting style indications into the text** "can be made quite easy
+>    using existing tried-and-true methods" (i.e. a select-text → click-a-
+>    prepared-style affordance that inserts the markup for the author — the
+>    standard WYSIWYG-toolbar pattern; author never types codes).
+> 3. **Possibly accept some HTML** in the text (`<p>`, `<br>`, …) — to be
+>    weighed against the prepared-styles approach (escaping/sanitisation
+>    cost, governance loss).
+> When tackled this gets the full fork-in-the-road treatment (honest
+> recommendation + concrete sketches + the seductive-wrong option named +
+> the prepared-styles-vs-raw-HTML trade-off) and its own slice plan. Note
+> the T1 `</script>` escape already hardens the editor for any future
+> markup-bearing text field.
 
 ## What this project is
 

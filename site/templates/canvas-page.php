@@ -144,7 +144,14 @@ foreach ($typography as $t) {
     // with no class (inherited defaults).
     $tyId  = (isset($r['typographyId']) && is_string($r['typographyId'])
               && isset($typoIds[$r['typographyId']])) ? $r['typographyId'] : null;
-    $rectClass = 'rect rect--' . esc($kind) . ($tyId ? ' ty-' . esc($tyId) : '');
+    // Slice T1: plain-text body content for text rects. Rendered with
+    // white-space:pre-wrap (preserves the author's newlines/spacing) and
+    // HTML-escaped via esc() — no markup is interpreted at this slice.
+    // Empty/absent text falls back to the kind stub, exactly as before.
+    $text  = ($kind === 'text' && isset($r['text']) && is_string($r['text'])
+              && trim($r['text']) !== '') ? $r['text'] : null;
+    $rectClass = 'rect rect--' . esc($kind) . ($tyId ? ' ty-' . esc($tyId) : '')
+               . ($text !== null ? ' has-text' : '');
 ?>
     <div class="<?= $rectClass ?>"
          data-rect-id="<?= esc($rid) ?>"
@@ -153,8 +160,12 @@ foreach ($typography as $t) {
          style="position: absolute;
                 left: <?= $x ?>px; top: <?= $y ?>px;
                 width: <?= $w ?>px; height: <?= $h ?>px;">
+      <?php if ($text !== null): ?>
+      <div class="rect-text"><?= esc($text) ?></div>
+      <?php else: ?>
       <span class="rect-stub-label"><?= esc($kind) ?></span>
       <span class="rect-stub-id"><?= esc($rid) ?></span>
+      <?php endif; ?>
     </div>
 <?php endforeach; ?>
   </div>

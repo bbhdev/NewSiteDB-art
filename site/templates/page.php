@@ -185,6 +185,16 @@ $payload = json_encode([
     'typography'    => $typography,
     'version'       => $v,
 ], JSON_UNESCAPED_SLASHES);
+// v0.10.82: harden the inline JSON against </script> breakout. This blob
+// is embedded verbatim inside <script id="editor-data" type="application/
+// json">…</script>; with JSON_UNESCAPED_SLASHES a string field containing
+// the literal "</script>" (now realistic since text rects carry free-form
+// body copy — Slice T1) would close the script element early and corrupt
+// every following field. Escaping "<" to its \\u003c JSON escape prevents
+// any "</script>", "<!--", or "<script" breakout while remaining valid
+// JSON — JSON.parse decodes \\u003c straight back to "<". (The runtime
+// template is unaffected: it renders text via esc(), not a JSON blob.)
+$payload = str_replace('<', '\\u003c', $payload);
 ?>
 <!doctype html>
 <html lang="en">

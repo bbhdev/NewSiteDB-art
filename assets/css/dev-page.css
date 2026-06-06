@@ -398,6 +398,36 @@ button.pe-save.is-flash {
   pointer-events: none;
 }
 
+/* Slice T1: real text content for a text rect, rendered in-flow under the
+   chrome. Inherits the rect's font — including any .ty-<id> typography
+   token (the class is on the parent .pe-rect, and font properties inherit).
+   DO NOT set font-size/family here or the token face is lost. pre-wrap
+   preserves authored newlines + runs of spaces; the node clips to the
+   rect so long copy can't escape. pointer-events:none so a click still
+   selects/drags the rect body. */
+.pe-rect-text {
+  width: 100%;
+  margin-top: 0.15rem;
+  white-space: pre-wrap;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+}
+
+/* Slice T1: the side-panel text editor. A comfortable fixed-size editing
+   field (deliberately NOT the rect's typography face — see the JS note);
+   vertical resize only so the author can grow it without breaking the
+   panel width. Monospace-ish line-height for legible multi-line editing. */
+.pe-rect-textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
 /* Bound-image preview (step 4b) ───────────────────────────────
    For an image-kind rect with a bound filename, the real image is
    painted as an absolutely-positioned child filling the rect, behind

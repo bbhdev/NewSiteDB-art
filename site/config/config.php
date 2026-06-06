@@ -1377,6 +1377,24 @@ HTML;
               return $fail('Rect typographyId must be a token slug or null.');
             }
           }
+          // v0.10.82 (Slice T1): optional `text` field — plain-text body
+          // content for a text rect (textarea-authored, multiline). Stored
+          // verbatim (whitespace/newlines preserved); the runtime renders
+          // it with white-space:pre-wrap and HTML-escapes it. No markup is
+          // interpreted at this slice — rich/styled runs are a separately-
+          // parked discussion. FORMAT-only validation: must be a string,
+          // capped at 5000 chars so a runaway paste can't bloat rects.json.
+          // Additive within schema v3 with a null default (typographyId
+          // precedent), so NOT a schema bump. Allowed on any kind for
+          // forward-compat (the editor only sets it on text rects).
+          if (isset($r['text']) && $r['text'] !== null) {
+            if (!is_string($r['text'])) {
+              return $fail('Rect text must be a string or null.');
+            }
+            if (mb_strlen($r['text']) > 5000) {
+              return $fail('Rect text exceeds 5000 characters.');
+            }
+          }
         }
 
         // Normalise on write: ensure each rect carries an explicit
@@ -1399,6 +1417,13 @@ HTML;
           // null so the on-disk shape is unambiguous (null vs "").
           $r['typographyId'] = (isset($r['typographyId']) && $r['typographyId'] !== '')
             ? $r['typographyId'] : null;
+          // v0.10.82 (Slice T1): text body — empty/whitespace-only string
+          // normalises to null so an "empty" text rect stores no key value
+          // (and the runtime falls back to its stub). Whitespace WITHIN
+          // non-empty content is preserved verbatim; only a wholly-blank
+          // value collapses to null.
+          $r['text'] = (isset($r['text']) && is_string($r['text']) && trim($r['text']) !== '')
+            ? $r['text'] : null;
           return $r;
         }, $rects);
 
