@@ -1208,6 +1208,11 @@
     byClass: initialByClass,
     masters: initialMasters,
     palette: initial.palette && initial.palette.length ? initial.palette : defaultPalette(),
+    // Typography tokens (Slice 3b). Site-wide named type styles, shared
+    // across all pages (not per-page like lines). Persisted separately
+    // via /dev/draw/typography — NOT part of the per-page draw save —
+    // so it is intentionally outside the undo/snapshot history.
+    typography: Array.isArray(initial.typography) ? initial.typography : [],
     // Nested per-page config (v3): { useClasses, dims }.
     pageConfig: initial.page && initial.page.dims
       ? initial.page
@@ -12228,6 +12233,100 @@
     renderSelectionPanel();
   }
 
+  // ---- Typography tokens (Slice 3b) ------------------------------------
+  //
+  // Read-only listing for 3b-1: each row shows the token's name, a live
+  // sample rendered with the token's own `.ty-<id>` class (the PHP-emitted
+  // CSS in the page <head> drives the actual font/size — same emitter the
+  // page editor & runtime use, so the preview here matches what ships),
+  // and a compact spec line. Create/rename/delete + field editing arrive
+  // in 3b-2 / 3b-3. Tokens are NOT in the draw undo history (they persist
+  // via their own /dev/draw/typography route, not the per-page save).
+
+  function typoSpecLine(t) {
+    const fam = (t.family && String(t.family).trim()) || 'sans-serif';
+    const size = (t.sizePx != null ? t.sizePx : 16);
+    const w = (t.weight != null ? t.weight : 400);
+    const lh = (t.lineHeight != null ? t.lineHeight : 1.4);
+    const ls = (t.letterSpacingPx != null ? t.letterSpacingPx : 0);
+    let s = fam + ' · ' + size + 'px · ' + w + ' · lh ' + lh + ' · ls ' + ls;
+    if (t.italic) s += ' · italic';
+    return s;
+  }
+
+  function renderTypographyList() {
+    const listEl = document.getElementById('typography-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    const tokens = Array.isArray(state.typography) ? state.typography : [];
+    if (!tokens.length) {
+      const empty = document.createElement('li');
+      empty.className = 'ed-typo-empty';
+      empty.textContent = 'No typography tokens yet.';
+      listEl.appendChild(empty);
+      return;
+    }
+    tokens.forEach(function (t) {
+      const li = document.createElement('li');
+      li.className = 'ed-typo-row';
+
+      const head = document.createElement('div');
+      head.className = 'ed-typo-head';
+      const nm = document.createElement('span');
+      nm.className = 'ed-typo-name';
+      nm.textContent = t.name || t.id;
+      const idTag = document.createElement('code');
+      idTag.className = 'ed-typo-id';
+      idTag.textContent = 'ty-' + t.id;
+      head.appendChild(nm);
+      head.appendChild(idTag);
+
+      const sample = document.createElement('div');
+      sample.className = 'ed-typo-sample ty-' + t.id;
+      sample.textContent = 'Ag — the quick brown fox';
+
+      const spec = document.createElement('div');
+      spec.className = 'ed-typo-spec';
+      spec.textContent = typoSpecLine(t);
+
+      li.appendChild(head);
+      li.appendChild(sample);
+      li.appendChild(spec);
+      listEl.appendChild(li);
+    });
+  }
+
+  // Persist the current tokens to content/_shared/typography-tokens.json.
+  // 3b-1 has no editing UI yet, so this writes the seed set verbatim —
+  // its purpose is to prove the round-trip (load → POST → file → reload)
+  // before create/edit/delete land in 3b-2.
+  async function saveTypography(btn) {
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+      const res = await fetch('/dev/draw/typography', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokens: state.typography })
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + res.status));
+      if (Array.isArray(j.tokens)) {
+        state.typography = j.tokens;   // adopt the server-normalised set
+        renderTypographyList();
+      }
+      if (btn) { btn.textContent = 'Saved.'; }
+    } catch (err) {
+      console.error('[dev-draw] typography save failed:', err);
+      if (btn) { btn.textContent = 'Failed'; }
+      alert('Typography save failed: ' + err.message);
+    } finally {
+      if (btn) {
+        setTimeout(function () { btn.disabled = false; btn.textContent = orig || 'Save'; }, 1800);
+      }
+    }
+  }
+
   // Track which line id we last scrolled the panel-into-view for.
   // Edit-driven re-renders (trigger flips, scope flips, etc.) hit
   // renderSelectionPanel without selection change; skip the
@@ -15771,6 +15870,13 @@
   });
   newGroupBtn.addEventListener('click', addGroup);
   newColorBtn.addEventListener('click', addColor);
+  // Typography panel (Slice 3b). Rendered once here (read-only in 3b-1,
+  // and shared/not-per-page so it stays out of renderAll's per-edit churn).
+  renderTypographyList();
+  const saveTypographyBtn = document.getElementById('save-typography-btn');
+  if (saveTypographyBtn) {
+    saveTypographyBtn.addEventListener('click', function () { saveTypography(saveTypographyBtn); });
+  }
   saveBtn.addEventListener('click', save);
   clearLinesBtn.addEventListener('click', clearAllLines);
   helpBtn.addEventListener('click', function () { showHelp('general'); });

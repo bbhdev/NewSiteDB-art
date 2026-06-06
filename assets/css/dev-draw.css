@@ -2629,6 +2629,49 @@ body.editor input[type="range"] {
 }
 .ed-palette-row .ed-mini { padding: 0.05rem 0.35rem; font-size: 0.75em; }
 
+/* ── typography tokens panel (Slice 3b) ──────────────────────────────
+   Read-only listing in 3b-1: per-token name + id chip, a live sample
+   rendered with the token's own .ty-<id> class (emitted in the page
+   <head>), and a compact spec line. */
+.ed-typo-list { list-style: none; padding: 0; margin: 0; }
+.ed-typo-empty {
+  color: #8a9099; font-style: italic; font-size: 0.8em;
+  padding: 0.3rem 0;
+}
+.ed-typo-row {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #2a2e35;
+}
+.ed-typo-row:last-child { border-bottom: 0; }
+.ed-typo-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.4rem; margin-bottom: 0.25rem;
+}
+.ed-typo-name {
+  color: #f0f0f0; font-size: 0.85em; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ed-typo-id {
+  color: #8a9099; font-size: 0.68em; flex: none;
+  background: #15171c; border: 1px solid #2a2e35;
+  border-radius: 3px; padding: 0.02rem 0.3rem;
+}
+.ed-typo-sample {
+  color: #e5e5e5;
+  background: #1b1e24; border: 1px solid #2a2e35; border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  max-height: 3.4em; overflow: hidden;
+  word-break: break-word;
+}
+.ed-typo-spec {
+  /* Force the panel UI font here — the row may sit under a .ty-<id>
+     ancestor in the future; keep the spec line readable regardless. */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-style: normal !important; letter-spacing: 0 !important;
+  font-size: 0.68rem; line-height: 1.3; font-weight: 400;
+  color: #8a9099; margin-top: 0.25rem;
+}
+
 /* ── color picker (swatches) in group/line panels ────────────────── */
 .ed-color-picker {
   display: flex;

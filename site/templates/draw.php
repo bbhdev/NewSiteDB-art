@@ -83,6 +83,10 @@ if (empty($palette)) {
   ];
 }
 
+// Typography tokens (Slice 3b). deco_load_typography() returns the seed
+// set when the file is absent, so the panel always has something to show.
+$typography = deco_load_typography($contentRoot);
+
 // Scan the target page's template for `id="…"` attributes so the
 // trigger-field combobox can suggest selectors that actually exist
 // (e.g. "#projects" if the home template has <h2 id="projects">).
@@ -133,6 +137,7 @@ $payload = json_encode([
   'masters'            => $masters,
   'byClass'            => $byClass,
   'palette'            => $palette,
+  'typography'         => $typography,
   'page'               => $pageCfg,
   'triggerSuggestions' => $triggerSuggestions,
   'imageSources'       => $imageSources,
@@ -147,6 +152,11 @@ $payload = json_encode([
   <title>Draw — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/dev-draw.css') ?>?v=<?= $v ?>">
+  <?php /* Slice 3b: load the curated webfonts + emit one .ty-<id> rule per
+           token so the typography panel's per-row previews render with the
+           real family/size — same emitter the page editor & runtime use. */ ?>
+  <?= deco_google_fonts_link($contentRoot) ?>
+  <style id="ed-typography-css"><?= deco_typography_css($typography) ?></style>
 </head>
 <body class="editor">
 
@@ -283,6 +293,14 @@ $payload = json_encode([
         <button type="button" id="new-color-btn" class="ed-mini">+ Color</button>
       </header>
       <ul id="palette-list" class="ed-palette-list"></ul>
+    </section>
+
+    <section class="ed-panel">
+      <header class="ed-panel-head">
+        <h3>Typography</h3>
+        <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save</button>
+      </header>
+      <ul id="typography-list" class="ed-typo-list"></ul>
     </section>
 
   </aside>

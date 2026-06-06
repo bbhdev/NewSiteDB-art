@@ -40,9 +40,11 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.75):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.76):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
-tokens — seed + select) landed — see the Slice 3a entry below.
+tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
+— read-only list + `dev/draw/typography` save round-trip) landed —
+see the Slice 3a / 3b-1 entries below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -991,6 +993,42 @@ palette as the shared "design system" surface).
   Until then, more tokens are added by hand-editing the JSON (or extending
   `deco_default_typography()`).
 
+**Slice 3b-1 — typography panel in draw, read-only + save plumbing (v0.10.76).**
+First sub-slice of the authoring UI. Stands up the panel surface and the
+persistence round-trip; create / rename / delete (3b-2) and field editing
+(3b-3) come next.
+- *Save route.* New `dev/draw/typography` (GET|POST) in `site/config/config.php`,
+  mirroring the `dev/draw/font-bundle` route. GET returns
+  `deco_load_typography()` (seed when no file). POST validates **format-only**
+  and writes `content/_shared/typography-tokens.json` (`{schemaVersion:1,
+  tokens, savedAt, count}`, atomic tmp+rename). Validation: id
+  `^[a-z0-9_-]{1,64}$` (same contract as a rect's `typographyId`) + duplicate-id
+  reject; name non-empty Unicode ≤64 (chapter-name set); family `'' | [A-Za-z0-9
+  '_-]` ≤64; numerics **clamped not rejected** (sizePx 1–400, weight 100–900,
+  lineHeight 0.5–4, letterSpacingPx −20–50); italic→bool. Token-ref integrity
+  intentionally NOT enforced (refs may dangle, like image bindings).
+- *Editor surface.* `draw.php` now loads `$typography = deco_load_typography()`,
+  embeds it in the JSON payload, and — crucially — emits
+  `deco_google_fonts_link()` + `<style>deco_typography_css()</style>` in its
+  `<head>`, so each panel row's `.ty-<id>` sample previews in the **real
+  webfont** (same emitter the page editor & runtime use → automatic parity).
+  New `#typography-list` panel section (after Design colors) + a Save button.
+- *JS.* `state.typography` from the payload (NOT in the undo/snapshot history —
+  it is shared/site-wide and persists via its own route, not the per-page draw
+  save). `renderTypographyList()` paints read-only rows (name + `ty-<id>` chip +
+  live sample + compact spec line); `saveTypography()` POSTs and adopts the
+  server-normalised set back. Rendered once at init (kept out of `renderAll`'s
+  per-edit churn).
+- *CSS.* `.ed-typo-*` rules in `dev-draw.css`; the spec line forces the panel UI
+  font with `!important` so it stays legible even if a `.ty-*` ancestor appears
+  later (descendant-selector / inheritance footgun — see CLAUDE.md).
+- *Verified end-to-end* via curl + the live draw UI: GET seed (4 tokens) → POST
+  → on-disk JSON → GET reads it back; bad-id and duplicate-id rejected; numerics
+  clamped (9999→400, weight 5→100, lh 99→4); panel renders 4 rows with correct
+  computed `.ty-` styles; the Save button shows "Saved." and writes the file.
+- *Next:* 3b-2 (create/rename/delete tokens) → 3b-3 (family picker + field
+  editing). Then priority #3 (real text content on text rects).
+
 ## What this project is
 
 A Kirby-based site where the visual identity is a layer of animated SVG line
@@ -1690,8 +1728,10 @@ absolute coordinates.
    Single source of truth, Deco doesn't read it yet.
    **3a DONE (v0.10.75): seed + select** — token JSON + PHP emitter
    (`deco_*_typography`) + Type dropdown/preview on text rects (see
-   the Slice 3a entry above). **3b PENDING: authoring UI in draw**
-   (create/edit/delete tokens, save route writing the JSON).
+   the Slice 3a entry above). **3b — authoring UI in draw**, sub-sliced:
+   **3b-1 DONE (v0.10.76)**: read-only panel + `dev/draw/typography`
+   save round-trip (see the 3b-1 entry above). **3b-2 PENDING**: create /
+   rename / delete tokens. **3b-3 PENDING**: family picker + field editing.
 4. **Slice 4 — Deco bootstrapper + htmlKey slots** (shared artifacts
    #2 + #3). `deco-mount` rects render as `<div data-deco="…">`;
    JS bootstrapper mounts the Deco runtime per rect against the
@@ -1717,6 +1757,21 @@ absolute coordinates.
    shapes from Slice 1 carry over; this is mostly a Kirby
    blueprint exercise plus a small page-type selector in the
    editor.
+
+> **⏸ Parked architectural consideration — drilldown: kind → property
+> (raised v0.10.76, to act on AFTER typography 3b is done).** The user
+> flagged that the `drilldown` rect *kind* has no content axis of its own,
+> so it's meaningless on its own and bolting a content type onto it would
+> just badly duplicate text/image/deco-mount. Root cause: `drilldown`
+> conflates **what a block contains** (text / image / deco-mount) with
+> **what it does on tap** (reveal an overlay) — orthogonal concerns. The
+> agreed direction: **remove the `drilldown` kind and add an optional
+> `drilldown` *property* to all other kinds** (hidden by default → fits the
+> progressive-disclosure rule: a `+ Drilldown` discloser on any block).
+> When picked up this is a real fork (rects-schema migration for existing
+> `drilldown` rects, validator change, editor UI, runtime overlay wiring,
+> the `KIND_ORDER`/z-stub code at HANDOFF ~line 893) and gets the full
+> fork-in-the-road treatment + its own slice plan then. **Not started.**
 
 **Behavioral artefact from this conversation.** I (Claude) initially
 proposed a Slice 1 with hand-typed JSON and no editor, deferring the
