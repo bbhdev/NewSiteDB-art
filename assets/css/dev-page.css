@@ -278,10 +278,23 @@ button.pe-save.is-flash {
   opacity: 0.85;
 }
 
+/* Lift ONLY while the rect is actively manipulated (v0.10.65). `is-
+   dragging` covers both move and resize (added on the first pointer
+   move past the 3px threshold); `is-panning` is the focal-dot pan. A
+   statically-selected rect deliberately does NOT lift — it stays in its
+   true layer order so the author can see the effect of the Z controls.
+   (Step 2 of the Z work will move the selection chrome into an always-
+   on-top overlay so handles stay grabbable even when the rect is buried;
+   until then a buried selected rect's handles can be occluded — the
+   accepted trade for honest overlap preview.) */
+.pe-rect.is-dragging,
+.pe-rect.is-panning {
+  z-index: 999;
+}
+
 .pe-rect.is-selected {
   outline: 2px solid var(--pe-palette-accent, #ff5500);
   outline-offset: 2px;
-  z-index: 1;
 }
 
 .pe-rect-label {
@@ -291,6 +304,16 @@ button.pe-save.is-flash {
   font-size: 0.75rem;
   color: rgba(0, 0, 0, 0.82); /* editor chrome, not palette-bound */
   pointer-events: none;       /* clicks pass through to the rect body */
+}
+
+/* Layer (Z) badge after the kind on the canvas (v0.10.65) — the rect's
+   position in the stacking order, readable without selecting. Lighter
+   weight + dimmer than the kind so it reads as secondary meta. */
+.pe-rect-z {
+  margin-left: 0.4em;
+  font-weight: 600;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
 }
 
 .pe-rect-id {
@@ -626,6 +649,48 @@ button.pe-save.is-flash {
   font-variant-numeric: tabular-nums;
   color: #c8c8c8;
   flex: 1;
+}
+
+/* Layer (Z) controls (v0.10.65) — "z N / M" readout + four reorder
+   buttons (to back · backward · forward · to front), each a Material
+   Icon. Icon-only buttons, so per the icon-sizing rule the glyph fills
+   a clear share of the button (20px in a 1.9rem box ≈ 70%+ of content
+   height) — never microscopic. */
+.pe-layer-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.pe-layer-z {
+  font-variant-numeric: tabular-nums;
+  color: #c8c8c8;
+  margin-right: 0.15rem;
+  white-space: nowrap;
+}
+.pe-layer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  background: #1b1c20;
+  color: #cfcfcf;
+  border: 1px solid #2c2e33;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.pe-layer-btn .material-icons { font-size: 20px; }
+.pe-layer-btn:hover:not(:disabled) {
+  border-color: var(--pe-palette-accent, #ff5500);
+  background: #232428;
+  color: #fff;
+}
+.pe-layer-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
 }
 
 /* Geometry numeric inputs (v0.10.27). Four small fields in one

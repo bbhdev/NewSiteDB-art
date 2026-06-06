@@ -285,6 +285,51 @@
     render();
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // Layer (Z) order — v0.10.65. Stacking is array order: render()
+  // appends rects in state.rects order, so the LAST rect paints on
+  // top (frontmost). The four ops mirror every layers panel:
+  //   to-front = splice to end · forward = swap with next ·
+  //   backward = swap with prev · to-back = splice to front.
+  // No schema change — Z is purely the array position (displayed as
+  // z = index+1, N = count). Selection is preserved across the move.
+  // ────────────────────────────────────────────────────────────────
+  function rectIndex(id) {
+    return state.rects.findIndex(function (r) { return r.id === id; });
+  }
+  function moveRectToTop(id) {        // bring to front (end of array)
+    const i = rectIndex(id);
+    if (i < 0 || i === state.rects.length - 1) return;
+    state.rects.push(state.rects.splice(i, 1)[0]);
+    markDirty();
+    render();
+  }
+  function moveRectToBottom(id) {     // send to back (start of array)
+    const i = rectIndex(id);
+    if (i <= 0) return;
+    state.rects.unshift(state.rects.splice(i, 1)[0]);
+    markDirty();
+    render();
+  }
+  function moveRectUp(id) {           // forward one (toward the front)
+    const i = rectIndex(id);
+    if (i < 0 || i === state.rects.length - 1) return;
+    const t = state.rects[i];
+    state.rects[i] = state.rects[i + 1];
+    state.rects[i + 1] = t;
+    markDirty();
+    render();
+  }
+  function moveRectDown(id) {         // backward one (toward the back)
+    const i = rectIndex(id);
+    if (i <= 0) return;
+    const t = state.rects[i];
+    state.rects[i] = state.rects[i - 1];
+    state.rects[i - 1] = t;
+    markDirty();
+    render();
+  }
+
   function addChapter(name) {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
@@ -1054,7 +1099,7 @@
     }
   }
 
-  function renderRect(rect) {
+  function renderRect(rect, index) {
     const el = document.createElement('div');
     el.className = 'pe-rect pe-rect--' + (rect.kind || 'unknown');
     if (rect.id === selectedId) el.classList.add('is-selected');
@@ -1113,6 +1158,15 @@
     const label = document.createElement('span');
     label.className = 'pe-rect-label';
     label.textContent = rect.kind || '?';
+    // Layer (Z) badge after the kind, so the stacking order is legible
+    // on the canvas without selecting (v0.10.65). z = array index + 1;
+    // the frontmost rect carries the highest number.
+    if (typeof index === 'number') {
+      const zTag = document.createElement('span');
+      zTag.className = 'pe-rect-z';
+      zTag.textContent = 'z' + (index + 1);
+      label.appendChild(zTag);
+    }
     el.appendChild(label);
 
     // Author note — editor-only, visible inside the rect when set.
@@ -1147,8 +1201,8 @@
 
   function render() {
     surface.innerHTML = '';
-    state.rects.forEach(function (r) {
-      surface.appendChild(renderRect(r));
+    state.rects.forEach(function (r, i) {
+      surface.appendChild(renderRect(r, i));
     });
     renderChapters();
     renderSelection();
@@ -1256,6 +1310,42 @@
     kindDim.className = 'pe-dim';
     kindDim.textContent = r.kind;
     body.appendChild(row('Kind', kindDim));
+
+    // Layer (Z) row — "z N / M" + the four standard reorder controls
+    // (v0.10.65). Buttons disable at the ends so the author can't no-op
+    // off the stack. Selection is preserved through each move, and since
+    // a statically-selected rect is no longer force-lifted, the reorder
+    // is immediately visible on the canvas.
+    const zIdx   = rectIndex(r.id);
+    const zTotal = state.rects.length;
+    const layer  = document.createElement('div');
+    layer.className = 'pe-layer-controls';
+    const zText = document.createElement('span');
+    zText.className = 'pe-layer-z';
+    zText.textContent = 'z ' + (zIdx + 1) + ' / ' + zTotal;
+    layer.appendChild(zText);
+    // [icon, title, handler, disabled] — ordered back→front, matching
+    // the request: to bottom · down 1 · up 1 · to top.
+    [
+      ['vertical_align_bottom', 'Send to back',   moveRectToBottom, zIdx <= 0],
+      ['keyboard_arrow_down',   'Send backward',  moveRectDown,     zIdx <= 0],
+      ['keyboard_arrow_up',     'Bring forward',  moveRectUp,       zIdx >= zTotal - 1],
+      ['vertical_align_top',    'Bring to front', moveRectToTop,    zIdx >= zTotal - 1]
+    ].forEach(function (spec) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pe-layer-btn';
+      b.title = spec[1];
+      b.setAttribute('aria-label', spec[1]);
+      b.disabled = spec[3];
+      const ic = document.createElement('span');
+      ic.className = 'material-icons';
+      ic.textContent = spec[0];
+      b.appendChild(ic);
+      b.addEventListener('click', function () { spec[2](r.id); });
+      layer.appendChild(b);
+    });
+    body.appendChild(row('Layer', layer));
 
     // Image binding (step 4b) — only for image-kind rects. Shows the
     // current binding with a thumb + filename and Change/Unbind, or a
