@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.57):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.58):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -629,6 +629,19 @@ from testing the upload slice:
   `endFocusDrag` now clears `is-panning` from *any* element still
   carrying it. The dot keeps only its `pointerdown` (+ a now-non-
   load-bearing `setPointerCapture`).)*
+- *(v0.10.58:* the dot used to **rest at the focal point** (`left:focusX%`
+  / `top:focusY%`). Since v0.10.52 it's a pure grab handle (crop is the
+  feedback), so that placement bought nothing and caused two bugs: it
+  **wandered** to a different spot each pan, and at a centred focal point
+  it sat dead-centre **under the kind label** — invisible (label z:4 > dot
+  z:3) yet still the hit target (label is `pointer-events:none`), so
+  clicking the type secretly started a pan. Now parked at a **fixed spot
+  just outside the rect**, on the edge parallel to the pan axis (x → below
+  bottom-centre, y → outside right-centre), always `is-detached`. Never
+  wanders, never under the label; the relative drag-delta mapping means
+  the handle's position needn't track the focal point. The old size-gated
+  `detached`/attached split (and the `insetX/insetY` clamp) is gone —
+  `TINY_MAX` still drives the separate `is-tiny` chrome lift.)*
 
 **Upload file-type filter (v0.10.56).** The picker's `Upload…` input had
 `accept="image/*"`, which let the OS picker offer `.heic` — then the

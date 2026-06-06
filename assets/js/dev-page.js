@@ -955,8 +955,9 @@
   // the rect outline switches to a "panning" style, with the live image
   // crop as the sole feedback (so the dot can never get stranded outside
   // the rect — Bug: it used to track the pointer to the edge and vanish).
-  // It reappears at the committed focal point on pointerup via render().
-  // Mapping is relative (drag-delta) in both attached and detached cases.
+  // It reappears (at its fixed outside-edge park spot) on pointerup via
+  // render(). Mapping is relative (drag-delta), so the handle's position
+  // need not track the focal point — which is why it can be parked fixed.
 
   function maybeAddFocusDot(el, img, rect, imgRatio) {
     const rw = rect.w | 0, rh = rect.h | 0;
@@ -969,37 +970,32 @@
     // overflows horizontally (pan X); a taller one overflows vertically
     // (pan Y). Exactly one axis overflows in cover mode.
     const axis = imgRatio > rectRatio ? 'x' : 'y';
-    const detached = Math.min(rw, rh) < TINY_MAX;
 
+    // The dot is a FIXED grab handle, not a focal-point readout (since
+    // v0.10.52 the live image crop is the sole feedback). So park it at a
+    // stable spot just OUTSIDE the rect, on the edge parallel to the pan
+    // axis. The old "rest at the focal point" placement caused two
+    // problems the user hit (v0.10.58): the dot wandered to a different
+    // spot every pan, and at a centred focal point it sat dead-centre
+    // UNDER the kind label — invisible (label is z:4, dot z:3) yet still
+    // the hit target (label is pointer-events:none), so clicking the type
+    // secretly started a pan. Parking outside fixes both. is-detached
+    // gives the heavier ring so it reads against the canvas.
     const dot = document.createElement('div');
-    dot.className = 'pe-focus-dot pe-focus-dot--' + axis +
-                    (detached ? ' is-detached' : '');
+    dot.className = 'pe-focus-dot pe-focus-dot--' + axis + ' is-detached';
     dot.title = 'Drag to choose which part of the image shows';
 
-    if (detached) {
-      // Parked just outside the rect, vertically centred on the right
-      // edge. A detached dot means the rect is `is-tiny`, so its kind/id
-      // chrome has been lifted out to the top-left-above zone — parking
-      // the dot on the right keeps the two from colliding. The +17px
-      // clears the dot's own half-width (it's centred on its anchor via
-      // translate(-50%)), so its near edge lands ~8px outside the rect.
+    if (axis === 'x') {
+      // Horizontal pan → handle centred just below the bottom edge; the
+      // user slides it left/right, parallel to that edge. +17px clears the
+      // dot's own half-size (it's centred on its anchor via translate).
+      dot.style.left = '50%';
+      dot.style.top  = 'calc(100% + 17px)';
+    } else {
+      // Vertical pan → handle centred just outside the right edge; slide
+      // it up/down, parallel to that edge.
       dot.style.left = 'calc(100% + 17px)';
       dot.style.top  = '50%';
-    } else {
-      // Attached: rest at the focal point, but inset by the dot's radius
-      // so it never half-clips off an edge at focus 0/100 (which made it
-      // hard to grab again). The non-overflow axis stays centred.
-      const insetX = rw > 0 ? (10 / rw) * 100 : 0;
-      const insetY = rh > 0 ? (10 / rh) * 100 : 0;
-      if (axis === 'x') {
-        const px = Math.max(insetX, Math.min(100 - insetX, clampFocus(rect.focusX)));
-        dot.style.left = px + '%';
-        dot.style.top  = '50%';
-      } else {
-        const py = Math.max(insetY, Math.min(100 - insetY, clampFocus(rect.focusY)));
-        dot.style.left = '50%';
-        dot.style.top  = py + '%';
-      }
     }
 
     dot.addEventListener('pointerdown', function (ev) {
