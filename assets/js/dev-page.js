@@ -120,6 +120,12 @@
   let selectedId = null;
   let drag = null; // { id, pointerId, startX, startY, origX, origY, moved }
   let focusDrag = null; // focal-dot drag (step 4d); independent of `drag`
+  // Objects panel (v0.10.70) — session-only display mode: 'type' groups by
+  // kind, 'z' is one flat list ordered by layer. Not persisted.
+  let objectsSortMode = 'type';
+  // Fixed kind order for the 'type' grouping (mirrors the Add-rect menu);
+  // any unrecognised kind falls to the end.
+  const KIND_ORDER = ['text', 'image', 'drilldown', 'deco-mount'];
 
   // Clamp an image focus coordinate to an integer in [0,100], with a
   // 50 (centred) fallback for missing/garbage input. Used by the
@@ -739,6 +745,23 @@
     placeBtn.addEventListener('click', function () { openImagePicker(null); });
   }
 
+  // OBJECTS panel (v0.10.70) — T = group by type, Z = flat by layer. Mode is
+  // session-only; the buttons just flip it and re-render the list.
+  const objTypeBtn = document.getElementById('objects-sort-type');
+  const objZBtn = document.getElementById('objects-sort-z');
+  if (objTypeBtn) {
+    objTypeBtn.addEventListener('click', function () {
+      objectsSortMode = 'type';
+      renderObjects();
+    });
+  }
+  if (objZBtn) {
+    objZBtn.addEventListener('click', function () {
+      objectsSortMode = 'z';
+      renderObjects();
+    });
+  }
+
   // ────────────────────────────────────────────────────────────────
   // Selection + drag.
   //
@@ -1339,7 +1362,117 @@
     surface.appendChild(renderOverlay());
     renderChapters();
     renderSelection();
+    renderObjects();
     writeStatus();
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // Sidebar: OBJECTS (v0.10.70) — navigation/help list so a rect hidden
+  // behind another (or simply forgotten) stays reachable. Click a row to
+  // select that rect; the selection chrome (move grip + handles) then makes
+  // it actionable even when buried. Two display modes (T = by type, Z = by
+  // layer) chosen by the header buttons. "Name" shown is the NOTE field,
+  // falling back to the id when no note is set (the note exists precisely to
+  // give objects a semantic label).
+  // ────────────────────────────────────────────────────────────────
+  function objectDisplayName(r) {
+    const note = (r.note && typeof r.note === 'string') ? r.note.trim() : '';
+    return note !== '' ? note : (r.id || '?');
+  }
+
+  // One clickable object row: name-or-note on the left, "z N" on the right.
+  function objectRow(r) {
+    const zIdx = rectIndex(r.id);
+    const li = document.createElement('li');
+    li.className = 'pe-object';
+    li.dataset.rectId = r.id;
+    if (r.id === selectedId) li.classList.add('is-current');
+    // Title carries the id even when a note is shown, so hovering a labelled
+    // row still reveals which rect it is.
+    li.title = (objectDisplayName(r) === r.id) ? r.id
+             : (objectDisplayName(r) + '  ·  ' + r.id);
+
+    const name = document.createElement('span');
+    name.className = 'pe-object-name';
+    // No note → show the id but mark it dim/italic so "unlabelled" reads at a
+    // glance and nudges the author to add a note.
+    if (objectDisplayName(r) === r.id) name.classList.add('is-unnamed');
+    name.textContent = objectDisplayName(r);
+
+    const z = document.createElement('span');
+    z.className = 'pe-object-z';
+    z.textContent = 'z' + (zIdx + 1);
+
+    li.appendChild(name);
+    li.appendChild(z);
+    li.addEventListener('click', function () {
+      selectedId = r.id;
+      render();
+    });
+    return li;
+  }
+
+  function renderObjects() {
+    const host = document.getElementById('objects-body');
+    if (!host) return;
+    host.innerHTML = '';
+
+    // Reflect the active mode on the header buttons.
+    const tBtn = document.getElementById('objects-sort-type');
+    const zBtn = document.getElementById('objects-sort-z');
+    if (tBtn) tBtn.classList.toggle('is-active', objectsSortMode === 'type');
+    if (zBtn) zBtn.classList.toggle('is-active', objectsSortMode === 'z');
+
+    if (!state.rects.length) {
+      const empty = document.createElement('div');
+      empty.className = 'pe-empty';
+      empty.textContent = 'No objects yet.';
+      host.appendChild(empty);
+      return;
+    }
+
+    // Descending Z (frontmost first) in both modes — matches a layers
+    // panel: the row at the top is the object on top.
+    const byZDesc = function (a, b) { return rectIndex(b.id) - rectIndex(a.id); };
+
+    if (objectsSortMode === 'z') {
+      const ul = document.createElement('ul');
+      ul.className = 'pe-objects';
+      state.rects.slice().sort(byZDesc).forEach(function (r) {
+        ul.appendChild(objectRow(r));
+      });
+      host.appendChild(ul);
+      return;
+    }
+
+    // Mode 'type': one sublist per kind present, kinds in KIND_ORDER then any
+    // extras alphabetically; within a kind, Z-descending.
+    const kinds = state.rects.map(function (r) { return r.kind || 'unknown'; });
+    const present = [];
+    KIND_ORDER.forEach(function (k) { if (kinds.indexOf(k) >= 0) present.push(k); });
+    kinds.slice().sort().forEach(function (k) {
+      if (KIND_ORDER.indexOf(k) < 0 && present.indexOf(k) < 0) present.push(k);
+    });
+
+    present.forEach(function (kind) {
+      const group = state.rects.filter(function (r) {
+        return (r.kind || 'unknown') === kind;
+      }).sort(byZDesc);
+      if (!group.length) return;
+
+      const sub = document.createElement('div');
+      sub.className = 'pe-objects-group';
+      const head = document.createElement('div');
+      head.className = 'pe-objects-subhead';
+      head.textContent = kind + ' (' + group.length + ')';
+      sub.appendChild(head);
+
+      const ul = document.createElement('ul');
+      ul.className = 'pe-objects';
+      group.forEach(function (r) { ul.appendChild(objectRow(r)); });
+      sub.appendChild(ul);
+      host.appendChild(sub);
+    });
   }
 
   // ────────────────────────────────────────────────────────────────

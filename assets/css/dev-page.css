@@ -698,6 +698,78 @@ button.pe-save.is-flash {
 }
 .pe-input:focus { border-color: var(--pe-palette-accent, #ff5500); outline: none; }
 
+/* OBJECTS panel (v0.10.70) ───────────────────────────────────────
+   A navigation/help list so a rect hidden behind another (or simply
+   forgotten) stays reachable: click a row → select that rect, then the
+   selection chrome (move grip + handles) acts on it even when buried.
+   Two display modes toggled by the T/Z header buttons. Intentionally
+   the LAST sidebar section — a help affordance, not a primary verb. */
+.pe-objects-sort {
+  display: flex;
+  gap: 0.25rem;
+}
+.pe-sort-btn {
+  background: #1b1c20;
+  color: #b0b0b0;
+  border: 1px solid #2c2e33;
+  border-radius: 3px;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.pe-sort-btn:hover { border-color: #3a3d44; color: #d8d8d8; }
+.pe-sort-btn.is-active {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+
+.pe-objects-group { margin-bottom: 0.5rem; }
+.pe-objects-group:last-child { margin-bottom: 0; }
+.pe-objects-subhead {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a8a8a;
+  padding: 0.25rem 0.2rem 0.15rem;
+}
+
+.pe-objects { list-style: none; margin: 0; padding: 0; }
+.pe-object {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.pe-object:hover { background: #232529; }
+.pe-object.is-current {
+  background: color-mix(in srgb, var(--pe-palette-accent, #ff5500) 14%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--pe-palette-accent, #ff5500);
+}
+.pe-object-name {
+  flex: 1;
+  min-width: 0;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-object-name.is-unnamed { color: #888; font-style: italic; }
+.pe-object-z {
+  color: #a8a8a8;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8em;
+  flex-shrink: 0;
+}
+
 .pe-selection-row {
   display: flex;
   /* flush-top, not centred: a row whose value grows taller on demand

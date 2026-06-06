@@ -278,6 +278,25 @@ $payload = json_encode([
       <header class="pe-panel-head"><h3>Selection</h3></header>
       <div id="selection-body"></div>
     </section>
+
+    <!-- OBJECTS — a navigation/help section (last, not a first-class
+         control). Lists every rect so an object fully hidden behind
+         another stays reachable (click a row to select it, then the
+         move grip / handles let you act on it). Two display modes
+         chosen by the flush-right T (by type) / Z (by layer) buttons.
+         "Name" = the rect's NOTE field, falling back to its id. -->
+    <section class="pe-panel" id="objects-panel">
+      <header class="pe-panel-head pe-objects-head">
+        <h3>Objects</h3>
+        <div class="pe-objects-sort" role="group" aria-label="Sort objects">
+          <button type="button" id="objects-sort-type" class="pe-sort-btn"
+                  title="Group by type">T</button>
+          <button type="button" id="objects-sort-z" class="pe-sort-btn"
+                  title="Sort by layer (Z)">Z</button>
+        </div>
+      </header>
+      <div id="objects-body"></div>
+    </section>
   </aside>
 
   <main class="pe-canvas-wrap">

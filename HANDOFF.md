@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.69):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.70):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -870,6 +870,33 @@ above its sibling and you see it move while the overlay stays on top.
   grip on top (`pointer-events:auto`, z:4, 10px above the box top edge); grip-drag
   moved the buried rect (361,173)→(241,233) = exactly the −120/+60 delta, with the
   rect lifted to z 999 during the drag.
+
+**OBJECTS side-panel section (v0.10.70).** A navigation/help affordance — the
+counterpart to the move grip. The grip lets you *act* on a buried rect once
+selected; the OBJECTS list lets you *find and select* a rect that is fully hidden
+behind another (or simply forgotten — you don't know it's there). It's
+deliberately the **last** sidebar section (after Chapters and Selection): a help
+list, not a first-class verb. New `#objects-panel` section in `page.php`; rendered
+by `renderObjects()` in dev-page.js (called from `render()` after
+`renderSelection()`); styled `.pe-objects*` in dev-page.css.
+- *Name shown = the NOTE field*, falling back to the rect id when no note is set
+  (`objectDisplayName(r)`). The note field exists precisely to give objects a
+  semantic label — this is its first read-side payoff. Unnamed rows render the id
+  dim+italic (`.is-unnamed`) so "needs a label" reads at a glance.
+- *Two display modes*, session-only (`objectsSortMode`, not persisted), toggled by
+  two flush-right header buttons labelled **T** / **Z** (`#objects-sort-type`,
+  `#objects-sort-z`), active state in accent. **T** = grouped by kind
+  (`KIND_ORDER = [text, image, drilldown, deco-mount]`, unknown kinds appended
+  alphabetically; only non-empty groups shown; a `kind (N)` subhead per group).
+  **Z** = one flat list. Both sort **Z-descending (frontmost first)** like a
+  layers panel — the top row is the object on top.
+- Each row: name-or-id (left, ellipsis-truncated) + `z<N>` (right, where N =
+  `rectIndex(id)+1`). Click → `selectedId = id; render()`; the selected row gets
+  `.is-current` (accent tint + inset bar, same treatment as the chapters list).
+- Verified on live preview (home: drilldown r-djeyos3m unnamed→id z1; deco-mount
+  r-ocmv55ac note "mounto - deco" z2): T mode shows both kind groups in order; Z
+  mode shows the flat z2→z1 list; clicking a row selects the rect and highlights
+  the row.
 
 ## What this project is
 
