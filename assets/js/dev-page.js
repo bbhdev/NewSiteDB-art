@@ -1306,30 +1306,36 @@
     idDim.textContent = r.id;
     body.appendChild(row('ID', idDim));
 
+    // Kind row — the kind, plus the "z N / M" stacking readout trailing
+    // it (per "show Z after the rect type"). Keeping the readout here frees
+    // the Layer row to hold its four buttons on a single line.
+    const zIdx   = rectIndex(r.id);
+    const zTotal = state.rects.length;
     const kindDim = document.createElement('span');
     kindDim.className = 'pe-dim';
     kindDim.textContent = r.kind;
+    const zText = document.createElement('span');
+    zText.className = 'pe-kind-z';
+    zText.textContent = 'z ' + (zIdx + 1) + ' / ' + zTotal;
+    kindDim.appendChild(zText);
     body.appendChild(row('Kind', kindDim));
 
-    // Layer (Z) row — "z N / M" + the four standard reorder controls
-    // (v0.10.65). Buttons disable at the ends so the author can't no-op
-    // off the stack. Selection is preserved through each move, and since
-    // a statically-selected rect is no longer force-lifted, the reorder
-    // is immediately visible on the canvas.
-    const zIdx   = rectIndex(r.id);
-    const zTotal = state.rects.length;
+    // Layer (Z) row — the four standard reorder controls (v0.10.65).
+    // Buttons disable at the ends so the author can't no-op off the stack.
+    // Selection is preserved through each move, and since a statically-
+    // selected rect is no longer force-lifted, the reorder is immediately
+    // visible on the canvas.
     const layer  = document.createElement('div');
     layer.className = 'pe-layer-controls';
-    const zText = document.createElement('span');
-    zText.className = 'pe-layer-z';
-    zText.textContent = 'z ' + (zIdx + 1) + ' / ' + zTotal;
-    layer.appendChild(zText);
     // [icon, title, handler, disabled] — ordered back→front, matching
-    // the request: to bottom · down 1 · up 1 · to top.
+    // the request: to bottom · down 1 · up 1 · to top. Single-step moves
+    // use plain directional arrows (arrow_up/downward) rather than chevrons,
+    // which read as a dropdown/disclosure caret; the to-end moves keep the
+    // arrow-to-a-bar glyphs (vertical_align_*).
     [
       ['vertical_align_bottom', 'Send to back',   moveRectToBottom, zIdx <= 0],
-      ['keyboard_arrow_down',   'Send backward',  moveRectDown,     zIdx <= 0],
-      ['keyboard_arrow_up',     'Bring forward',  moveRectUp,       zIdx >= zTotal - 1],
+      ['arrow_downward',        'Send backward',  moveRectDown,     zIdx <= 0],
+      ['arrow_upward',          'Bring forward',  moveRectUp,       zIdx >= zTotal - 1],
       ['vertical_align_top',    'Bring to front', moveRectToTop,    zIdx >= zTotal - 1]
     ].forEach(function (spec) {
       const b = document.createElement('button');

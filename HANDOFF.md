@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.65):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.66):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -741,12 +741,15 @@ and edits that order; no schema change (pure array splice).
 - *Canvas z badge.* Each rect's kind label carries a trailing `zN`
   (`.pe-rect-z`), N = index+1; frontmost rect = end of array = highest.
   `renderRect(rect, index)` computes it; `render()` passes the index.
-- *Selection "Layer" row.* Shows `z N / M` + four reorder buttons
-  (`.pe-layer-btn`, 1.9rem chips, 20px Material Icon glyphs):
-  `vertical_align_bottom` send-to-back, `keyboard_arrow_down` backward,
-  `keyboard_arrow_up` forward, `vertical_align_top` to-front. Endpoint
-  buttons disable at the extremes. Reorder → `markDirty()` + `render()`,
-  selection preserved.
+- *Selection "Layer" row.* Four reorder buttons (`.pe-layer-btn`, 1.9rem
+  chips, 20px Material Icon glyphs), one line, no wrap:
+  `vertical_align_bottom` send-to-back, `arrow_downward` backward,
+  `arrow_upward` forward, `vertical_align_top` to-front. Single-step moves
+  use plain directional arrows, NOT `keyboard_arrow_*` chevrons (those read
+  as a dropdown/disclosure caret — v0.10.66 fix). Endpoint buttons disable
+  at the extremes. Reorder → `markDirty()` + `render()`, selection preserved.
+  The `z N / M` readout sits on the **Kind** row (`.pe-kind-z`), trailing the
+  kind — this frees the Layer row's width so the four buttons fit one line.
 - *Reorder helpers* after `deleteRect`: `rectIndex(id)` +
   `moveRectToTop/Bottom/Up/Down`, each splice/swap on `state.rects`.
 - *Selection-lift conflict.* `.is-selected` no longer raises z-index

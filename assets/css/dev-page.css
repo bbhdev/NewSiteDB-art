@@ -87,6 +87,13 @@ body.page-editor {
   align-items: center;
   gap: 0.5rem;
 }
+/* The create cluster keeps its natural width and never shrinks — its
+   buttons must stay one-line (see white-space:nowrap below). The view
+   cluster yields width (shrinks) but never grows, so the spacer alone
+   pushes the version to the right; when the bar gets crowded the status
+   text (and only the status text) shrinks and wraps. */
+.pe-tools { flex: 0 0 auto; }
+.pe-view  { flex: 0 1 auto; min-width: 0; }
 
 .pe-spacer { flex: 1; }
 
@@ -99,6 +106,10 @@ button.pe-save {
   padding: 0.3rem 0.75rem;
   font: inherit;
   cursor: pointer;
+  /* A button label must never wrap, and the button must not be squeezed
+     by a greedy neighbour (the status text) — keep it rigid. */
+  white-space: nowrap;
+  flex: 0 0 auto;
   transition: background 0.15s ease, border-color 0.15s ease,
               box-shadow 0.15s ease;
 }
@@ -141,6 +152,11 @@ button.pe-save.is-flash {
   color: #b0b0b0;
   font-variant-numeric: tabular-nums;
   margin-left: 0.5rem;
+  /* Shrinkable (not growable): it keeps its natural width when there's
+     room and only wraps when the bar gets crowded, so the rigid buttons
+     never have to. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* Body grid: sidebar + canvas. ──────────────────────────────── */
@@ -661,12 +677,16 @@ button.pe-save.is-flash {
   align-items: center;
   gap: 0.3rem;
   flex: 1;
-  flex-wrap: wrap;
+  /* Four icon buttons fit the selection-row value column on one line —
+     do NOT wrap. The "z N / M" readout moved to the Kind row to free the
+     width (see .pe-kind-z), so this row carries the buttons only. */
 }
-.pe-layer-z {
+/* "z N / M" readout, shown trailing the kind on the Kind row. */
+.pe-kind-z {
   font-variant-numeric: tabular-nums;
-  color: #c8c8c8;
-  margin-right: 0.15rem;
+  color: #9a9a9a;
+  margin-left: 0.5em;
+  font-weight: 600;
   white-space: nowrap;
 }
 .pe-layer-btn {
