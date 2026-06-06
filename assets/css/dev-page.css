@@ -439,6 +439,37 @@ button.pe-save.is-flash {
   z-index: 1;
 }
 
+/* Slice T2: inline edit mode. The node becomes contenteditable, so it must
+   opt BACK IN to pointer events (base is none) and text selection (the
+   parent .pe-rect is user-select:none) — otherwise clicks won't place a
+   caret and the caret can't be dragged to select. cursor:text signals
+   editability; the dashed accent ring + caret-color make the active editor
+   obvious over the rect's kind background. min-height gives an empty rect a
+   clickable caret target. overflow:auto so the author can reach text taller
+   than the rect while editing (the static node clips). z above the chrome. */
+.pe-rect-text.is-editing {
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  overflow: auto;
+  min-height: 1.4em;
+  z-index: 5;
+  outline: 1.5px dashed var(--pe-palette-accent, #ff5500);
+  outline-offset: 2px;
+  caret-color: var(--pe-palette-accent, #ff5500);
+}
+
+/* Slice T2: small helper hint under a panel field (e.g. "double-click to
+   edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */
+.pe-field-hint {
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  font-style: italic;
+  line-height: 1.35;
+  color: #9aa3ad;
+}
+
 /* Slice T1: the side-panel text editor. A comfortable fixed-size editing
    field (deliberately NOT the rect's typography face — see the JS note);
    vertical resize only so the author can grow it without breaking the

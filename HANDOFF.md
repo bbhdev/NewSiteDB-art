@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.83):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.84):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -52,9 +52,13 @@ Slice 3a / 3b entries below.
 **Slice T1 (plain-text content on text rects, v0.10.82) landed** —
 text rects now carry author-entered body copy (textarea-first), styled
 by their typography token, rendered on both editor canvas and runtime.
-See the Slice T1 entry below. A **rich/fine-grained text-styling
-discussion is PARKED** (prepared-styles model — see the ⏸ callout near
-the Slice T1 entry).
+See the Slice T1 entry below. **Slice T2 (inline on-canvas text
+editing, v0.10.84) landed** — double-click a text rect to edit its
+body copy directly on the canvas (`contenteditable="plaintext-only"`);
+the side-panel textarea remains as a secondary surface. This is the
+tablet-first-class editing path (double-tap on touch). See the Slice T2
+entry below. A **rich/fine-grained text-styling discussion is PARKED**
+(prepared-styles model — see the ⏸ callout near the Slice T1 entry).
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -1205,10 +1209,47 @@ all additive within schema **v3 (NO bump — `typographyId` precedent)**:
   the child beats the inherited token face (the weakest cascade layer). The
   runtime never had this problem — when text is present it replaces the stub
   chrome entirely, so nothing UI inherits over content.
-- *Deferred (named):* **T2** inline on-canvas editing (contenteditable /
-  WYSIWYG — this is the tablet-first-class editing path); **T3** overflow /
+- *Deferred (named):* ~~T2~~ (landed v0.10.84, see below); **T3** overflow /
   vertical-alignment options. Rich inline styled runs are now superseded by
   the parked discussion below.
+
+**Slice T2 — inline on-canvas text editing (v0.10.84).** The
+tablet-first-class editing path: edit a text rect's body copy *directly on
+the canvas* instead of (only) in the side panel. **Double-click** a text
+rect (double-tap on touch) to enter edit mode; the rect's `.pe-rect-text`
+node becomes `contenteditable="plaintext-only"` (WebKit/Blink-native
+plain-text editor — strips paste formatting, newlines round-trip through
+`textContent` under `white-space: pre-wrap`, native iPad WebKit support). The
+T1 side-panel textarea is retained as a secondary surface; a `.pe-field-hint`
+under it advertises the canvas gesture.
+- *State:* one module-level `editingId` (alongside `selectedId`). `renderRect`
+  marks the rect editable when `rect.id === editingId`, attaching the
+  contenteditable, an Escape/⌘↵ keydown handler, and a blur handler.
+- *Helpers:* `enterEditMode(id)` (clears any drag, selects + sets `editingId`,
+  `render()`, then `focusEditable()`); `commitEdit(doRender)` (reads the live
+  `.pe-rect-text.is-editing` `textContent`, applies the same null/5000-cap
+  discipline as `setRectText`, clears `editingId`); `cancelEdit()` (drops
+  `editingId`, re-renders → reverts to last-committed text); `focusEditable()`
+  (re-focuses the live editable after each `render()` — called at the end of
+  `render()`) and `placeCaretEnd(el)`.
+- *Gesture de-confliction* (the crux — single-click must still select/drag):
+  (1) **double-click**, not click, enters edit, so single-click drag is
+  untouched; (2) the `pointerdown` handler bails early if the target is inside
+  the live editable (lets the caret land), otherwise `commitEdit(false)` and
+  proceeds — so clicking away commits; (3) `renderOverlay()` early-returns
+  while `editingId != null`, suppressing the move grip + resize handles so they
+  can't intercept caret clicks; (4) `deleteRect` clears `editingId` if it
+  deletes the rect being edited. The pre-existing global keydown handler
+  already bails on `isContentEditable`, so Backspace/Escape/⌘S don't fight the
+  inline editor.
+- *Commit/cancel:* blur → commit; ⌘↵ (or Ctrl-Enter) → commit; Escape →
+  cancel (revert). Plain Enter inserts a newline (plaintext-only).
+- *Verified (preview MCP, v0.10.84):* double-click → focused editable with
+  caret, overlay handles gone, newlines preserved; ⌘↵ commits + marks dirty;
+  Escape reverts; click-away commits; Save → reload round-trips the
+  inline-edited text (with `\n`) to disk; no console errors. Schema unchanged
+  (still writes 3) — T2 is pure editor UX over the T1 `text` field, no save-
+  route change.
 
 > **⏸ Parked discussion — rich / fine-grained text styling (NOT started).**
 > Raised by the user alongside T1 approval, explicitly "to be planned for a

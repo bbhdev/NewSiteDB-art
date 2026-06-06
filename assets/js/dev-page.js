@@ -131,6 +131,11 @@
   // Step-2-local UI state: which rect is currently selected (or
   // null), and the active pointer drag if any.
   let selectedId = null;
+  // Slice T2: id of the text rect currently in inline on-canvas edit mode
+  // (its .pe-rect-text becomes contenteditable). null = nobody editing.
+  // Separate from selectedId: a rect is selected first, then double-clicked
+  // to enter editing; exiting editing keeps it selected.
+  let editingId = null;
   let drag = null; // { id, pointerId, startX, startY, origX, origY, moved }
   let focusDrag = null; // focal-dot drag (step 4d); independent of `drag`
   // Objects panel (v0.10.70) — session-only display mode: 'type' groups by
@@ -300,6 +305,7 @@
     if (i < 0) return;
     state.rects.splice(i, 1);
     if (selectedId === id) selectedId = null;
+    if (editingId === id)  editingId  = null; // T2: drop a dangling edit
     markDirty();
     render();
   }
@@ -510,6 +516,82 @@
     if ((r.text || null) === next) return;
     r.text = next;
     markDirty();
+    render();
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // Slice T2: inline on-canvas text editing. Double-click a text rect
+  // → its .pe-rect-text becomes contenteditable="plaintext-only" (a
+  // WebKit/Blink-native plain-text editor: strips paste formatting,
+  // and newlines round-trip through textContent with white-space:pre-
+  // wrap). The author edits in the rect's actual typography face —
+  // true WYSIWYG, and the touch-friendly path for the future tablet
+  // layer (double-tap to edit). The side-panel textarea (T1) stays as
+  // the secondary surface for long copy.
+  // ────────────────────────────────────────────────────────────────
+
+  // Move the caret to the end of a contenteditable element.
+  function placeCaretEnd(el) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) { /* selection API unavailable — focus alone is fine */ }
+  }
+
+  // Re-focus the live editable after a render() rebuilt the DOM. No-op
+  // if it's already focused (so a stray render mid-edit doesn't reset
+  // the caret); only re-seats focus + caret when the element is new.
+  function focusEditable() {
+    if (editingId == null) return;
+    const elx = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!elx) return;
+    if (document.activeElement !== elx) {
+      elx.focus();
+      placeCaretEnd(elx);
+    }
+  }
+
+  function enterEditMode(rectId) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r || r.kind !== 'text') return;
+    // Cancel any in-flight drag from the double-click's pointerdowns so a
+    // stray pointerup can't move the rect after we enter edit mode.
+    drag = null;
+    selectedId = rectId;
+    editingId  = rectId;
+    render();          // rebuilds the rect with a contenteditable text node
+    focusEditable();   // then seats focus + caret (caret at end)
+  }
+
+  // Commit the live editable's text into state. Reads textContent (never
+  // innerHTML — no markup is honoured at this slice), applies the same
+  // null/cap discipline as setRectText, but WITHOUT its own render so the
+  // caller controls when the DOM rebuilds (avoids a double render and a
+  // focus/caret jump). Pass doRender=true to redraw immediately.
+  function commitEdit(doRender) {
+    if (editingId == null) return;
+    const id  = editingId;
+    const elx = surface && surface.querySelector('.pe-rect-text.is-editing');
+    const raw = elx ? String(elx.textContent || '') : '';
+    editingId = null;
+    const r = state.rects.find(function (x) { return x.id === id; });
+    if (r) {
+      const next = raw.trim() === '' ? null : raw.slice(0, 5000);
+      if ((r.text || null) !== next) { r.text = next; markDirty(); }
+    }
+    if (doRender) render();
+  }
+
+  // Abandon the edit without saving (Escape). The on-disk/in-memory text
+  // is untouched; render() drops the contenteditable + restores the
+  // normal display node (or the stub if empty).
+  function cancelEdit() {
+    if (editingId == null) return;
+    editingId = null;
     render();
   }
 
@@ -844,6 +926,19 @@
   const MIN_SIZE = 20;
 
   surface.addEventListener('pointerdown', function (ev) {
+    // Slice T2: inline-edit interception. If a rect is being edited and
+    // the pointer landed INSIDE its editable text node, do nothing here —
+    // no selection, no drag, no preventDefault — so the browser handles
+    // caret placement / text selection natively. Any pointerdown OUTSIDE
+    // the editable commits the edit first (synchronously, no render — the
+    // logic below renders), then proceeds to select/drag the new target.
+    if (editingId != null) {
+      if (ev.target.closest && ev.target.closest('.pe-rect-text.is-editing')) {
+        return;
+      }
+      commitEdit(false);
+    }
+
     // Resize-handle hit takes priority over rect-body hit. The handle
     // is a child of the selected rect, so the rectEl walk would also
     // find the parent rect — but we need to know the handle direction.
@@ -937,6 +1032,23 @@
     // source of truth is simpler.
     render();
     ev.preventDefault();
+  });
+
+  // Slice T2: double-click a text rect → enter inline edit mode. Single
+  // click still selects/drags (handled above); double-click is the
+  // distinct, conflict-free gesture to start editing (double-tap on the
+  // future tablet layer). Non-text rects ignore it. If the dblclick
+  // landed on an already-active editor, leave it alone (let the browser's
+  // native double-click word-select run).
+  surface.addEventListener('dblclick', function (ev) {
+    if (ev.target.closest && ev.target.closest('.pe-rect-text.is-editing')) return;
+    const rectEl = findRectElement(ev.target);
+    if (!rectEl) return;
+    const id = rectEl.dataset.rectId;
+    const r  = state.rects.find(function (x) { return x.id === id; });
+    if (!r || r.kind !== 'text') return;
+    ev.preventDefault();
+    enterEditMode(id);
   });
 
   document.addEventListener('pointermove', function (ev) {
@@ -1294,17 +1406,45 @@
       el.appendChild(note);
     }
 
-    // Slice T1: real text content for a text rect, rendered behind the
+    // Slice T1/T2: real text content for a text rect, rendered behind the
     // editor chrome (kind/z badge + note + id) so the author sees the
     // actual copy on the canvas, in the rect's typography face (the
     // .ty-<id> class on `el` cascades to this child). Whitespace +
     // newlines are preserved via CSS white-space:pre-wrap. textContent
-    // (never innerHTML) — no markup is interpreted at this slice. Empty
-    // text → no node; the kind stub label stands in, same as before.
-    if (rect.kind === 'text' && rect.text) {
+    // (never innerHTML) — no markup is interpreted at this slice.
+    //
+    // The node renders when the rect has text OR is being inline-edited
+    // (T2) — an empty rect under edit still needs a caret target. In
+    // edit mode it's contenteditable="plaintext-only" with blur/Escape/
+    // Cmd-Enter handlers; otherwise it's a static, click-through display
+    // node and the empty rect falls back to its kind stub.
+    const isEditingThis = (rect.kind === 'text' && rect.id === editingId);
+    if (rect.kind === 'text' && (rect.text || isEditingThis)) {
       const txt = document.createElement('div');
       txt.className = 'pe-rect-text';
-      txt.textContent = rect.text;
+      txt.textContent = rect.text || '';
+      if (isEditingThis) {
+        txt.classList.add('is-editing');
+        // plaintext-only: WebKit/Blink strip paste formatting + keep the
+        // content as plain text with real newlines (textContent captures
+        // them). Spellcheck off — this is design copy, not prose review.
+        txt.contentEditable = 'plaintext-only';
+        txt.spellcheck = false;
+        txt.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            cancelEdit();
+          } else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+            // Plain Enter inserts a newline (native, plaintext-only);
+            // Cmd/Ctrl+Enter commits — mirrors the T1 textarea contract.
+            ev.preventDefault();
+            commitEdit(true);
+          }
+        });
+        // Clicking away (another rect, the panel, empty canvas) commits.
+        txt.addEventListener('blur', function () { commitEdit(true); });
+      }
       el.appendChild(txt);
       el.classList.add('has-text');
     }
@@ -1331,6 +1471,12 @@
   function renderOverlay() {
     const ov = document.createElement('div');
     ov.className = 'pe-overlay';
+    // Slice T2: while inline-editing, suppress the selection chrome entirely.
+    // Its move grip + resize handles (pointer-events:auto, at the z ceiling)
+    // would otherwise sit over the editable and steal caret clicks near the
+    // corners/edges. The dashed is-editing ring is the affordance during
+    // editing; the box returns on commit/cancel (next render).
+    if (editingId != null) return ov;
     const r = selectedId &&
               state.rects.find(function (x) { return x.id === selectedId; });
     if (!r) return ov; // nothing selected → empty, fully click-through
@@ -1430,6 +1576,11 @@
     renderSelection();
     renderObjects();
     writeStatus();
+    // Slice T2: if an inline edit is active, re-seat focus + caret on the
+    // freshly-rebuilt editable (render() replaces the whole surface). No-op
+    // when it's already focused, so a stray render mid-edit doesn't jump
+    // the caret — only a render that destroyed+recreated the node re-focuses.
+    focusEditable();
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -1889,6 +2040,13 @@
         setRectText(r.id, textArea.value);
       });
       body.appendChild(row('Text', textArea));
+
+      // Slice T2: discoverability hint for inline on-canvas editing. The
+      // double-click gesture is invisible otherwise; this points to it.
+      const hint = document.createElement('div');
+      hint.className = 'pe-field-hint';
+      hint.textContent = 'Tip: double-click the rect to edit on the canvas (Esc cancels, ⌘↵ commits).';
+      body.appendChild(hint);
     }
 
     // Geometry — four small numeric inputs (x / y / w / h). Tab
