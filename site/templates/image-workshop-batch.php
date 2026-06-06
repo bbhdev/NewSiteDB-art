@@ -249,7 +249,7 @@ foreach ($images as $img) {
                  card's data-verdict) and sits immediately right of OK. -->
             <div class="iw-verdict" role="group" aria-label="Verdict for <?= esc($img->filename()) ?>">
               <button type="button" class="iw-vbtn iw-vbtn--ok"      data-verdict="ok"<?=      $verdict === 'ok'      ? ' aria-pressed="true"' : '' ?>>OK</button>
-              <button type="button" class="iw-use" aria-haspopup="true" aria-expanded="false" title="Send the resized image to a page">Use this</button>
+              <button type="button" class="iw-use" aria-haspopup="true" aria-expanded="false" title="Send the resized image to a page">Use it</button>
               <button type="button" class="iw-vbtn iw-vbtn--rework"  data-verdict="rework"<?=  $verdict === 'rework'  ? ' aria-pressed="true"' : '' ?>>Rework</button>
               <button type="button" class="iw-vbtn iw-vbtn--dropped" data-verdict="dropped"<?= $verdict === 'dropped' ? ' aria-pressed="true"' : '' ?>>Dropped</button>
             </div>
