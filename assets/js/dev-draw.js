@@ -12475,6 +12475,103 @@
     }
   }
 
+  // "View in panel" — a modal that renders every token as real paragraphs
+  // (not the one-line side-panel sample), inside a column the width of a
+  // page text block, so the author can judge a font in actual body text.
+  // Uses the live client CSS (#ed-typography-css-live), so it reflects
+  // unsaved edits too. Mirrors the app's standard .ed-modal pattern
+  // (overlay + header + close, Esc / click-outside to dismiss).
+  const TYPO_PREVIEW_PARAGRAPH =
+    'The quick brown fox jumps over the lazy dog while five wizards juggle ' +
+    'antique vexed quartz. Sphinx of black quartz, judge my vow — pack my ' +
+    'box with a dozen liquor jugs. Good typography is invisible: it sets the ' +
+    'rhythm of a page, guiding the eye from line to line without calling ' +
+    'attention to itself. 0123456789 — “Curly quotes,” em-dashes, & ampersands.';
+  const TYPO_PREVIEW_HEADING = 'A Page Begins With a Single Line';
+
+  function showTypographyPreview() {
+    rebuildTypographyClientCss();
+    const tokens = Array.isArray(state.typography) ? state.typography : [];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'ed-modal-overlay ed-typo-pv-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'ed-modal ed-typo-pv-modal';
+
+    const head = document.createElement('div');
+    head.className = 'ed-modal-header';
+    const t = document.createElement('h3');
+    t.textContent = 'Typography preview';
+    head.appendChild(t);
+    const x = document.createElement('button');
+    x.className = 'ed-modal-close';
+    x.textContent = '×';
+    x.addEventListener('click', cleanup);
+    head.appendChild(x);
+    modal.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'ed-modal-body ed-typo-pv-body';
+
+    if (!tokens.length) {
+      const empty = document.createElement('p');
+      empty.className = 'ed-typo-empty';
+      empty.textContent = 'No typography tokens to preview yet.';
+      body.appendChild(empty);
+    } else {
+      tokens.forEach(function (tok) {
+        const block = document.createElement('section');
+        block.className = 'ed-typo-pv-block';
+
+        const cap = document.createElement('div');
+        cap.className = 'ed-typo-pv-cap';
+        const nm = document.createElement('span');
+        nm.className = 'ed-typo-pv-cap-name';
+        nm.textContent = tok.name || tok.id;
+        const chip = document.createElement('code');
+        chip.className = 'ed-typo-id';
+        chip.textContent = 'ty-' + tok.id;
+        const spec = document.createElement('span');
+        spec.className = 'ed-typo-pv-cap-spec';
+        spec.textContent = typoSpecLine(tok);
+        cap.appendChild(nm);
+        cap.appendChild(chip);
+        cap.appendChild(spec);
+
+        // The actual specimen — a short heading line + a full paragraph,
+        // both in this token's style, inside a text-column-width box.
+        const specimen = document.createElement('div');
+        specimen.className = 'ed-typo-pv-specimen ty-' + tok.id;
+        const h = document.createElement('div');
+        h.className = 'ed-typo-pv-h';
+        h.textContent = TYPO_PREVIEW_HEADING;
+        const p = document.createElement('p');
+        p.className = 'ed-typo-pv-p';
+        p.textContent = TYPO_PREVIEW_PARAGRAPH;
+        specimen.appendChild(h);
+        specimen.appendChild(p);
+
+        block.appendChild(cap);
+        block.appendChild(specimen);
+        body.appendChild(block);
+      });
+    }
+    modal.appendChild(body);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function cleanup() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') cleanup(); }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cleanup();
+    });
+  }
+
   // Track which line id we last scrolled the panel-into-view for.
   // Edit-driven re-renders (trigger flips, scope flips, etc.) hit
   // renderSelectionPanel without selection change; skip the
@@ -16030,6 +16127,10 @@
   const saveTypographyBtn = document.getElementById('save-typography-btn');
   if (saveTypographyBtn) {
     saveTypographyBtn.addEventListener('click', function () { saveTypography(saveTypographyBtn); });
+  }
+  const viewTypoBtn = document.getElementById('view-typo-btn');
+  if (viewTypoBtn) {
+    viewTypoBtn.addEventListener('click', showTypographyPreview);
   }
   saveBtn.addEventListener('click', save);
   clearLinesBtn.addEventListener('click', clearAllLines);

@@ -40,11 +40,12 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.77):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.78):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
-— read-only list + `dev/draw/typography` save round-trip) and 3b-2
-(create / rename / delete tokens) landed — see the Slice 3a / 3b
+— read-only list + `dev/draw/typography` save round-trip), 3b-2
+(create / rename / delete tokens), and a 3b-2 follow-up "View in panel"
+token preview modal (v0.10.78) landed — see the Slice 3a / 3b
 entries below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
@@ -1063,6 +1064,40 @@ Adds the mutation verbs to the 3b-1 panel. No new route — reuses
   weight / lineHeight / letterSpacing / italic field editing — driving
   `rebuildTypographyClientCss` live). Then priority #3 (real text content).
 
+**Slice 3b-2 follow-up — "View in panel" token preview modal (v0.10.78).**
+A small addition requested after 3b-2 validated: the side-panel rows show each
+token as a one-line sample, which isn't enough to judge a font as body text.
+- *Trigger.* A `View in panel` button (`#view-typo-btn`, `.ed-typo-view-btn`)
+  below `#typography-list` → `showTypographyPreview()`.
+- *Modal.* Lightweight `.ed-modal-overlay` / `.ed-modal` pattern (not a
+  PanelManager dock) — `.ed-typo-pv-overlay` + `.ed-modal.ed-typo-pv-modal`.
+  One `.ed-typo-pv-block` per token: a UI-font caption bar
+  (`.ed-typo-pv-cap` — name + id chip + spec line) above a styled specimen
+  (`.ed-typo-pv-specimen ty-<id>`) containing a heading line
+  (`TYPO_PREVIEW_HEADING`) + a full paragraph (`TYPO_PREVIEW_PARAGRAPH`,
+  pangram + digits + punctuation). The whole specimen carries the token's
+  `.ty-<id>` class, so heading AND paragraph render in that token's actual
+  style — a 48px heading token shows big text, an 18px body token shows
+  real page text. Reads the **live** client CSS, so unsaved edits preview.
+- *Dismiss.* Esc + click-outside, both via a `cleanup()` that removes the
+  overlay and the keydown listener. Verified working.
+- *Two CSS gotchas hit + fixed (worth remembering):*
+  1. **em on a styled element.** `.ed-typo-pv-specimen` first used
+     `max-width: 38em` for the reading column — but the element carries the
+     token's own font-size (48px for a heading token), so `38em` resolved to
+     ~1824px and blew the column out. Fixed to `max-width: 620px`. Lesson:
+     any length in `em`/`%` on an element whose font-size is itself the thing
+     under test resolves against that font-size — use px/rem for a constant
+     measure. (Same family of trap as the descendant-selector footgun.)
+  2. **base `.ed-modal` wins at equal specificity.** `.ed-typo-pv-modal`
+     (single class, defined ~line 2630) lost to the base `.ed-modal`
+     (`max-width:30rem; width:90%`, defined ~line 2789, later in source).
+     Fixed by doubling specificity to `.ed-modal.ed-typo-pv-modal` — the
+     same trick the codebase already uses for `.ed-modal.ed-overview-panel`
+     (see the comment near line 1741).
+- *Constants* live at the top of the typography block in `dev-draw.js`
+  (`TYPO_PREVIEW_HEADING`, `TYPO_PREVIEW_PARAGRAPH`).
+
 ## What this project is
 
 A Kirby-based site where the visual identity is a layer of animated SVG line
@@ -1766,7 +1801,9 @@ absolute coordinates.
    **3b-1 DONE (v0.10.76)**: read-only panel + `dev/draw/typography`
    save round-trip. **3b-2 DONE (v0.10.77)**: create / rename / delete
    tokens (stable-id discipline + live previews — see the 3b-2 entry
-   above). **3b-3 PENDING**: family picker + field editing.
+   above). **3b-2 follow-up DONE (v0.10.78)**: "View in panel" preview
+   modal (each token as heading + full paragraph). **3b-3 PENDING**:
+   family picker + field editing.
 4. **Slice 4 — Deco bootstrapper + htmlKey slots** (shared artifacts
    #2 + #3). `deco-mount` rects render as `<div data-deco="…">`;
    JS bootstrapper mounts the Deco runtime per rect against the

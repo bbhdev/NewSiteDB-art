@@ -304,6 +304,8 @@ $payload = json_encode([
         </span>
       </header>
       <ul id="typography-list" class="ed-typo-list"></ul>
+      <button type="button" id="view-typo-btn" class="ed-mini ed-typo-view-btn"
+              title="Preview every token as real paragraphs">View in panel</button>
     </section>
 
   </aside>

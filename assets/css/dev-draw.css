@@ -2687,6 +2687,51 @@ body.editor input[type="range"] {
   font-size: 0.68rem; line-height: 1.3; font-weight: 400;
   color: #8a9099; margin-top: 0.25rem;
 }
+.ed-typo-view-btn { margin-top: 0.5rem; width: 100%; }
+
+/* ── typography preview modal ("View in panel") ──────────────────────
+   Renders each token as a real text column (heading line + paragraph) so
+   a font can be judged in body text, not just a one-line sample. */
+/* Double the class specificity (.ed-modal.ed-typo-pv-modal) to beat the
+   base `.ed-modal` rule, which lives further down the cascade with equal
+   single-class specificity (same trick as .ed-modal.ed-overview-panel). */
+.ed-modal.ed-typo-pv-modal {
+  width: 92vw;
+  max-width: 880px;
+  max-height: 88vh;
+  display: flex; flex-direction: column;
+}
+.ed-typo-pv-body {
+  overflow-y: auto;
+  /* Page-like reading surface so the specimen reads as real page text. */
+  background: #f7f6f3;
+  padding: 0;
+}
+.ed-typo-pv-block { border-bottom: 1px solid #e2ded6; }
+.ed-typo-pv-block:last-child { border-bottom: 0; }
+.ed-typo-pv-cap {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.5rem;
+  padding: 0.5rem 1.5rem; background: #ecebe6;
+  border-bottom: 1px solid #e2ded6;
+  /* Caption stays in the UI font regardless of the specimen styling. */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.ed-typo-pv-cap-name { font-weight: 700; font-size: 0.85rem; color: #2a2d33; }
+.ed-typo-pv-cap .ed-typo-id { color: #6a7079; background: #fff; border-color: #d4d0c8; }
+.ed-typo-pv-cap-spec { font-size: 0.7rem; color: #8a8378; margin-left: auto; }
+.ed-typo-pv-specimen {
+  /* The styled column. Default color dark-on-light like a real page;
+     the token's .ty-<id> rule supplies font-family/size/weight/etc.
+     ⚠ Column width is in px, NOT em: this element carries the token's own
+     font-size (e.g. 48px for a heading token), so `38em` would resolve
+     against THAT and blow the column out to ~1824px. px keeps the reading
+     measure constant regardless of the token's size. */
+  color: #1b1d21;
+  padding: 1.1rem 1.5rem 1.4rem;
+  max-width: 620px;
+}
+.ed-typo-pv-h { margin: 0 0 0.4em; }
+.ed-typo-pv-p { margin: 0; }
 
 /* ── color picker (swatches) in group/line panels ────────────────── */
 .ed-color-picker {
