@@ -793,6 +793,29 @@
   });
 
   document.addEventListener('pointermove', function (ev) {
+    // Focal-dot pan (independent of `drag`). Handled here, not on the dot,
+    // so capture loss can't strand the gesture (v0.10.57).
+    if (focusDrag && ev.pointerId === focusDrag.pointerId) {
+      const r = state.rects.find(function (x) { return x.id === focusDrag.rectId; });
+      if (r) {
+        const cur = focusDrag.axis === 'x' ? ev.clientX : ev.clientY;
+        const f = clampFocus(
+          focusDrag.startFocus + (cur - focusDrag.startClient) / focusDrag.range * 100
+        );
+        if (f !== focusDrag.startFocus) focusDrag.dirty = true;
+        if (focusDrag.axis === 'x') r.focusX = f; else r.focusY = f;
+        // Imperative live crop update — no render() mid-drag (it would
+        // rebuild the dot). The dot is hidden during the pan anyway.
+        const fimg = surface.querySelector(
+          '[data-rect-id="' + focusDrag.rectId + '"] .pe-rect-img'
+        );
+        if (fimg) {
+          fimg.style.objectPosition =
+            clampFocus(r.focusX) + '% ' + clampFocus(r.focusY) + '%';
+        }
+      }
+      return;
+    }
     if (!drag || ev.pointerId !== drag.pointerId) return;
     const dx = ev.clientX - drag.startX;
     const dy = ev.clientY - drag.startY;
@@ -870,7 +893,24 @@
     }
   });
 
+  // End the focal-dot pan from a document-level release so it can't be
+  // stranded by pointer-capture loss (v0.10.57). Clears is-panning on
+  // whatever element still carries it — the release may have targeted a
+  // different element than the dot, and render() rebuilds the node anyway.
+  function endFocusDrag(ev) {
+    if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return false;
+    const changed = focusDrag.dirty === true;
+    focusDrag = null;
+    surface.querySelectorAll('.pe-rect.is-panning').forEach(function (n) {
+      n.classList.remove('is-panning');
+    });
+    if (changed) markDirty();
+    render(); // canonical re-render — rebuilds the dot at the new focal point
+    return true;
+  }
+
   document.addEventListener('pointerup', function (ev) {
+    if (endFocusDrag(ev)) return;
     if (!drag || ev.pointerId !== drag.pointerId) return;
     const wasDrag = drag.moved;
     drag = null;
@@ -880,6 +920,7 @@
   });
 
   document.addEventListener('pointercancel', function (ev) {
+    if (endFocusDrag(ev)) return;
     if (!drag || ev.pointerId !== drag.pointerId) return;
     // Revert the in-progress move so a cancelled gesture doesn't
     // leave the rect at a half-dragged position.
@@ -984,36 +1025,14 @@
       // the live image crop is the sole, unambiguous feedback. The dot can
       // no longer get stranded outside the rect because it isn't shown.
       el.classList.add('is-panning');
+      // setPointerCapture is a nicety for the common case; the move/end of
+      // the focus drag are handled at the DOCUMENT level (see the document
+      // pointermove/up/cancel handlers) so they fire no matter where the
+      // pointer is released — capture on the hidden dot was being lost when
+      // the user let go outside the rect / near a corner, stranding the
+      // is-panning chrome (v0.10.57).
       try { dot.setPointerCapture(ev.pointerId); } catch (e) {}
     });
-
-    dot.addEventListener('pointermove', function (ev) {
-      if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return;
-      const r = state.rects.find(function (x) { return x.id === focusDrag.rectId; });
-      if (!r) return;
-      const cur = focusDrag.axis === 'x' ? ev.clientX : ev.clientY;
-      const f = clampFocus(
-        focusDrag.startFocus + (cur - focusDrag.startClient) / focusDrag.range * 100
-      );
-      if (f !== focusDrag.startFocus) focusDrag.dirty = true;
-      if (focusDrag.axis === 'x') r.focusX = f; else r.focusY = f;
-      // Imperative live crop update — a full render() here would destroy
-      // the dot mid-drag and drop its pointer capture. The dot itself is
-      // hidden (is-panning), so there's nothing to reposition.
-      img.style.objectPosition =
-        clampFocus(r.focusX) + '% ' + clampFocus(r.focusY) + '%';
-    });
-
-    function endFocusDrag(ev) {
-      if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return;
-      const changed = focusDrag.dirty === true;
-      focusDrag = null;
-      el.classList.remove('is-panning'); // belt-and-braces; render() rebuilds anyway
-      if (changed) markDirty();
-      render(); // canonical re-render — rebuilds the dot at the new focal point
-    }
-    dot.addEventListener('pointerup', endFocusDrag);
-    dot.addEventListener('pointercancel', endFocusDrag);
 
     el.appendChild(dot);
   }

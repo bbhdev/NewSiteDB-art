@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.56):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.57):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -618,6 +618,17 @@ from testing the upload slice:
   dotted bands sit a visible 5px apart. The earlier −5/−8px put the inner
   ring under the solid outline and the bands only ~1px apart, reading as
   one ring.)*
+- *(v0.10.57:* the focal-dot pan's move/end were handled **on the dot**,
+  relying on `setPointerCapture` to retarget the release back to the dot.
+  Capture was being lost when the user released outside the rect / near a
+  corner, so `pointerup` targeted a different element, `endFocusDrag`
+  never ran, and the `is-panning` chrome (hidden dot + rings) lingered.
+  Moved the move/up/cancel handling to the **document level** — the same
+  capture-independent mechanism the main rect drag uses — so the gesture
+  ends no matter where or on what element the pointer is released.
+  `endFocusDrag` now clears `is-panning` from *any* element still
+  carrying it. The dot keeps only its `pointerdown` (+ a now-non-
+  load-bearing `setPointerCapture`).)*
 
 **Upload file-type filter (v0.10.56).** The picker's `Upload…` input had
 `accept="image/*"`, which let the OS picker offer `.heic` — then the
