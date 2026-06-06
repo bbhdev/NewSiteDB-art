@@ -12247,15 +12247,37 @@
   //   CSS so new/edited tokens preview live (the server <head> CSS only
   //   covers tokens that existed at page load; this layer overrides it and
   //   also covers freshly-created ids).
-  // 3b-3 (next): family picker + size/weight/lineHeight/letterSpacing/
-  //   italic field editing.
+  // 3b-3 (this): per-row collapsible editor — family picker (reuses
+  //   fontFamilyField: Google bundle ∪ local fonts) + size / weight /
+  //   lineHeight / letterSpacing / italic fields. Field edits mutate the
+  //   token, rebuild the live CSS, and refresh the spec line IN PLACE (no
+  //   list re-render, so the focused input keeps focus). Editor visibility
+  //   is progressive-disclosure: collapsed by default, one chevron per row.
 
   // Session set of ids created-but-not-yet-saved. While an id is in here,
   // renaming re-derives the id from the name (so you get a clean
   // `.ty-heading` instead of `.ty-token`); once saved to disk the id locks
   // forever, so existing rect `typographyId` refs never break on rename.
   const newTypoIds = {};
+  // Session set of token ids whose inline field editor is expanded. Not
+  // persisted — re-derived per session. Keyed by id; migrated when an
+  // unsaved token's id changes on rename (see renderTypographyList).
+  const expandedTypoIds = {};
   let typographyDirty = false;
+
+  // Standard CSS font-weight steps, labelled. Values are numbers so they
+  // match a numeric t.weight strictly in selectField; onChange parses back.
+  const TYPO_WEIGHTS = [
+    { value: 100, label: '100 Thin' },
+    { value: 200, label: '200 Extra Light' },
+    { value: 300, label: '300 Light' },
+    { value: 400, label: '400 Regular' },
+    { value: 500, label: '500 Medium' },
+    { value: 600, label: '600 Semibold' },
+    { value: 700, label: '700 Bold' },
+    { value: 800, label: '800 Extra Bold' },
+    { value: 900, label: '900 Black' }
+  ];
 
   function clampTypoNum(v, lo, hi, def) {
     v = parseFloat(v);
@@ -12343,6 +12365,7 @@
       sizePx: 16, weight: 400, lineHeight: 1.4, letterSpacingPx: 0, italic: false
     });
     newTypoIds[id] = true;
+    expandedTypoIds[id] = true;   // open the editor so fields are ready
     rebuildTypographyClientCss();
     markTypographyDirty();
     renderTypographyList();
@@ -12382,6 +12405,11 @@
       const head = document.createElement('div');
       head.className = 'ed-typo-head';
 
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'ed-mini ed-typo-toggle';
+      toggle.title = 'Edit this token’s font fields';
+
       const nameInp = document.createElement('input');
       nameInp.type = 'text';
       nameInp.className = 'ed-typo-name-input';
@@ -12410,15 +12438,71 @@
       spec.className = 'ed-typo-spec';
       spec.textContent = typoSpecLine(t);
 
+      // ---- collapsible field editor (3b-3) -----------------------------
+      // Built for every row but shown only when expanded. Field handlers
+      // mutate the token, rebuild the live CSS (which restyles the .ty-<id>
+      // sample automatically), and refresh the spec line in place — never
+      // re-rendering the list, so the active input keeps focus mid-edit.
+      const edit = document.createElement('div');
+      edit.className = 'ed-typo-edit';
+
+      function afterFieldEdit() {
+        rebuildTypographyClientCss();
+        spec.textContent = typoSpecLine(t);
+        markTypographyDirty();
+      }
+
+      edit.appendChild(fontFamilyField('Family', t.family || '', function (v) {
+        t.family = v || '';
+        injectGoogleFontsLink();   // ensure a newly-picked bundled face is loaded
+        afterFieldEdit();
+      }, 'Pick from bundle or type any name'));
+
+      edit.appendChild(numberField('Size (px)', (t.sizePx != null ? t.sizePx : 16), function (v) {
+        if (Number.isFinite(v)) { t.sizePx = v; afterFieldEdit(); }
+      }));
+
+      edit.appendChild(selectField('Weight', (t.weight != null ? t.weight : 400), TYPO_WEIGHTS, function (v) {
+        t.weight = parseInt(v, 10) || 400;
+        afterFieldEdit();
+      }));
+
+      edit.appendChild(numberField('Line height', (t.lineHeight != null ? t.lineHeight : 1.4), function (v) {
+        if (Number.isFinite(v)) { t.lineHeight = v; afterFieldEdit(); }
+      }));
+
+      edit.appendChild(numberField('Letter spacing (px)', (t.letterSpacingPx != null ? t.letterSpacingPx : 0), function (v) {
+        if (Number.isFinite(v)) { t.letterSpacingPx = v; afterFieldEdit(); }
+      }));
+
+      edit.appendChild(checkboxField('Italic', !!t.italic, function (v) {
+        t.italic = !!v;
+        afterFieldEdit();
+      }));
+
+      function setExpanded(on) {
+        edit.style.display = on ? '' : 'none';
+        toggle.textContent = on ? '▾' : '▸';
+        toggle.classList.toggle('is-open', on);
+        if (on) expandedTypoIds[t.id] = true; else delete expandedTypoIds[t.id];
+      }
+      setExpanded(!!expandedTypoIds[t.id]);
+      toggle.addEventListener('click', function () {
+        setExpanded(edit.style.display === 'none');
+      });
+
       nameInp.addEventListener('input', function () {
         t.name = nameInp.value;
         // For an unsaved token, keep the id readable by tracking the name.
         if (newTypoIds[t.id]) {
           const newId = uniqueTypoId(slugifyTypoId(t.name), t.id);
           if (newId !== t.id) {
+            const wasExpanded = !!expandedTypoIds[t.id];
             delete newTypoIds[t.id];
+            delete expandedTypoIds[t.id];
             t.id = newId;
             newTypoIds[newId] = true;
+            if (wasExpanded) expandedTypoIds[newId] = true;
             li.setAttribute('data-typo-id', newId);
             idTag.textContent = 'ty-' + newId;
             sample.className = 'ed-typo-sample ty-' + newId;
@@ -12428,12 +12512,14 @@
         markTypographyDirty();
       });
 
+      head.appendChild(toggle);
       head.appendChild(nameInp);
       head.appendChild(idTag);
       head.appendChild(del);
       li.appendChild(head);
       li.appendChild(sample);
       li.appendChild(spec);
+      li.appendChild(edit);
       listEl.appendChild(li);
     });
   }

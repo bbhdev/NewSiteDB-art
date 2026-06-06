@@ -40,13 +40,15 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.78):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.79):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
-(create / rename / delete tokens), and a 3b-2 follow-up "View in panel"
-token preview modal (v0.10.78) landed — see the Slice 3a / 3b
-entries below.
+(create / rename / delete tokens), a 3b-2 follow-up "View in panel"
+token preview modal (v0.10.78), and **3b-3 (per-token field editor —
+family picker + size/weight/lineHeight/letterSpacing/italic, v0.10.79)**
+landed. **Typography authoring is now feature-complete.** See the
+Slice 3a / 3b entries below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -1098,6 +1100,41 @@ token as a one-line sample, which isn't enough to judge a font as body text.
 - *Constants* live at the top of the typography block in `dev-draw.js`
   (`TYPO_PREVIEW_HEADING`, `TYPO_PREVIEW_PARAGRAPH`).
 
+**Slice 3b-3 — per-token field editor: family + size/weight/lh/ls/italic
+(v0.10.79).** Completes typography authoring — tokens are now fully editable
+on-canvas (no hand-JSON). Reuses the existing route; no schema change.
+- *Collapsible editor per row.* A chevron toggle (`.ed-typo-toggle`) on each
+  row reveals an `.ed-typo-edit` body with six fields. Collapsed by default
+  (progressive-disclosure rule — six fields × N tokens would bloat the narrow
+  panel). Expand state is a session map `expandedTypoIds`, NOT persisted.
+  A freshly-created token auto-expands so its fields are immediately ready.
+- *Fields.* `fontFamilyField('Family', …)` is **reused as-is** — its popup
+  already unions the Google bundle (`state.fontBundle`) and local fonts
+  (`state.localFonts`, the `/dev/draw/local-fonts` faces), so typography gets
+  the same picker as the TEXT section for free. Then `numberField` (Size,
+  Line height, Letter spacing), `selectField` (Weight, from `TYPO_WEIGHTS`
+  100–900 labelled; values are numbers so they match `t.weight` strictly),
+  `checkboxField` (Italic).
+- *In-place updates — the focus-keeping rule.* Field `onChange`s call a local
+  `afterFieldEdit()` that does three things and NOTHING else: rebuild the live
+  client CSS (which restyles the `.ty-<id>` sample automatically), refresh the
+  `.ed-typo-spec` line text, and mark dirty. It deliberately does **not**
+  `renderTypographyList()` — re-rendering mid-keystroke would blur the active
+  input. Numeric handlers store only finite values (empty/NaN keeps the prior
+  value); `rebuildTypographyClientCss` still clamps when emitting CSS.
+- *Rename × expand-state interaction.* When an unsaved token's id re-derives
+  on rename (3b-2 behaviour), the expand-state key is migrated old-id→new-id
+  so the open editor stays open. Verified: `token`→`lead-para` keeps the
+  editor expanded.
+- *Verified* in preview: expand shows 6 fields with correct pre-filled values
+  (weight select pre-selected at the token's weight); editing size/weight/
+  italic restyles the sample + spec + dirty flag live; family popup lists 23
+  families (bundle ∪ local incl. a local "BROWEN"), picking applies; collapse
+  persists across a re-render; new token auto-expands; no console errors.
+- *Next:* priority #3 — real text content on text rects (the `ty-<id>` class
+  already styles whatever text goes in). Then the parked drilldown
+  restructure (see the callout below).
+
 ## What this project is
 
 A Kirby-based site where the visual identity is a layer of animated SVG line
@@ -1802,8 +1839,10 @@ absolute coordinates.
    save round-trip. **3b-2 DONE (v0.10.77)**: create / rename / delete
    tokens (stable-id discipline + live previews — see the 3b-2 entry
    above). **3b-2 follow-up DONE (v0.10.78)**: "View in panel" preview
-   modal (each token as heading + full paragraph). **3b-3 PENDING**:
-   family picker + field editing.
+   modal (each token as heading + full paragraph). **3b-3 DONE
+   (v0.10.79)**: per-token collapsible field editor — family picker +
+   size / weight / lineHeight / letterSpacing / italic. Typography
+   authoring is feature-complete.
 4. **Slice 4 — Deco bootstrapper + htmlKey slots** (shared artifacts
    #2 + #3). `deco-mount` rects render as `<div data-deco="…">`;
    JS bootstrapper mounts the Deco runtime per rect against the
