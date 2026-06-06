@@ -12572,7 +12572,9 @@
     'antique vexed quartz. Sphinx of black quartz, judge my vow — pack my ' +
     'box with a dozen liquor jugs. Good typography is invisible: it sets the ' +
     'rhythm of a page, guiding the eye from line to line without calling ' +
-    'attention to itself. 0123456789 — “Curly quotes,” em-dashes, & ampersands.';
+    'attention to itself. THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG — a ' +
+    'line set ALL IN CAPS, as a title or label often is. ' +
+    '0123456789 — “Curly quotes,” em-dashes, & ampersands.';
   const TYPO_PREVIEW_HEADING = 'A Page Begins With a Single Line';
 
   function showTypographyPreview() {
