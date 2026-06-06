@@ -27,6 +27,16 @@ Read this top-to-bottom once; reference back as needed.
 >   even while building the desktop editor. When a choice would foreclose the tablet
 >   path, flag it.
 >
+> **Timing (v0.10.68):** the tablet layer itself is **later** — likely once Deco /
+> Phase-2 page-building is well advanced. The user will say when ready; do not start
+> it unprompted. What matters NOW is only *not foreclosing* it.
+>
+> **Companion idea, also later (v0.10.68):** when the tablet layer is built, also
+> imagine a **feature-reduced iPhone layer derived from the tablet one** (less
+> power, smaller surface) — motivated by wanting to demo Deco's power *unexpectedly*
+> from a phone. So design the tablet UI layer with a further reduction step in mind,
+> not as a hard floor.
+>
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 

@@ -18,6 +18,13 @@ screen" assumption — that premise is wrong and has caused drift before.
   affordances, mouse-only drag semantics, fixed wide-viewport layouts), flag it
   rather than silently committing to the desktop-only path.
 
+- **Timing:** the tablet layer itself is built *later* (likely once Deco/Phase-2
+  page-building is well advanced) — the user will say when. For now, just don't
+  foreclose it.
+- **Companion idea (later):** design the tablet layer anticipating a further
+  **feature-reduced iPhone layer** derived from it (to demo Deco unexpectedly from
+  a phone) — so the tablet UI is a reducible base, not a hard floor.
+
 Full rationale is in HANDOFF.md's "PROJECT NORTH STAR" callout at the top.
 
 ## Read this on session start
