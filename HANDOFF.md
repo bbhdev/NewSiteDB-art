@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.67):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.68):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -776,9 +776,40 @@ nubs (`pointer-events:auto`). Handles no longer emitted per-rect.
   drag handler's `[data-rect-id=…]` querySelector still resolves the rect, not
   the box; `render()` rebuilds the box fresh on pointerup.
 - *Deferred & named.* Body-drag-to-MOVE a fully-buried rect (its body is still
-  under the covering rect) and relocating the focal-pan dot into the overlay
-  are not done. Workaround for move: bring-forward via the layer buttons,
-  reposition, send back.
+  under the covering rect) is not done. Workaround: bring-forward via the layer
+  buttons, reposition, send back.
+
+**Focal-pan dot into the overlay + z-index ceiling (v0.10.68).** Finishes the
+always-on-top work: the focal-pan dot (image cover-mode crop handle) had stayed
+a child of the rect, so a buried image rect's dot was covered and ungrabbable —
+the same isolation-context trap the handles had. Changes:
+- *Dot relocated.* `maybeAddFocusDot(host, rect, imgRatio)` now appends to the
+  overlay **box** (the `host`), not the rect. `renderOverlay()` calls it via a
+  new `maybeAddOverlayDot(box, r)` gate (kind=image · fit=cover · ratio known),
+  and the per-rect emit in `renderRect` is gone. The dot still parks just
+  outside the box edge parallel to its overflow axis (the box has the rect's
+  exact geometry, so the offsets land identically).
+- *Live rebuild on resize.* `updateOverlayBox(r)` calls `refreshOverlayDot(box,
+  r)`, which rebuilds the dot — resizing can flip the overflow axis (x↔y) or
+  cross the no-pan threshold, so a reposition isn't enough. Safe because
+  `updateOverlayBox` runs only during move/resize, never during a pan, so it
+  can't tear down an in-flight pan's captured element. Verified: widening the
+  rect past square flips the dot `--x`→`--y` mid-drag.
+- *`pointer-events:auto` on the dot (the bug that bit).* The box is
+  `pointer-events:none` (click-through); a child does NOT inherit pointer events
+  back, so the relocated dot was initially unclickable. Added `pointer-events:
+  auto` to `.pe-focus-dot` — same opt-back-in the handles needed.
+- *Panning chrome retargeted.* The hide-dot / cursor:grabbing / dotted-ring
+  (`::before`/`::after`) CSS moved from `.pe-rect.is-panning` to
+  `.pe-overlay-box.is-panning` so it rides on top. The rect *also* still gets
+  `is-panning` (line ~307) purely for its 999 z-lift, so the live image crop —
+  the sole pan feedback — rises above neighbours even when buried.
+  `endFocusDrag` cleans up via `surface.querySelectorAll('.is-panning')` (both
+  box and rect). Verified end-to-end: objectPosition 50%→100% on a 200px drag,
+  dot hidden during pan, no stranded `is-panning` after pointerup.
+- *Z-index ceiling.* `.pe-overlay` bumped 1000 → 2147483647 (max 32-bit signed)
+  so the chrome is unconditionally on top regardless of how rect z-indices
+  evolve under author-managed layering.
 
 ## What this project is
 

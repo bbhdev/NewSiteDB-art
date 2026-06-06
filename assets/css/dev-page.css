@@ -319,7 +319,12 @@ button.pe-save.is-flash {
   position: absolute;
   inset: 0;
   pointer-events: none; /* clicks fall through to the rects below */
-  z-index: 1000;        /* above even a dragged rect (.is-dragging:999) */
+  /* Max 32-bit signed int — the conventional "always on top" ceiling. The
+     chrome must win over any rect no matter how the stacking evolves (rects
+     use DOM order + a 999 manipulation lift today, but author-managed Z could
+     grow that later); parking the overlay at the ceiling makes it unconditional
+     rather than a magic number a future rect z-index could overtake. */
+  z-index: 2147483647;
 }
 .pe-overlay-box {
   position: absolute;
@@ -447,6 +452,10 @@ button.pe-save.is-flash {
   z-index: 3; /* above the image (0) and the chrome labels (1) */
   cursor: grab;
   touch-action: none;
+  /* The dot now lives in the click-through overlay box (v0.10.68), so it must
+     opt back into pointer events — same as the resize handles — to stay
+     grabbable. Without this the box's pointer-events:none would swallow it. */
+  pointer-events: auto;
 }
 .pe-focus-dot:active { cursor: grabbing; }
 /* Axis hint: a short bar through the dot showing the drag direction. */
@@ -472,12 +481,14 @@ button.pe-save.is-flash {
    are added just outside it, each 3px larger than the last, to read as
    "you're panning / this is moving". Everything returns to normal when
    the drag ends and the .is-panning class is removed. */
-.pe-rect.is-panning > .pe-focus-dot { opacity: 0; }
-.pe-rect.is-panning {
-  cursor: grabbing;
-}
-.pe-rect.is-panning::before,
-.pe-rect.is-panning::after {
+/* The dot + its panning rings live in the overlay box now (v0.10.68) so the
+   pan chrome is also always-on-top when the image rect is buried. The rect
+   itself still gets .is-panning purely for the z-lift (line ~307) so the live
+   image crop — the sole pan feedback — rises above neighbouring rects. */
+.pe-overlay-box.is-panning .pe-focus-dot { opacity: 0; }
+.pe-overlay-box.is-panning { cursor: grabbing; }
+.pe-overlay-box.is-panning::before,
+.pe-overlay-box.is-panning::after {
   content: "";
   position: absolute;
   border: 2px dotted var(--pe-palette-accent, #ff5500);
@@ -488,9 +499,9 @@ button.pe-save.is-flash {
 /* Both rings clear the solid selected outline (which ends ~4px out) so the
    inner one isn't swallowed by it, and the two dotted bands are spaced a
    visible 5px apart (v0.10.56). Band = [inset−2px … inset] out from the
-   rect edge: ::before 5–7px, ::after 12–14px → 5px gap between them. */
-.pe-rect.is-panning::before { inset: -7px; }
-.pe-rect.is-panning::after  { inset: -14px; }
+   box edge: ::before 5–7px, ::after 12–14px → 5px gap between them. */
+.pe-overlay-box.is-panning::before { inset: -7px; }
+.pe-overlay-box.is-panning::after  { inset: -14px; }
 
 /* Tiny rects (v0.10.51) — a rect under 100px in either dimension can't
    hold its kind label + id inside without them overlapping/mangling, so

@@ -959,7 +959,10 @@
     if (!focusDrag || ev.pointerId !== focusDrag.pointerId) return false;
     const changed = focusDrag.dirty === true;
     focusDrag = null;
-    surface.querySelectorAll('.pe-rect.is-panning').forEach(function (n) {
+    // Clear is-panning wherever it landed — both the rect (z-lift) and the
+    // overlay box (dot-hide + rings). render() rebuilds the box anyway, but
+    // clearing defensively avoids a stale state if a render is skipped.
+    surface.querySelectorAll('.is-panning').forEach(function (n) {
       n.classList.remove('is-panning');
     });
     if (changed) markDirty();
@@ -1017,7 +1020,14 @@
   // render(). Mapping is relative (drag-delta), so the handle's position
   // need not track the focal point — which is why it can be parked fixed.
 
-  function maybeAddFocusDot(el, img, rect, imgRatio) {
+  // host = the element the dot is appended to and measured against. Since
+  // v0.10.68 that's the overlay box (which matches the rect's geometry), so
+  // the dot is part of the always-on-top chrome and stays visible/grabbable
+  // when the image rect is buried. Idempotent: drops any existing dot first,
+  // so it can be called to refresh during a live resize.
+  function maybeAddFocusDot(host, rect, imgRatio) {
+    const stale = host.querySelector('.pe-focus-dot');
+    if (stale) stale.remove();
     const rw = rect.w | 0, rh = rect.h | 0;
     const rectRatio = rh > 0 ? rw / rh : 0;
     if (rectRatio <= 0) return;
@@ -1059,8 +1069,8 @@
     dot.addEventListener('pointerdown', function (ev) {
       ev.stopPropagation();   // don't let the surface treat this as a rect move
       ev.preventDefault();
-      const box = el.getBoundingClientRect();
-      const axisSize = axis === 'x' ? box.width : box.height;
+      const hostBox = host.getBoundingClientRect();
+      const axisSize = axis === 'x' ? hostBox.width : hostBox.height;
       // Relative (drag-delta) mapping in every case: full 0→100 pan over
       // `range` px of pointer travel, floored at 140px so even a tiny rect
       // sweeps comfortably. Relative (not absolute "dot follows pointer")
@@ -1075,10 +1085,13 @@
         range:       Math.max(axisSize, 140),
         dirty:       false
       };
-      // Enter panning mode: CSS hides the dot and restyles the outline so
-      // the live image crop is the sole, unambiguous feedback. The dot can
-      // no longer get stranded outside the rect because it isn't shown.
-      el.classList.add('is-panning');
+      // Enter panning mode. The chrome (hide dot + dotted rings) is on the
+      // overlay box so it stays on top; the rect ALSO gets is-panning purely
+      // for its z-lift (line ~307), so the live image crop — the sole pan
+      // feedback — rises above neighbouring rects even when buried.
+      host.classList.add('is-panning');
+      const rectEl = surface.querySelector('[data-rect-id="' + rect.id + '"]');
+      if (rectEl) rectEl.classList.add('is-panning');
       // setPointerCapture is a nicety for the common case; the move/end of
       // the focus drag are handled at the DOCUMENT level (see the document
       // pointermove/up/cancel handlers) so they fire no matter where the
@@ -1088,7 +1101,7 @@
       try { dot.setPointerCapture(ev.pointerId); } catch (e) {}
     });
 
-    el.appendChild(dot);
+    host.appendChild(dot);
   }
 
   // Live-refresh the size-dependent chrome on an existing rect node WITHOUT
@@ -1100,16 +1113,9 @@
   function refreshSizeChrome(el, rect) {
     if (Math.min(rect.w | 0, rect.h | 0) < TINY_MAX) el.classList.add('is-tiny');
     else el.classList.remove('is-tiny');
-    const old = el.querySelector('.pe-focus-dot');
-    if (old) old.remove();
-    if (rect.id === selectedId && rect.kind === 'image' && rect.image &&
-        (rect.fit || 'cover') === 'cover') {
-      const found = imageByFilename[rect.image];
-      const img = el.querySelector('.pe-rect-img');
-      if (found && found.ratio > 0 && img) {
-        maybeAddFocusDot(el, img, rect, found.ratio);
-      }
-    }
+    // The focal dot lives in the overlay box now (v0.10.68); its live update
+    // during a resize is handled by updateOverlayBox → refreshOverlayDot, not
+    // here. This function only manages the rect's own size-dependent chrome.
   }
 
   function renderRect(rect, index) {
@@ -1154,15 +1160,11 @@
         el.classList.add('has-image');
         // v0.10.47: data-fit drives object-fit in CSS (cover|contain).
         el.dataset.fit = (rect.fit === 'contain') ? 'contain' : 'cover';
-        // v0.10.50: focal-dot pan control — only on the selected rect, in
-        // cover mode, and only when the image actually has hidden parts to
-        // pan to (the rect/image aspect ratios differ). A contained or
-        // ratio-matched image has nothing hidden, so the dot would be a
-        // no-op affordance — we suppress it.
-        if (rect.id === selectedId && (rect.fit || 'cover') === 'cover' &&
-            found.ratio > 0) {
-          maybeAddFocusDot(el, img, rect, found.ratio);
-        }
+        // v0.10.68: the focal-pan dot is no longer a child of the rect. It
+        // moved into the always-on-top selection overlay (see renderOverlay
+        // → maybeAddFocusDot) so it stays grabbable when the selected rect
+        // is buried under a higher-Z sibling — same motivation as the resize
+        // handles relocating in v0.10.67.
       } else if (imageLibrary !== null) {
         el.classList.add('is-img-missing');
       }
@@ -1234,8 +1236,26 @@
       h.dataset.dir = d;
       box.appendChild(h);
     });
+    // Focal-pan dot (v0.10.68) — lives in the overlay box, on top of every
+    // rect, so a buried image rect's pan handle stays grabbable. Only on an
+    // image rect in cover mode whose image actually has hidden parts to pan
+    // to (ratio mismatch); maybeAddFocusDot itself re-checks the threshold.
+    maybeAddOverlayDot(box, r);
     ov.appendChild(box);
     return ov;
+  }
+
+  // Decide whether the selected image rect warrants a focal-pan dot, and if
+  // so build it into the given overlay box. Centralises the kind/fit/ratio
+  // gate so renderOverlay (initial paint) and refreshOverlayDot (live resize)
+  // share one rule.
+  function maybeAddOverlayDot(box, r) {
+    if (!box || !r) return;
+    if (r.kind !== 'image' || !r.image) return;
+    if ((r.fit || 'cover') !== 'cover') return;
+    const found = imageByFilename[r.image];
+    if (!found || !(found.ratio > 0)) return;
+    maybeAddFocusDot(box, r, found.ratio);
   }
 
   // Live-track the overlay box to the selected rect during a move/resize
@@ -1249,6 +1269,25 @@
     box.style.top    = (r.y | 0) + 'px';
     box.style.width  = (r.w | 0) + 'px';
     box.style.height = (r.h | 0) + 'px';
+    refreshOverlayDot(box, r);
+  }
+
+  // Live-update the focal-pan dot during a resize drag (v0.10.68). Resizing
+  // changes the rect ratio, which can flip the overflow axis (x↔y) or cross
+  // the no-pan threshold — so the dot must be rebuilt, not just repositioned.
+  // updateOverlayBox runs only during move/resize, never during a pan, so
+  // tearing down and rebuilding the dot here can't strand an in-flight pan.
+  function refreshOverlayDot(box, r) {
+    if (!box || !r) return;
+    const gatesDot =
+      r.kind === 'image' && r.image && (r.fit || 'cover') === 'cover' &&
+      imageByFilename[r.image] && imageByFilename[r.image].ratio > 0;
+    if (gatesDot) {
+      maybeAddOverlayDot(box, r); // re-checks ratio threshold internally
+    } else {
+      const stale = box.querySelector('.pe-focus-dot');
+      if (stale) stale.remove();
+    }
   }
 
   function render() {
