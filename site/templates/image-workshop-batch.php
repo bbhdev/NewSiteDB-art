@@ -67,6 +67,29 @@ if (is_file($verdictsPath)) {
 
 $verdictKinds = ['ok', 'rework', 'dropped'];
 
+// Load the "sent" sidecar (written by dev/image-workshop/use-image).
+// Shape: { schemaVersion, sent: { "<filename>": [ {page,title}, ... ] } }.
+// Drives the per-card "Sent to …" badges and disables already-sent pages
+// in that card's target dropdown.
+$sentPath = $page->root() . '/sent.json';
+$sentMap  = [];
+if (is_file($sentPath)) {
+  $decodedSent = json_decode(file_get_contents($sentPath), true);
+  if (is_array($decodedSent) && isset($decodedSent['sent']) && is_array($decodedSent['sent'])) {
+    $sentMap = $decodedSent['sent'];
+  }
+}
+
+// Enumerate canvas pages — the transfer targets offered by "Use this".
+// Only canvas-page pages are valid (the route enforces this too); their
+// `images` children use the image-container template and are skipped
+// automatically by the template-name filter.
+$canvasPages = [];
+foreach (kirby()->site()->index() as $cp) {
+  if ($cp->intendedTemplate()->name() !== 'canvas-page') { continue; }
+  $canvasPages[] = ['id' => $cp->id(), 'title' => $cp->title()->value()];
+}
+
 // Counts per verdict, for the filter-bar badges.
 $counts = ['ok' => 0, 'rework' => 0, 'dropped' => 0, 'unrated' => 0];
 foreach ($images as $img) {
@@ -177,8 +200,16 @@ foreach ($images as $img) {
             // Current verdict for this file ('' when unrated).
             $verdict = $verdicts[$img->filename()] ?? '';
             if (!in_array($verdict, $verdictKinds, true)) { $verdict = ''; }
+            // Pages this image has already been sent to (for badges + to
+            // disable those options in this card's dropdown).
+            $sentEntries = (isset($sentMap[$img->filename()]) && is_array($sentMap[$img->filename()]))
+              ? $sentMap[$img->filename()] : [];
+            $sentIds = [];
+            foreach ($sentEntries as $se) {
+              if (is_array($se) && !empty($se['page'])) { $sentIds[] = $se['page']; }
+            }
           ?>
-          <article class="iw-card" data-filename="<?= esc($img->filename()) ?>" data-verdict="<?= esc($verdict) ?>">
+          <article class="iw-card<?= !empty($sentEntries) ? ' is-sent' : '' ?>" data-filename="<?= esc($img->filename()) ?>" data-verdict="<?= esc($verdict) ?>">
             <div class="iw-card-head">
               <span class="iw-fname" title="<?= esc($img->filename()) ?>"><?= esc($img->filename()) ?></span>
             </div>
@@ -213,11 +244,37 @@ foreach ($images as $img) {
             </div>
 
             <!-- Verdict toggle (Step B). Click the active one again to
-                 clear back to unrated. -->
+                 clear back to unrated. The "Use this" button (Slice 2)
+                 appears only when the verdict is OK (CSS-gated on the
+                 card's data-verdict) and sits immediately right of OK. -->
             <div class="iw-verdict" role="group" aria-label="Verdict for <?= esc($img->filename()) ?>">
               <button type="button" class="iw-vbtn iw-vbtn--ok"      data-verdict="ok"<?=      $verdict === 'ok'      ? ' aria-pressed="true"' : '' ?>>OK</button>
+              <button type="button" class="iw-use" aria-haspopup="true" aria-expanded="false" title="Send the resized image to a page">Use this</button>
               <button type="button" class="iw-vbtn iw-vbtn--rework"  data-verdict="rework"<?=  $verdict === 'rework'  ? ' aria-pressed="true"' : '' ?>>Rework</button>
               <button type="button" class="iw-vbtn iw-vbtn--dropped" data-verdict="dropped"<?= $verdict === 'dropped' ? ' aria-pressed="true"' : '' ?>>Dropped</button>
+            </div>
+
+            <!-- Transfer affordance (Slice 2). The picker stays hidden
+                 until "Use this" is clicked. The sent-list shows which
+                 page(s) this resized image has already been sent to;
+                 those pages are pre-disabled in the dropdown. -->
+            <div class="iw-send">
+              <div class="iw-send-picker" hidden>
+                <select class="iw-send-select" aria-label="Choose target page">
+                  <option value="">Choose a page…</option>
+                  <?php foreach ($canvasPages as $cpi): $isSent = in_array($cpi['id'], $sentIds, true); ?>
+                    <option value="<?= esc($cpi['id']) ?>"<?= $isSent ? ' disabled' : '' ?>><?= esc($cpi['title']) ?><?= $isSent ? ' (sent)' : '' ?></option>
+                  <?php endforeach; ?>
+                </select>
+                <button type="button" class="iw-send-go">Send</button>
+                <button type="button" class="iw-send-cancel" aria-label="Cancel">✕</button>
+              </div>
+              <div class="iw-sent-list"<?= empty($sentEntries) ? ' hidden' : '' ?>>
+                <span class="iw-sent-label">Sent to:</span>
+                <?php foreach ($sentEntries as $se): if (!is_array($se)) continue; ?>
+                  <span class="iw-sent-chip" data-page="<?= esc($se['page'] ?? '') ?>"><?= esc($se['title'] ?? ($se['page'] ?? '?')) ?></span>
+                <?php endforeach; ?>
+              </div>
             </div>
           </article>
         <?php endforeach; ?>
@@ -420,6 +477,92 @@ foreach ($images as $img) {
       }
 
       recount();
+    })();
+
+    // "Use this" transfer (Slice 2): per-card, send the RESIZED image (at
+    // the current test long edge) to a chosen canvas page. The button is
+    // CSS-gated to appear only when the card's verdict is OK. A second
+    // grid-level click listener — disjoint from the verdict one above
+    // (.iw-use / .iw-send-* selectors never match .iw-vbtn).
+    (function () {
+      var grid = document.getElementById('iw-grid');
+      if (!grid) return;
+
+      var USE_URL  = <?= json_encode(url('dev/image-workshop/use-image')) ?>;
+      var BATCH_ID = <?= json_encode($page->id()) ?>;
+      var SIZE     = <?= (int) $size ?>;
+
+      function setOpen(card, on) {
+        var picker = card.querySelector('.iw-send-picker');
+        var useBtn = card.querySelector('.iw-use');
+        if (picker) picker.hidden = !on;
+        if (useBtn) useBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+        if (on) { var sel = card.querySelector('.iw-send-select'); if (sel) sel.focus(); }
+      }
+
+      grid.addEventListener('click', function (e) {
+        var card = e.target.closest('.iw-card');
+        if (!card) return;
+
+        if (e.target.closest('.iw-use')) {
+          var picker = card.querySelector('.iw-send-picker');
+          setOpen(card, picker ? picker.hidden : true);
+          return;
+        }
+        if (e.target.closest('.iw-send-cancel')) { setOpen(card, false); return; }
+
+        var goBtn = e.target.closest('.iw-send-go');
+        if (!goBtn) return;
+
+        var sel    = card.querySelector('.iw-send-select');
+        var pageId = sel ? sel.value : '';
+        if (!pageId) { if (sel) sel.focus(); return; }
+        var fname = card.getAttribute('data-filename');
+
+        goBtn.disabled = true; goBtn.textContent = 'Sending…';
+        fetch(USE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch: BATCH_ID, filename: fname, size: SIZE, targetPage: pageId })
+        }).then(function (r) { return r.json(); })
+          .then(function (j) {
+            goBtn.disabled = false; goBtn.textContent = 'Send';
+            if (!j || !j.ok) { alert('Send failed: ' + ((j && j.error) || 'unknown')); return; }
+            markSent(card, j.page, j.title);
+            setOpen(card, false);
+          })
+          .catch(function () {
+            goBtn.disabled = false; goBtn.textContent = 'Send';
+            alert('Send failed (network).');
+          });
+      });
+
+      function markSent(card, pageId, title) {
+        card.classList.add('is-sent');
+        var list = card.querySelector('.iw-sent-list');
+        if (list) {
+          list.hidden = false;
+          var esc = String(pageId).replace(/["\\]/g, '\\$&');
+          if (!list.querySelector('.iw-sent-chip[data-page="' + esc + '"]')) {
+            var chip = document.createElement('span');
+            chip.className = 'iw-sent-chip';
+            chip.setAttribute('data-page', pageId);
+            chip.textContent = title || pageId;
+            list.appendChild(chip);
+          }
+        }
+        // Disable that page in this card's dropdown (avoids a duplicate copy).
+        var sel = card.querySelector('.iw-send-select');
+        if (sel) {
+          Array.prototype.forEach.call(sel.options, function (o) {
+            if (o.value === pageId) {
+              o.disabled = true;
+              if (o.textContent.indexOf('(sent)') === -1) o.textContent += ' (sent)';
+            }
+          });
+          sel.value = '';
+        }
+      }
     })();
   </script>
   <!-- v<?= $v ?> -->

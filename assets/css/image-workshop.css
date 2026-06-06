@@ -477,3 +477,98 @@ body.iw-body {
 .iw-vbtn--ok[aria-pressed="true"]      { background: var(--iw-ok); }
 .iw-vbtn--rework[aria-pressed="true"]  { background: var(--iw-rework); }
 .iw-vbtn--dropped[aria-pressed="true"] { background: var(--iw-dropped); }
+
+/* "Use this" transfer affordance (Slice 2) ──────────────────────── */
+
+/* The button is the 2nd grid child (after OK). It is hidden until the
+   card is marked OK, at which point the verdict row widens from 3 to 4
+   columns so the row reads: OK | Use this | Rework | Dropped. */
+.iw-use {
+  display: none;
+  background: #f0a060;
+  color: #16171a;
+  border: none;
+  padding: 0.4rem 0.3rem;
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 700;
+  cursor: pointer;
+}
+.iw-use:hover { background: #f5b074; }
+.iw-card[data-verdict="ok"] .iw-verdict { grid-template-columns: repeat(4, 1fr); }
+.iw-card[data-verdict="ok"] .iw-use { display: block; }
+
+/* Send picker + sent-list live in a thin footer under the verdict row. */
+.iw-send {
+  border-top: 1px solid #2c2e33;
+  background: #1b1c20;
+}
+.iw-send-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem;
+}
+.iw-send-picker[hidden] { display: none; }
+.iw-send-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #202227;
+  color: #e8e8e8;
+  border: 1px solid #3a3d44;
+  border-radius: 4px;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.82em;
+}
+.iw-send-go {
+  background: #f0a060;
+  color: #16171a;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.82em;
+  font-weight: 700;
+  cursor: pointer;
+}
+.iw-send-go:disabled { opacity: 0.5; cursor: default; }
+.iw-send-cancel {
+  background: #2a2c31;
+  color: #c0c0c0;
+  border: 1px solid #3a3d44;
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  font-size: 0.82em;
+  cursor: pointer;
+  line-height: 1;
+}
+.iw-send-cancel:hover { background: #33363c; color: #e8e8e8; }
+
+/* Per-image "Sent to: …" badges, shown once an image has been sent. */
+.iw-sent-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.4rem 0.55rem;
+}
+.iw-sent-list[hidden] { display: none; }
+.iw-sent-label {
+  color: #80c890;
+  font-size: 0.74em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.iw-sent-label::before { content: "✓ "; }
+.iw-sent-chip {
+  background: rgba(92, 184, 116, 0.16);
+  color: #b6e4c2;
+  border: 1px solid rgba(92, 184, 116, 0.4);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.78em;
+}
+/* A sent card carries a green right stripe mirroring the verdict stripe. */
+.iw-card.is-sent { border-right: 3px solid var(--iw-ok); }
