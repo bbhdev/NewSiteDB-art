@@ -4,6 +4,32 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
+> ## ⛳ PROJECT NORTH STAR — tablet (iPad) live editing is a first-class phase
+>
+> **Re-stated emphatically by the user (v0.10.68) because earlier exchanges drifted
+> toward a "user works on a large screen" assumption.** That assumption is WRONG as
+> a design premise. Editing the **live site from a tablet (iPad today, other tablets
+> later)** is a planned, important phase of this project — not a nice-to-have, not a
+> someday-maybe.
+>
+> Concrete implications, to weigh in EVERY editor/UI decision from now on:
+> - **A simple homothety (uniform scale-up of the desktop UI) will not work.** The
+>   tablet editor needs a genuinely reworked interaction model — touch targets,
+>   gestures, panel layout — not a zoomed desktop layout.
+> - **The self-hosted icon library (v0.10.64) exists partly to serve this** — icon
+>   affordances are more tablet-friendly than text-dense controls.
+> - **Likely shape: an alternative UI *layer*** over the same editor core/state, not
+>   a fork. (Exact architecture is still TBD — to be discussed before building.)
+> - **Why this is recorded so loudly:** decisions that strongly contradict tablet
+>   editing (desktop-only gestures, hover-dependent affordances, fixed pixel layouts
+>   that assume a wide viewport, mouse-only drag semantics) are **disproportionately
+>   expensive to unwind later.** Prefer choices that keep the touch/tablet path open
+>   even while building the desktop editor. When a choice would foreclose the tablet
+>   path, flag it.
+>
+> This is a standing constraint on Phase 2 editor work. Carry it forward in every
+> handoff.
+
 **Current state (v0.10.68):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).

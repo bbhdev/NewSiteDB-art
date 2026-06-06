@@ -1,5 +1,25 @@
 # Project-level instructions
 
+## ⛳ Standing constraint — tablet (iPad) live editing is a first-class phase
+
+Editing the **live site from a tablet (iPad today, others later)** is a planned,
+important phase of this project. Do NOT design around a "the user works on a large
+screen" assumption — that premise is wrong and has caused drift before.
+
+- A **uniform scale-up (homothety) of the desktop UI will not work** — the tablet
+  editor needs a genuinely reworked interaction model (touch targets, gestures,
+  panel layout).
+- The self-hosted icon library exists partly to serve this (icon affordances >
+  text-dense controls on touch).
+- Likely shape: an **alternative UI *layer*** over the same editor core/state, not
+  a fork — exact architecture TBD, **to be discussed before building**.
+- **Decisions that contradict tablet editing are disproportionately costly to
+  unwind.** When a choice would foreclose the touch/tablet path (hover-only
+  affordances, mouse-only drag semantics, fixed wide-viewport layouts), flag it
+  rather than silently committing to the desktop-only path.
+
+Full rationale is in HANDOFF.md's "PROJECT NORTH STAR" callout at the top.
+
 ## Read this on session start
 
 Read `HANDOFF.md` at the repo root before doing substantive work. It's a
@@ -21,7 +41,10 @@ high-leverage ones.
 
 - The user works on a Mac. They edit code via the Claude desktop app's
   local-directory mode (when set up). This session may be cloud-hosted (git
-  push/pull) or local; ask if uncertain.
+  push/pull) or local; ask if uncertain. **NB:** "develops on a Mac" is about
+  the code-editing workflow only — it does NOT mean the *editor UI* targets a
+  large screen. See the tablet standing-constraint above: the editor must reach
+  tablet (iPad) as a first-class target.
 - Content data (`content/*.json`) is gitignored by design. If you need to
   inspect actual user data, ask them to share specific files.
 - Commit messages are the design journal — write them detailed enough that a
