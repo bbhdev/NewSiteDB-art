@@ -592,6 +592,40 @@ button.pe-save.is-flash {
 .pe-resize-handle--w  { top: 50%;     left: -6px;    cursor: ew-resize;
                         transform: translateY(-50%); }
 
+/* Move grip (v0.10.69) — always-on-top drag handle for MOVING the selected
+   rect, including when it's buried. A tab centred just above the box top edge
+   so it never overlaps content; the inner icon carries the affordance, so it
+   fills most of the tab height per the icon-sizing rule. Parked 10px above the
+   edge to clear the 'n' resize handle (which reaches 6px above). z above the
+   handles(2)/dot(3) within the box. The surface has no overflow:hidden, so a
+   rect at the very top simply floats its grip onto the striped wrap — visible,
+   not clipped. */
+.pe-overlay-box > .pe-move-grip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.5rem;
+  min-width: 2rem;
+  padding: 0 0.35rem;
+  border-radius: 6px;
+  background: var(--pe-palette-accent, #ff5500);
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: move;
+  z-index: 4;
+}
+.pe-move-grip .material-icons {
+  font-size: 1.25rem;   /* ~83% of the 1.5rem tab — clearly readable affordance */
+  line-height: 1;
+  color: #ffffff;
+  pointer-events: none; /* the grip div is the hit target */
+}
+
 /* Sidebar panel rows ─────────────────────────────────────────
    Chapter rows + selection-panel rows share a compact info-row
    visual: name on the left, small affordances on the right. */

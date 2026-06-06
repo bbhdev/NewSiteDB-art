@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.68):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.69):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -812,8 +812,9 @@ nubs (`pointer-events:auto`). Handles no longer emitted per-rect.
   drag handler's `[data-rect-id=…]` querySelector still resolves the rect, not
   the box; `render()` rebuilds the box fresh on pointerup.
 - *Deferred & named.* Body-drag-to-MOVE a fully-buried rect (its body is still
-  under the covering rect) is not done. Workaround: bring-forward via the layer
-  buttons, reposition, send back.
+  under the covering rect) — **RESOLVED in v0.10.69 via the move grip** (see the
+  "Move grip" entry below). The grip approach was chosen over a draggable box body
+  to preserve click-through selection and to suit the planned tablet UI.
 
 **Focal-pan dot into the overlay + z-index ceiling (v0.10.68).** Finishes the
 always-on-top work: the focal-pan dot (image cover-mode crop handle) had stayed
@@ -846,6 +847,29 @@ the same isolation-context trap the handles had. Changes:
 - *Z-index ceiling.* `.pe-overlay` bumped 1000 → 2147483647 (max 32-bit signed)
   so the chrome is unconditionally on top regardless of how rect z-indices
   evolve under author-managed layering.
+
+**Move grip — drag a buried rect (v0.10.69).** Closes the last named deferral of
+the always-on-top work: a fully-buried rect's body was unreachable for a MOVE
+(only resize/pan worked, via the overlay handles/dot). Added a `.pe-move-grip` —
+an `open_with` icon tab in the overlay box (so at the z ceiling) parked centred
+just above the box top edge (`bottom: calc(100% + 10px)`, clearing the 'n' handle
+which reaches 6px above). `pointerdown` on it (resolved with `closest('.pe-move-
+grip')` so a hit on the inner icon span counts) starts a `mode:'move'` drag
+against `selectedId` — same path as the rect-body move and the resize-handle
+branch. The buried rect still gets its 999 z-lift during the drag, so it rises
+above its sibling and you see it move while the overlay stays on top.
+- *Why a grip, not a draggable box body.* Making the box body itself draggable was
+  the simpler option but would have swallowed click-through selection of any rect
+  overlapping the selected one's footprint. The explicit grip preserves
+  click-through AND is the touch-friendly path for the planned tablet UI (a
+  text-dense body-drag target is poor on touch; an icon affordance is exactly what
+  the tablet layer wants — see the PROJECT NORTH STAR callout).
+- *No clipping risk.* `.pe-canvas-surface` has no `overflow:hidden`, so a rect at
+  the very top floats its grip onto the striped wrap — visible, not clipped.
+- Verified on live preview (home page, buried drilldown z1 under deco-mount z2):
+  grip on top (`pointer-events:auto`, z:4, 10px above the box top edge); grip-drag
+  moved the buried rect (361,173)→(241,233) = exactly the −120/+60 delta, with the
+  rect lifted to z 999 during the drag.
 
 ## What this project is
 

@@ -785,6 +785,31 @@
                      ev.target.classList.contains('pe-resize-handle')
                      ? ev.target : null;
 
+    // Move-grip hit (v0.10.69). The grip lives in the always-on-top overlay
+    // box, which belongs to the selected rect — so dragging it MOVES that rect
+    // even when the rect body is buried under a higher-Z sibling. Like the
+    // resize-handle branch, resolve the rect from selectedId (the grip's
+    // ancestor is the overlay box, not a .pe-rect). closest() catches a hit on
+    // the inner <span> icon too.
+    const gripEl = ev.target && ev.target.closest &&
+                   ev.target.closest('.pe-move-grip');
+    if (gripEl) {
+      const sr = state.rects.find(function (x) { return x.id === selectedId; });
+      if (!sr) return;
+      drag = {
+        mode:      'move',
+        id:        selectedId,
+        pointerId: ev.pointerId,
+        startX:    ev.clientX,
+        startY:    ev.clientY,
+        origX:     sr.x,
+        origY:     sr.y,
+        moved:     false
+      };
+      ev.preventDefault();
+      return;
+    }
+
     // Resize handle hit (v0.10.67). Handles live in the always-on-top
     // overlay, which belongs to the selected rect — so a handle hit resizes
     // selectedId even when the rect itself is buried under a higher-Z rect.
@@ -1236,6 +1261,21 @@
       h.dataset.dir = d;
       box.appendChild(h);
     });
+    // Move grip (v0.10.69) — an always-on-top drag handle so the selected
+    // rect can be MOVED even when fully buried under a higher-Z sibling (its
+    // body is unreachable; the box, at the z-index ceiling, is not). Parked
+    // as a tab just above the box top edge so it never sits over content and
+    // doesn't fight the body's own drag-to-move when the rect is exposed. The
+    // explicit icon target is also the touch-friendly path for the planned
+    // tablet UI (text-dense body-drag is hard on touch).
+    const grip = document.createElement('div');
+    grip.className = 'pe-move-grip';
+    grip.title = 'Drag to move (works even when this rect is buried)';
+    const gicon = document.createElement('span');
+    gicon.className = 'material-icons';
+    gicon.textContent = 'open_with';
+    grip.appendChild(gicon);
+    box.appendChild(grip);
     // Focal-pan dot (v0.10.68) — lives in the overlay box, on top of every
     // rect, so a buried image rect's pan handle stays grabbable. Only on an
     // image rect in cover mode whose image actually has hidden parts to pan
