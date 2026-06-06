@@ -754,9 +754,9 @@ button.pe-save.is-flash {
   color: #8a8a8a;
   padding: 0.25rem 0.35rem 0.2rem;
   /* Lighter than the sidebar so each type title reads as a banded section
-     header rather than blending into the list. Sidebar #1a1b1f + 060606
-     (two +030303 steps; one step was too faint to register). (v0.10.73) */
-  background: #202125;
+     header rather than blending into the list. Sidebar #1a1b1f + 070707
+     (two +030303 steps then one more +010101 nudge). (v0.10.74) */
+  background: #212226;
   border-radius: 3px;
 }
 

@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.73):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.74):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -936,9 +936,9 @@ page-editor panel-polish tweaks.
   on *both* sides and must re-declare the separator.
 - *OBJECTS type titles banded.* The `.pe-objects-subhead` (kind headers in the
   T/by-type view) were plain text on the sidebar. Gave them a background
-  lighter than the sidebar (`#1a1b1f` + `060606` = `#202125`; v0.10.73 doubled
-  the original single `030303` step, which was too faint to register) + small
-  radius so each type reads as a section band.
+  lighter than the sidebar (`#1a1b1f` + `070707` = `#212226`, dialled in over
+  three rounds: `030303` was too faint → `060606` → `+010101`) + small radius so
+  each type reads as a section band.
 
 ## What this project is
 
