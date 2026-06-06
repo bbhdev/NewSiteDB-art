@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.58):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.60):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -650,6 +650,49 @@ server whitelist (jpg/jpeg/png/gif/webp/avif) rejected it, a confusing
 (extensions + MIME types) so unsupported types (notably HEIC, which the
 GD/Imagick thumb engine can't decode) are greyed out up front. The
 server whitelist remains the backstop.
+
+**Image-workshop → page "Use this" transfer (v0.10.59 backend / v0.10.60
+UI).** The deferred image-workshop→page transfer step. From a workshop
+batch grid, an author can send a triaged image into a canvas page's
+`images` library so it becomes pickable in the page editor.
+
+- *Flow (user-chosen):* the verdict row stays 3 buttons until a card is
+  marked **OK**, then a 4th accent button **"Use this"** appears
+  immediately right of OK — CSS-gated via
+  `.iw-card[data-verdict="ok"] .iw-use { display:block }` plus the verdict
+  grid widening `repeat(3,1fr)`→`repeat(4,1fr)` in the OK state (no JS
+  toggles visibility). "Use this" reveals an inline picker: a dropdown of
+  every canvas page + Send/Cancel.
+- *Only the RESIZED derivative is sent, never the original* (user
+  constraint — originals are huge; a 13MB 1320×2868 source → ~595KB
+  368×800 at size=800). The client posts the current test long edge
+  (`SIZE`), and the route reproduces `$img->resize($size,$size)` — the
+  exact derivative the grid shows — then copies that cached thumb file.
+- *Route:* `POST dev/image-workshop/use-image`, body
+  `{ batch, filename, size, targetPage }`. Mirrors `dev/page/upload-image`
+  for the destination side: runs with **no Panel user**, so it resolves +
+  resizes via Kirby (read-only) then `copy()`s the derivative raw into the
+  library dir (lazily provisioned — mkdir `_drafts/images` +
+  `image-container.txt` when the child is absent), auto-renaming on clash.
+  Source batch resolved via the workshop container's `childrenAndDrafts()`
+  (batches are drafts) and validated to `image-workshop-batch`; target
+  validated to `canvas-page` — both enforced server-side, not just in the
+  dropdown.
+- *Sent state:* recorded in a per-batch `sent.json` sidecar
+  (`{ schemaVersion, sent: { "<filename>": [{page,title}, …] } }`, atomic
+  tmp+rename like `verdicts.json`, de-duped by target page id). The
+  template reads it on load → renders green "Sent to: <title>" chips
+  (`is-sent` green right-stripe on the card) and pre-disables already-sent
+  pages in that card's dropdown. After a live send, JS appends the chip
+  and disables the option so a second send can't write a duplicate copy.
+  Multiple targets stack as multiple chips.
+- *Gotcha for verification:* a batch page is a **Panel draft**, so it
+  404s over plain HTTP / in the preview browser (no Panel session) — the
+  grid only renders for a logged-in user. To smoke-test the template
+  headlessly, render the draft directly via a Kirby bootstrap harness
+  (`(new Kirby)->page('dev/image-workshop')->childrenAndDrafts()
+  ->find('<batch>')->render()`); the route itself is curl-testable because
+  routes bypass draft visibility.
 
 ## What this project is
 
