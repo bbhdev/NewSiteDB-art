@@ -1283,6 +1283,26 @@
     })(),
     dirty: false
   };
+  // v0.10.71: make the Save button reflect dirty state — dim + disabled when
+  // clean ("nothing to save"), accent when there are unsaved changes. Mirrors
+  // the /dev/page editor. `state.dirty` is assigned raw (`state.dirty = true`)
+  // in ~30 call sites, so rather than route them all through a markDirty()
+  // helper we convert `dirty` into an accessor that reflects on every write —
+  // every existing assignment now updates the button for free. `_saving`
+  // forces the button disabled during an in-flight save regardless of dirty.
+  let _dirty = false;
+  let _saving = false;
+  function reflectSaveButton() {
+    if (!saveBtn) return;
+    saveBtn.disabled = _saving || !_dirty;
+    saveBtn.classList.toggle('is-dirty', _dirty && !_saving);
+  }
+  Object.defineProperty(state, 'dirty', {
+    get: function () { return _dirty; },
+    set: function (v) { _dirty = !!v; reflectSaveButton(); },
+    enumerable: true, configurable: true
+  });
+  reflectSaveButton(); // initial paint: clean → dim + disabled
   // Make sure every useClass has a dims slot + a byClass entry, so
   // getters never see undefined.
   useClasses.forEach(function (cid) {
@@ -15677,7 +15697,7 @@
 
   // ── Save ──────────────────────────────────────────────────────────
   async function save() {
-    saveBtn.disabled = true;
+    _saving = true; reflectSaveButton();
     saveStatus.classList.remove('is-error');
     saveStatus.textContent = 'Saving…';
     try {
@@ -15709,7 +15729,7 @@
           + 'render anyway, but dropping them is permanent.)');
         if (!ok) {
           saveStatus.textContent = 'Save canceled.';
-          saveBtn.disabled = false;
+          _saving = false; reflectSaveButton();
           return;
         }
       }
@@ -15741,7 +15761,7 @@
       saveStatus.classList.add('is-error');
       saveStatus.textContent = 'Save failed: ' + err.message;
     } finally {
-      saveBtn.disabled = false;
+      _saving = false; reflectSaveButton();
     }
   }
 

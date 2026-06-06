@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.70):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.71):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -897,6 +897,30 @@ by `renderObjects()` in dev-page.js (called from `render()` after
   r-ocmv55ac note "mounto - deco" z2): T mode shows both kind groups in order; Z
   mode shows the flat z2→z1 list; clicking a row selects the rect and highlights
   the row.
+
+**UI consistency: page scrollbar + draw save button (v0.10.71).** Two small
+cross-editor polish fixes.
+- *Page editor dark scrollbars.* `/dev/draw` had dark scrollbars (`body.editor`
+  scrollbar-color + `::-webkit-scrollbar*` rules) but `/dev/page` didn't — the
+  bright OS chrome read as broken against the `#1f2024` backdrop. Mirrored the
+  treatment under `body.page-editor` in dev-page.css (thin; thumb `#444`, track
+  `#1a1b1f`). Verified: `scrollbar-color` now `rgb(68,68,68) rgb(26,27,31)`.
+- *Draw save button is now dirty-aware.* Draw's `.ed-save` was hard-coded to the
+  accent (`background: var(--accent)`) and never disabled on clean, so it was
+  **always highlighted even with nothing to save** — the page editor's Save was
+  already dirty-aware; draw was the odd one out. Fix mirrors the page editor:
+  clean → inherits the dark `.ed-toolbar button` look + disabled; `.is-dirty` →
+  accent + enabled. The catch: draw assigns `state.dirty = true` raw in ~30 call
+  sites (no `markDirty()` helper). Rather than touch all of them, `state.dirty`
+  was converted to an **accessor** (`Object.defineProperty` get/set over a
+  `_dirty` backing) whose setter calls `reflectSaveButton()` — every existing
+  assignment now updates the button for free. A `_saving` flag forces disabled
+  during an in-flight save; `save()`'s three manual `saveBtn.disabled` toggles now
+  drive `_saving` + reflect. The success flash keyframe was retargeted to settle
+  on the dark clean colours (was ending on accent) and forces opacity:1 so the
+  green pulse stays vivid over the now-disabled button. Verified: clean = dark
+  `#3a3a3a` + disabled; clicking "new color" (a real `state.dirty=true` site)
+  flips it to accent + enabled, proving the accessor fires end-to-end.
 
 ## What this project is
 

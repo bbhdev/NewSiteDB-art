@@ -11,6 +11,21 @@
  * patterns recur (Slice 7 polish).
  */
 
+/* Dark scrollbars editor-wide — default OS chrome is too bright against
+   the #1f2024 backdrop. Mirrors the dev-draw treatment (body.editor) so
+   the two editors share scrollbar chrome. Firefox honors scrollbar-color;
+   WebKit/Blink uses the pseudo-elements. (v0.10.71) */
+body.page-editor,
+body.page-editor * {
+  scrollbar-width: thin;
+  scrollbar-color: #444 #1a1b1f;
+}
+body.page-editor *::-webkit-scrollbar              { width: 10px; height: 10px; }
+body.page-editor *::-webkit-scrollbar-track        { background: #1a1b1f; }
+body.page-editor *::-webkit-scrollbar-thumb        { background: #444; border-radius: 5px; border: 2px solid #1a1b1f; }
+body.page-editor *::-webkit-scrollbar-thumb:hover  { background: #5a5a5a; }
+body.page-editor *::-webkit-scrollbar-corner       { background: #1a1b1f; }
+
 /* Layout primitives ───────────────────────────────────────────── */
 
 body.page-editor {

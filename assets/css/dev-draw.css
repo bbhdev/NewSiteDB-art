@@ -301,17 +301,25 @@ body.editor {
 .ed-spacer { flex: 1; }
 
 .ed-toolbar .ed-save {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
+  /* Clean state inherits the dark toolbar-button look (background #3a3a3a
+     from `.ed-toolbar button`) and is disabled by JS, so "nothing to save"
+     reads as dim/inert. The `.is-dirty` class (set by JS when there are
+     unsaved changes) flips it to the accent so the primary action only
+     lights up when it's actually actionable — mirrors the /dev/page
+     editor's Save button. (v0.10.71) */
   font-weight: 600;
   /* Wider than other toolbar buttons so the primary action reads as
      primary, instead of looking squeezed at "Save" length. */
   min-width: 4.5rem;
   padding: 0 1rem;
 }
-.ed-toolbar .ed-save:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
-.ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: progress; }
+.ed-toolbar .ed-save.is-dirty {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.ed-toolbar .ed-save.is-dirty:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+.ed-toolbar .ed-save:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Unified styling for the three icon buttons in the toolbar/tab
    strip (clone, settings, help). Each one carries inline SVG of
    consistent design (1.6 stroke, round joins) so size + visual
@@ -2528,13 +2536,19 @@ body.editor input[type="range"] {
 
 /* Save-button success flash — quick green-tinted pulse so the
    user's eyes (already on the button) see the confirmation. */
+/* Green "saved!" pulse that settles into the dark clean resting state
+   (v0.10.71: the button is disabled+dim immediately after a save now that
+   it's dirty-aware, so the flash forces full opacity + white text and ends
+   on the dark/grey clean colours rather than the old accent). */
 @keyframes ed-save-flash {
-  0%   { background: var(--accent); border-color: var(--accent); }
-  20%  { background: #2c8a4a;        border-color: #3aa860; }
-  100% { background: var(--accent); border-color: var(--accent); }
+  0%   { background: #2c8a4a; border-color: #3aa860; }
+  20%  { background: #2c8a4a; border-color: #3aa860; }
+  100% { background: #3a3a3a; border-color: #555; }
 }
 .ed-toolbar .ed-save.is-flash-success {
   animation: ed-save-flash 0.9s ease-out;
+  opacity: 1;
+  color: #fff;
 }
 
 /* Hide canvas-wrap scrollbars (panning is via the canvas itself;
