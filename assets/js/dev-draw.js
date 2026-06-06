@@ -12235,13 +12235,54 @@
 
   // ---- Typography tokens (Slice 3b) ------------------------------------
   //
-  // Read-only listing for 3b-1: each row shows the token's name, a live
-  // sample rendered with the token's own `.ty-<id>` class (the PHP-emitted
-  // CSS in the page <head> drives the actual font/size — same emitter the
-  // page editor & runtime use, so the preview here matches what ships),
-  // and a compact spec line. Create/rename/delete + field editing arrive
-  // in 3b-2 / 3b-3. Tokens are NOT in the draw undo history (they persist
-  // via their own /dev/draw/typography route, not the per-page save).
+  // Site-wide named type styles, shared across all pages. Each row shows
+  // an editable name, the stable `ty-<id>` identity chip, a live sample
+  // rendered with the token's own `.ty-<id>` class, a compact spec line,
+  // and a delete button. Tokens are NOT in the draw undo history — they
+  // persist via their own /dev/draw/typography route (the Save button in
+  // the panel head), not the per-page draw save.
+  //
+  // 3b-1: read-only list + save round-trip.
+  // 3b-2 (this): create / rename / delete + dirty indicator + client-side
+  //   CSS so new/edited tokens preview live (the server <head> CSS only
+  //   covers tokens that existed at page load; this layer overrides it and
+  //   also covers freshly-created ids).
+  // 3b-3 (next): family picker + size/weight/lineHeight/letterSpacing/
+  //   italic field editing.
+
+  // Session set of ids created-but-not-yet-saved. While an id is in here,
+  // renaming re-derives the id from the name (so you get a clean
+  // `.ty-heading` instead of `.ty-token`); once saved to disk the id locks
+  // forever, so existing rect `typographyId` refs never break on rename.
+  const newTypoIds = {};
+  let typographyDirty = false;
+
+  function clampTypoNum(v, lo, hi, def) {
+    v = parseFloat(v);
+    if (isNaN(v)) return def;
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function slugifyTypoId(name) {
+    const s = String(name || '').toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return s || 'token';
+  }
+
+  // First id of the form base, base-2, base-3, … not already taken by a
+  // token other than `exceptId`.
+  function uniqueTypoId(base, exceptId) {
+    const taken = {};
+    (state.typography || []).forEach(function (t) {
+      if (t.id !== exceptId) taken[t.id] = true;
+    });
+    if (!taken[base]) return base;
+    let n = 2;
+    while (taken[base + '-' + n]) n++;
+    return base + '-' + n;
+  }
 
   function typoSpecLine(t) {
     const fam = (t.family && String(t.family).trim()) || 'sans-serif';
@@ -12254,6 +12295,73 @@
     return s;
   }
 
+  // Rebuild a client-side <style> mirroring deco_typography_css() so the
+  // panel previews stay WYSIWYG for tokens the server didn't emit (new
+  // ones) or whose fields changed this session. The PHP emitter remains
+  // the source of truth for what actually ships; this only keeps the live
+  // editor accurate. Placed after the server's #ed-typography-css so it
+  // wins on equal specificity.
+  function rebuildTypographyClientCss() {
+    let el = document.getElementById('ed-typography-css-live');
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'ed-typography-css-live';
+      document.head.appendChild(el);
+    }
+    const css = (state.typography || []).map(function (t) {
+      const id = String(t.id || '').replace(/[^a-z0-9_-]/gi, '');
+      if (!id) return '';
+      const famRaw = (t.family != null ? String(t.family) : '').trim().replace(/[^A-Za-z0-9 _-]/g, '');
+      const fam = famRaw !== '' ? ("'" + famRaw + "', ") : '';
+      const size = clampTypoNum(t.sizePx, 1, 400, 16);
+      const w = Math.round(clampTypoNum(t.weight, 100, 900, 400));
+      const lh = clampTypoNum(t.lineHeight, 0.5, 4, 1.4);
+      const ls = clampTypoNum(t.letterSpacingPx, -20, 50, 0);
+      return '.ty-' + id + ' { font-family: ' + fam + 'sans-serif; font-size: ' + size +
+             'px; font-weight: ' + w + '; line-height: ' + lh + '; letter-spacing: ' + ls +
+             'px; font-style: ' + (t.italic ? 'italic' : 'normal') + '; }';
+    }).join('\n');
+    el.textContent = css;
+  }
+
+  function markTypographyDirty() {
+    typographyDirty = true;
+    const btn = document.getElementById('save-typography-btn');
+    if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save •'; }
+  }
+  function clearTypographyDirty() {
+    typographyDirty = false;
+    const btn = document.getElementById('save-typography-btn');
+    if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save'; }
+  }
+
+  function addTypographyToken() {
+    if (!Array.isArray(state.typography)) state.typography = [];
+    const id = uniqueTypoId('token');
+    state.typography.push({
+      id: id, name: 'New token', family: '',
+      sizePx: 16, weight: 400, lineHeight: 1.4, letterSpacingPx: 0, italic: false
+    });
+    newTypoIds[id] = true;
+    rebuildTypographyClientCss();
+    markTypographyDirty();
+    renderTypographyList();
+    // Focus + select the new row's name for immediate renaming.
+    const inp = document.querySelector(
+      '#typography-list .ed-typo-row[data-typo-id="' + id + '"] .ed-typo-name-input');
+    if (inp) { inp.focus(); inp.select(); }
+  }
+
+  function deleteTypographyToken(t) {
+    if (!confirm('Delete typography token "' + (t.name || t.id) +
+                 '"? Text using it falls back to inherited styles.')) return;
+    state.typography = (state.typography || []).filter(function (x) { return x.id !== t.id; });
+    delete newTypoIds[t.id];
+    rebuildTypographyClientCss();
+    markTypographyDirty();
+    renderTypographyList();
+  }
+
   function renderTypographyList() {
     const listEl = document.getElementById('typography-list');
     if (!listEl) return;
@@ -12262,24 +12370,37 @@
     if (!tokens.length) {
       const empty = document.createElement('li');
       empty.className = 'ed-typo-empty';
-      empty.textContent = 'No typography tokens yet.';
+      empty.textContent = 'No typography tokens yet — use “+ Token”.';
       listEl.appendChild(empty);
       return;
     }
     tokens.forEach(function (t) {
       const li = document.createElement('li');
       li.className = 'ed-typo-row';
+      li.setAttribute('data-typo-id', t.id);
 
       const head = document.createElement('div');
       head.className = 'ed-typo-head';
-      const nm = document.createElement('span');
-      nm.className = 'ed-typo-name';
-      nm.textContent = t.name || t.id;
+
+      const nameInp = document.createElement('input');
+      nameInp.type = 'text';
+      nameInp.className = 'ed-typo-name-input';
+      nameInp.value = t.name || '';
+      nameInp.placeholder = 'name';
+
       const idTag = document.createElement('code');
       idTag.className = 'ed-typo-id';
       idTag.textContent = 'ty-' + t.id;
-      head.appendChild(nm);
-      head.appendChild(idTag);
+      idTag.title = newTypoIds[t.id]
+        ? 'Stable id (tracks the name until first saved, then locks)'
+        : 'Stable id — does not change on rename (rects reference it)';
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'ed-mini ed-typo-del';
+      del.textContent = '×';
+      del.title = 'Delete token';
+      del.addEventListener('click', function () { deleteTypographyToken(t); });
 
       const sample = document.createElement('div');
       sample.className = 'ed-typo-sample ty-' + t.id;
@@ -12289,6 +12410,27 @@
       spec.className = 'ed-typo-spec';
       spec.textContent = typoSpecLine(t);
 
+      nameInp.addEventListener('input', function () {
+        t.name = nameInp.value;
+        // For an unsaved token, keep the id readable by tracking the name.
+        if (newTypoIds[t.id]) {
+          const newId = uniqueTypoId(slugifyTypoId(t.name), t.id);
+          if (newId !== t.id) {
+            delete newTypoIds[t.id];
+            t.id = newId;
+            newTypoIds[newId] = true;
+            li.setAttribute('data-typo-id', newId);
+            idTag.textContent = 'ty-' + newId;
+            sample.className = 'ed-typo-sample ty-' + newId;
+            rebuildTypographyClientCss();
+          }
+        }
+        markTypographyDirty();
+      });
+
+      head.appendChild(nameInp);
+      head.appendChild(idTag);
+      head.appendChild(del);
       li.appendChild(head);
       li.appendChild(sample);
       li.appendChild(spec);
@@ -12296,12 +12438,11 @@
     });
   }
 
-  // Persist the current tokens to content/_shared/typography-tokens.json.
-  // 3b-1 has no editing UI yet, so this writes the seed set verbatim —
-  // its purpose is to prove the round-trip (load → POST → file → reload)
-  // before create/edit/delete land in 3b-2.
+  // Persist the current tokens to content/_shared/typography-tokens.json
+  // via the dedicated route. On success the server-normalised set is
+  // adopted back and all session ids lock (clear newTypoIds), so further
+  // renames no longer mutate ids.
   async function saveTypography(btn) {
-    const orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
       const res = await fetch('/dev/draw/typography', {
@@ -12313,17 +12454,24 @@
       if (!res.ok || !j.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + res.status));
       if (Array.isArray(j.tokens)) {
         state.typography = j.tokens;   // adopt the server-normalised set
-        renderTypographyList();
       }
-      if (btn) { btn.textContent = 'Saved.'; }
+      Object.keys(newTypoIds).forEach(function (k) { delete newTypoIds[k]; });
+      rebuildTypographyClientCss();
+      renderTypographyList();
+      clearTypographyDirty();
+      if (btn) { btn.disabled = false; btn.textContent = 'Saved.'; }
+      setTimeout(function () {
+        const b = document.getElementById('save-typography-btn');
+        if (b && !typographyDirty) b.textContent = 'Save';
+      }, 1800);
     } catch (err) {
       console.error('[dev-draw] typography save failed:', err);
-      if (btn) { btn.textContent = 'Failed'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Failed'; }
       alert('Typography save failed: ' + err.message);
-    } finally {
-      if (btn) {
-        setTimeout(function () { btn.disabled = false; btn.textContent = orig || 'Save'; }, 1800);
-      }
+      setTimeout(function () {
+        const b = document.getElementById('save-typography-btn');
+        if (b) b.textContent = typographyDirty ? 'Save •' : 'Save';
+      }, 1800);
     }
   }
 
@@ -15870,9 +16018,15 @@
   });
   newGroupBtn.addEventListener('click', addGroup);
   newColorBtn.addEventListener('click', addColor);
-  // Typography panel (Slice 3b). Rendered once here (read-only in 3b-1,
-  // and shared/not-per-page so it stays out of renderAll's per-edit churn).
+  // Typography panel (Slice 3b). Rendered once here — shared/not-per-page,
+  // so it stays out of renderAll's per-edit churn. The client-side preview
+  // CSS is (re)built up front so seed tokens already render WYSIWYG.
+  rebuildTypographyClientCss();
   renderTypographyList();
+  const newTypoBtn = document.getElementById('new-typo-btn');
+  if (newTypoBtn) {
+    newTypoBtn.addEventListener('click', addTypographyToken);
+  }
   const saveTypographyBtn = document.getElementById('save-typography-btn');
   if (saveTypographyBtn) {
     saveTypographyBtn.addEventListener('click', function () { saveTypography(saveTypographyBtn); });

@@ -298,7 +298,10 @@ $payload = json_encode([
     <section class="ed-panel">
       <header class="ed-panel-head">
         <h3>Typography</h3>
-        <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save</button>
+        <span class="ed-typo-head-btns">
+          <button type="button" id="new-typo-btn" class="ed-mini" title="Add a typography token">+ Token</button>
+          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save</button>
+        </span>
       </header>
       <ul id="typography-list" class="ed-typo-list"></ul>
     </section>

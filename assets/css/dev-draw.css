@@ -2643,13 +2643,29 @@ body.editor input[type="range"] {
   border-bottom: 1px solid #2a2e35;
 }
 .ed-typo-row:last-child { border-bottom: 0; }
+.ed-typo-head-btns { display: flex; gap: 0.3rem; }
 .ed-typo-head {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; align-items: center;
   gap: 0.4rem; margin-bottom: 0.25rem;
 }
 .ed-typo-name {
   color: #f0f0f0; font-size: 0.85em; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ed-typo-name-input {
+  flex: 1 1 auto; min-width: 0;
+  background: #111; color: #f0f0f0; border: 1px solid #444;
+  padding: 0.15rem 0.35rem; border-radius: 3px; font: inherit;
+  font-size: 0.85em; font-weight: 600; box-sizing: border-box;
+}
+.ed-typo-del {
+  flex: none; padding: 0.05rem 0.4rem; font-size: 0.85em;
+  border-color: #855; color: #f88;
+}
+/* Dirty indicator on the panel-head Save button — unsaved create/rename/
+   delete since the last write. */
+#save-typography-btn.is-dirty {
+  border-color: #c79a3a; color: #f0c25a;
 }
 .ed-typo-id {
   color: #8a9099; font-size: 0.68em; flex: none;

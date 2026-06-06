@@ -40,11 +40,12 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.76):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.77):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
-— read-only list + `dev/draw/typography` save round-trip) landed —
-see the Slice 3a / 3b-1 entries below.
+— read-only list + `dev/draw/typography` save round-trip) and 3b-2
+(create / rename / delete tokens) landed — see the Slice 3a / 3b
+entries below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -1029,6 +1030,39 @@ persistence round-trip; create / rename / delete (3b-2) and field editing
 - *Next:* 3b-2 (create/rename/delete tokens) → 3b-3 (family picker + field
   editing). Then priority #3 (real text content on text rects).
 
+**Slice 3b-2 — create / rename / delete typography tokens (v0.10.77).**
+Adds the mutation verbs to the 3b-1 panel. No new route — reuses
+`dev/draw/typography` POST.
+- *Create.* `+ Token` button in the panel head appends a token with default
+  fields (16px / 400 / lh 1.4) and focuses its name input.
+- *Stable-id discipline.* A token's `id` is its permanent identity (rects
+  reference it via `typographyId`, and `.ty-<id>` is the CSS hook), so rename
+  changes only `name`, never `id`. BUT to avoid ugly auto-ids: a freshly
+  created, not-yet-saved id is held in a session set `newTypoIds`, and while
+  it's in that set renaming re-derives the id from the name
+  (`slugifyTypoId` + `uniqueTypoId` dedupe) — so typing "Hero Title" gives you
+  `.ty-hero-title`. On successful Save the set is cleared and every id locks
+  forever. Result: clean ids for new tokens, zero ref-breakage on later rename.
+- *Delete.* Per-row `×` with confirm; removes from `state.typography`. Rect
+  refs to the deleted token dangle gracefully by design (no cleanup).
+- *Dirty indicator.* Create/rename/delete set a `typographyDirty` flag → the
+  panel Save button shows "Save •" with an amber `.is-dirty` style; cleared on
+  successful save. (Distinct from the per-page draw Save — typography is
+  shared/site-wide and out of the undo history.)
+- *Live WYSIWYG previews.* New `rebuildTypographyClientCss()` injects a
+  `<style id="ed-typography-css-live">` mirroring `deco_typography_css()`,
+  appended after the server's `#ed-typography-css` so it wins and also covers
+  ids the server didn't emit at page load (new tokens). PHP emitter stays the
+  source of truth for what ships; this only keeps the live editor accurate.
+  (This is the hook 3b-3's field editing will drive.)
+- *Verified* via the live draw UI: create (4→5), rename id-tracking
+  (token→hero-title, chip + sample class follow), Save (writes 5-token file,
+  clears dirty, locks ids), post-save rename keeps id locked + re-flags dirty,
+  delete removes the row. Test file removed → default stays seed-fallback.
+- *Next:* 3b-3 (family picker from font-bundle + local fonts, and size /
+  weight / lineHeight / letterSpacing / italic field editing — driving
+  `rebuildTypographyClientCss` live). Then priority #3 (real text content).
+
 ## What this project is
 
 A Kirby-based site where the visual identity is a layer of animated SVG line
@@ -1730,8 +1764,9 @@ absolute coordinates.
    (`deco_*_typography`) + Type dropdown/preview on text rects (see
    the Slice 3a entry above). **3b — authoring UI in draw**, sub-sliced:
    **3b-1 DONE (v0.10.76)**: read-only panel + `dev/draw/typography`
-   save round-trip (see the 3b-1 entry above). **3b-2 PENDING**: create /
-   rename / delete tokens. **3b-3 PENDING**: family picker + field editing.
+   save round-trip. **3b-2 DONE (v0.10.77)**: create / rename / delete
+   tokens (stable-id discipline + live previews — see the 3b-2 entry
+   above). **3b-3 PENDING**: family picker + field editing.
 4. **Slice 4 — Deco bootstrapper + htmlKey slots** (shared artifacts
    #2 + #3). `deco-mount` rects render as `<div data-deco="…">`;
    JS bootstrapper mounts the Deco runtime per rect against the
