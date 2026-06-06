@@ -136,6 +136,16 @@
   // Separate from selectedId: a rect is selected first, then double-clicked
   // to enter editing; exiting editing keeps it selected.
   let editingId = null;
+  // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
+  // use the native 'dblclick' event because the pointerdown handler calls
+  // preventDefault() on every rect hit, and preventDefault on pointerdown
+  // suppresses the browser's synthesized click/dblclick compatibility events.
+  // Track the last tap's time + rect id ourselves; two taps on the same text
+  // rect within DOUBLE_TAP_MS enter edit mode. Also gives the tablet layer a
+  // real double-tap for free.
+  let lastTapTime = 0;
+  let lastTapId = null;
+  const DOUBLE_TAP_MS = 350;
   let drag = null; // { id, pointerId, startX, startY, origX, origY, moved }
   let focusDrag = null; // focal-dot drag (step 4d); independent of `drag`
   // Objects panel (v0.10.70) — session-only display mode: 'type' groups by
@@ -1010,6 +1020,27 @@
     const r  = state.rects.find(function (x) { return x.id === id; });
     if (!r) return;
 
+    // Slice T2 (v0.10.85): manual double-click/double-tap → enter inline edit.
+    // The second tap on the same text rect within DOUBLE_TAP_MS opens the
+    // editor and skips drag setup. The first tap falls through to normal
+    // select+drag. See lastTap* note at the state declarations for why we
+    // can't use the native 'dblclick' event here.
+    if (r.kind === 'text') {
+      const now = Date.now();
+      if (lastTapId === id && (now - lastTapTime) < DOUBLE_TAP_MS) {
+        lastTapTime = 0;
+        lastTapId = null;
+        enterEditMode(id);
+        ev.preventDefault();
+        return;
+      }
+      lastTapTime = now;
+      lastTapId = id;
+    } else {
+      lastTapTime = 0;
+      lastTapId = null;
+    }
+
     // Selection happens on pointerdown regardless of subsequent
     // drag — feels more responsive than waiting for pointerup.
     selectedId = id;
@@ -1034,22 +1065,11 @@
     ev.preventDefault();
   });
 
-  // Slice T2: double-click a text rect → enter inline edit mode. Single
-  // click still selects/drags (handled above); double-click is the
-  // distinct, conflict-free gesture to start editing (double-tap on the
-  // future tablet layer). Non-text rects ignore it. If the dblclick
-  // landed on an already-active editor, leave it alone (let the browser's
-  // native double-click word-select run).
-  surface.addEventListener('dblclick', function (ev) {
-    if (ev.target.closest && ev.target.closest('.pe-rect-text.is-editing')) return;
-    const rectEl = findRectElement(ev.target);
-    if (!rectEl) return;
-    const id = rectEl.dataset.rectId;
-    const r  = state.rects.find(function (x) { return x.id === id; });
-    if (!r || r.kind !== 'text') return;
-    ev.preventDefault();
-    enterEditMode(id);
-  });
+  // NB: double-click to enter edit mode is handled inside the pointerdown
+  // handler above via manual lastTap* tracking — NOT a native 'dblclick'
+  // listener, which never fires here because pointerdown calls preventDefault
+  // (that suppresses the browser's synthesized click/dblclick events). This
+  // also gives the future tablet layer a real double-tap gesture.
 
   document.addEventListener('pointermove', function (ev) {
     // Focal-dot pan (independent of `drag`). Handled here, not on the dot,

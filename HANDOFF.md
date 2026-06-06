@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.84):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.85):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -53,10 +53,11 @@ Slice 3a / 3b entries below.
 text rects now carry author-entered body copy (textarea-first), styled
 by their typography token, rendered on both editor canvas and runtime.
 See the Slice T1 entry below. **Slice T2 (inline on-canvas text
-editing, v0.10.84) landed** — double-click a text rect to edit its
-body copy directly on the canvas (`contenteditable="plaintext-only"`);
-the side-panel textarea remains as a secondary surface. This is the
-tablet-first-class editing path (double-tap on touch). See the Slice T2
+editing, v0.10.84; double-click fixed v0.10.85) landed** — double-click
+a text rect to edit its body copy directly on the canvas
+(`contenteditable="plaintext-only"`); the side-panel textarea remains as
+a secondary surface. This is the tablet-first-class editing path
+(double-tap on touch). See the Slice T2
 entry below. A **rich/fine-grained text-styling discussion is PARKED**
 (prepared-styles model — see the ⏸ callout near the Slice T1 entry).
 Slice 2 brought the image pipeline + out-of-workflow image workshop
@@ -1233,7 +1234,7 @@ under it advertises the canvas gesture.
   (re-focuses the live editable after each `render()` — called at the end of
   `render()`) and `placeCaretEnd(el)`.
 - *Gesture de-confliction* (the crux — single-click must still select/drag):
-  (1) **double-click**, not click, enters edit, so single-click drag is
+  (1) **double-click** (not click) enters edit, so single-click drag is
   untouched; (2) the `pointerdown` handler bails early if the target is inside
   the live editable (lets the caret land), otherwise `commitEdit(false)` and
   proceeds — so clicking away commits; (3) `renderOverlay()` early-returns
@@ -1242,14 +1243,30 @@ under it advertises the canvas gesture.
   deletes the rect being edited. The pre-existing global keydown handler
   already bails on `isContentEditable`, so Backspace/Escape/⌘S don't fight the
   inline editor.
+- *Double-click detection — the v0.10.84→.85 gotcha.* The original T2 used a
+  native `dblclick` listener on `surface`. **It never fired**: the
+  `pointerdown` handler calls `ev.preventDefault()` on every rect hit, and
+  *preventDefault on pointerdown suppresses the browser's synthesized
+  `click`/`dblclick` compatibility events* — so double-click was dead on real
+  input (a synthetic `dblclick` dispatched straight at the node in testing
+  hid this — false positive). **Fix (v0.10.85):** detect the double-tap
+  manually inside `pointerdown` — module state `lastTapTime`/`lastTapId` +
+  `DOUBLE_TAP_MS` (350); the second pointerdown on the same text rect within
+  the window calls `enterEditMode` and returns (skips drag setup), the first
+  falls through to select+drag. The dead `dblclick` listener was removed. This
+  also hands the future tablet layer a real **double-tap** (the native
+  `dblclick` would never have worked on touch either). Lesson: never rely on
+  `click`/`dblclick` alongside a `preventDefault`-ing pointer handler — and
+  test gestures by dispatching the *real* event sequence (pointerdown/up
+  pairs), not the synthetic high-level event.
 - *Commit/cancel:* blur → commit; ⌘↵ (or Ctrl-Enter) → commit; Escape →
   cancel (revert). Plain Enter inserts a newline (plaintext-only).
-- *Verified (preview MCP, v0.10.84):* double-click → focused editable with
-  caret, overlay handles gone, newlines preserved; ⌘↵ commits + marks dirty;
-  Escape reverts; click-away commits; Save → reload round-trips the
-  inline-edited text (with `\n`) to disk; no console errors. Schema unchanged
-  (still writes 3) — T2 is pure editor UX over the T1 `text` field, no save-
-  route change.
+- *Verified (preview MCP, v0.10.85, via real pointerdown/up pairs):*
+  double-tap → focused editable with caret, overlay handles gone, newlines
+  preserved; single tap does NOT edit; ⌘↵ commits + marks dirty; Escape
+  reverts; click-away commits; Save → reload round-trips the inline-edited
+  text (with `\n`) to disk; no console errors. Schema unchanged (still writes
+  3) — T2 is pure editor UX over the T1 `text` field, no save-route change.
 
 > **⏸ Parked discussion — rich / fine-grained text styling (NOT started).**
 > Raised by the user alongside T1 approval, explicitly "to be planned for a
