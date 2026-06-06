@@ -179,6 +179,7 @@ $payload = json_encode([
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Page editor — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
+  <link rel="stylesheet" href="<?= url('assets/css/material-icons.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/dev-page.css') ?>?v=<?= $v ?>">
   <style>
     /* Palette-driven custom properties — emitted at template time so

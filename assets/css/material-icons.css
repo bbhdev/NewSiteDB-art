@@ -1,0 +1,60 @@
+/* ─────────────────────────────────────────────────────────────────
+   Material Icons — self-hosted icon system (Phase 2, v0.10.64)
+
+   Google's classic "Material Icons" font, self-hosted (no CDN, works
+   offline, matches the project's existing self-hosted-fonts choice).
+   One 126 KB woff2 covers ~2,100 icons. Usage anywhere:
+
+       <span class="material-icons">flip_to_front</span>
+
+   The text node is an icon *ligature name* — the font's `liga` feature
+   renders it as the glyph. Browsers that haven't loaded the font yet
+   briefly show the literal name; that's expected and resolves on load.
+
+   Icon names: https://fonts.google.com/icons?icon.set=Material+Icons
+
+   This is a standalone stylesheet so any surface (page editor, draw
+   editor, runtime) can adopt it by linking it; Slice 1 wires it into
+   the page editor only — other surfaces adopt it as their icons get
+   migrated off ad-hoc glyphs.
+   ───────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Material Icons';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block; /* avoid a flash of the literal ligature name */
+  src: url('../fonts/MaterialIcons.woff2') format('woff2');
+}
+
+.material-icons {
+  font-family: 'Material Icons';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;            /* default; override per call-site */
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  /* Render the ligature → glyph, and smooth the edges. */
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Icons are decorative chrome by default — let clicks fall through to
+     the button/control that wraps them. Call-sites that need the icon
+     itself clickable can re-enable pointer-events locally. */
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Optional size helpers (the font scales with font-size). Per the
+   icon-sizing rule, default to a clearly-visible size — never
+   microscopic. md (20px) suits inline toolbar buttons; sm (18px) is
+   the smallest we use for dense control rows. */
+.material-icons.mi-sm { font-size: 18px; }
+.material-icons.mi-md { font-size: 20px; }
+.material-icons.mi-lg { font-size: 28px; }
