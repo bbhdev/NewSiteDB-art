@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.71):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.72):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -921,6 +921,23 @@ cross-editor polish fixes.
   green pulse stays vivid over the now-disabled button. Verified: clean = dark
   `#3a3a3a` + disabled; clicking "new color" (a real `state.dirty=true` site)
   flips it to accent + enabled, proving the accessor fires end-to-end.
+
+**Selection-panel coord separators + OBJECTS type-title band (v0.10.72).** Two
+page-editor panel-polish tweaks.
+- *Coord separators restored.* The selection panel draws discreet hairlines
+  between properties via `.pe-selection-row + .pe-selection-row { border-top }`.
+  But the geometry block (x/y/w/h) is a `.pe-geom-fields`, not a
+  `.pe-selection-row`, so it fell out of that adjacency chain — no hairline
+  before the coords, and (because the Note row below it follows a
+  `.pe-geom-fields`, not a row) no hairline after them either. Added
+  `.pe-selection-row + .pe-geom-fields, .pe-geom-fields + .pe-selection-row`
+  with the same border-top to bridge the block back in. Gotcha to remember: any
+  non-`.pe-selection-row` block dropped into that panel breaks the sibling chain
+  on *both* sides and must re-declare the separator.
+- *OBJECTS type titles banded.* The `.pe-objects-subhead` (kind headers in the
+  T/by-type view) were plain text on the sidebar. Gave them a background one
+  step lighter than the sidebar (`#1a1b1f` + `030303` = `#1d1e22`) + small
+  radius so each type reads as a section band.
 
 ## What this project is
 

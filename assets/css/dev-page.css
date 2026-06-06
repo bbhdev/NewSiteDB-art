@@ -752,7 +752,12 @@ button.pe-save.is-flash {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #8a8a8a;
-  padding: 0.25rem 0.2rem 0.15rem;
+  padding: 0.25rem 0.35rem 0.2rem;
+  /* A touch lighter than the sidebar (#1a1b1f + 030303) so each type title
+     reads as a banded section header rather than blending into the list.
+     (v0.10.72) */
+  background: #1d1e22;
+  border-radius: 3px;
 }
 
 .pe-objects { list-style: none; margin: 0; padding: 0; }
@@ -799,6 +804,17 @@ button.pe-save.is-flash {
    sits above every row but the first, so each property reads as its own
    little section without heavy chrome. */
 .pe-selection-row + .pe-selection-row {
+  border-top: 1px solid #26282d;
+  padding-top: 0.4rem;
+}
+/* The geom block (x/y/w/h) is a .pe-geom-fields, not a .pe-selection-row, so
+   it fell outside the adjacency chain above: no hairline rendered BEFORE it
+   (the row above it had nothing after to pair with) and it also suppressed
+   the hairline AFTER it (the row below it follows a .pe-geom-fields, not a
+   .pe-selection-row). Bridge the block back into the chain so the coords read
+   as their own little section like every other property row. (v0.10.72) */
+.pe-selection-row + .pe-geom-fields,
+.pe-geom-fields + .pe-selection-row {
   border-top: 1px solid #26282d;
   padding-top: 0.4rem;
 }
