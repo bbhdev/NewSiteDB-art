@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.82):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.83):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -1194,6 +1194,17 @@ all additive within schema **v3 (NO bump — `typographyId` precedent)**:
   `null`, schema still 3 → runtime renders pre-wrap → an `<b>…<script>…`
   payload renders as literal escaped text (no injection) AND round-trips
   cleanly back through the hardened editor JSON.
+- *Follow-up fix (v0.10.83) — chrome inheriting the token face.* Because
+  `.ty-<id>` lives on `.pe-rect` and font props inherit, the editor chrome
+  (kind/z label, note, id) rendered in the content's typography — an
+  unreadable handwriting token made the metadata illegible. Chrome is editor
+  UI, not content, so it must reset to the UI font unconditionally. Fix: a
+  named `--pe-ui-font` stack, applied (with `font-style`/`letter-spacing`
+  resets) directly on `.pe-rect-label` (the `.pe-rect-z` badge is its child
+  → inherits the reset), `.pe-rect-id`, and `.pe-rect-note`. Direct CSS on
+  the child beats the inherited token face (the weakest cascade layer). The
+  runtime never had this problem — when text is present it replaces the stub
+  chrome entirely, so nothing UI inherits over content.
 - *Deferred (named):* **T2** inline on-canvas editing (contenteditable /
   WYSIWYG — this is the tablet-first-class editing path); **T3** overflow /
   vertical-alignment options. Rich inline styled runs are now superseded by

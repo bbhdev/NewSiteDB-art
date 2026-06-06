@@ -32,11 +32,19 @@ body.page-editor {
   margin: 0;
   background: #1f2024;
   color: #f0f0f0;
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font: 13px/1.4 var(--pe-ui-font);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
+
+/* Editor UI font stack, named so rect chrome (kind/z/note/id) can RESET
+   to it. A text rect wears its .ty-<id> typography token on .pe-rect, and
+   font properties inherit — so without an explicit reset the chrome would
+   render in the content's face (e.g. an unreadable handwriting token) and
+   become illegible. Chrome is editor UI, not content; it must always be
+   the UI font regardless of the rect's typography. */
+:root { --pe-ui-font: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
 
 .pe-toolbar {
   display: flex;
@@ -349,6 +357,12 @@ button.pe-save.is-flash {
 }
 
 .pe-rect-label {
+  /* Reset to the UI font: a text rect's .ty-<id> token is on the parent
+     and would otherwise be inherited here, rendering the kind chrome in
+     the content face (v0.10.83). The z badge is a child of this element,
+     so it inherits the reset for free. */
+  font-family: var(--pe-ui-font);
+  font-style: normal;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -371,6 +385,11 @@ button.pe-save.is-flash {
   position: absolute;
   top: 0.25rem;
   right: 0.4rem;
+  /* Reset to UI font (v0.10.83) — see .pe-rect-label. letter-spacing reset
+     too: the token may set tracking that would otherwise leak into the id. */
+  font-family: var(--pe-ui-font);
+  font-style: normal;
+  letter-spacing: normal;
   font-size: 0.65rem;
   color: rgba(0, 0, 0, 0.72); /* editor chrome, not palette-bound */
   font-variant-numeric: tabular-nums;
@@ -385,6 +404,10 @@ button.pe-save.is-flash {
    own height is the cap — a very short rect that can't fit the note
    simply hides what doesn't fit. */
 .pe-rect-note {
+  /* Reset to UI font (v0.10.83) — see .pe-rect-label. Keeps the intended
+     italic (legible in the UI face); resets the token's tracking. */
+  font-family: var(--pe-ui-font);
+  letter-spacing: normal;
   margin-top: 0.15rem;
   max-width: 90%;
   padding: 0 0.5rem;
