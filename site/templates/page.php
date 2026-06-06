@@ -280,13 +280,24 @@ $payload = json_encode([
   </aside>
 
   <main class="pe-canvas-wrap">
-    <!-- Canvas surface sized to the primary class's pageW × pageH.
-         Step 1: empty surface, nothing rendered inside. Step 2+
-         renders rects here as position:absolute children. -->
-    <div id="page-editor-surface"
-         class="pe-canvas-surface"
-         style="width: <?= (int)$primaryDims['pageW'] ?>px; min-height: <?= (int)$primaryDims['pageH'] ?>px;">
-      <!-- rects render here -->
+    <!-- The column hugs the surface (width:max-content) and is centred
+         in the scroll wrap, so the dims caption above it aligns flush
+         with the surface's top-left edge regardless of pageW. -->
+    <div class="pe-canvas-col">
+      <!-- Page-area + canvas dimensions, drawn above the page rect
+           top-left (v0.10.63). Same frame the Deco runtime uses:
+           page area = visible page rect; canvas = the larger Deco
+           drawing frame it sits inside. Static — only changes on
+           reload (different page / class). -->
+      <div class="pe-canvas-dims">Page area: <?= (int)$primaryDims['pageW'] ?>, <?= (int)$primaryDims['pageH'] ?> — Canvas: <?= (int)$primaryDims['canvasW'] ?>, <?= (int)$primaryDims['canvasH'] ?></div>
+      <!-- Canvas surface sized to the primary class's pageW × pageH.
+           Step 1: empty surface, nothing rendered inside. Step 2+
+           renders rects here as position:absolute children. -->
+      <div id="page-editor-surface"
+           class="pe-canvas-surface"
+           style="width: <?= (int)$primaryDims['pageW'] ?>px; min-height: <?= (int)$primaryDims['pageH'] ?>px;">
+        <!-- rects render here -->
+      </div>
     </div>
   </main>
 </div>
