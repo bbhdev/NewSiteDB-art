@@ -1558,6 +1558,156 @@ HTML;
           'application/json'
         );
       }
+    ],
+
+    /**
+     * v0.10.59 — Image-workshop "Use this" transfer (Slice 2).
+     *
+     *   POST dev/image-workshop/use-image
+     *   body: { batch, filename, size, targetPage }
+     *
+     * Copies the RESIZED derivative (long-edge $size — the exact fit the
+     * workshop grid shows at the current test size) of a batch image into
+     * a target canvas page's `images` child library. Originals are never
+     * sent (too large — the user's explicit constraint). Records the
+     * transfer in a per-batch sent.json sidecar so the workshop can show,
+     * per image, which page(s) it has already been sent to.
+     *
+     * Like upload-image, this runs with NO Panel user: we resolve + resize
+     * via Kirby (read-only ops), then copy the cached derivative file raw
+     * into the target library dir (lazily provisioned, identical to
+     * upload-image), auto-renaming on clash. createFile would hit the
+     * permission checks that no-user context fails.
+     */
+    [
+      'pattern' => 'dev/image-workshop/use-image',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+        $body  = $kirby->request()->body()->toArray();
+
+        $batchId  = $body['batch']      ?? null;
+        $filename = $body['filename']   ?? null;
+        $targetId = $body['targetPage'] ?? null;
+        $sizeRaw  = $body['size']       ?? null;
+
+        if (!is_string($batchId) || $batchId === ''
+            || !is_string($filename) || $filename === ''
+            || !is_string($targetId) || $targetId === '') {
+          return $json(['ok' => false, 'error' => 'Missing or invalid body fields.'], 400);
+        }
+
+        // Long edge — same clamp as the workshop grid (image blueprint bounds).
+        $size = is_numeric($sizeRaw) ? (int) $sizeRaw : 1000;
+        $size = max(200, min(8000, $size));
+
+        // Resolve the batch (drafts included), scoped to the workshop
+        // container so an arbitrary page id can't be targeted as a source.
+        $container = $kirby->page('dev/image-workshop');
+        $batchPage = $container ? $container->childrenAndDrafts()->find($batchId) : null;
+        if (!$batchPage || $batchPage->intendedTemplate()->name() !== 'image-workshop-batch') {
+          return $json(['ok' => false, 'error' => 'Unknown image-workshop batch: ' . $batchId], 404);
+        }
+
+        // The source must be an actual image file in that batch.
+        $img = $batchPage->image($filename);
+        if (!$img) {
+          return $json(['ok' => false, 'error' => 'Unknown image in batch: ' . $filename], 404);
+        }
+
+        // Resolve + validate the target. Only canvas-page pages are valid
+        // transfer targets (the dropdown only offers those — enforce here).
+        $target = $kirby->page($targetId);
+        if (!$target || $target->intendedTemplate()->name() !== 'canvas-page') {
+          return $json(['ok' => false, 'error' => 'Invalid target page: ' . $targetId], 404);
+        }
+
+        // Generate (or cache-hit) the resized derivative — byte-identical
+        // to what the grid renders at this size.
+        $resized = $img->resize($size, $size);
+        $srcPath = $resized->root();
+        if (!is_string($srcPath) || !is_file($srcPath)) {
+          return $json(['ok' => false, 'error' => 'Could not generate the resized image.'], 500);
+        }
+
+        // Target image library — lazily provisioned, identical to upload-image.
+        $imgPage = $target->childrenAndDrafts()->findBy('slug', 'images');
+        if ($imgPage) {
+          $dir = $imgPage->root();
+        } else {
+          $dir = $target->root() . '/_drafts/images';
+          if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            return $json(['ok' => false, 'error' => 'Could not create the image library.'], 500);
+          }
+          $containerTxt = $dir . '/image-container.txt';
+          if (!file_exists($containerTxt)) {
+            @file_put_contents($containerTxt, "Title: Image library\n");
+          }
+        }
+
+        // Destination name: source base + the derivative's actual extension.
+        // Auto-rename on clash so a transfer never overwrites a bound image.
+        $ext = strtolower(pathinfo($srcPath, PATHINFO_EXTENSION));
+        if ($ext === '') $ext = strtolower($img->extension());
+        $base = strtolower(pathinfo($filename, PATHINFO_FILENAME));
+        $base = preg_replace('/[^a-z0-9_-]+/', '-', $base);
+        $base = trim($base, '-_');
+        if ($base === '') $base = 'image';
+
+        $outName = $base . '.' . $ext;
+        $n = 1;
+        while (file_exists($dir . '/' . $outName)) {
+          $outName = $base . '-' . $n . '.' . $ext;
+          $n++;
+        }
+
+        if (!@copy($srcPath, $dir . '/' . $outName)) {
+          return $json(['ok' => false, 'error' => 'Could not write the image into the target library.'], 500);
+        }
+
+        // Record the transfer in the per-batch sent.json sidecar.
+        // Shape: { schemaVersion, sent: { "<filename>": [ {page,title}, ... ] } }.
+        $sentPath = $batchPage->root() . '/sent.json';
+        $sent = [];
+        if (is_file($sentPath)) {
+          $decoded = json_decode(file_get_contents($sentPath), true);
+          if (is_array($decoded) && isset($decoded['sent']) && is_array($decoded['sent'])) {
+            $sent = $decoded['sent'];
+          }
+        }
+        if (!isset($sent[$filename]) || !is_array($sent[$filename])) {
+          $sent[$filename] = [];
+        }
+        // De-dupe by page id — a repeat send to the same page adds nothing.
+        $already = false;
+        foreach ($sent[$filename] as $entry) {
+          if (is_array($entry) && ($entry['page'] ?? null) === $target->id()) { $already = true; break; }
+        }
+        if (!$already) {
+          $sent[$filename][] = ['page' => $target->id(), 'title' => $target->title()->value()];
+        }
+
+        $payload = ['schemaVersion' => 1, 'sent' => (object) $sent];
+        $jsonStr = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+        $tmp = $sentPath . '.tmp';
+        if (file_put_contents($tmp, $jsonStr) === false || !rename($tmp, $sentPath)) {
+          @unlink($tmp);
+          // The copy already landed — report success, flag the sidecar miss.
+          return $json([
+            'ok' => true, 'filename' => $outName,
+            'page' => $target->id(), 'title' => $target->title()->value(),
+            'warning' => 'Image copied but sent.json could not be written.',
+          ]);
+        }
+
+        return $json([
+          'ok' => true, 'filename' => $outName,
+          'page' => $target->id(), 'title' => $target->title()->value(),
+        ]);
+      }
     ]
   ]
 ];
