@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.60):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.63):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -693,6 +693,32 @@ batch grid, an author can send a triaged image into a canvas page's
   (`(new Kirby)->page('dev/image-workshop')->childrenAndDrafts()
   ->find('<batch>')->render()`); the route itself is curl-testable because
   routes bypass draft visibility.
+
+**Page-editor Z-depth fix + dims caption (v0.10.62 / v0.10.63).** Two
+small follow-ups in the `/dev/page` editor:
+
+- *Z-depth mixing (v0.10.62).* `.pe-rect` set no z-index, so it created
+  no stacking context and its z-indexed chrome (kind label z:4, focal dot
+  z:3, panning rings z:2, image z:0) escaped into the surface's ROOT
+  context — one rect's label could paint over a different rect. Fix:
+  `isolation: isolate` on `.pe-rect` (and mirrored to `.rect` in
+  `canvas-page.css`). Each rect is now its own stacking context, bounding
+  every child's z to its own rect ("rect Z + 1"). Inter-rect order still
+  = DOM order + `.is-selected{z-index:1}`. This is the global-CLAUDE.md
+  CSS-stacking-context trap in the wild.
+- *Flush-top-left kind label (v0.10.62).* `.pe-rect` switched to
+  `justify-content/align-items: flex-start` + `padding:.25rem .4rem` so
+  the kind label (and author note) flow top-left instead of centred over
+  bound-image / deco-mount content. Padding insets only in-flow chrome —
+  the full-bleed image (`inset:0`), absolute top-right id, and edge
+  resize handles reference the padding box and are untouched.
+- *Dims caption (v0.10.63).* A caption above the surface, top-left,
+  reads `Page area: W, H — Canvas: W, H` (all four from
+  `$primaryDims`/Deco config). Caption + surface wrapped in
+  `.pe-canvas-col` (`width:max-content; margin:0 auto`) so the caption's
+  left edge aligns flush with the surface regardless of pageW. Medium
+  white, no background box (+ a subtle text-shadow for legibility over
+  the striped wrap).
 
 ## What this project is
 
