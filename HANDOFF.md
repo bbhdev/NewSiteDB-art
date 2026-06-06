@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.63):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.65):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -719,6 +719,40 @@ small follow-ups in the `/dev/page` editor:
   left edge aligns flush with the surface regardless of pageW. Medium
   white, no background box (+ a subtle text-shadow for legibility over
   the striped wrap).
+
+**Self-hosted Material Icons (v0.10.64).** Introduced a project-wide icon
+system so editor chrome can move off ad-hoc glyphs. Google's *classic*
+"Material Icons" font (126 KB woff2, ~2,100 glyphs) self-hosted at
+`assets/fonts/MaterialIcons.woff2`, wired by a standalone
+`assets/css/material-icons.css` (`@font-face` + `.material-icons` base
+class using the `liga` ligature API — `<span class="material-icons">name
+</span>` renders the named glyph). Size helpers `.mi-sm/md/lg`
+(18/20/28px); `pointer-events:none` so clicks fall through to the wrapping
+button. Chose classic over Material Symbols (3.96 MB) because no subsetting
+toolchain (fonttools/pyftsubset) is installed and 126 KB needs none. Slice 1
+links it into the page editor only (`page.php`); other surfaces adopt it as
+their glyphs migrate. The font binary IS committed (unlike the gitignored
+`assets/fonts/local/` workshop fonts).
+
+**Page-editor author-managed Z order (v0.10.65).** Z = `state.rects` array
+order is already the paint model — `render()` empties the surface and
+re-appends in array order, so DOM order = paint order. This slice surfaces
+and edits that order; no schema change (pure array splice).
+- *Canvas z badge.* Each rect's kind label carries a trailing `zN`
+  (`.pe-rect-z`), N = index+1; frontmost rect = end of array = highest.
+  `renderRect(rect, index)` computes it; `render()` passes the index.
+- *Selection "Layer" row.* Shows `z N / M` + four reorder buttons
+  (`.pe-layer-btn`, 1.9rem chips, 20px Material Icon glyphs):
+  `vertical_align_bottom` send-to-back, `keyboard_arrow_down` backward,
+  `keyboard_arrow_up` forward, `vertical_align_top` to-front. Endpoint
+  buttons disable at the extremes. Reorder → `markDirty()` + `render()`,
+  selection preserved.
+- *Reorder helpers* after `deleteRect`: `rectIndex(id)` +
+  `moveRectToTop/Bottom/Up/Down`, each splice/swap on `state.rects`.
+- *Selection-lift conflict.* `.is-selected` no longer raises z-index
+  (outline only) so layer-button effects aren't masked by a selected rect
+  sitting on top; manipulation lift moved to `.is-dragging/.is-panning`
+  (z-index:999). Figma-style always-on-top handle chrome deferred.
 
 ## What this project is
 
