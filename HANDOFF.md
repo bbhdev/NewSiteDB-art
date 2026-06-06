@@ -4,7 +4,7 @@ A briefing for whoever (next Claude session, or human) picks this project up
 without the context of the conversation that produced versions ~v0.8.5–0.9.8.
 Read this top-to-bottom once; reference back as needed.
 
-**Current state (v0.10.66):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.67):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
 out-of-workflow image workshop landed — see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -755,7 +755,30 @@ and edits that order; no schema change (pure array splice).
 - *Selection-lift conflict.* `.is-selected` no longer raises z-index
   (outline only) so layer-button effects aren't masked by a selected rect
   sitting on top; manipulation lift moved to `.is-dragging/.is-panning`
-  (z-index:999). Figma-style always-on-top handle chrome deferred.
+  (z-index:999).
+
+**Page-editor always-on-top selection chrome (v0.10.67).** Step 2 of the Z
+work ("Figma-style overlay"): once authors can bury a rect under a higher-Z
+one, its resize handles (children of the rect, inside the rect's own
+`isolation:isolate` stacking context) got covered and became ungrabbable.
+Fix: a single `.pe-overlay` layer appended LAST to the surface in `render()`
+(z-index:1000, `pointer-events:none` so clicks fall through to rects). When
+something is selected it holds one `.pe-overlay-box` — the accent outline,
+sized/positioned to the selected rect — carrying the eight `.pe-resize-handle`
+nubs (`pointer-events:auto`). Handles no longer emitted per-rect.
+- *Hit-resolution.* The pointerdown handler resolves a handle hit via
+  `selectedId` (the handle's DOM ancestor is the overlay box, not a `.pe-rect`,
+  so `findRectElement` would miss it) — resize works even when buried.
+  Verified: `elementFromPoint` over a covering rect returns the handle, and
+  dragging it resizes the buried rect.
+- *Live tracking.* `updateOverlayBox(r)` repositions the box during
+  move/resize. The box is identified by **class** (not `data-rect-id`) so the
+  drag handler's `[data-rect-id=…]` querySelector still resolves the rect, not
+  the box; `render()` rebuilds the box fresh on pointerup.
+- *Deferred & named.* Body-drag-to-MOVE a fully-buried rect (its body is still
+  under the covering rect) and relocating the focal-pan dot into the overlay
+  are not done. Workaround for move: bring-forward via the layer buttons,
+  reposition, send back.
 
 ## What this project is
 

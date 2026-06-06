@@ -785,6 +785,32 @@
                      ev.target.classList.contains('pe-resize-handle')
                      ? ev.target : null;
 
+    // Resize handle hit (v0.10.67). Handles live in the always-on-top
+    // overlay, which belongs to the selected rect — so a handle hit resizes
+    // selectedId even when the rect itself is buried under a higher-Z rect.
+    // Resolve the rect from selectedId, not from a DOM-ancestor walk (the
+    // handle's ancestor is the overlay box, not a .pe-rect).
+    if (handleEl) {
+      const sr = state.rects.find(function (x) { return x.id === selectedId; });
+      if (!sr) return;
+      drag = {
+        mode:      'resize',
+        dir:       handleEl.dataset.dir,
+        id:        selectedId,
+        pointerId: ev.pointerId,
+        startX:    ev.clientX,
+        startY:    ev.clientY,
+        origX:     sr.x,
+        origY:     sr.y,
+        origW:     sr.w,
+        origH:     sr.h,
+        moved:     false
+      };
+      render();
+      ev.preventDefault();
+      return;
+    }
+
     const rectEl = findRectElement(ev.target);
     if (!rectEl) {
       // Empty-canvas click: deselect.
@@ -801,22 +827,7 @@
     // Selection happens on pointerdown regardless of subsequent
     // drag — feels more responsive than waiting for pointerup.
     selectedId = id;
-    if (handleEl) {
-      // Resize gesture. Direction encoded in the dataset.
-      drag = {
-        mode:      'resize',
-        dir:       handleEl.dataset.dir,
-        id:        id,
-        pointerId: ev.pointerId,
-        startX:    ev.clientX,
-        startY:    ev.clientY,
-        origX:     r.x,
-        origY:     r.y,
-        origW:     r.w,
-        origH:     r.h,
-        moved:     false
-      };
-    } else {
+    {
       drag = {
         mode:      'move',
         id:        id,
@@ -921,6 +932,7 @@
           // Live chrome/dot detach as the size crosses TINY_MAX (v0.10.53).
           refreshSizeChrome(el, r);
         }
+        updateOverlayBox(r); // keep the always-on-top handles tracking
       } else {
         r.x = Math.round(drag.origX + dx);
         r.y = Math.round(drag.origY + dy);
@@ -933,6 +945,7 @@
           el.style.left = r.x + 'px';
           el.style.top  = r.y + 'px';
         }
+        updateOverlayBox(r); // keep the always-on-top handles tracking
       }
       writeStatus();
     }
@@ -1185,18 +1198,57 @@
     idTag.textContent = rect.id || '';
     el.appendChild(idTag);
 
-    // Resize handles — emitted on every rect; CSS hides them unless
-    // the rect carries .is-selected. Cheaper than conditional DOM
-    // insertion and keeps selection toggling a one-class flip.
-    const dirs = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
-    dirs.forEach(function (d) {
+    // Resize handles are NOT children of the rect anymore (v0.10.67).
+    // They live in the always-on-top selection overlay (renderOverlay)
+    // so they stay grabbable when the selected rect is buried under a
+    // higher-Z rect — the motivation for author-managed layering.
+
+    return el;
+  }
+
+  // Selection overlay (v0.10.67 — "Figma-style" chrome). A single layer
+  // appended LAST to the surface, so it paints above every rect regardless
+  // of stacking order. It carries the selection outline + the eight resize
+  // handles for the currently-selected rect, positioned to match it. The
+  // container is click-through (pointer-events:none); only the handles opt
+  // back in, so clicking a rect body still hits the rect, not the overlay.
+  function renderOverlay() {
+    const ov = document.createElement('div');
+    ov.className = 'pe-overlay';
+    const r = selectedId &&
+              state.rects.find(function (x) { return x.id === selectedId; });
+    if (!r) return ov; // nothing selected → empty, fully click-through
+
+    const box = document.createElement('div');
+    box.className = 'pe-overlay-box';
+    box.style.left   = (r.x | 0) + 'px';
+    box.style.top    = (r.y | 0) + 'px';
+    box.style.width  = (r.w | 0) + 'px';
+    box.style.height = (r.h | 0) + 'px';
+
+    // Handle offsets (-6px etc.) are relative to the box, which matches the
+    // rect's geometry exactly — so the same per-direction CSS still lands.
+    ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].forEach(function (d) {
       const h = document.createElement('div');
       h.className = 'pe-resize-handle pe-resize-handle--' + d;
       h.dataset.dir = d;
-      el.appendChild(h);
+      box.appendChild(h);
     });
+    ov.appendChild(box);
+    return ov;
+  }
 
-    return el;
+  // Live-track the overlay box to the selected rect during a move/resize
+  // drag (the box is rebuilt fresh by render() on pointerup). Identified by
+  // class — NOT data-rect-id — so the existing rect-element querySelector in
+  // the drag handler keeps resolving the rect, not the box.
+  function updateOverlayBox(r) {
+    const box = surface.querySelector('.pe-overlay-box');
+    if (!box || !r) return;
+    box.style.left   = (r.x | 0) + 'px';
+    box.style.top    = (r.y | 0) + 'px';
+    box.style.width  = (r.w | 0) + 'px';
+    box.style.height = (r.h | 0) + 'px';
   }
 
   function render() {
@@ -1204,6 +1256,8 @@
     state.rects.forEach(function (r, i) {
       surface.appendChild(renderRect(r, i));
     });
+    // Selection chrome paints above every rect (appended last).
+    surface.appendChild(renderOverlay());
     renderChapters();
     renderSelection();
     writeStatus();

@@ -308,9 +308,24 @@ button.pe-save.is-flash {
   z-index: 999;
 }
 
-.pe-rect.is-selected {
+/* The selection outline + resize handles no longer live on the rect — they
+   moved to the always-on-top overlay (v0.10.67) so they stay visible and
+   grabbable when the selected rect is buried under a higher-Z rect. The
+   .is-selected class is kept as a state hook (e.g. JS focal-dot logic) but
+   carries no outline of its own anymore. */
+
+/* Selection overlay — a click-through layer above every rect. ──────── */
+.pe-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* clicks fall through to the rects below */
+  z-index: 1000;        /* above even a dragged rect (.is-dragging:999) */
+}
+.pe-overlay-box {
+  position: absolute;
   outline: 2px solid var(--pe-palette-accent, #ff5500);
   outline-offset: 2px;
+  pointer-events: none; /* the ring is purely visual; handles opt back in */
 }
 
 .pe-rect-label {
@@ -546,7 +561,13 @@ button.pe-save.is-flash {
   display: none;
   z-index: 2;
 }
-.pe-rect.is-selected > .pe-resize-handle { display: block; }
+/* Handles live in the overlay box now (v0.10.67) and are always shown when
+   a rect is selected; the overlay is click-through so they must opt back
+   into pointer events to remain grabbable. */
+.pe-overlay-box > .pe-resize-handle {
+  display: block;
+  pointer-events: auto;
+}
 .pe-resize-handle--nw { top: -6px;    left: -6px;    cursor: nwse-resize; }
 .pe-resize-handle--n  { top: -6px;    left: 50%;     cursor: ns-resize;
                         transform: translateX(-50%); }
