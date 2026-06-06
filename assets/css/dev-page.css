@@ -753,10 +753,10 @@ button.pe-save.is-flash {
   letter-spacing: 0.06em;
   color: #8a8a8a;
   padding: 0.25rem 0.35rem 0.2rem;
-  /* A touch lighter than the sidebar (#1a1b1f + 030303) so each type title
-     reads as a banded section header rather than blending into the list.
-     (v0.10.72) */
-  background: #1d1e22;
+  /* Lighter than the sidebar so each type title reads as a banded section
+     header rather than blending into the list. Sidebar #1a1b1f + 060606
+     (two +030303 steps; one step was too faint to register). (v0.10.73) */
+  background: #202125;
   border-radius: 3px;
 }
 
