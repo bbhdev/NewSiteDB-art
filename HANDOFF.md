@@ -40,9 +40,11 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.74):** Phase 1 complete (v0.9.0 milestone).
-Phase 2 Slice 1 complete; Slice 2 in progress (image pipeline +
-out-of-workflow image workshop landed — see the Slice 2 entry below).
+**Current state (v0.10.75):** Phase 1 complete (v0.9.0 milestone).
+Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
+tokens — seed + select) landed — see the Slice 3a entry below.
+Slice 2 brought the image pipeline + out-of-workflow image workshop
+(see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
 links into the Panel sidebar, added "‹ Panel" back-links to all
 three editors, and tidied the draw toolbar (see the nav-cleanup
@@ -940,6 +942,55 @@ page-editor panel-polish tweaks.
   three rounds: `030303` was too faint → `060606` → `+010101`) + small radius so
   each type reads as a section band.
 
+**Slice 3a — typography tokens, seed + select (v0.10.75).** The missing
+middle layer between the font bundle (21 Google families) + local fonts and a
+text rect: a named, **type-only** style a text rect points at. Decisions
+locked with the user: (a) a token carries *only* family / size / weight /
+line-height / letter-spacing / italic — **no colour** (colour stays the
+orthogonal palette concern, so one token is reusable in any colour); (b) this
+slice is **seed + select** (authoring UI deferred to Slice 3b); (c) Slice 3b's
+authoring UI will live in the **draw editor** (which already owns font-bundle +
+palette as the shared "design system" surface).
+- *Data + storage.* Canonical file `content/_shared/typography-tokens.json`
+  (`{schemaVersion, tokens:[…]}`), the same site-wide `_shared` pattern as
+  palette.json / font-bundle.json. Until the draw UI writes it,
+  `deco_default_typography()` supplies a 4-token seed (Heading=Playfair
+  Display 48/600, Subheading=Cormorant Garamond 30/500, Body=Inter 18/400,
+  Caption=Inter 13/400) so the system works with no file present (mirrors
+  `deco_default_dims()`).
+- *Shared PHP helpers* (all in `site/plugins/deco/index.php`, next to
+  `deco_load_palette`): `deco_load_typography()` (file → fallback to defaults),
+  `deco_typography_css()` (emits one `.ty-<id> { … }` rule per token, every
+  field sanitised/clamped so a hand-edited file can't inject CSS), and
+  `deco_google_fonts_link()` (builds the `<link>` for the font bundle — the
+  standalone Phase-2 templates don't run app.js, so they must load the
+  webfonts themselves or a token's family won't render).
+- *Same emitter, both templates.* `page.php` (editor) and `canvas-page.php`
+  (runtime) both call `deco_typography_css($typography)` + `deco_google_fonts_link()`,
+  so a token previews in the editor exactly as it renders on the public page —
+  visual parity is automatic, no duplicated rule authoring.
+- *Rect field.* `typographyId` on text rects (null = inherit). **Additive
+  within rects-schema v3 with a null default → NOT a schema bump** (same
+  rationale as `fit` / `focusX`/`focusY`). Normalised at read time (page.php),
+  on save (save route), and client-side (dev-page.js). Save-route validation is
+  **format-only** (`^[a-z0-9_-]+$`, ≤64) — existence is NOT checked, so a ref
+  may dangle if a token is later deleted; runtime/editor degrade to inherited
+  defaults, exactly like a dangling image binding.
+- *Editor UI.* The selection panel shows a **Type** row for text rects only
+  (symmetric with the image rows for image rects): a token dropdown + a live
+  preview line rendered in the chosen token's actual face (`.ty-<id>`), plus a
+  spec meta line (family · size · weight · lh · ls). A dangling ref stays
+  selectable and shows a flagged "(missing)" / red preview. On the canvas, a
+  text rect with a resolvable token gets `ty-<id> has-typo` classes.
+- *Verified end-to-end* on sandbox `test-page-3`: assign token → Save → on-disk
+  `rects.json` carries `typographyId` → runtime `/test-page-3` renders
+  `class="rect rect--text ty-body"` with the `.ty-body` rule, no PHP errors.
+- *Deferred to Slice 3b:* the token authoring UI in draw (create / rename /
+  delete tokens, family picker from font-bundle + local, size/weight/etc.
+  fields, a `dev/draw/typography` save route writing typography-tokens.json).
+  Until then, more tokens are added by hand-editing the JSON (or extending
+  `deco_default_typography()`).
+
 ## What this project is
 
 A Kirby-based site where the visual identity is a layer of animated SVG line
@@ -1637,6 +1688,10 @@ absolute coordinates.
 3. **Slice 3 — Typography tokens** (shared artifact #1). JSON →
    PHP-emitted CSS classes → token select field on text rects.
    Single source of truth, Deco doesn't read it yet.
+   **3a DONE (v0.10.75): seed + select** — token JSON + PHP emitter
+   (`deco_*_typography`) + Type dropdown/preview on text rects (see
+   the Slice 3a entry above). **3b PENDING: authoring UI in draw**
+   (create/edit/delete tokens, save route writing the JSON).
 4. **Slice 4 — Deco bootstrapper + htmlKey slots** (shared artifacts
    #2 + #3). `deco-mount` rects render as `<div data-deco="…">`;
    JS bootstrapper mounts the Deco runtime per rect against the

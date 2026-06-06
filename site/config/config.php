@@ -1226,6 +1226,22 @@ HTML;
               }
             }
           }
+          // v0.10.75 (Slice 3a): optional `typographyId` — the id of a
+          // typography token (content/_shared/typography-tokens.json) a
+          // text rect renders with. Additive within schema v3 with a
+          // null default, so NOT a schema bump. FORMAT-only validation
+          // (slug chars, ≤64): existence is intentionally NOT checked so
+          // a ref may dangle if a token is later deleted — the runtime
+          // degrades to inherited defaults, exactly like a dangling image
+          // binding. Allowed on any kind for forward-compat (the editor
+          // only sets it on text rects).
+          if (isset($r['typographyId']) && $r['typographyId'] !== null) {
+            if (!is_string($r['typographyId'])
+                || !preg_match('/^[a-z0-9_-]+$/i', $r['typographyId'])
+                || mb_strlen($r['typographyId']) > 64) {
+              return $fail('Rect typographyId must be a token slug or null.');
+            }
+          }
         }
 
         // Normalise on write: ensure each rect carries an explicit
@@ -1244,6 +1260,10 @@ HTML;
             $fv = is_numeric($fv) ? (int) round((float) $fv) : 50;
             $r[$fk] = max(0, min(100, $fv));
           }
+          // v0.10.75: typography token ref — empty string normalises to
+          // null so the on-disk shape is unambiguous (null vs "").
+          $r['typographyId'] = (isset($r['typographyId']) && $r['typographyId'] !== '')
+            ? $r['typographyId'] : null;
           return $r;
         }, $rects);
 

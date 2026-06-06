@@ -93,6 +93,17 @@ $paletteSafe = function ($v, $fallback) {
     return $ok ? $v : $fallback;
 };
 $paletteText = $paletteSafe($paletteByID['text'] ?? null, 'var(--text)');
+
+// Typography tokens (Slice 3a) — same shared artefact + same emitter as
+// the editor, so a text rect's typographyId renders identically here.
+// $typoIds gates which refs are honoured at render time (a dangling
+// token ref → no class → inherited defaults, graceful like a dangling
+// image binding).
+$typography = deco_load_typography($contentRoot);
+$typoIds = [];
+foreach ($typography as $t) {
+    if (is_array($t) && isset($t['id'])) $typoIds[(string) $t['id']] = true;
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -102,7 +113,9 @@ $paletteText = $paletteSafe($paletteByID['text'] ?? null, 'var(--text)');
   <title><?= $page->title() ?> — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/canvas-page.css') ?>?v=<?= $v ?>">
+  <?= deco_google_fonts_link($contentRoot) ?>
   <style>
+<?= deco_typography_css($typography) ?>
     :root {
       --cp-palette-text:    <?= $paletteText ?>;
       --cp-kind-text:       #cfe4ff;
@@ -126,8 +139,14 @@ $paletteText = $paletteSafe($paletteByID['text'] ?? null, 'var(--text)');
     $h     = isset($r['h'])    ? (int) $r['h']       : 0;
     $chId  = isset($r['chapterId']) ? $r['chapterId'] : null;
     $chNm  = ($chId && isset($chapterNameByID[$chId])) ? $chapterNameByID[$chId] : null;
+    // Typography token class for text rects (Slice 3a). Only honoured
+    // when the ref resolves to a known token; a dangling ref renders
+    // with no class (inherited defaults).
+    $tyId  = (isset($r['typographyId']) && is_string($r['typographyId'])
+              && isset($typoIds[$r['typographyId']])) ? $r['typographyId'] : null;
+    $rectClass = 'rect rect--' . esc($kind) . ($tyId ? ' ty-' . esc($tyId) : '');
 ?>
-    <div class="rect rect--<?= esc($kind) ?>"
+    <div class="<?= $rectClass ?>"
          data-rect-id="<?= esc($rid) ?>"
          <?php if ($chId): ?>data-chapter="<?= esc($chId) ?>"<?php endif; ?>
          <?php if ($chNm): ?>data-chapter-name="<?= esc($chNm) ?>"<?php endif; ?>

@@ -1040,6 +1040,40 @@ input.pe-geom-input::-webkit-inner-spin-button {
 }
 .pe-fit-match { align-self: flex-start; }
 
+/* ── Typography token control (Slice 3a) ────────────────────────── */
+.pe-typo { display: flex; flex-direction: column; gap: 0.45rem; flex: 1; min-width: 0; }
+/* Live preview of the chosen token, rendered in its actual face via the
+   template-emitted .ty-<id> rule. Clipped so a large token can't blow
+   out the panel; reset overrides so editor chrome doesn't bleed in. */
+.pe-typo-preview {
+  background: #1b1e24;
+  border: 1px solid #3a3f47;
+  border-radius: 5px;
+  padding: 0.5rem 0.6rem;
+  overflow: hidden;
+}
+.pe-typo-sample {
+  color: var(--pe-palette-text, #f0f0f0);
+  margin: 0;
+  /* Cap the rendered sample so a 48px heading token previews legibly
+     without dominating the sidebar — scales the token down uniformly. */
+  max-height: 3.2em;
+  overflow: hidden;
+  word-break: break-word;
+}
+.pe-typo-meta {
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  color: #8a9099;
+  font-family: inherit;       /* never inherit the token's face */
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+.pe-typo-preview.is-empty,
+.pe-typo-preview.is-missing { font-size: 0.74rem; line-height: 1.35; }
+.pe-typo-preview.is-empty   { color: #8a9099; font-style: italic; }
+.pe-typo-preview.is-missing { color: #ff7766; border-color: #5a2c2c; background: #241b1b; }
+
 /* ── Image picker overlay (step 4b) ─────────────────────────────── */
 .pe-picker-overlay {
   position: fixed;

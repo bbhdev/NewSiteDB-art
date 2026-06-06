@@ -102,6 +102,19 @@
       r.focusX = clampFocus(r.focusX);
       r.focusY = clampFocus(r.focusY);
     }
+    // v0.10.75 (Slice 3a): `typographyId` — the typography token a text
+    // rect renders with. Additive within schema v3, null default.
+    if (r && typeof r === 'object' && !('typographyId' in r)) r.typographyId = null;
+  });
+
+  // Typography tokens (Slice 3a). The site-wide type styles a text rect
+  // can point at; emitted as .ty-<id> CSS by the template, so picking a
+  // token here previews in the rect's actual face. typoById indexes the
+  // list for O(1) lookup in the selection panel + canvas render.
+  state.typography = Array.isArray(state.typography) ? state.typography : [];
+  const typoById = {};
+  state.typography.forEach(function (t) {
+    if (t && t.id) typoById[t.id] = t;
   });
 
   // Slice 2 step 4b: per-page image library, fetched once from
@@ -466,6 +479,20 @@
     const next = mode === 'contain' ? 'contain' : 'cover';
     if (r.fit === next) return;
     r.fit = next;
+    markDirty();
+    render();
+  }
+
+  // Slice 3a: typography token binding for text rects. tokenId '' / null
+  // clears the binding (rect renders with inherited defaults). Unknown
+  // ids are ignored (shouldn't happen via the UI dropdown).
+  function setRectTypography(rectId, tokenId) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return;
+    const next = (tokenId == null || tokenId === '') ? null : String(tokenId);
+    if (next !== null && !typoById[next]) return;
+    if (r.typographyId === next) return;
+    r.typographyId = next;
     markDirty();
     render();
   }
@@ -1169,6 +1196,14 @@
   function renderRect(rect, index) {
     const el = document.createElement('div');
     el.className = 'pe-rect pe-rect--' + (rect.kind || 'unknown');
+    // Slice 3a: text rect carrying a (resolvable) typography token gets
+    // the matching .ty-<id> class so its text renders in that face. The
+    // class is forward-compat plumbing for real text content (next
+    // slice); today it also styles any text the rect shows.
+    if (rect.kind === 'text' && rect.typographyId && typoById[rect.typographyId]) {
+      el.classList.add('ty-' + rect.typographyId);
+      el.classList.add('has-typo');
+    }
     if (rect.id === selectedId) el.classList.add('is-selected');
     el.dataset.rectId = rect.id || '';
     if (rect.chapterId) el.dataset.chapter = rect.chapterId;
@@ -1731,6 +1766,73 @@
 
         body.appendChild(row('Fit', fitBox));
       }
+    }
+
+    // Typography (Slice 3a) — only for text-kind rects. A dropdown of
+    // site-wide tokens (none = inherit defaults) + a live preview line
+    // rendered in the chosen token's actual face, so the author sees the
+    // type before there's real text content in the rect. A dangling ref
+    // (token deleted in draw) shows a flagged "missing" preview.
+    if (r.kind === 'text') {
+      const typoWrap = document.createElement('div');
+      typoWrap.className = 'pe-typo';
+
+      const sel = document.createElement('select');
+      sel.className = 'pe-input';
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = '— none —';
+      if (r.typographyId == null) none.selected = true;
+      sel.appendChild(none);
+      let refDangles = (r.typographyId != null && !typoById[r.typographyId]);
+      state.typography.forEach(function (t) {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.name || t.id;
+        if (r.typographyId === t.id) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      // Keep a dangling ref visible/selectable rather than silently
+      // dropping it, so the author can see + fix the broken binding.
+      if (refDangles) {
+        const ghost = document.createElement('option');
+        ghost.value = r.typographyId;
+        ghost.textContent = r.typographyId + ' (missing)';
+        ghost.selected = true;
+        sel.appendChild(ghost);
+      }
+      sel.addEventListener('change', function () { setRectTypography(r.id, sel.value); });
+      typoWrap.appendChild(sel);
+
+      // Live preview line — class drives the actual font via the
+      // template-emitted .ty-<id> rule. Capped height + clipped so a big
+      // token can't blow out the panel.
+      const tok = (r.typographyId && typoById[r.typographyId]) ? typoById[r.typographyId] : null;
+      const prev = document.createElement('div');
+      prev.className = 'pe-typo-preview';
+      if (tok) {
+        const sample = document.createElement('div');
+        sample.className = 'pe-typo-sample ty-' + tok.id;
+        sample.textContent = 'Ag — the quick brown fox';
+        prev.appendChild(sample);
+        const meta = document.createElement('div');
+        meta.className = 'pe-typo-meta';
+        const ls = (tok.letterSpacingPx || 0);
+        meta.textContent = (tok.family || '?') + ' · ' + (tok.sizePx || '?') + 'px · '
+          + (tok.weight || 400) + (tok.italic ? ' italic' : '')
+          + ' · lh ' + (tok.lineHeight != null ? tok.lineHeight : '?')
+          + (ls ? ' · ls ' + ls : '');
+        prev.appendChild(meta);
+      } else if (refDangles) {
+        prev.className += ' is-missing';
+        prev.textContent = 'Token “' + r.typographyId + '” no longer exists.';
+      } else {
+        prev.className += ' is-empty';
+        prev.textContent = 'No token — inherits default text style.';
+      }
+      typoWrap.appendChild(prev);
+
+      body.appendChild(row('Type', typoWrap));
     }
 
     // Geometry — four small numeric inputs (x / y / w / h). Tab

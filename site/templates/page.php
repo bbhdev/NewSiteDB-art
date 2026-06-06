@@ -121,6 +121,12 @@ $rects = array_map(function ($r) {
         $fv = is_numeric($fv) ? (int) round((float) $fv) : 50;
         $r[$fk] = max(0, min(100, $fv));
     }
+    // v0.10.75 (Slice 3a): `typographyId` — the typography token a text
+    // rect renders with (null = inherit defaults). Additive within
+    // schema v3 with a null default, so NOT a schema bump: a v3 file
+    // without it behaves exactly as before. Only meaningful on text
+    // rects; carried (null) on all kinds for grep-ability.
+    if (!array_key_exists('typographyId', $r)) $r['typographyId'] = null;
     return $r;
 }, $rects);
 // Editor always emits the current schema version on save. Declaring 3
@@ -158,6 +164,13 @@ $paletteSafe = function ($v, $fallback) {
 $paletteAccent = $paletteSafe($paletteByID['accent'] ?? null, 'var(--accent)');
 $paletteText   = $paletteSafe($paletteByID['text']   ?? null, 'var(--text)');
 
+// Typography tokens (Slice 3a) — the same shared artefact the runtime
+// template reads, so a text rect's typographyId renders identically in
+// editor and on the public page. Emitted both as .ty-<id> CSS rules
+// (below, inside <style>) AND as data in the payload so the selection
+// panel can build its "Type" dropdown + live preview.
+$typography = deco_load_typography($contentRoot);
+
 $payload = json_encode([
     'pageId'        => $targetSlug,
     'pages'         => $pageOptions,
@@ -169,6 +182,7 @@ $payload = json_encode([
     'schemaVersion' => $schemaVersion,
     'chapters'      => $chapters,
     'rects'         => $rects,
+    'typography'    => $typography,
     'version'       => $v,
 ], JSON_UNESCAPED_SLASHES);
 ?>
@@ -181,7 +195,12 @@ $payload = json_encode([
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/material-icons.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/dev-page.css') ?>?v=<?= $v ?>">
+  <?= deco_google_fonts_link($contentRoot) ?>
   <style>
+    /* Typography tokens (Slice 3a) — one .ty-<id> rule per token, the
+       SAME emitter the runtime template uses, so a text rect's chosen
+       token previews here exactly as it renders on the public page. */
+<?= deco_typography_css($typography) ?>
     /* Palette-driven custom properties — emitted at template time so
        the editor's accent/text track the project palette without a
        JS round-trip. Kind-background defaults stay here too so a

@@ -152,6 +152,120 @@ function deco_load_palette(string $contentDir): array
 }
 
 /**
+ * Phase-2 typography tokens (Slice 3a). A token is a named, type-only
+ * text style — family / size / weight / line-height / letter-spacing /
+ * italic. Colour is deliberately NOT part of a token (it stays the
+ * orthogonal palette concern), so one token is reusable in any colour.
+ *
+ * Canonical location is content/_shared/typography-tokens.json with
+ * shape { schemaVersion, tokens: [...] } — the same site-wide _shared
+ * pattern as palette.json / font-bundle.json. The file is authored in
+ * the draw editor (Slice 3b); until then deco_default_typography()
+ * supplies a seed set so the system works end-to-end with no file
+ * present (mirrors deco_default_dims()).
+ *
+ * Token-ref integrity is intentionally NOT enforced at save time (a
+ * rect's typographyId may dangle if a token is later deleted) — the
+ * editor/runtime degrade gracefully (no class applied → inherited
+ * defaults), exactly like a dangling image binding.
+ *
+ * @return list<array>
+ */
+function deco_default_typography(): array
+{
+    return [
+        ['id' => 'heading',  'name' => 'Heading',    'family' => 'Playfair Display',   'sizePx' => 48, 'weight' => 600, 'lineHeight' => 1.1, 'letterSpacingPx' => 0,   'italic' => false],
+        ['id' => 'subhead',  'name' => 'Subheading', 'family' => 'Cormorant Garamond', 'sizePx' => 30, 'weight' => 500, 'lineHeight' => 1.2, 'letterSpacingPx' => 0.5, 'italic' => false],
+        ['id' => 'body',     'name' => 'Body',       'family' => 'Inter',              'sizePx' => 18, 'weight' => 400, 'lineHeight' => 1.5, 'letterSpacingPx' => 0,   'italic' => false],
+        ['id' => 'caption',  'name' => 'Caption',    'family' => 'Inter',              'sizePx' => 13, 'weight' => 400, 'lineHeight' => 1.4, 'letterSpacingPx' => 0.4, 'italic' => false],
+    ];
+}
+
+/**
+ * @return list<array>
+ */
+function deco_load_typography(string $contentDir): array
+{
+    $path = $contentDir . '/_shared/typography-tokens.json';
+    if (is_file($path)) {
+        $data = json_decode(file_get_contents($path), true);
+        if (is_array($data) && isset($data['tokens']) && is_array($data['tokens'])) {
+            return $data['tokens'];
+        }
+    }
+    return deco_default_typography();
+}
+
+/**
+ * Emit one CSS rule per token — `.ty-<id> { … }` — as a plain string
+ * (no <style> wrapper; the caller wraps it). Both the editor template
+ * and the runtime template call this with the same token list, so a
+ * text rect carrying typographyId=<id> renders identically in both —
+ * visual parity is automatic, no duplicated rule authoring.
+ *
+ * Every field is sanitised/clamped before it reaches the stylesheet so
+ * a hand-edited tokens file can never inject arbitrary CSS: id and
+ * family are character-whitelisted, numerics are range-clamped.
+ */
+function deco_typography_css(array $tokens): string
+{
+    $num = function (float $v): string {
+        // Trim trailing zeros so "1.10" → "1.1", "0.00" → "0".
+        $s = rtrim(rtrim(number_format($v, 3, '.', ''), '0'), '.');
+        return $s === '' ? '0' : $s;
+    };
+    $out = '';
+    foreach ($tokens as $t) {
+        if (!is_array($t) || !isset($t['id'])) continue;
+        $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $t['id']);
+        if ($id === '') continue;
+        $family = isset($t['family']) ? preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $t['family']) : '';
+        $size   = max(1.0,   min(400.0, isset($t['sizePx'])          ? (float) $t['sizePx']          : 16.0));
+        $weight = max(100,   min(900,   isset($t['weight'])          ? (int)   $t['weight']          : 400));
+        $lh     = max(0.5,   min(4.0,   isset($t['lineHeight'])      ? (float) $t['lineHeight']      : 1.4));
+        $ls     = max(-20.0, min(50.0,  isset($t['letterSpacingPx']) ? (float) $t['letterSpacingPx'] : 0.0));
+        $italic = !empty($t['italic']);
+        $fam    = ($family !== '') ? ("'" . $family . "', ") : '';
+        $out .= '.ty-' . $id . ' {'
+              . ' font-family: ' . $fam . 'sans-serif;'
+              . ' font-size: ' . $num($size) . 'px;'
+              . ' font-weight: ' . $weight . ';'
+              . ' line-height: ' . $num($lh) . ';'
+              . ' letter-spacing: ' . $num($ls) . 'px;'
+              . ' font-style: ' . ($italic ? 'italic' : 'normal') . ';'
+              . " }\n";
+    }
+    return $out;
+}
+
+/**
+ * Build the Google-Fonts <link> for the site's font bundle
+ * (content/_shared/font-bundle.json). The standalone Phase-2 templates
+ * (page.php editor, canvas-page.php runtime) are NOT the main site shell
+ * and don't run app.js, so they must load the webfonts themselves for a
+ * typography token's family to actually render. Mirrors the family-list
+ * construction used by app.js and the fonts-bundle route. Returns '' if
+ * the bundle is absent/empty (graceful: tokens fall back to sans-serif).
+ */
+function deco_google_fonts_link(string $contentDir): string
+{
+    $path = $contentDir . '/_shared/font-bundle.json';
+    if (!is_file($path)) return '';
+    $j = json_decode(file_get_contents($path), true);
+    if (!is_array($j) || !isset($j['fonts']) || !is_array($j['fonts'])) return '';
+    $parts = [];
+    foreach ($j['fonts'] as $f) {
+        if (!is_string($f) || $f === '') continue;
+        $parts[] = 'family=' . str_replace(' ', '+', $f);
+    }
+    if (!$parts) return '';
+    $href = 'https://fonts.googleapis.com/css2?'
+          . htmlspecialchars(implode('&', $parts), ENT_QUOTES, 'UTF-8')
+          . '&display=swap';
+    return '<link rel="stylesheet" href="' . $href . '">';
+}
+
+/**
  * Per-class instance records (v4+). Falls back to v3 lines.json (and
  * legacy locations) and wraps each entry as a master-less instance
  * so pre-migration content still renders something. Same chain for
