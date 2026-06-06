@@ -12438,6 +12438,15 @@
       spec.className = 'ed-typo-spec';
       spec.textContent = typoSpecLine(t);
 
+      // Per-token preview — opens the big "View in panel" modal scoped to
+      // just this token (the panel-head button shows all tokens).
+      const viewOne = document.createElement('button');
+      viewOne.type = 'button';
+      viewOne.className = 'ed-mini ed-typo-row-view';
+      viewOne.textContent = 'View in panel';
+      viewOne.title = 'Preview this token as real paragraphs';
+      viewOne.addEventListener('click', function () { showTypographyPreview(t); });
+
       // ---- collapsible field editor (3b-3) -----------------------------
       // Built for every row but shown only when expanded. Field handlers
       // mutate the token, rebuild the live CSS (which restyles the .ty-<id>
@@ -12519,6 +12528,7 @@
       li.appendChild(head);
       li.appendChild(sample);
       li.appendChild(spec);
+      li.appendChild(viewOne);
       li.appendChild(edit);
       listEl.appendChild(li);
     });
@@ -12561,9 +12571,12 @@
     }
   }
 
-  // "View in panel" — a modal that renders every token as real paragraphs
-  // (not the one-line side-panel sample), inside a column the width of a
-  // page text block, so the author can judge a font in actual body text.
+  // "View in panel" — a modal that renders tokens as real paragraphs (not
+  // the one-line side-panel sample), inside a column the width of a page
+  // text block, so the author can judge a font in actual body text.
+  // Two modes via the optional `only` argument:
+  //   • showTypographyPreview()      → every token ("View all in panel").
+  //   • showTypographyPreview(token) → that one token (per-row button).
   // Uses the live client CSS (#ed-typography-css-live), so it reflects
   // unsaved edits too. Mirrors the app's standard .ed-modal pattern
   // (overlay + header + close, Esc / click-outside to dismiss).
@@ -12577,9 +12590,10 @@
     '0123456789 — “Curly quotes,” em-dashes, & ampersands.';
   const TYPO_PREVIEW_HEADING = 'A Page Begins With a Single Line';
 
-  function showTypographyPreview() {
+  function showTypographyPreview(only) {
     rebuildTypographyClientCss();
-    const tokens = Array.isArray(state.typography) ? state.typography : [];
+    const all = Array.isArray(state.typography) ? state.typography : [];
+    const tokens = only ? [only] : all;
 
     const overlay = document.createElement('div');
     overlay.className = 'ed-modal-overlay ed-typo-pv-overlay';
@@ -12589,7 +12603,9 @@
     const head = document.createElement('div');
     head.className = 'ed-modal-header';
     const t = document.createElement('h3');
-    t.textContent = 'Typography preview';
+    t.textContent = only
+      ? ('Typography preview — ' + (only.name || only.id))
+      : 'Typography preview';
     head.appendChild(t);
     const x = document.createElement('button');
     x.className = 'ed-modal-close';
@@ -16218,7 +16234,9 @@
   }
   const viewTypoBtn = document.getElementById('view-typo-btn');
   if (viewTypoBtn) {
-    viewTypoBtn.addEventListener('click', showTypographyPreview);
+    // Wrap so the click Event isn't passed as the `only` argument
+    // (that would scope the modal to a bogus single "token").
+    viewTypoBtn.addEventListener('click', function () { showTypographyPreview(); });
   }
   saveBtn.addEventListener('click', save);
   clearLinesBtn.addEventListener('click', clearAllLines);

@@ -2703,6 +2703,12 @@ body.editor input[type="range"] {
   color: #8a9099; margin-top: 0.25rem;
 }
 .ed-typo-view-btn { margin-top: 0.5rem; width: 100%; }
+/* Per-token "View in panel" — smaller and self-width, sits below the spec
+   line; distinct from the full-width panel-head "View all in panel". */
+.ed-typo-row-view {
+  margin-top: 0.3rem; padding: 0.1rem 0.45rem;
+  font-size: 0.68rem; color: #9aa3ad;
+}
 
 /* ── typography preview modal ("View in panel") ──────────────────────
    Renders each token as a real text column (heading line + paragraph) so

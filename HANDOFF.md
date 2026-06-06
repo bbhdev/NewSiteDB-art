@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.79):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.81):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -1098,7 +1098,17 @@ token as a one-line sample, which isn't enough to judge a font as body text.
      same trick the codebase already uses for `.ed-modal.ed-overview-panel`
      (see the comment near line 1741).
 - *Constants* live at the top of the typography block in `dev-draw.js`
-  (`TYPO_PREVIEW_HEADING`, `TYPO_PREVIEW_PARAGRAPH`).
+  (`TYPO_PREVIEW_HEADING`, `TYPO_PREVIEW_PARAGRAPH` — the paragraph includes
+  an ALL-CAPS run, v0.10.80, so caps/title usage is visible).
+- *Two modes (v0.10.81).* `showTypographyPreview(only)` takes an optional
+  token: the panel-head **"View all in panel"** button calls it with no arg
+  (all tokens); a per-row **"View in panel"** button (`.ed-typo-row-view`,
+  below each token's spec line) calls it with that token (single block, title
+  "Typography preview — <name>"). ⚠ Gotcha fixed: the head button was wired
+  as `addEventListener('click', showTypographyPreview)`, which once `only`
+  existed passed the click Event AS `only` → a bogus single "token". Now
+  wrapped in `function(){ showTypographyPreview(); }`. Per-row buttons pass
+  the token explicitly so they're unaffected.
 
 **Slice 3b-3 — per-token field editor: family + size/weight/lh/ls/italic
 (v0.10.79).** Completes typography authoring — tokens are now fully editable
