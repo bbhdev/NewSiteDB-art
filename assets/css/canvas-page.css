@@ -31,10 +31,17 @@ body.canvas-page-body {
 .rect {
   box-sizing: border-box;
   border: 1px solid rgba(0, 0, 0, 0.18);
+  /* Stub label flush top-left (mirrors the editor) so it never covers the
+     centre of future bound content; the id stays absolute top-right. Padding
+     insets only in-flow chrome, not absolute children. isolation keeps each
+     rect its own stacking context for parity with the editor (and for when
+     Slice 2 binds real z-indexed content). */
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 0.25rem 0.4rem;
+  isolation: isolate;
   color: var(--cp-palette-text, rgba(0, 0, 0, 0.82));
   font-size: 0.9rem;
 }

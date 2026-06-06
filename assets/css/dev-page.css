@@ -224,10 +224,22 @@ button.pe-save.is-flash {
 .pe-rect {
   box-sizing: border-box;
   border: 1px solid rgba(0, 0, 0, 0.35);
+  /* Chrome (kind label + note) flows flush TOP-LEFT so it never sits over
+     the centre of a bound image / deco-mount content. The id stays absolute
+     top-right; padding insets only the in-flow chrome — the full-bleed image
+     (inset:0), id and resize handles reference the padding box, so they are
+     unaffected. */
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 0.25rem 0.4rem;
+  /* Each rect is its OWN stacking context, so its z-indexed chrome (kind
+     label z:4, focal dot z:3, panning rings z:2) is bounded to this rect —
+     a child can stack above its own rect's image but never above a SIBLING
+     rect ("rect Z + 1"). Without isolation a label at z:4 escaped into the
+     surface's root context and floated over every other block. */
+  isolation: isolate;
   font-size: 0.85rem;
   /* Rect body color inherits the palette text token so real content
      (Slice 2) tracks the project palette. The kind-stub label below
