@@ -390,6 +390,11 @@ body.editor {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* v0.10.111: wrap as a block when title + buttons don't fit side by side —
+     the buttons drop to their own row rather than the title breaking
+     mid-phrase or the buttons wrapping their own text. */
+  flex-wrap: wrap;
+  gap: 0.4rem 0.5rem;
   margin-bottom: 0.5rem;
 }
 .ed-panel-head h3 {
@@ -400,6 +405,7 @@ body.editor {
   letter-spacing: 0.08em;
   color: #c0c0c0;
   font-weight: 600;
+  white-space: nowrap;   /* never break "CHARACTER STYLES" across two lines */
 }
 /* v0.8.47: small muted count of behavior blocks, right-aligned in
    the panel header. Same color family as the meta line under the
@@ -419,6 +425,7 @@ body.editor {
   cursor: pointer;
   font: inherit;
   font-size: 0.8rem;
+  white-space: nowrap;   /* v0.10.111: button labels never wrap their own text */
 }
 .ed-mini:hover { background: #333; }
 
@@ -2662,11 +2669,22 @@ body.editor input[type="range"] {
   flex: none; padding: 0.05rem 0.4rem; font-size: 0.85em;
   border-color: #855; color: #f88;
 }
+/* v0.10.111: the edit affordance was a tiny grey ▸ triangle — authors could
+   not tell rows were editable ("I thought edit is impossible"). Now a clearly
+   bordered, accent "Edit ▸" button: a labelled control, not an icon-only
+   micro-glyph (per the icon-sizing rule). Open state turns amber + filled. */
 .ed-typo-toggle {
-  flex: none; padding: 0.05rem 0.4rem; font-size: 0.85em;
-  line-height: 1; color: #9aa3ad;
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  color: var(--accent);
+  border-color: #6a6a6a;
 }
-.ed-typo-toggle.is-open { color: #f0c25a; }
+.ed-typo-toggle:hover { background: #333; border-color: #888; }
+.ed-typo-toggle.is-open {
+  color: #f0c25a; border-color: #c79a3a; background: #2a2410;
+}
 /* Collapsible per-token field editor (3b-3). Indented + hairline left rule
    to read as "belongs to this row"; UI font forced so field labels never
    inherit a token's .ty-<id> styling from an ancestor. */

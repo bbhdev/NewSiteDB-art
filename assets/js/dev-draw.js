@@ -12496,7 +12496,7 @@
 
       function setExpanded(on) {
         edit.style.display = on ? '' : 'none';
-        toggle.textContent = on ? '▾' : '▸';
+        toggle.textContent = on ? 'Edit ▾' : 'Edit ▸';
         toggle.classList.toggle('is-open', on);
         if (on) expandedTypoIds[t.id] = true; else delete expandedTypoIds[t.id];
       }
@@ -12917,7 +12917,7 @@
 
       function setExpanded(on) {
         edit.style.display = on ? '' : 'none';
-        toggle.textContent = on ? '▾' : '▸';
+        toggle.textContent = on ? 'Edit ▾' : 'Edit ▸';
         toggle.classList.toggle('is-open', on);
         if (on) expandedCsIds[c.id] = true; else delete expandedCsIds[c.id];
       }

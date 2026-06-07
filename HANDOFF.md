@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.110):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.111):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -369,7 +369,21 @@ for the char-style **omit-unset** data model.
   fields, tri-state italic intact) → Delete; then the test file was removed to
   restore the no-file seed-fallback state (content left as found).
 
-**Next: TS4 Slice 4** — dangling-ref/governance polish.
+**Style-panel UI polish (v0.10.111):** three principle-violations the author
+flagged on the Character-styles panel (and shared `.ed-typo-*` styling, so the
+Typography panel benefited too): (a) the panel-head title wrapped mid-phrase →
+`.ed-panel-head` now `flex-wrap: wrap` + `h3 { white-space: nowrap }`, so the
+title stays on one line and the buttons drop to their own row only if cramped;
+(b) `.ed-mini` buttons wrapped their own labels → `white-space: nowrap`; (c) the
+per-row edit affordance was a tiny grey `▸` triangle the author couldn't find
+("I thought edit is impossible") → now a clearly bordered accent **"Edit ▸"**
+button (label + chevron, amber when open) — a labelled control, not an icon-only
+micro-glyph (icon-sizing rule). JS: the toggle textContent is now `Edit ▾`/`Edit ▸`.
+
+**Next: TS4 Slice 4** — dangling-ref/governance polish. **BUT see the open
+architectural question below** — the author has asked for a larger rethink of
+what "a project style" is (complete named styles incl. colour, not relative
+deltas) that supersedes the current Slice-4 framing. Resolve that first.
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
 override; it's load-bearing — confirmed 2026-06).
