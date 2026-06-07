@@ -3037,7 +3037,10 @@
             const v = ta.value; ta.value = ''; ta.value = v;  // caret to end
           }
         });
-        body.appendChild(row('Text', openBtn, 'pe-selection-row--stack'));
+        // v0.10.101: inline on the TEXT label's own row (compact button in the
+        // content column), NOT stacked full-width — the closed affordance is
+        // tiny, so it doesn't need the whole panel.
+        body.appendChild(row('Text', openBtn));
       } else {
         // Open: a header row (label + collapse [×]) then the full-width
         // textarea. The collapse only HIDES the editor — the textarea has
@@ -3050,8 +3053,10 @@
         const collapse = document.createElement('button');
         collapse.type = 'button';
         collapse.className = 'pe-text-collapse';
-        collapse.title = 'Hide editor';
-        collapse.textContent = '×';
+        collapse.title = 'Done editing text';
+        // v0.10.101: labelled "Done" (was "×") — a bare × reads as delete/cancel;
+        // this only hides the editor and the text is already committed on blur.
+        collapse.textContent = 'Done';
         collapse.addEventListener('click', function () {
           panelTextOpen.delete(r.id);
           render();
