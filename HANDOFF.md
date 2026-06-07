@@ -432,6 +432,23 @@ repurposed** to carry complete-style ids. Key decisions:
   style registry; the separate `char-styles.json` / `.mk-cs-<id>` layer is retired. The
   registry must guarantee exactly one `isDefault` style (seed one; forbid deleting the last
   / the default without reassigning).
+- **Why "Element styles", not "Styles" — naming encodes a direction (author, 2026-06).**
+  "Styles" silently asserts *text*; **"element styles"** keeps the registry conceptually
+  applicable to **any element**, text being just one kind. The name is a deliberate guard
+  against re-baking a text-only assumption into the model. It ties to a divergence the
+  author considers accidental and wants to converge: today a **Page text block**
+  (`kind=text`, `rect.text` + marks) and a **Draw text block** are two parallel text
+  mechanisms — an unintended fork. **Intended convergence:** a Page **deco-mount** block
+  starts as a **neutral, non-content-typed element**, and acquires content-type by what it
+  *mounts* — mounting a Draw text block makes it **behave like a native Page text block**.
+  So the deco-mount is the generic "element"; "text" (or image, …) is an acquired role, not
+  a birth `kind`. **Slice-B+ implication:** keep element-style application element-generic —
+  apply styles to an element / its text ranges without assuming the element is permanently a
+  `kind==='text'` rect, so the SAME registry later applies uniformly to a deco-mounted Draw
+  text block, not only to today's native Page text rects. Don't foreclose this (avoid new
+  hard `kind==='text'` gates beyond what the current mechanism already has). The full
+  Draw↔Page convergence is its own future track, not Slice B — but B must not dig the fork
+  deeper.
 
 **Revised slice plan (replaces "TS4 Slice 4"):**
 - **A1 — add `color` (palette-ref) to the element style** ✅ DONE (v0.10.112). Data +
