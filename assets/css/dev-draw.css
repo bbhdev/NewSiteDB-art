@@ -2660,7 +2660,10 @@ body.editor input[type="range"] {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ed-typo-name-input {
-  flex: 1 1 auto; min-width: 0;
+  /* flex-basis gives the name field real presence so it reads as an editable
+     name (not a mystery sliver). It still shrinks under pressure but never
+     collapses below min-width — the row stays legible as "Edit | name | id". */
+  flex: 1 1 7rem; min-width: 4.5rem;
   background: #111; color: #f0f0f0; border: 1px solid #444;
   padding: 0.15rem 0.35rem; border-radius: 3px; font: inherit;
   font-size: 0.85em; font-weight: 600; box-sizing: border-box;
@@ -2685,27 +2688,34 @@ body.editor input[type="range"] {
 .ed-typo-toggle.is-open {
   color: #f0c25a; border-color: #c79a3a; background: #2a2410;
 }
-/* A2: project-default control. "Make default" is a quiet outline button;
-   the current default is a filled amber, disabled badge (the star reads as
-   "this is THE one"). Sized as a labelled control, not a micro-glyph. */
+/* A2: project-default control, now a compact STAR icon (was a wide
+   "Make default" text button that crowded out the name field + pushed × off
+   the row). ☆ outline = promotable; ★ filled-on-yellow = is the default.
+   Square-ish, with a star sized well above micro-glyph (~1.05rem) per the
+   icon-sizing rule — the star carries the affordance on its own. */
 .ed-typo-default {
   flex: none;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.72rem;
-  line-height: 1.1;
+  width: 1.7rem; height: 1.7rem;
+  padding: 0; display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 1.05rem; line-height: 1;
   color: #b8a76a; border-color: #5a5440;
 }
-.ed-typo-default:hover { background: #2a2410; border-color: #8a7d4a; }
+.ed-typo-default:hover { background: #2a2410; border-color: #8a7d4a; color: #d8b24a; }
 .ed-typo-default.is-default {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a;
-  font-weight: 600; cursor: default; opacity: 1;
+  cursor: default; opacity: 1;
 }
 /* Collapsible per-token field editor (3b-3). Indented + hairline left rule
    to read as "belongs to this row"; UI font forced so field labels never
    inherit a token's .ty-<id> styling from an ancestor. */
 .ed-typo-edit {
-  margin: 0.4rem 0 0.2rem; padding: 0.4rem 0 0.1rem 0.6rem;
-  border-left: 2px solid #2a2e35;
+  /* Distinctive "you are editing this style" surface: darker inset background
+     (#050505) + a full amber outline matching the open Edit button
+     (#c79a3a) so the expanded editor is unmistakably tied to its row. */
+  margin: 0.4rem 0 0.2rem; padding: 0.5rem 0.6rem 0.4rem;
+  background: #050505;
+  border: 1px solid #c79a3a; border-radius: 5px;
   display: flex; flex-direction: column; gap: 0.35rem;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }

@@ -12452,7 +12452,7 @@
       nameInp.type = 'text';
       nameInp.className = 'ed-typo-name-input';
       nameInp.value = t.name || '';
-      nameInp.placeholder = 'name';
+      nameInp.placeholder = 'Style name';
 
       const idTag = document.createElement('code');
       idTag.className = 'ed-typo-id';
@@ -12470,8 +12470,13 @@
       const defBtn = document.createElement('button');
       defBtn.type = 'button';
       defBtn.className = 'ed-mini ed-typo-default' + (t.isDefault ? ' is-default' : '');
-      defBtn.textContent = t.isDefault ? '★ Default' : 'Make default';
+      // Compact star icon (was the wide "Make default" / "★ Default" text
+      // labels, which squeezed the name input to ~0 and pushed × off-edge):
+      // ☆ outline = "not the default, click to promote"; ★ filled-on-yellow =
+      // "this IS the default". aria-label carries the meaning for a11y.
+      defBtn.textContent = t.isDefault ? '★' : '☆';
       defBtn.disabled = !!t.isDefault;
+      defBtn.setAttribute('aria-label', t.isDefault ? 'Project default style' : 'Make default style');
       defBtn.title = t.isDefault
         ? 'Project default — every text falls back to this style'
         : 'Make this the project default style';
