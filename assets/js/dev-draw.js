@@ -12369,17 +12369,28 @@
       btn.classList.remove('is-dirty'); btn.disabled = true; btn.textContent = 'Saved';
     }
   }
+  function applyTypoSectionDirty() {
+    // Always-visible cue: amber outline on the whole section + a header badge.
+    // Survives closing the edit subpanel (when the in-panel save vanishes) so
+    // the user can never lose the "unsaved" signal while a row is collapsed.
+    const sec = document.getElementById('element-styles-section');
+    if (sec) sec.classList.toggle('is-dirty', typographyDirty);
+    const badge = document.getElementById('typo-dirty-badge');
+    if (badge) badge.hidden = !typographyDirty;
+  }
   function markTypographyDirty() {
     typographyDirty = true;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save •'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
+    applyTypoSectionDirty();
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
+    applyTypoSectionDirty();
   }
 
   function addTypographyToken() {

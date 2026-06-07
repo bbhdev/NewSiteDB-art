@@ -2773,10 +2773,27 @@ body.editor input[type="range"] {
 }
 .ed-typo-edit-save.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
 /* Dirty indicator on the panel-head Save button — unsaved create/rename/
-   delete since the last write. */
+   delete since the last write. Filled amber (same as the in-panel save and the
+   default-style badge) so "active" reads unambiguously, not just a faint
+   border/text tint. */
 #save-typography-btn.is-dirty,
 #save-charstyles-btn.is-dirty {
-  border-color: #c79a3a; color: #f0c25a;
+  color: #1a1407; background: #d8b24a; border-color: #d8b24a; font-weight: 600;
+}
+#save-typography-btn.is-dirty:hover,
+#save-charstyles-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
+/* Always-visible section-level dirty cue (v0.10.120): when any element style
+   has unsaved create/rename/delete/field edits, the whole panel gets an amber
+   outline + a "● unsaved" header badge. This stays visible even with every row
+   collapsed (no edit subpanel open), so the user cannot lose the dirty signal
+   when the panel-head Save button is scrolled out of view. */
+#element-styles-section.is-dirty {
+  outline: 2px solid #c79a3a; outline-offset: 2px; border-radius: 5px;
+}
+.ed-typo-dirty-badge {
+  color: #1a1407; background: #d8b24a; border-radius: 3px;
+  padding: 0.05rem 0.4rem; font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.02em; align-self: center;
 }
 /* TS4 Slice 3: char-style sample row reuses .ed-typo-sample as the box but
    shows the relative effect inline — plain base text + a .mk-cs-<id> span —

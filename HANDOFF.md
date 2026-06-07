@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.119):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.120):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -603,7 +603,22 @@ small slices (DRAW-only; no data/route/schema change).
   `applyTypoEditSaveState()` so all open rows + the post-save re-render stay in sync.
   *(The author floated a "big outline around all styles" as an alternative dirty cue; the
   in-panel save button was their preferred option and is what shipped. If a global always-
-  visible dirty cue is still wanted for the collapsed case, revisit.)*
+  visible dirty cue is still wanted for the collapsed case, revisit.)* → **revisited in V4.**
+
+**Element-styles panel UI polish — third feedback round (V4 .120).**
+- **V4 (v0.10.120) — section-level dirty cue + filled top Save.** Two fixes:
+  (a) The in-panel Save (V3) vanishes when the user **closes the edit subpanel without
+  saving** → with every row collapsed there was *no* dirty signal unless the panel-head
+  Save happened to be in view (the author called this a danger). Added an **always-visible
+  section cue**: `#element-styles-section.is-dirty` gets a 2px amber outline + a
+  **"● unsaved"** header badge (`#typo-dirty-badge`). Toggled by a new
+  `applyTypoSectionDirty()` called from both `markTypographyDirty()`/`clearTypographyDirty()`.
+  (b) BUG the author reported: the panel-head Save "does not become active when dirty."
+  It *did* get `.is-dirty` + "Save •", but the dirty CSS was only a faint border/text-colour
+  tint over a transparent bg — read as inactive. Changed `#save-typography-btn.is-dirty`
+  (and `#save-charstyles-btn.is-dirty`) to the **filled amber** style (same as the in-panel
+  save + default-star badge) so "active" is unambiguous. Verified live: clean→dirty toggles
+  outline+badge+filled button; reload discards (no data mutation).
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the

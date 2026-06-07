@@ -315,10 +315,11 @@ $payload = json_encode([
              panel was retired here (A2-3); its data + .mk-cs-<id> rendering
              survive until Slice B repurposes the range-mark, and the dead JS
              is removed in Slice D. */ ?>
-    <section class="ed-panel">
+    <section class="ed-panel" id="element-styles-section">
       <header class="ed-panel-head">
         <h3>Element styles</h3>
         <span class="ed-typo-head-btns">
+          <span class="ed-typo-dirty-badge" id="typo-dirty-badge" hidden>● unsaved</span>
           <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
           <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save</button>
         </span>
