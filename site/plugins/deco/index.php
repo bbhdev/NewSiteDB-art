@@ -251,6 +251,12 @@ function deco_typography_css(array $tokens): string
  * code-unit offsets, which match for the BMP (all ordinary design copy);
  * astral characters (emoji) could mis-slice — acceptable for TS1's
  * strong/em scope and noted in HANDOFF.
+ *
+ * TS3-a: each run's `attrs` is now a list of VALUE-BEARING descriptors
+ * ['attr'=>string, 'value'=>(true|string)] (was a bare list of attr
+ * names). Atomic axes (strong/em) carry value===true; valued axes
+ * (color → palette id) carry the string value. deco_marks_classes()
+ * consumes the value to emit value-specific classes (mk-color-<id>).
  */
 function deco_text_segments(string $text, $marks): array
 {
@@ -274,14 +280,19 @@ function deco_text_segments(string $text, $marks): array
         $e = $bounds[$k + 1];
         if ($e <= $s) continue;
         $attrs = [];
+        $seen  = [];
         foreach ($ms as $m) {
             if (!is_array($m)) continue;
             $msS = isset($m['start']) ? (int) $m['start'] : 0;
             $msE = isset($m['end'])   ? (int) $m['end']   : 0;
             $a   = isset($m['attr'])  ? (string) $m['attr'] : '';
-            if ($a !== '' && $msS <= $s && $msE >= $e && !in_array($a, $attrs, true)) {
-                $attrs[] = $a;
-            }
+            if ($a === '' || $msS > $s || $msE < $e) continue;
+            $val = array_key_exists('value', $m) ? $m['value'] : true;
+            $vk  = is_bool($val) ? ($val ? 'true' : 'false') : (string) $val;
+            $key = $a . "\0" . $vk;
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $attrs[] = ['attr' => $a, 'value' => $val];
         }
         $segs[] = ['text' => mb_substr($text, $s, $e - $s, 'UTF-8'), 'attrs' => $attrs];
     }
@@ -289,17 +300,69 @@ function deco_text_segments(string $text, $marks): array
 }
 
 /**
- * Slice TS1 — map a run's attrs to CSS classes. Ordered table (mirrors
- * MARK_ATTR_CLASS in dev-page.js) so M2 layers slot in later unchanged.
+ * Slice TS1/TS3-a — map a run's value-bearing attrs to CSS classes.
+ * Ordered table (mirrors MARK_ATTR_CLASS in dev-page.js) so M2 layers
+ * slot in later unchanged. Atomic axes map by name; valued axes map by
+ * name+value (color → mk-color-<sanitised id>). Tolerates the legacy
+ * bare-string element shape defensively.
  */
 function deco_marks_classes(array $attrs): array
 {
     static $map = ['strong' => 'mk-strong', 'em' => 'mk-em'];
     $cls = [];
     foreach ($attrs as $a) {
-        if (isset($map[$a]) && !in_array($map[$a], $cls, true)) $cls[] = $map[$a];
+        if (is_array($a)) {
+            $attr = isset($a['attr']) ? (string) $a['attr'] : '';
+            $val  = array_key_exists('value', $a) ? $a['value'] : true;
+        } else {
+            $attr = (string) $a;
+            $val  = true;
+        }
+        $c = null;
+        if ($attr === 'color') {
+            $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $val);
+            if ($id !== '') $c = 'mk-color-' . $id;
+        } elseif (isset($map[$attr])) {
+            $c = $map[$attr];
+        }
+        if ($c !== null && !in_array($c, $cls, true)) $cls[] = $c;
     }
     return $cls;
+}
+
+/**
+ * TS3-a — emit one CSS rule per palette colour: `.mk-color-<id> { color:
+ * <value>; }`. The dynamic sibling of deco_typography_css(): both the
+ * editor template (page.php) and the runtime template (canvas-page.php)
+ * call this with the SAME palette list, so a text rect's colour marks
+ * render identically in both — visual parity is automatic.
+ *
+ * Every id is character-whitelisted and every value is validated against
+ * the same safe-CSS-colour pattern used for the palette custom props, so
+ * a hand-edited palette.json can never inject arbitrary CSS. A palette
+ * entry with an unsafe value is skipped (its id then renders with no rule
+ * → inherited colour, graceful like a dangling typography ref).
+ */
+function deco_palette_marks_css(array $palette): string
+{
+    $safe = function ($v) {
+        if (!is_string($v) || $v === '') return null;
+        $ok = preg_match(
+            '/^(#[0-9a-fA-F]{3,8}|var\(--[a-zA-Z0-9_-]+\)|rgba?\([0-9.,%\s\/-]+\)|hsla?\([0-9.,%\s\/-]+\)|[a-zA-Z]+)$/',
+            $v
+        );
+        return $ok ? $v : null;
+    };
+    $out = '';
+    foreach ($palette as $p) {
+        if (!is_array($p) || !isset($p['id'])) continue;
+        $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $p['id']);
+        if ($id === '') continue;
+        $val = $safe($p['value'] ?? null);
+        if ($val === null) continue;
+        $out .= '.mk-color-' . $id . ' { color: ' . $val . '; }' . "\n";
+    }
+    return $out;
 }
 
 /**

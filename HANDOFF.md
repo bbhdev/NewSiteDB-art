@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.95):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.96):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -101,6 +101,45 @@ selection. `effAttrsAt(caret)` also lights the toolbar when a bare caret
 sits inside a run. The M1/M2 cascade roadmap (named char-styles as the
 governed default, atomic overrides as the escape hatch) + deferred
 TS3/TS4 are in the Slice TS1 entry's roadmap callout below.
+**Slice TS3-a (valued `color` marks — palette-ref text colour,
+v0.10.96) landed** — the first VALUED mark axis (vs TS1/TS2's atomic
+boolean strong/em). Scope was narrowed by two decisions: build **color
+first** (link is TS3-b), and **defer the `token` axis to TS4** (it
+overlaps M2 named character-styles — build it once there). What changed:
+(1) **Segment shape evolved from bare attr names to value-bearing
+descriptors** — `segments()`/`deco_text_segments()` now emit
+`attrs: [{attr, value}]` (was `['strong']`), deduped by attr+value, in
+BOTH JS and PHP. Class mappers (`attrsToClasses`/`deco_marks_classes`)
+consume the value: `color` → `mk-color-<id>` (id char-whitelisted),
+atomic axes → static `mk-strong`/`mk-em`; both tolerate the legacy
+bare-string shape for safety. (2) **Dynamic CSS emitter**
+`deco_palette_marks_css($palette)` (in `deco/index.php`, modeled on
+`deco_typography_css`) emits `.mk-color-<id>{color:<val>}` per palette
+entry — value validated against the safe-CSS-colour regex, unsafe values
+skipped. Wired into BOTH `canvas-page.php` (runtime) and `page.php`
+(editor, for WYSIWYG parity); `page.php` also now passes `palette` in the
+editor JSON payload. (3) **Engine op `setMark` (OVERWRITE, not toggle)** —
+valued axes are one-value-per-char: `setMark` clears the attr over
+`[a,b)` then adds the new value, so applying a colour over part of an
+existing colour SPLITS the run (validated: black over "round" inside
+green "roundtrip" → black "round" + green "trip"). Atomic axes keep
+`applyMark`/toggle. (4) **Palette-swatch toolbar** — `buildTextToolbar`
+appends a divider, a clear chip (diagonal-slash, `applyColor(null)`), and
+one chip per palette colour FILLED with its real colour;
+`updateToolbarPressed` lights the active swatch via `currentMarkValue`.
+`applyColor` is selection-only (no-op on a collapsed caret — pending-color
+deferred). Governance: shape-only validation in the save route (NO
+change needed — `value` already accepts `<=256`-char strings); a dangling
+palette id degrades gracefully (no rule → inherited colour), same as a
+dangling `typographyId`. **No schema bump** (additive within rects
+schema v3; save still writes `schemaVersion: 3`). **The v0.10.93
+neutral-editor-colour override is KEPT** — still needed so UNcoloured
+editor text stays readable on pale backgrounds; retiring it is a separate
+WYSIWYG-background concern, not unblocked by TS3-a. Validated end-to-end:
+PHP runtime spans + emitted rules, editor render-from-disk, interactive
+swatch apply, overwrite-split, clear, and computed-RGB parity. Next:
+**TS3-b (link)**, then **TS4 (M2 named char-styles, incl. the `token`
+axis)**.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool

@@ -116,6 +116,7 @@ foreach ($typography as $t) {
   <?= deco_google_fonts_link($contentRoot) ?>
   <style>
 <?= deco_typography_css($typography) ?>
+<?= deco_palette_marks_css($palette) /* TS3-a: .mk-color-<id> per palette colour */ ?>
     :root {
       --cp-palette-text:    <?= $paletteText ?>;
       --cp-kind-text:       #cfe4ff;

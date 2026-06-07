@@ -117,6 +117,17 @@
     if (t && t.id) typoById[t.id] = t;
   });
 
+  // Palette (TS3-a). The site-wide colours a text rect's `color` marks
+  // can reference; the template emits one .mk-color-<id> rule per entry,
+  // so a colour swatch picked in the toolbar previews in its true colour.
+  // paletteById indexes the list for O(1) lookup. Only the list is needed
+  // in JS (for the swatch UI) — the CSS itself comes from the template.
+  state.palette = Array.isArray(state.palette) ? state.palette : [];
+  const paletteById = {};
+  state.palette.forEach(function (p) {
+    if (p && p.id) paletteById[p.id] = p;
+  });
+
   // Slice 2 step 4b: per-page image library, fetched once from
   // GET dev/page/images/<pageId>. null = not yet loaded; [] =
   // loaded-empty. imageByFilename indexes the list so renderRect and
@@ -565,12 +576,29 @@
 
   // Ordered layer map attr → CSS class. Written as a table (not a switch)
   // so M2 named-style layers slot in later without touching the resolver.
+  // Atomic axes only (value ignored); valued axes are handled in
+  // classForMark() below.
   const MARK_ATTR_CLASS = { strong: 'mk-strong', em: 'mk-em' };
 
+  // Sanitise a mark value into a CSS-class-safe id fragment (mirrors the
+  // PHP preg_replace in deco_marks_classes / the .mk-color-<id> emitter).
+  function safeMarkId(v) {
+    return String(v == null ? '' : v).replace(/[^a-z0-9_-]/gi, '');
+  }
+
+  // Class for one value-bearing attr descriptor. Atomic axes map by name;
+  // valued axes (color → palette id) map by name+value so two different
+  // colours get two different classes. Mirrors PHP deco_marks_classes().
+  function classForMark(attr, value) {
+    if (attr === 'color') { const id = safeMarkId(value); return id ? 'mk-color-' + id : null; }
+    return MARK_ATTR_CLASS[attr] || null;
+  }
+
+  // attrs is the value-bearing list produced by segments(): [{attr,value}].
   function attrsToClasses(attrs) {
     const cls = [];
     for (let k = 0; k < attrs.length; k++) {
-      const c = MARK_ATTR_CLASS[attrs[k]];
+      const c = classForMark(attrs[k].attr, attrs[k].value);
       if (c && cls.indexOf(c) === -1) cls.push(c);
     }
     return cls;
@@ -702,6 +730,72 @@
   // Stable serialization key for a mark value (true vs string).
   function markValKey(v) { return v === true ? 'true' : String(v); }
 
+  // Set a VALUED attr over [a,b) with OVERWRITE semantics (TS3-a): unlike
+  // the atomic toggle, a valued axis allows only one value per char, so we
+  // first clear any existing mark of that attr in the range (removeAttrRange
+  // splits a containing mark — exactly how a partial recolour creates new
+  // runs), then add the new value. value == null clears only (no add).
+  // Pure; caller normalizes.
+  function setMark(marks, a, b, attr, value) {
+    if (b <= a) return marks.slice();
+    const cleared = removeAttrRange(marks, a, b, attr);
+    if (value == null) return cleared;
+    return cleared.concat([{ start: a, end: b, attr: attr, value: value }]);
+  }
+
+  // Does a SINGLE value of `attr` cover every char in [a,b)? Like
+  // rangeHasAttr but restricted to marks whose value matches `value`.
+  function rangeHasAttrValue(marks, a, b, attr, value) {
+    if (b <= a) return false;
+    const vk = markValKey(value);
+    const iv = [];
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr === attr && markValKey(m.value) === vk && m.end > a && m.start < b) {
+        iv.push([Math.max(m.start, a), Math.min(m.end, b)]);
+      }
+    }
+    iv.sort(function (x, y) { return x[0] - y[0]; });
+    let cur = a;
+    for (let k = 0; k < iv.length; k++) {
+      if (iv[k][0] > cur) return false;
+      if (iv[k][1] > cur) cur = iv[k][1];
+      if (cur >= b) return true;
+    }
+    return cur >= b;
+  }
+
+  // The single value of `attr` covering ALL of [a,b), or null if the range
+  // is unstyled for that attr OR carries a mix of values. (After overwrite
+  // semantics there is at most one value per char, so at most one candidate
+  // can fully cover.) Drives the active-swatch indicator for a selection.
+  function rangeUniformValue(marks, a, b, attr) {
+    if (b <= a) return null;
+    const cand = {};
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr === attr && m.end > a && m.start < b) cand[markValKey(m.value)] = m.value;
+    }
+    const keys = Object.keys(cand);
+    for (let k = 0; k < keys.length; k++) {
+      if (rangeHasAttrValue(marks, a, b, attr, cand[keys[k]])) return cand[keys[k]];
+    }
+    return null;
+  }
+
+  // Current value of `attr` for the editor selection: the uniform value over
+  // a non-empty selection, or (collapsed caret) the value of the mark
+  // strictly containing it. null = none / mixed. Drives swatch lighting.
+  function currentMarkValue(marks, sel, attr) {
+    if (!sel) return null;
+    if (sel.end > sel.start) return rangeUniformValue(marks, sel.start, sel.end, attr);
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr === attr && m.start < sel.start && m.end > sel.start) return m.value;
+    }
+    return null;
+  }
+
   // Drop empties, clamp to [0,len], merge equal (attr,value) adjacent/
   // overlapping ranges, and return in a deterministic order (by start,
   // then attr) for stable on-disk diffs.
@@ -741,9 +835,10 @@
   }
 
   // Derive runs: split `text` at every mark boundary and tag each segment
-  // with the attrs that fully cover it. Returns [{text, attrs:[…]}]. This
-  // is the one function reimplemented in PHP (canvas-page.php) for runtime
-  // parity. Empty marks → a single unstyled segment.
+  // with the value-bearing attrs that fully cover it. Returns
+  // [{text, attrs:[{attr,value}, …]}] (TS3-a: value-bearing, was bare
+  // names). This is the one function reimplemented in PHP (canvas-page.php)
+  // for runtime parity. Empty marks → a single unstyled segment.
   function segments(text, marks) {
     text = text == null ? '' : String(text);
     const len = text.length;
@@ -762,9 +857,11 @@
       const s = bounds[k], e = bounds[k + 1];
       if (e <= s) continue;
       const attrs = [];
+      const seen = {};
       for (let j = 0; j < ms.length; j++) {
-        if (ms[j].start <= s && ms[j].end >= e && attrs.indexOf(ms[j].attr) === -1) {
-          attrs.push(ms[j].attr);
+        if (ms[j].start <= s && ms[j].end >= e) {
+          const key = ms[j].attr + ' ' + markValKey(ms[j].value);
+          if (!seen[key]) { seen[key] = true; attrs.push({ attr: ms[j].attr, value: ms[j].value }); }
         }
       }
       segs.push({ text: text.slice(s, e), attrs: attrs });
@@ -1038,6 +1135,28 @@
     updateToolbarPressed();
   }
 
+  // TS3-a: set (or clear, value === null) a palette COLOUR over the current
+  // selection. Selection-only for now — a collapsed caret is a no-op (pending
+  // colour, "type in red here", is a deferred follow-on; pendingAttrs is an
+  // atomic-toggle Set and can't carry a value). Overwrite semantics via
+  // setMark: one colour per char. Rebuilds spans + restores the selection so
+  // the author sees the colour land and can keep recolouring.
+  function applyColor(value) {
+    if (editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const sel = getCaretOffset(ed);
+    if (!sel || sel.end <= sel.start) return;    // selection required
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) return;
+    const len = editText.length;
+    r.marks = normalizeMarks(setMark(r.marks || [], sel.start, sel.end, 'color', value), len);
+    markDirty();
+    renderRunsInto(ed, editText, r.marks);
+    setSelectionRange(ed, sel.start, sel.end);
+    updateToolbarPressed();
+  }
+
   // Reflect each attr's coverage over the current selection as a THREE-state
   // pressed display (TS2): 'all' → .is-active, 'some' → .is-mixed
   // (indeterminate), 'none' → off. A collapsed caret has no selection to
@@ -1068,6 +1187,19 @@
       btns[k].classList.toggle('is-active', cov === 'all');
       btns[k].classList.toggle('is-mixed',  cov === 'some');
     }
+    // TS3-a colour swatches: light the swatch whose value uniformly covers
+    // the selection (or contains the caret); light "clear" when there's a
+    // selection with no single colour. dataset.value '' = the clear swatch.
+    const sws = bar.querySelectorAll('.pe-tt-swatch');
+    if (sws.length) {
+      const curColor = currentMarkValue(marks, sel, 'color');
+      const curKey = curColor == null ? null : markValKey(curColor);
+      for (let k = 0; k < sws.length; k++) {
+        const v = sws[k].dataset.value;
+        const on = (v === '') ? (hasSel && curKey === null) : (curKey === v);
+        sws[k].classList.toggle('is-active', on);
+      }
+    }
   }
 
   // Position the (fixed) toolbar just above the editable — or below if it
@@ -1081,9 +1213,10 @@
     bar.style.top = top + 'px';
   }
 
-  // Build (or tear down) the floating B/I toolbar. Called from render():
+  // Build (or tear down) the floating text toolbar. Called from render():
   // removes any stale bar, and when editing builds a fresh one over the
-  // active editable. TS1 ships two buttons (bold, italic).
+  // active editable. B / I atomic toggles (TS1/TS2) + a palette colour-
+  // swatch row (TS3-a).
   function buildTextToolbar() {
     const old = document.getElementById('pe-text-toolbar');
     if (old) old.remove();
@@ -1112,6 +1245,35 @@
       b.addEventListener('click', function (ev) { ev.preventDefault(); toggleStyle(def.attr); });
       bar.appendChild(b);
     });
+    // TS3-a colour swatches. A divider, a "clear colour" chip, then one
+    // chip per palette colour (its real colour as the fill, so it previews
+    // exactly what the run becomes). Same pointerdown/mousedown focus-guard
+    // as the B/I buttons so the editable keeps focus + selection.
+    if (state.palette && state.palette.length) {
+      const sep = document.createElement('span');
+      sep.className = 'pe-tt-sep';
+      bar.appendChild(sep);
+      const mkSwatch = function (value, title, styleVal) {
+        const s = document.createElement('button');
+        s.type = 'button';
+        s.className = 'pe-tt-swatch' + (value === '' ? ' pe-tt-swatch-clear' : '');
+        s.title = title;
+        s.dataset.value = value;
+        if (styleVal) s.style.background = styleVal;
+        s.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+        s.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+        s.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          applyColor(value === '' ? null : value);
+        });
+        bar.appendChild(s);
+      };
+      mkSwatch('', 'Clear colour (selection)', '');
+      state.palette.forEach(function (p) {
+        if (!p || !p.id) return;
+        mkSwatch(String(p.id), (p.name || p.id) + ' (selection)', p.value || '');
+      });
+    }
     document.body.appendChild(bar);
     positionTextToolbar(bar, ed);
     updateToolbarPressed();

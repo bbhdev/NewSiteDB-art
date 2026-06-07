@@ -189,6 +189,7 @@ $payload = json_encode([
     'chapters'      => $chapters,
     'rects'         => $rects,
     'typography'    => $typography,
+    'palette'       => $palette,
     'version'       => $v,
 ], JSON_UNESCAPED_SLASHES);
 // v0.10.82: harden the inline JSON against </script> breakout. This blob
@@ -217,6 +218,10 @@ $payload = str_replace('<', '\\u003c', $payload);
        SAME emitter the runtime template uses, so a text rect's chosen
        token previews here exactly as it renders on the public page. */
 <?= deco_typography_css($typography) ?>
+    /* TS3-a: one .mk-color-<id> rule per palette colour, the SAME
+       emitter the runtime uses, so a colour mark previews here exactly
+       as it renders on the public page (WYSIWYG colour parity). */
+<?= deco_palette_marks_css($palette) ?>
     /* Palette-driven custom properties — emitted at template time so
        the editor's accent/text track the project palette without a
        JS round-trip. Kind-background defaults stay here too so a

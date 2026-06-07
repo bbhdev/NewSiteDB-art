@@ -483,7 +483,10 @@ button.pe-save.is-flash {
    position:fixed (set in JS) above the editable. Above all canvas chrome. */
 .pe-text-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.25rem;
+  max-width: 22rem;
   padding: 0.25rem;
   background: #1c1c1e;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -524,6 +527,46 @@ button.pe-save.is-flash {
   border-style: dashed;
   border-color: var(--pe-palette-accent, #ff5500);
   color: #fff;
+}
+
+/* TS3-a colour swatches — divider + colour chips appended after B/I. Each
+   chip is filled with its real palette colour so it previews exactly what a
+   styled run becomes. Sized as a clearly-tappable square (~1.6rem, close to
+   the 2rem button height) per the icon-sizing rule — not a microscopic dot,
+   so it also works as a touch target for the future tablet editor. */
+.pe-tt-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.1rem 0.15rem;
+  background: rgba(255, 255, 255, 0.18);
+}
+.pe-tt-swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.pe-tt-swatch:hover { border-color: rgba(255, 255, 255, 0.6); }
+/* "Clear colour" chip: a neutral field with a diagonal red slash (the
+   conventional "none" affordance). */
+.pe-tt-swatch-clear {
+  background:
+    linear-gradient(to top left,
+      transparent calc(50% - 1px), #ff3b30 calc(50% - 1px),
+      #ff3b30 calc(50% + 1px), transparent calc(50% + 1px)),
+    #3a3a3c;
+}
+/* Selected swatch: an accent ring so the author sees which colour the
+   current selection/caret carries. */
+.pe-tt-swatch.is-active {
+  outline: 2px solid var(--pe-palette-accent, #ff5500);
+  outline-offset: 1px;
+  border-color: #fff;
 }
 
 /* Slice T2: small helper hint under a panel field (e.g. "double-click to
