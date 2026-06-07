@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.85):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.91):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -57,9 +57,15 @@ editing, v0.10.84; double-click fixed v0.10.85) landed** — double-click
 a text rect to edit its body copy directly on the canvas
 (`contenteditable="plaintext-only"`); the side-panel textarea remains as
 a secondary surface. This is the tablet-first-class editing path
-(double-tap on touch). See the Slice T2
-entry below. A **rich/fine-grained text-styling discussion is PARKED**
-(prepared-styles model — see the ⏸ callout near the Slice T1 entry).
+(double-tap on touch). See the Slice T2 entry below. **Slice TS1
+(governed rich text — offset-marks engine + live WYSIWYG + strong/em
+B/I toolbar, v0.10.86 → v0.10.91) landed** — text rects now carry a
+`marks` field (additive within schema v3, no bump); the contenteditable
+surface is now `true` (live styled spans while typing); a floating B/I
+toolbar applies/composes/removes atomic styles over a selection; render
+parity in JS + PHP. The M1/M2 cascade roadmap (named char-styles as the
+governed default, atomic overrides as the escape hatch) + deferred
+TS2/TS3/TS4 are in the Slice TS1 entry's roadmap callout below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
@@ -1268,29 +1274,153 @@ under it advertises the canvas gesture.
   text (with `\n`) to disk; no console errors. Schema unchanged (still writes
   3) — T2 is pure editor UX over the T1 `text` field, no save-route change.
 
-> **⏸ Parked discussion — rich / fine-grained text styling (NOT started).**
-> Raised by the user alongside T1 approval, explicitly "to be planned for a
-> little later." The need: "achieve complete and fine-grained text styling,
-> as HTML does and therefore is expected on the web." Diving into page code
-> to add manual styling is the **worst case** to avoid. The user's proposed
-> direction (to be worked up into a real plan, not yet decided):
-> 1. **Prepared-styles model — treat styling like colours/typography.**
->    Author *prepares* named styles, *saves* them, and in content can then
->    *only apply prepared styles* (governable, no raw code). This is the
->    leading idea and rhymes with the existing palette + typography-token
->    architecture.
-> 2. **Inserting style indications into the text** "can be made quite easy
->    using existing tried-and-true methods" (i.e. a select-text → click-a-
->    prepared-style affordance that inserts the markup for the author — the
->    standard WYSIWYG-toolbar pattern; author never types codes).
-> 3. **Possibly accept some HTML** in the text (`<p>`, `<br>`, …) — to be
->    weighed against the prepared-styles approach (escaping/sanitisation
->    cost, governance loss).
-> When tackled this gets the full fork-in-the-road treatment (honest
-> recommendation + concrete sketches + the seductive-wrong option named +
-> the prepared-styles-vs-raw-HTML trade-off) and its own slice plan. Note
-> the T1 `</script>` escape already hardens the editor for any future
-> markup-bearing text field.
+**Slice TS1 — rich text via offset-marks + live WYSIWYG (strong/em)
+(v0.10.86 → v0.10.91).** Landed. The first end-to-end proof of the
+governed rich-text engine the user asked for ("complete and fine-grained
+text styling, as HTML does" — but authors apply *prepared* styles, never
+raw code). TS1 ships the data model, the edit-time mark algebra,
+render-from-marks parity (editor + runtime), and the two atomic styles
+`strong`/`em` via a floating B/I toolbar, with **live WYSIWYG while
+typing** (the user's chosen edit surface). Approved plan:
+`.claude/plans/flickering-watching-mccarthy.md`.
+
+- **Data model — offset marks (the NSAttributedString shape).** A text
+  rect keeps its plain string `rect.text` (T1/T2 untouched) PLUS a new
+  sibling `rect.marks`: an array of `{start,end,attr,value}` over the
+  half-open interval `[start,end)`. TS1 attrs are `strong`/`em` with
+  `value:true`. *Runs* (contiguous same-style segments) are **derived at
+  render time** by `segments()`, never stored or hand-edited — this is
+  what lets marks survive arbitrary text edits.
+- **Why a flat sibling field, NOT nested `{text,marks}` — and why no
+  schema bump.** `marks` is additive within rects-content **schema v3**
+  with a safe default `[]`, exactly how `text` and `typographyId` were
+  added before it (read-time normalization fills the default; old code
+  ignores the field; the save route keeps writing `schemaVersion:3`).
+  So: **no CONTENT_SCHEMA_VERSION bump, no migration script, no
+  per-snapshot authorization.** Old data → `marks:[]` → a single
+  unstyled run, byte-identical to pre-TS1 output.
+- **Mark shape is forward-compatible.** The composition rule that drives
+  everything: **same `attr` → overwrite/coalesce; different `attr` →
+  compose.** `value` is `true` today but the validator already accepts a
+  `<=256`-char string, so TS3's valued attrs (`color`/`token`/`link`)
+  drop into the same shape with no model change.
+- **The 5-op mark algebra (the engine, `assets/js/dev-page.js`).** Pure
+  functions, client-side only (PHP never edits marks, only renders +
+  validates). All ops keep marks normalized:
+  - `diffText(old,new) → {p,d,i}` — common prefix/suffix diff → one edit
+    (delete `d`, insert `i` at `p`). Covers type/delete/paste/replace
+    uniformly against the `input` event's before/after text.
+  - `remapMarks(marks,p,d,i)` — shift after `p` by `Δ=i−d`; **insertion
+    strictly inside a mark grows it**; **boundary insertion leaves the new
+    text unstyled**; deletion clips survivors; fully-covered marks drop.
+    Survivors keep their attr — this is how runs persist across edits.
+  - `applyMark(marks,a,b,attr)` — toggle: if `[a,b)` is uniformly covered
+    → remove over `[a,b)` (a mark that *strictly contains* `[a,b)`
+    **splits into two** — this is precisely how partial-removal creates
+    new runs); else add `{a,b,attr,true}`.
+  - `normalizeMarks(marks,len)` — drop empty/`start>=end`, clamp to
+    `[0,len]`, per-`(attr,value)` merge of adjacent/overlapping ranges,
+    deterministic sort for stable serialization.
+  - `segments(text,marks)` — boundary-union segmentation → the runs;
+    reimplemented in PHP for runtime parity.
+  - Caret helpers `getCaretOffset`/`locateOffset`/`setSelectionRange`
+    walk text nodes to read/restore the selection across a span rebuild.
+- **Edit surface — `contenteditable="true"` (was `plaintext-only`).**
+  Typing **patches the DOM in place** — no re-render on keystroke, so
+  IME / dead-keys / accents are safe. The styled `mk-*` child spans are
+  rebuilt **only on style apply/remove and on commit**, never on input.
+  Because `true` (unlike `plaintext-only`) reintroduces rich paste and
+  `<div>`/`<br>` on Enter, TS1 adds two guards: **paste → insert as
+  text/plain** and **Enter → insert a literal `\n`** (both via
+  `insertPlainTextAtCaret`, which does the Range edit then calls
+  `handleEditInput` because a manual DOM edit doesn't fire `input`).
+  `handleEditInput` is the live tracker: diff `el.textContent` vs the
+  last-known `editText`, `r.marks = normalizeMarks(remapMarks(...),len)`,
+  update `editText`, `markDirty()` — **no `render()`** (preserves caret +
+  composition). `enterEditMode` seeds `editText`; `commitEdit` syncs
+  marks to the committed text length.
+- **Floating B/I toolbar (`toggleStyle`/`buildTextToolbar`).** Shown
+  while a rect is being edited; `position:fixed` above the editable
+  (flips below if it would clip the viewport top), rebuilt from
+  `render()` right after `focusEditable()`. **CRITICAL focus-guard:**
+  each button binds BOTH `pointerdown` and `mousedown` with
+  `preventDefault`, so pressing it never blurs the editable (without
+  this, blur → `commitEdit` fires → `editingId` clears before the click
+  handler runs, and the toolbar silently does nothing). The `click`
+  carries the action. `toggleStyle` reads the selection, applies
+  `applyMark`, normalizes against `editText.length` (NOT `r.text` —
+  that's stale until commit; marks track the live editable), repaints the
+  runs, then restores the selection so successive clicks compose on the
+  same range. A one-time `selectionchange` listener (`selChangeBound`
+  guard) keeps the B/I `.is-active` pressed-state in sync via
+  `rangeHasAttr`. **Collapsed caret (end<=start) is a deliberate no-op**
+  — pending-format is deferred to TS2.
+- **Render parity — one algorithm, implemented twice.** `segments()` in
+  JS (editor canvas) and `deco_text_segments()` in PHP
+  (`site/plugins/deco/index.php`, runtime) produce identical span
+  structure; `deco_marks_classes()` mirrors the JS `MARK_ATTR_CLASS`
+  ordered map (`strong→mk-strong`, `em→mk-em`). Static CSS in BOTH
+  stylesheets — `.mk-strong{font-weight:700}` / `.mk-em{font-style:
+  italic}` in `dev-page.css` (`.pe-rect-text …`) and `canvas-page.css`
+  (`.rect-text …`). No dynamic emitter yet (that's TS3, modeled on
+  `deco_typography_css()`). **The CSS cascade works in our favour:** a
+  direct `.mk-*` class on the child span beats the `.ty-<id>` typography
+  token *inherited* from the parent rect — the CLAUDE.md
+  descendant-selector / inheritance footgun, here pointing the right way.
+- **⚠ UTF-16 vs code-point parity caveat.** JS offsets are UTF-16
+  code-units; PHP `segments()` uses `mb_*` code-point indices. **Identical
+  for the BMP** (all ordinary design copy) but **astral characters
+  (emoji, some CJK ext) could mis-slice** a mark boundary. Acceptable for
+  TS1's strong/em scope; revisit if/when text styling meets emoji-heavy
+  content (options: store code-point offsets on save, or grapheme-aware
+  segmentation).
+- **Save-route governance (`config.php` `dev/page/save`).** Shape-only
+  validation, lenient like `typographyId` (no attr-registry membership
+  check — an unknown attr just maps to no class and degrades): `marks`
+  must be a genuine JSON list (assoc object / string rejected); each
+  element needs `start`/`end`/`attr`/`value`; int `0 <= start < end <=
+  mb_strlen(text)` (a marks array on a textless rect fails — no offsets
+  to anchor); `attr` matches `/^[a-z][a-z0-9_-]{0,31}$/`; `value === true`
+  or a `<=256`-char string; `<=1000` marks/rect. Normalization re-indexes
+  via `array_values` and forces `[]` when text is null. `page.php`
+  read-time default fills `marks:[]` when absent/non-array.
+- **Verified end-to-end (port 8799):** valid marks round-trip (persist,
+  `schemaVersion` still 3, non-text rects → `marks:[]`); 7 malformed
+  shapes rejected with precise errors; runtime renders
+  `"T2 <span class=mk-strong>roundtrip</span> \n<span class=mk-em>line
+  one</span>…"` identical to the editor; XSS — `"<b>x</b> </script> &"`
+  renders fully `esc()`'d with the mark span wrapping the escaped run.
+  **Gotcha caught during verification (not a code bug):** an editor page
+  left open with stale in-memory marks can overwrite a programmatic disk
+  save on blur/autosave — a test-harness artifact. The runtime faithfully
+  renders whatever is on disk, which is the parity proof.
+
+> **Roadmap — governed rich text beyond TS1 (M1/M2 cascade).** The
+> long-term posture (agreed with the user, NOT built yet): **named
+> character-styles (M2) become the design-system default**, with **atomic
+> composable overrides (M1, = TS1's strong/em) as the escape hatch** for
+> genuine special cases. Both live on the same `marks` storage, resolved
+> by a **cascade**: rect base typography token < named char-style <
+> atomic override. This rhymes with palette + typography-tokens and with
+> the progressive-disclosure principle. The TS1 engine is already
+> layer-aware (the attr→class map is an ordered list, not a flat switch)
+> so M2 drops in with no algebra change. Deferred slices, named so they
+> aren't lost:
+> - **TS2** — toolbar completeness: collapsed-caret **pending format**
+>   (type-then-styled), ⌘B/⌘I keyboard shortcuts, indeterminate/mixed
+>   pressed-state, any further atomic axes.
+> - **TS3** — **valued prepared styles**: `color` (palette ref), `token`
+>   (typography ref), `link` (href); a dynamic `.mk-*` CSS emitter
+>   referencing the registries (modeled on `deco_typography_css()`);
+>   registry-aware governance validation.
+> - **TS4** — **M2 named character-styles** as the governed default: a
+>   `charStyle` axis + prepared-charStyle registry + authoring panel (like
+>   the typography panel), resolved as the cascade's middle layer (atomic
+>   overrides still win).
+> - **Possibly-accept-some-HTML** (`<p>`/`<br>`) was on the table but the
+>   offset-marks model supersedes it — governance is kept, no
+>   sanitisation surface, `esc()` on every run. Revisit only if a hard
+>   requirement for author-pasted HTML appears.
 
 ## What this project is
 
