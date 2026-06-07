@@ -12530,7 +12530,7 @@
         if (Number.isFinite(v)) { t.sizePx = v; afterFieldEdit(); }
       }));
 
-      edit.appendChild(selectField('Weight', (t.weight != null ? t.weight : 400), TYPO_WEIGHTS, function (v) {
+      edit.appendChild(darkSelectField('Weight', (t.weight != null ? t.weight : 400), TYPO_WEIGHTS, function (v) {
         t.weight = parseInt(v, 10) || 400;
         afterFieldEdit();
       }));
@@ -14883,7 +14883,10 @@
     btn.type = 'button';
     btn.textContent = '▾';
     btn.title = 'Pick from font bundle';
-    btn.style.cssText = 'flex:0 0 auto; padding:0 8px; cursor:pointer;';
+    // Dark trigger (v0.10.118) — was the browser-default white button on the
+    // dark editor; now matches the inputs/selects around it.
+    btn.style.cssText = 'flex:0 0 auto; padding:0 8px; cursor:pointer;'
+      + 'background:#111; color:#f0f0f0; border:1px solid #444; border-radius:3px;';
 
     const pop = document.createElement('div');
     pop.style.cssText = [
@@ -16425,6 +16428,69 @@
     inp.addEventListener('input', function () { onChange(inp.value); });
 
     wrap.appendChild(lbl); wrap.appendChild(inp);
+    return wrap;
+  }
+
+  // Custom dark dropdown (v0.10.118) — a div-based replacement for a native
+  // <select> whose popup cannot be themed dark on iOS (renders as a system
+  // white menu/wheel, ignoring color-scheme). Built on the same pop pattern
+  // as fontFamilyField. options: [{value,label}]. Used where the popup must
+  // be dark on every platform (e.g. the element-style Weight field). Also
+  // friendlier for the tablet-first-class target than a native select wheel.
+  function darkSelectField(label, value, options, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+
+    const row = document.createElement('div');
+    row.style.cssText = 'position:relative; min-width:0;';
+
+    let current = value;
+    function labelFor(v) {
+      const o = options.find(function (x) { return String(x.value) === String(v); });
+      return o ? o.label : (v == null ? '' : String(v));
+    }
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ed-dark-select';
+    const btnText = document.createElement('span');
+    btnText.className = 'ed-dark-select-text';
+    const caret = document.createElement('span');
+    caret.className = 'ed-dark-select-caret';
+    caret.textContent = '▾';
+    btn.appendChild(btnText); btn.appendChild(caret);
+    function refreshBtn() { btnText.textContent = labelFor(current); }
+    refreshBtn();
+
+    const pop = document.createElement('div');
+    pop.className = 'ed-dark-select-pop';
+    pop.style.display = 'none';
+    options.forEach(function (o) {
+      const it = document.createElement('div');
+      it.className = 'ed-dark-select-opt' + (String(o.value) === String(current) ? ' is-active' : '');
+      it.textContent = o.label;
+      it.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        current = o.value;
+        refreshBtn();
+        pop.querySelectorAll('.ed-dark-select-opt').forEach(function (x) { x.classList.remove('is-active'); });
+        it.classList.add('is-active');
+        pop.style.display = 'none';
+        onChange(o.value);
+      });
+      pop.appendChild(it);
+    });
+
+    btn.addEventListener('click', function () {
+      pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
+    });
+    document.addEventListener('mousedown', function (e) {
+      if (!row.contains(e.target)) pop.style.display = 'none';
+    });
+
+    row.appendChild(btn); row.appendChild(pop);
+    wrap.appendChild(lbl); wrap.appendChild(row);
     return wrap;
   }
 

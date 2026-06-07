@@ -1436,6 +1436,32 @@ body.editor input[type="range"] {
      arrow for every editor <select> (Weight, font-family fallback, …). */
   color-scheme: dark;
 }
+/* Custom dark dropdown (v0.10.118) — replaces a native <select> where the
+   popup must render dark on every platform (iOS ignores color-scheme on
+   native selects). Trigger looks like the other dark inputs; pop reuses the
+   font-picker styling. */
+.ed-dark-select {
+  display: flex; align-items: center; width: 100%;
+  background: #111; color: #f0f0f0; border: 1px solid #444;
+  border-radius: 3px; padding: 0.25rem 0.4rem; font: inherit;
+  cursor: pointer; box-sizing: border-box;
+}
+.ed-dark-select:hover { border-color: #666; }
+.ed-dark-select-text {
+  flex: 1 1 auto; min-width: 0; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ed-dark-select-caret { flex: 0 0 auto; margin-left: 8px; opacity: 0.8; }
+.ed-dark-select-pop {
+  position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px;
+  max-height: 240px; overflow-y: auto;
+  background: #2a2a2a; color: #e8e8e8; border: 1px solid #444;
+  border-radius: 4px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+}
+.ed-dark-select-opt { padding: 6px 10px; cursor: pointer; line-height: 1.4; }
+.ed-dark-select-opt:hover { background: #3a3a55; }
+.ed-dark-select-opt.is-active { background: #2f2f44; color: #fff; }
 .ed-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .ed-actions button {
   background: #3a3a3a;
