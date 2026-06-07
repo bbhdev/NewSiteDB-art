@@ -2581,9 +2581,9 @@
       return;
     }
 
-    function row(labelText, child) {
+    function row(labelText, child, modifier) {
       const div = document.createElement('div');
-      div.className = 'pe-selection-row';
+      div.className = 'pe-selection-row' + (modifier ? ' ' + modifier : '');
       const lab = document.createElement('label');
       lab.textContent = labelText;
       div.appendChild(lab);
@@ -2821,7 +2821,10 @@
       }
       typoWrap.appendChild(prev);
 
-      body.appendChild(row('Type', typoWrap));
+      // v0.10.98: stack this ONE row (label on top, content full-width) so the
+      // big type preview reclaims the empty label gutter — a 48px sample needs
+      // the whole panel width. Every other row keeps the label-left layout.
+      body.appendChild(row('Type', typoWrap, 'pe-selection-row--stack'));
 
       // Slice T1: plain-text body content. A multiline textarea kept in a
       // plain, comfortable editing face (NOT the rect's typography token —

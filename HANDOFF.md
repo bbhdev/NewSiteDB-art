@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.97):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.98):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -175,6 +175,17 @@ this slice. **Next: TS3-b-2** — link button + inline URL input
 (progressive disclosure, prefill existing href, apply/remove via
 `setMark(…,'link',href)`, pressed-state) + the save-route scheme check for
 `attr==='link'`.
+**Side-panel tweak (v0.10.98):** the TYPE row's font preview was wrapping
+to multiple lines and sitting in the narrow content column (5.5rem label +
+flex content), pushing the TEXT/NOTE/coords affordances below the fold.
+Fix: `row()` gained an optional 3rd `modifier` param; the Type row passes
+`pe-selection-row--stack` (`flex-direction:column; align-items:stretch`,
+label `width:auto`) so the preview spans the FULL panel width — the one
+deliberate exception to the label-column layout. The `.pe-typo-sample`
+preview is now single-line (`white-space:nowrap; overflow:hidden;
+text-overflow:clip`; removed `max-height`/`word-break`) so a long sample
+clips at the panel edge instead of wrapping. Editor-only; no runtime
+parity needed.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool

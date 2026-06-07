@@ -1024,6 +1024,15 @@ button.pe-save.is-flash {
   width: 5.5rem;
   flex: 0 0 auto;
 }
+/* v0.10.98: full-width row variant — label stacks ABOVE the content, which
+   then spans the whole panel. Used only by the TYPE row, whose 48px type
+   preview needs the full width (the fixed label gutter was wasted space). */
+.pe-selection-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+.pe-selection-row--stack > label { width: auto; }
 .pe-selection-row select.pe-input {
   flex: 1;
   padding: 0.2rem 0.3rem;
@@ -1253,11 +1262,13 @@ input.pe-geom-input::-webkit-inner-spin-button {
 .pe-typo-sample {
   color: var(--pe-palette-text, #f0f0f0);
   margin: 0;
-  /* Cap the rendered sample so a 48px heading token previews legibly
-     without dominating the sidebar — scales the token down uniformly. */
-  max-height: 3.2em;
+  /* v0.10.98: single line — never wrap the preview. A 48px token shows on
+     one line and is clipped horizontally (the leading glyphs "Ag — the…"
+     carry the face); the parent .pe-typo-preview also clips. This keeps the
+     TYPE section short so the TEXT field + tip below stay in view. */
+  white-space: nowrap;
   overflow: hidden;
-  word-break: break-word;
+  text-overflow: clip;
 }
 .pe-typo-meta {
   margin-top: 0.4rem;
