@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.125):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.126):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -483,15 +483,45 @@ repurposed** to carry complete-style ids. Key decisions:
   - **B1 — data + render layer** ✅ DONE (v0.10.125). New `elementStyle` range mark carrying
     a COMPLETE element-style id; `classForMark` emits the SAME `.ty-<id>` class directly on the
     run span; the atomic-colour tie broken in the shared emitter. (entry below.)
-  - **B2** — rect default-style resolution under totality: `typographyId == null` (and any
-    dangling rect/range ref) resolves to the **declared default** element style, not browser
-    inherit. PENDING.
+  - **B2 — rect default-style resolution (type axes)** ✅ DONE (v0.10.126). `typographyId ==
+    null` (and any dangling ref) now resolves to the **declared default** element style, not
+    browser defaults. *Colour axis at container level is masked by the load-bearing
+    `.pe-rect-text` editor override until Slice D — see entry below.* (entry below.)
   - **B3** — toolbar/panel rework (HANDOFF "one-layer" arch notes): primary panel = element-
     style BUTTONS; atomic overrides behind an icon → secondary panel; whole panel draggable +
     `position:fixed`. PENDING.
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B2 — rect default-style resolution, type axes (v0.10.126).** Consumes A2's
+totality guarantee at render time. Two helpers added in `dev-page.js` (right after `typoById`):
+`defaultStyleId()` (the registry's lone `isDefault` style, re-derived fresh each call;
+defensive fallback to the first style) and `effectiveStyleId(rect)` (the rect's own
+`typographyId` when set+resolvable, ELSE the default). `renderRect` now always adds a concrete
+`.ty-<id>` to a text rect's container — for `typographyId == null` AND for a dangling ref —
+instead of falling to browser defaults. `has-typo` still marks "an explicit token is set" (it
+has no CSS/JS consumer — purely informational). The stored `typographyId: null` is kept as a
+meaningful state: "follow whatever the default is" (the rect tracks a later default change),
+distinct from an explicit pin. The selection-panel picker still labels null as "none" — fixing
+that label to read "— Default (<name>) —" is folded into the B3 panel rework (the panel is
+reworked wholesale there).
+
+**Colour-axis caveat (applies to B1 + B2; resolved in Slice D).** The six TYPE axes resolve
+correctly everywhere. COLOUR has an asymmetry caused by the load-bearing `.pe-rect-text {
+color: rgba(0,0,0,0.85) }` editor override (v0.10.93):
+- **Container level (rect-default colour):** `.ty-<id>` (0,1,0) TIES `.pe-rect-text` (0,1,0) on
+  the same container element → source order wins → the rect's default/explicit element-style
+  COLOUR is masked (renders the editor's near-black). The TYPE axes are unaffected
+  (`.pe-rect-text` doesn't set them).
+- **Span level (range colour):** a range's `.ty-<id>` (or atomic `.mk-color-<id>`) sits on the
+  run `<span>` and beats the container's INHERITED colour (inheritance has no specificity) →
+  range colours DO show (B1 verified: a `heading` range rendered #6666FF; atomic colour #FFDD00).
+- A **colour-inherit** range therefore currently inherits the container's near-black, not the
+  default style's concrete colour. Once Slice D retires/reworks the `.pe-rect-text` colour
+  override, the container will carry the default style's concrete colour and the whole
+  inherit-chain bottoms out correctly at it (the totality intent). Do NOT just delete the
+  override — it's load-bearing (see the Slice-D / general-page-background entry).
 
 **Element styles B1 — per-range application, data + render layer (v0.10.125).** The first
 Slice-B sub-slice: a text range can now carry a COMPLETE element style, rendered on the editor

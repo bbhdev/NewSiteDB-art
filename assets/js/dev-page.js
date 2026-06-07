@@ -117,6 +117,27 @@
     if (t && t.id) typoById[t.id] = t;
   });
 
+  // Slice B2 — TOTALITY: the registry declares exactly ONE default style, and
+  // there is NO unset/undefined style. The declared default is the root
+  // fallback every text resolves to. defaultStyleId() finds it fresh from the
+  // (small) registry each call so a "Make default" change in the registry is
+  // reflected without re-indexing; it falls back to the first style if no flag
+  // is present (defensive — the draw editor + save-route guarantee exactly one).
+  function defaultStyleId() {
+    const list = state.typography || [];
+    for (let k = 0; k < list.length; k++) { if (list[k] && list[k].isDefault) return list[k].id; }
+    return (list[0] && list[0].id) || null;
+  }
+  // The element-style id a text rect actually renders in: its own typographyId
+  // when set+resolvable, else the declared default (NOT browser-inherited
+  // defaults — that's the B2 change). A dangling ref (typographyId points at a
+  // since-deleted style) also resolves to the default. Returns null only if the
+  // registry is empty (no style to apply → browser defaults, unavoidable).
+  function effectiveStyleId(rect) {
+    if (rect && rect.typographyId && typoById[rect.typographyId]) return rect.typographyId;
+    return defaultStyleId();
+  }
+
   // Palette (TS3-a). The site-wide colours a text rect's `color` marks
   // can reference; the template emits one .mk-color-<id> rule per entry,
   // so a colour swatch picked in the toolbar previews in its true colour.
@@ -2455,13 +2476,19 @@
   function renderRect(rect, index) {
     const el = document.createElement('div');
     el.className = 'pe-rect pe-rect--' + (rect.kind || 'unknown');
-    // Slice 3a: text rect carrying a (resolvable) typography token gets
-    // the matching .ty-<id> class so its text renders in that face. The
-    // class is forward-compat plumbing for real text content (next
-    // slice); today it also styles any text the rect shows.
-    if (rect.kind === 'text' && rect.typographyId && typoById[rect.typographyId]) {
-      el.classList.add('ty-' + rect.typographyId);
-      el.classList.add('has-typo');
+    // Slice 3a / B2: a text rect always renders in a DEFINED element style.
+    // Under totality (B2) the resolved style is the rect's own typographyId
+    // when set+resolvable, ELSE the declared default style — never browser
+    // defaults. So every text rect carries a concrete .ty-<id> on its
+    // container; runs inherit it, and a colour-inherit range mark resolves its
+    // colour up to this concrete style. has-typo marks "an explicit token is
+    // set" (drives the selection-panel echo) vs the default fallback.
+    if (rect.kind === 'text') {
+      const styleId = effectiveStyleId(rect);
+      if (styleId && typoById[styleId]) {
+        el.classList.add('ty-' + styleId);
+        if (rect.typographyId && typoById[rect.typographyId]) el.classList.add('has-typo');
+      }
     }
     if (rect.id === selectedId) el.classList.add('is-selected');
     el.dataset.rectId = rect.id || '';
