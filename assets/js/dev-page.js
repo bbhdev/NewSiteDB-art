@@ -1684,8 +1684,33 @@
     if (rect.kind === 'text' && (rect.text || isEditingThis)) {
       const txt = document.createElement('div');
       txt.className = 'pe-rect-text';
-      txt.textContent = rect.text || '';
+      if (!isEditingThis) {
+        // Slice TS1: static display renders DERIVED runs — segments() splits
+        // rect.text at every mark boundary; each run with style becomes a
+        // <span class="mk-…"> whose direct class beats the inherited .ty-<id>
+        // typography token from `el` (the CSS descendant/inheritance order
+        // working in our favour). Plain runs are bare text nodes. Content is
+        // always set via textContent / createTextNode — no markup honoured.
+        const segs = segments(rect.text || '', rect.marks);
+        if (!segs.length) {
+          txt.textContent = rect.text || '';
+        } else {
+          for (let si = 0; si < segs.length; si++) {
+            const seg = segs[si];
+            const classes = attrsToClasses(seg.attrs);
+            if (!classes.length) {
+              txt.appendChild(document.createTextNode(seg.text));
+            } else {
+              const sp = document.createElement('span');
+              sp.className = classes.join(' ');
+              sp.textContent = seg.text;
+              txt.appendChild(sp);
+            }
+          }
+        }
+      }
       if (isEditingThis) {
+        txt.textContent = rect.text || '';
         txt.classList.add('is-editing');
         // plaintext-only: WebKit/Blink strip paste formatting + keep the
         // content as plain text with real newlines (textContent captures

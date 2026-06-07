@@ -460,6 +460,14 @@ button.pe-save.is-flash {
   caret-color: var(--pe-palette-accent, #ff5500);
 }
 
+/* Slice TS1: atomic text-style marks. A direct class on the run's <span>
+   beats the .ty-<id> typography token inherited from the parent .pe-rect
+   (direct child rule > inherited value) — so an author override always
+   wins over the base face. Static rules for now; valued/prepared styles
+   (color/token/link) get a dynamic emitter in a later slice (TS3). */
+.pe-rect-text .mk-strong { font-weight: 700; }
+.pe-rect-text .mk-em     { font-style: italic; }
+
 /* Slice T2: small helper hint under a panel field (e.g. "double-click to
    edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */
 .pe-field-hint {
