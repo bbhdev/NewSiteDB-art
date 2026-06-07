@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.120):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.121):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -619,6 +619,31 @@ small slices (DRAW-only; no data/route/schema change).
   (and `#save-charstyles-btn.is-dirty`) to the **filled amber** style (same as the in-panel
   save + default-star badge) so "active" is unambiguous. Verified live: clean→dirty toggles
   outline+badge+filled button; reload discards (no data mutation).
+  *(V4's section outline + badge were superseded one round later — see V5.)*
+
+**Element-styles panel UI polish — fourth feedback round (V5 .121).**
+- **V5 (v0.10.121) — sticky header replaces outline+pill; relabel; ORDERING.** Three changes:
+  (a) **Dirty cue reworked.** The author found V4's section outline only ever showed its
+  TOP edge (a tall panel clips the side/bottom edges off-screen) and the "● unsaved" pill
+  was redundant — it sat on the same header row as the Save button, adding nothing. Both
+  removed. Instead the element-styles **panel header is now `position: sticky; top:0`**
+  inside the scrolling `.ed-sidebar` (solid #1f1f1f bg, negative-margin bleed over the
+  panel padding). The Save button — already the dirty light — pins to the sidebar top, so
+  it stays visible while scrolling the styles list. This is the real fix for the original
+  "danger" (dirty signal scrolling out of view) without extra chrome. `applyTypoSectionDirty()`
+  and the `#typo-dirty-badge` / `#element-styles-section.is-dirty` CSS were deleted.
+  (b) **Top Save relabelled** "Save •" → **"Save changes"** when dirty (matches the in-panel
+  save for consistency); clean label stays "Save".
+  (c) **Ordering (new capability).** Element-style list order IS the authored hierarchy
+  (Heading1 → Subheading → Body …) and was previously uneditable. Added single-step **↑/↓
+  icon buttons** flush right on each row's second header line (`.ed-typo-move`, pushed right
+  by `.ed-typo-right-start{margin-left:auto}`). `moveTypo(t, dir)` swaps the array neighbour,
+  marks dirty, re-renders; first row's ↑ and last row's ↓ are `disabled`. Chose arrows over
+  drag deliberately: drag is imprecise + poor on the tablet-first-class target, and there are
+  only ever a handful of styles so move-to-top/bottom isn't warranted. Order persists through
+  the normal `saveTypography()` array serialization (no schema change). Verified live: reorder
+  swaps + dirties; end-buttons disable correctly; sticky header pins at sidebar top when
+  scrolled; reload discards the in-memory reorder (user data untouched); no console errors.
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the

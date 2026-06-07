@@ -12369,28 +12369,21 @@
       btn.classList.remove('is-dirty'); btn.disabled = true; btn.textContent = 'Saved';
     }
   }
-  function applyTypoSectionDirty() {
-    // Always-visible cue: amber outline on the whole section + a header badge.
-    // Survives closing the edit subpanel (when the in-panel save vanishes) so
-    // the user can never lose the "unsaved" signal while a row is collapsed.
-    const sec = document.getElementById('element-styles-section');
-    if (sec) sec.classList.toggle('is-dirty', typographyDirty);
-    const badge = document.getElementById('typo-dirty-badge');
-    if (badge) badge.hidden = !typographyDirty;
-  }
   function markTypographyDirty() {
     typographyDirty = true;
+    // Panel-head Save is the dirty indicator. Its header is sticky (CSS) so it
+    // stays in view while scrolling the styles list — no separate badge needed
+    // (the former "● unsaved" pill duplicated this button on the same row).
+    // Label matches the in-panel save ("Save changes") for consistency.
     const btn = document.getElementById('save-typography-btn');
-    if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save •'; }
+    if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save changes'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
-    applyTypoSectionDirty();
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
-    applyTypoSectionDirty();
   }
 
   function addTypographyToken() {
@@ -12445,6 +12438,22 @@
     renderTypographyList();
   }
 
+  // Reorder element styles (v0.10.121): the list order IS the authored
+  // hierarchy (Heading1 → Heading2 → body …), so it must be editable. Drag
+  // is poor on touch (the tablet-first-class target) and imprecise; single-
+  // step up/down icon buttons are clearer and there can only ever be a
+  // handful of styles, so move-to-top/bottom isn't warranted. Swaps the
+  // array element with its neighbour, marks dirty, re-renders.
+  function moveTypo(t, dir) {
+    const list = state.typography || [];
+    const i = list.indexOf(t);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+    markTypographyDirty();
+    renderTypographyList();
+  }
+
   function renderTypographyList() {
     const listEl = document.getElementById('typography-list');
     if (!listEl) return;
@@ -12457,7 +12466,7 @@
       listEl.appendChild(empty);
       return;
     }
-    tokens.forEach(function (t) {
+    tokens.forEach(function (t, idx) {
       const li = document.createElement('li');
       li.className = 'ed-typo-row';
       li.setAttribute('data-typo-id', t.id);
@@ -12503,6 +12512,26 @@
         ? 'Project default — every text falls back to this style'
         : 'Make this the project default style';
       defBtn.addEventListener('click', function () { setDefaultTypo(t); });
+
+      // Order controls (v0.10.121): single-step up/down, flush right on the
+      // second header line. First row's up + last row's down are disabled.
+      const moveUp = document.createElement('button');
+      moveUp.type = 'button';
+      moveUp.className = 'ed-mini ed-typo-move ed-typo-move-up';
+      moveUp.textContent = '↑';
+      moveUp.title = 'Move this style up';
+      moveUp.setAttribute('aria-label', 'Move style up');
+      moveUp.disabled = (idx === 0);
+      moveUp.addEventListener('click', function () { moveTypo(t, -1); });
+
+      const moveDown = document.createElement('button');
+      moveDown.type = 'button';
+      moveDown.className = 'ed-mini ed-typo-move ed-typo-move-down';
+      moveDown.textContent = '↓';
+      moveDown.title = 'Move this style down';
+      moveDown.setAttribute('aria-label', 'Move style down');
+      moveDown.disabled = (idx === tokens.length - 1);
+      moveDown.addEventListener('click', function () { moveTypo(t, 1); });
 
       const del = document.createElement('button');
       del.type = 'button';
@@ -12642,6 +12671,11 @@
       headBottom.className = 'ed-typo-head-bottom';
       headBottom.appendChild(toggle);
       headBottom.appendChild(idTag);
+      // Right cluster (margin-left:auto on the first member pushes all three
+      // flush right): order arrows then delete.
+      moveUp.classList.add('ed-typo-right-start');
+      headBottom.appendChild(moveUp);
+      headBottom.appendChild(moveDown);
       headBottom.appendChild(del);
       head.appendChild(headTop);
       head.appendChild(headBottom);

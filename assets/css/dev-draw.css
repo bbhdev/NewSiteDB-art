@@ -2709,6 +2709,22 @@ body.editor input[type="range"] {
   flex: none; padding: 0.05rem 0.4rem; font-size: 0.85em;
   border-color: #855; color: #f88;
 }
+/* Order arrows (v0.10.121): single-step up/down, clustered flush right on the
+   second header line. The first member of the right cluster carries
+   margin-left:auto so the arrows + delete sit together at the far edge. Glyph
+   sized well above a micro-arrow (per the icon-sizing rule); disabled ends
+   (top row's ↑, bottom row's ↓) dim and stop responding. */
+.ed-typo-right-start { margin-left: auto; }
+.ed-typo-move {
+  flex: none;
+  width: 1.5rem; height: 1.5rem;
+  padding: 0; display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 0.95rem; line-height: 1;
+  color: #cfcfcf; border-color: #5a5a5a;
+}
+.ed-typo-move:hover:not(:disabled) { background: #333; border-color: #888; color: #fff; }
+.ed-typo-move:disabled { opacity: 0.3; cursor: default; }
 /* v0.10.111: the edit affordance was a tiny grey ▸ triangle — authors could
    not tell rows were editable ("I thought edit is impossible"). Now a clearly
    bordered, accent "Edit ▸" button: a labelled control, not an icon-only
@@ -2782,18 +2798,18 @@ body.editor input[type="range"] {
 }
 #save-typography-btn.is-dirty:hover,
 #save-charstyles-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
-/* Always-visible section-level dirty cue (v0.10.120): when any element style
-   has unsaved create/rename/delete/field edits, the whole panel gets an amber
-   outline + a "● unsaved" header badge. This stays visible even with every row
-   collapsed (no edit subpanel open), so the user cannot lose the dirty signal
-   when the panel-head Save button is scrolled out of view. */
-#element-styles-section.is-dirty {
-  outline: 2px solid #c79a3a; outline-offset: 2px; border-radius: 5px;
-}
-.ed-typo-dirty-badge {
-  color: #1a1407; background: #d8b24a; border-radius: 3px;
-  padding: 0.05rem 0.4rem; font-size: 0.7rem; font-weight: 600;
-  letter-spacing: 0.02em; align-self: center;
+/* Always-visible dirty cue (v0.10.121): instead of a section outline (only its
+   top edge was ever on-screen for a tall panel) + a redundant "● unsaved" pill
+   (it sat on the same row as the Save button, adding nothing), the element-
+   styles panel HEADER is sticky. The Save button — already the dirty light —
+   pins to the top of the scrolling sidebar, so it stays visible while the user
+   scrolls the styles list and can never silently lose the unsaved signal. The
+   solid background occludes content scrolling beneath the pinned header. */
+#element-styles-section .ed-panel-head {
+  position: sticky; top: 0; z-index: 5;
+  background: #1f1f1f;        /* matches .ed-sidebar so list rows don't show through */
+  margin: -0.75rem -0.75rem 0.5rem;   /* bleed over the .ed-panel padding, full width */
+  padding: 0.75rem 0.75rem 0.5rem;
 }
 /* TS4 Slice 3: char-style sample row reuses .ed-typo-sample as the box but
    shows the relative effect inline — plain base text + a .mk-cs-<id> span —
