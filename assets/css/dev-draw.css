@@ -2798,19 +2798,27 @@ body.editor input[type="range"] {
 }
 #save-typography-btn.is-dirty:hover,
 #save-charstyles-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
-/* Always-visible dirty cue (v0.10.121): instead of a section outline (only its
-   top edge was ever on-screen for a tall panel) + a redundant "● unsaved" pill
-   (it sat on the same row as the Save button, adding nothing), the element-
-   styles panel HEADER is sticky. The Save button — already the dirty light —
-   pins to the top of the scrolling sidebar, so it stays visible while the user
-   scrolls the styles list and can never silently lose the unsaved signal. The
-   solid background occludes content scrolling beneath the pinned header. */
-#element-styles-section .ed-panel-head {
-  position: sticky; top: 0; z-index: 5;
-  background: #1f1f1f;        /* matches .ed-sidebar so list rows don't show through */
-  margin: -0.75rem -0.75rem 0.5rem;   /* bleed over the .ed-panel padding, full width */
-  padding: 0.75rem 0.75rem 0.5rem;
+/* Always-reachable dirty cue (v0.10.122): the sticky HEADER (v0.10.121) only
+   solved the scroll-DOWN case — scrolling up to other sections slid the whole
+   element-styles panel (and its pinned header) below the fold, and the header
+   stayed glued even when clean (strange). Replaced by a save BAR that is
+   position:sticky; bottom:0 and rendered only while dirty: as the sidebar's
+   last child it pins to the bottom of the scroll viewport from ANY position,
+   and is absent entirely when clean (no permanent chrome). */
+.ed-typo-save-bar {
+  position: sticky; bottom: 0; z-index: 6;
+  padding: 0.5rem 0.75rem;
+  background: #1f1f1f;              /* occlude list rows scrolling beneath */
+  border-top: 1px solid #c79a3a;   /* amber rule signals "unsaved" */
+  box-shadow: 0 -6px 12px -6px rgba(0,0,0,0.6);
 }
+.ed-typo-save-bar[hidden] { display: none; }
+#typo-save-bar-btn {
+  display: block; width: 100%;
+  padding: 0.4rem 0.9rem; font-size: 0.85rem; font-weight: 600;
+  color: #1a1407; background: #d8b24a; border-color: #d8b24a;
+}
+#typo-save-bar-btn:hover { background: #e6bf57; border-color: #e6bf57; }
 /* TS4 Slice 3: char-style sample row reuses .ed-typo-sample as the box but
    shows the relative effect inline — plain base text + a .mk-cs-<id> span —
    so size/weight/italic deltas read against the surrounding base. The base

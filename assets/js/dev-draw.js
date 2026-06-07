@@ -12371,19 +12371,24 @@
   }
   function markTypographyDirty() {
     typographyDirty = true;
-    // Panel-head Save is the dirty indicator. Its header is sticky (CSS) so it
-    // stays in view while scrolling the styles list — no separate badge needed
-    // (the former "● unsaved" pill duplicated this button on the same row).
-    // Label matches the in-panel save ("Save changes") for consistency.
+    // Panel-head Save reflects dirtiness when in view; label matches the
+    // in-panel save ("Save changes") for consistency.
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save changes'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
+    // Always-reachable cue: the sticky-bottom save bar appears only while dirty
+    // and stays pinned to the sidebar viewport bottom at any scroll position
+    // (the sticky header it replaced slid out of view when scrolled up).
+    const bar = document.getElementById('typo-save-bar');
+    if (bar) bar.hidden = false;
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
+    const bar = document.getElementById('typo-save-bar');
+    if (bar) bar.hidden = true;
   }
 
   function addTypographyToken() {
@@ -16811,6 +16816,10 @@
   const saveTypographyBtn = document.getElementById('save-typography-btn');
   if (saveTypographyBtn) {
     saveTypographyBtn.addEventListener('click', function () { saveTypography(saveTypographyBtn); });
+  }
+  const typoSaveBarBtn = document.getElementById('typo-save-bar-btn');
+  if (typoSaveBarBtn) {
+    typoSaveBarBtn.addEventListener('click', function () { saveTypography(typoSaveBarBtn); });
   }
   const viewTypoBtn = document.getElementById('view-typo-btn');
   if (viewTypoBtn) {

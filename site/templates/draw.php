@@ -328,6 +328,17 @@ $payload = json_encode([
               title="Preview every style as real paragraphs">View all in panel</button>
     </section>
 
+    <?php /* Unsaved-changes bar (v0.10.122): shown ONLY while element styles
+             are dirty. position:sticky; bottom:0 inside the scrolling sidebar
+             keeps it pinned to the bottom of the viewport from ANY scroll
+             position (it's the last child), so the Save action is always
+             reachable — unlike the former sticky header, which slid below the
+             fold once the user scrolled up to other sections. Hidden when
+             clean, so there is no permanent chrome. */ ?>
+    <div class="ed-typo-save-bar" id="typo-save-bar" hidden>
+      <button type="button" id="typo-save-bar-btn" class="ed-mini">Save changes</button>
+    </div>
+
   </aside>
 
   <div class="ed-mode-banner" id="set-origin-banner" hidden>

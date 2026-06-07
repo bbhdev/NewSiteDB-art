@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.121):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.122):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -644,6 +644,23 @@ small slices (DRAW-only; no data/route/schema change).
   the normal `saveTypography()` array serialization (no schema change). Verified live: reorder
   swaps + dirties; end-buttons disable correctly; sticky header pins at sidebar top when
   scrolled; reload discards the in-memory reorder (user data untouched); no console errors.
+  *(The sticky-HEADER dirty cue was superseded the next round — see V6.)*
+
+**Element-styles panel UI polish — fifth feedback round (V6 .122).**
+- **V6 (v0.10.122) — dirty cue is now a sticky-BOTTOM save bar, dirty-only.** The author
+  found two flaws in V5's sticky header: (a) it only solved the scroll-DOWN case — scrolling
+  UP to other sidebar sections slid the whole element-styles panel (and its pinned header)
+  below the fold, so the Save action vanished again; (b) the header stayed glued to the top
+  even when clean, which read as strange. Replaced the sticky header entirely with a
+  **`.ed-typo-save-bar` (`#typo-save-bar`)**: a full-width amber "Save changes" button in a
+  bar that is `position: sticky; bottom: 0` and, as the **sidebar's last child**, pins to the
+  bottom of the scroll viewport from ANY scroll position. It is rendered (`hidden` toggled in
+  `markTypographyDirty()`/`clearTypographyDirty()`) **only while dirty** — no permanent chrome,
+  so the "stays glued when clean" complaint is moot. Bound to the same `saveTypography()` as
+  the header button. The panel-head Save still reflects dirty when in view (unchanged); the
+  sticky-header CSS (`#element-styles-section .ed-panel-head{position:sticky…}`) was removed.
+  Verified live: bar hidden when clean, shown when dirty; scrolled to sidebar TOP it stays
+  pinned at the viewport bottom (barBottom≈sidebarBottom); reload discards; no console errors.
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
