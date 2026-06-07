@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.93):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.95):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -80,9 +80,27 @@ palette colour. Rationale: the palette `text` token is currently
 `#FFDD00` (yellow), unreadable on pale pastel kind backgrounds, and there
 is no per-text colour UI yet (that's TS3). **TEMPORARY — remove the
 override once TS3 gives text its own `color` mark** (comment in-place in
-dev-page.css). The M1/M2 cascade roadmap (named char-styles as the
+dev-page.css). **Slice TS2 (toolbar completeness, v0.10.94 →
+v0.10.95) landed** — two pieces (underline / a 3rd atomic axis was
+explicitly deferred): (TS2-a, v0.10.94) the B/I buttons are now
+THREE-state — `rangeAttrCoverage → none|some|all` drives off /
+`.is-mixed` (dashed accent, indeterminate) / `.is-active`, so a
+selection spanning bold + plain no longer reads as "nothing bold."
+Editor-only. (TS2-b, v0.10.95) **collapsed-caret pending format**:
+toggling with just a caret sets `pendingAttrs` (a Set, or null), applied
+to the NEXT typed chars in `handleEditInput`. Non-obvious bits worth
+remembering: an EMPTY Set is a real "type unstyled here" override (vs
+null = natural inheritance) — that's how "caret inside bold, hit B, type"
+splits the run; pending PERSISTS across consecutive typing (normalize
+coalesces per-keystroke marks); the live-WYSIWYG repaint is SKIPPED
+during IME composition (`ev.isComposing`) because rebuilding the node
+aborts composition; and the clearing policy deliberately AVOIDS
+`selectionchange` (it races with `input`) — pending clears on
+caret-moving keys, a caret-repositioning pointerdown, and a non-empty
+selection. `effAttrsAt(caret)` also lights the toolbar when a bare caret
+sits inside a run. The M1/M2 cascade roadmap (named char-styles as the
 governed default, atomic overrides as the escape hatch) + deferred
-TS2/TS3/TS4 are in the Slice TS1 entry's roadmap callout below.
+TS3/TS4 are in the Slice TS1 entry's roadmap callout below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
