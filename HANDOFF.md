@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.106):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.107):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -283,9 +283,38 @@ There is **no authoring UI yet** — a charStyle mark can't be *created* in the
 editor until Slice 2, so this slice was verified at the CSS/render+parity layer
 (no mark persisted to the shared fixture, no Save fired).
 
-**Next: TS4 Slice 2** — toolbar char-style picker (`setMark`/`currentMarkValue`,
-mirroring the colour swatches + Type picker), then Slice 3 (authoring panel like
-the typography panel) and Slice 4 (dangling-ref/governance polish).
+**TS4 Slice 2 — toolbar char-style picker (v0.10.107):** the authoring surface
+for *applying* (not yet creating) char-styles. Three additions to dev-page.js,
+each a structural clone of the proven `color` axis:
+- `applyCharStyle(value)` — identical to `applyColor` but attr `'charStyle'`:
+  selection-only, OVERWRITE semantics via `setMark` (one char-style per char),
+  rebuilds spans + restores the selection. `value === null` clears.
+- chip row in `buildTextToolbar` (after the colour swatches): a divider, an `×`
+  clear chip, then one `.pe-tt-cs` pill per `state.charStyles` entry. Each pill's
+  label is wrapped in a `.mk-cs-<id>` span so it **previews the actual style**
+  (Lead-in bold, Fine print small, Quote italic) — same WYSIWYG principle as the
+  colour swatches. Same `pointerdown`/`mousedown` `preventDefault` focus-guard.
+- active-state loop in `updateToolbarPressed` (mirrors the swatch loop): lights
+  the chip whose value uniformly covers the selection via `currentMarkValue(...,
+  'charStyle')`; lights `×` when a selection carries no single char-style.
+CSS: `.pe-tt-cs` pills in dev-page.css (2rem tall = button height, auto width,
+accent `.is-active`) — sized as real touch targets for the tablet editor.
+
+Verified through the **actual toolbar UI** in preview (synthetic double-tap to
+enter edit mode — NB the rect node is replaced on the select-render, so re-query
+the element between the two taps; a stale ref silently no-ops the 2nd tap): the
+chips render with correct labels+preview classes; selecting a range + clicking
+"Quote" produces a `mk-cs-quote` run (italic, 31.5px = 1.05em × the subhead 30px
+base) and lights the chip; applying **strong** over it yields one run with
+`mk-cs-quote mk-strong` → italic (char-style) **+** 700 (atomic wins) + 31.5px,
+proving compose+cascade through the real UI. Reloaded to discard (no Save fired;
+on-disk marks unchanged). No schema/save-route change (still a string-valued
+mark). **No authoring UI for the registry yet** — char-styles come from
+`deco_default_charstyles()` until Slice 3 builds the editor.
+
+**Next: TS4 Slice 3** — char-style authoring panel (create/edit/delete entries
+in `_shared/char-styles.json`, like the typography panel), then Slice 4
+(dangling-ref/governance polish).
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
 override; it's load-bearing — confirmed 2026-06).

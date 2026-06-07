@@ -1259,6 +1259,30 @@
     updateToolbarPressed();
   }
 
+  // TS4 Slice 2: set (or clear, value === null) a named character-style over
+  // the current selection. Structurally identical to applyColor — a valued
+  // axis with OVERWRITE semantics (one charStyle per char) via setMark — only
+  // the attr differs. Selection-only; a collapsed caret is a no-op (a pending
+  // char-style is a deferred follow-on, same as pending colour). The style is
+  // the cascade's middle layer: it restyles the run relative to the rect's
+  // base token, and any atomic strong/em/underline on the same chars still
+  // wins (pure CSS specificity — see classForMark / deco_charstyle_marks_css).
+  function applyCharStyle(value) {
+    if (editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const sel = getCaretOffset(ed);
+    if (!sel || sel.end <= sel.start) return;    // selection required
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) return;
+    const len = editText.length;
+    r.marks = normalizeMarks(setMark(r.marks || [], sel.start, sel.end, 'charStyle', value), len);
+    markDirty();
+    renderRunsInto(ed, editText, r.marks);
+    setSelectionRange(ed, sel.start, sel.end);
+    updateToolbarPressed();
+  }
+
   // TS3-b-2: open the inline link-URL editor for the current selection.
   // Selection-only (like colour) — a collapsed caret is a no-op. We capture
   // the selection range NOW, while focus is still in the editable (the Link
@@ -1392,6 +1416,19 @@
         sws[k].classList.toggle('is-active', on);
       }
     }
+    // TS4 Slice 2: char-style chips — light the chip whose value uniformly
+    // covers the selection (or contains the caret); light "clear" when there's
+    // a selection carrying no single char-style. Mirrors the colour-swatch loop.
+    const csChips = bar.querySelectorAll('.pe-tt-cs');
+    if (csChips.length) {
+      const curCs = currentMarkValue(marks, sel, 'charStyle');
+      const curCsKey = curCs == null ? null : markValKey(curCs);
+      for (let k = 0; k < csChips.length; k++) {
+        const v = csChips[k].dataset.value;
+        const on = (v === '') ? (hasSel && curCsKey === null) : (curCsKey === v);
+        csChips[k].classList.toggle('is-active', on);
+      }
+    }
     // v0.10.102: live link read-out. Show the URL (+ verify / edit) whenever
     // the selection is a single uniform link AND the editor isn't already open
     // (the prefilled input shows it then). Reposition the toolbar only on a
@@ -1490,6 +1527,43 @@
       state.palette.forEach(function (p) {
         if (!p || !p.id) return;
         mkSwatch(String(p.id), (p.name || p.id) + ' (selection)', p.value || '');
+      });
+    }
+    // TS4 Slice 2: char-style chips. A divider, a "clear style" chip, then one
+    // chip per registered char-style. Each chip's label is wrapped in its own
+    // .mk-cs-<id> span so it PREVIEWS the style it applies (same "what you see
+    // is what the run becomes" principle as the colour swatches). Same
+    // pointerdown/mousedown focus-guard so the editable keeps focus+selection.
+    if (state.charStyles && state.charStyles.length) {
+      const csSep = document.createElement('span');
+      csSep.className = 'pe-tt-sep';
+      bar.appendChild(csSep);
+      const mkCsChip = function (value, label, title, previewId) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'pe-tt-cs' + (value === '' ? ' pe-tt-cs-clear' : '');
+        c.title = title;
+        c.dataset.value = value;
+        if (previewId) {
+          const lbl = document.createElement('span');
+          lbl.className = 'mk-cs-' + safeMarkId(previewId);
+          lbl.textContent = label;
+          c.appendChild(lbl);
+        } else {
+          c.textContent = label;
+        }
+        c.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+        c.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+        c.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          applyCharStyle(value === '' ? null : value);
+        });
+        bar.appendChild(c);
+      };
+      mkCsChip('', '×', 'Clear character style (selection)', null);
+      state.charStyles.forEach(function (cs) {
+        if (!cs || !cs.id) return;
+        mkCsChip(String(cs.id), (cs.name || cs.id), (cs.name || cs.id) + ' (selection)', cs.id);
       });
     }
     // TS3-b-2 LINK control. A divider, then a chain-link button that opens the
