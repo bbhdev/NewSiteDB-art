@@ -405,6 +405,15 @@ repurposed** to carry complete-style ids. Key decisions:
   may be too much to show on the primary panel. → This is a Slice-B change: the existing
   TS1 B/I toolbar + TS4 char-style picker on the page editor must be reworked into
   "element-style buttons (primary) + an icon that reveals the overrides panel (secondary)".
+- **Editing styles panel = moveable + viewport-fixed (author precision, 2026-06):** the
+  styles panel shown *while editing text* must be **draggable** (the user drops it wherever
+  suits the current work) and **`position: fixed` to the viewport — it must NOT scroll with
+  the page**. Rationale: for tall text blocks a scroll-following / rect-anchored panel
+  scrolls out of view, stranding the author mid-edit. → Slice-B implication: the current
+  TS1 toolbar is a small floating bar anchored near the rect; replace with a **fixed,
+  user-positioned panel** (remember its position for the session). The icon-opened overrides
+  panel (above) lives under the same moveable/fixed surface so the whole styling affordance
+  stays put.
 - **Totality — one DEFAULT, no undefined style (author precision, 2026-06):** the registry
   **declares exactly ONE style as the default**, and **there is NO possibility of an
   undefined/unset style**. Every text resolves to a *defined* element style: a rect's
