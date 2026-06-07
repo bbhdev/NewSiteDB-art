@@ -682,6 +682,33 @@ button.pe-save.is-flash {
    style's own palette colour vanish into the orange). */
 .pe-tt-es.is-active > span { color: inherit !important; }
 
+/* Slice B3-2: the atomic OVERRIDES (B/I/U, colour, link) are the escape hatch,
+   not the default — they live in a collapsible secondary row, disclosed by the
+   fx toggle. Progressive-disclosure rule: governed element styles are primary
+   and always visible; raw overrides are one tap away. flex-basis:100% drops the
+   row onto its own line under the element-style buttons (the bar is flex-wrap). */
+.pe-tt-overrides { display: none; }
+.pe-text-toolbar.pe-tt-show-ovr .pe-tt-overrides {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+/* fx toggle — a sliders glyph (icon-sizing rule: ~1.2rem in the 2rem button,
+   thick stroke, clear touch target for the tablet editor). is-active = the
+   overrides row is open. */
+.pe-tt-fx svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  display: block;
+  margin: 0 auto;
+}
+
 /* TS3-b-2 link control. The chain-link button matches the B/I buttons; its
    icon fills a clear share of the button (icon-sizing rule — no microscopic
    glyph, also a usable touch target for the tablet editor). The inline URL

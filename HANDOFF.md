@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.127):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.128):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -491,12 +491,35 @@ repurposed** to carry complete-style ids. Key decisions:
     - **B3-1 — element-style BUTTONS (governed primary picker)** ✅ DONE (v0.10.127). Replaces the
       retired TS4 char-style chips with one button per registered element style (+ a "clear"
       chip → revert range to rect default), each previewing via `.ty-<id>`. (entry below.)
-    - **B3-2** — atomic overrides (B/I/U, colour, link) moved behind an icon → secondary panel. PENDING.
+    - **B3-2 — atomic overrides behind an fx disclosure** ✅ DONE (v0.10.128). B/I/U, colour
+      swatches, link all moved into a collapsible secondary row; element-style buttons + an fx
+      toggle are the always-visible primary row. (entry below.)
     - **B3-3** — whole panel draggable + `position:fixed`, remembering session position. PENDING.
     - Also folded in: relabel the selection-panel typography picker null option "none" → "— Default (<name>) —".
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B3-2 — atomic overrides behind an fx disclosure (v0.10.128).** Reshapes the
+text toolbar to match the governance posture: the GOVERNED element-style buttons (B3-1) are the
+always-visible PRIMARY row; the ATOMIC overrides (B/I/U, colour swatches, link) — the escape
+hatch — move into a collapsible SECONDARY row revealed by an `fx` (sliders) toggle. Progressive-
+disclosure rule applied to formatting: the prepared styles are in your face, raw overrides are
+one tap away. In `dev-page.js` `buildTextToolbar` now builds two containers: atomic controls
+append to a `pe-tt-overrides` div (was `bar`); element-style buttons + the fx toggle append to
+`bar` directly, so the element styles are the bar's first children. The fx click toggles a
+session `overridesOpen` flag + the `pe-tt-show-ovr` class on the bar and repositions (height
+changed). `overridesOpen` persists across the selectionchange-driven rebuilds and resets in
+`enterEditMode` so every fresh edit foregrounds the governed path. CSS: `.pe-tt-overrides`
+display:none → flex with `flex-basis:100%` (its own line under the buttons) when shown; the fx
+sliders icon sized per the icon rule (~1.2rem in the 2rem button). **Gotcha fixed:** the fx
+button carries `.pe-tt-btn` for styling but has no `dataset.attr`; `updateToolbarPressed`'s
+`.pe-tt-btn` pressed-loop was clobbering its `is-active` (driven by `overridesOpen`, not mark
+coverage) on every refresh → added an `if (!attr) continue` guard (also protects the link
+Apply/Cancel buttons, harmlessly). **Live-verified** (transient rect, reloaded to discard): bar
+child order = 8 ES buttons · sep · fx · overrides(hidden); fx opens the row (B/I/U + 8 swatches +
+link), B still applies `strong`; open state + fx highlight survive a selectionchange rebuild; fx
+closes it. No console errors.
 
 **Element styles B3-1 — element-style buttons, the governed primary picker (v0.10.127).** The
 first user-facing authoring UI of Slice B. In `dev-page.js`: a new `applyElementStyle(value)`

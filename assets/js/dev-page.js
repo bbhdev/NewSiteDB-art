@@ -210,6 +210,14 @@
   // disclosure. Both reset on enter/commit/cancel of the edit.
   let linkEditOpen = false;
   let savedLinkRange = null;
+  // Slice B3-2: the toolbar's PRIMARY row is the governed element-style buttons;
+  // the ATOMIC overrides (B/I/U, colour, link) live in a collapsible secondary
+  // row, disclosed by an "fx" toggle. overridesOpen persists the disclosure
+  // across toolbar rebuilds (selectionchange rebuilds the whole bar) — it is
+  // session-only (not stored), reset like linkEditOpen on enter/commit/cancel
+  // so a fresh edit starts with the governed path foregrounded. Progressive
+  // disclosure (project rule): the escape hatch is one tap away, not in your face.
+  let overridesOpen = false;
   // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
   // use the native 'dblclick' event because the pointerdown handler calls
   // preventDefault() on every rect hit, and preventDefault on pointerdown
@@ -1109,6 +1117,7 @@
     pendingAttrs = null;         // TS2-b: no carried-over pending format
     linkEditOpen = false;        // TS3-b-2: no carried-over link editor
     savedLinkRange = null;
+    overridesOpen = false;       // B3-2: each edit foregrounds the governed path
     render();          // rebuilds the rect with a contenteditable text node
     focusEditable();   // then seats focus + caret (caret at end)
   }
@@ -1446,6 +1455,11 @@
     const btns = bar.querySelectorAll('.pe-tt-btn');
     for (let k = 0; k < btns.length; k++) {
       const attr = btns[k].dataset.attr;
+      // B3-2: skip .pe-tt-btn elements that aren't mark-toggles (the fx
+      // overrides toggle, the link Apply/Cancel buttons). Without this the loop
+      // would clobber the fx button's is-active (driven by overridesOpen, not by
+      // mark coverage) on every selectionchange-driven pressed-state refresh.
+      if (!attr) continue;
       let cov;
       if (hasSel) {
         cov = rangeAttrCoverage(marks, sel.start, sel.end, attr);   // none|some|all
@@ -1537,6 +1551,13 @@
     const bar = document.createElement('div');
     bar.id = 'pe-text-toolbar';
     bar.className = 'pe-text-toolbar';
+    // B3-2: the bar holds the PRIMARY governed row (element-style buttons +
+    // the fx toggle) directly; all ATOMIC overrides go into `ovr`, a collapsible
+    // secondary row appended last and shown only when overridesOpen. Building
+    // the atomics into `ovr` (not `bar`) is what keeps the element-style buttons
+    // the first, foregrounded children of the bar.
+    const ovr = document.createElement('div');
+    ovr.className = 'pe-tt-overrides';
     const defs = [
       { attr: 'strong',    label: 'B', title: 'Bold (selection)' },
       { attr: 'em',        label: 'I', title: 'Italic (selection)' },
@@ -1555,7 +1576,7 @@
       b.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
       b.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
       b.addEventListener('click', function (ev) { ev.preventDefault(); toggleStyle(def.attr); });
-      bar.appendChild(b);
+      ovr.appendChild(b);
     });
     // TS3-a colour swatches. A divider, a "clear colour" chip, then one
     // chip per palette colour (its real colour as the fill, so it previews
@@ -1564,7 +1585,7 @@
     if (state.palette && state.palette.length) {
       const sep = document.createElement('span');
       sep.className = 'pe-tt-sep';
-      bar.appendChild(sep);
+      ovr.appendChild(sep);
       const mkSwatch = function (value, title, styleVal) {
         const s = document.createElement('button');
         s.type = 'button';
@@ -1578,7 +1599,7 @@
           ev.preventDefault();
           applyColor(value === '' ? null : value);
         });
-        bar.appendChild(s);
+        ovr.appendChild(s);
       };
       mkSwatch('', 'Clear colour (selection)', '');
       state.palette.forEach(function (p) {
@@ -1597,9 +1618,8 @@
     //  you see is what the run becomes" principle as the colour swatches). Same
     //  pointerdown/mousedown focus-guard so the editable keeps focus+selection.
     if (state.typography && state.typography.length) {
-      const esSep = document.createElement('span');
-      esSep.className = 'pe-tt-sep';
-      bar.appendChild(esSep);
+      // B3-2: element styles are the FIRST children of the bar (the primary
+      // governed row) — no leading divider needed.
       const defId = defaultStyleId();
       const mkEsBtn = function (value, label, title, previewId) {
         const c = document.createElement('button');
@@ -1637,7 +1657,7 @@
     // Icon (not microscopic): ~1.15rem chain-link SVG inside the 2rem button.
     const linkSep = document.createElement('span');
     linkSep.className = 'pe-tt-sep';
-    bar.appendChild(linkSep);
+    ovr.appendChild(linkSep);
     const lb = document.createElement('button');
     lb.type = 'button';
     lb.className = 'pe-tt-btn pe-tt-link';
@@ -1650,7 +1670,7 @@
     lb.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
     lb.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
     lb.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
-    bar.appendChild(lb);
+    ovr.appendChild(lb);
 
     // v0.10.102: live link READ-OUT. The structure is built once (hidden by
     // default); updateToolbarPressed fills + shows it whenever the selection is
@@ -1696,7 +1716,7 @@
     infoEdit.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
     infoEdit.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
     info.appendChild(infoEdit);
-    bar.appendChild(info);
+    ovr.appendChild(info);
 
     // When the editor is open, append a full-width input row (wraps under the
     // buttons — the toolbar is flex-wrap). The <input> is the ONE control that
@@ -1742,8 +1762,39 @@
       const err = document.createElement('span');
       err.className = 'pe-tt-link-err';
       rowEl.appendChild(err);
-      bar.appendChild(rowEl);
+      ovr.appendChild(rowEl);
     }
+    // B3-2: the fx toggle (primary row) reveals/hides the atomic overrides row.
+    // Sliders icon (not microscopic — ~1.2rem in the 2rem button, thick stroke).
+    // Same focus-guard so the editable keeps focus + selection. It carries no
+    // dataset.attr, so the .pe-tt-btn pressed-state loop leaves it alone; we
+    // drive its own is-active from overridesOpen.
+    const fxSep = document.createElement('span');
+    fxSep.className = 'pe-tt-sep';
+    bar.appendChild(fxSep);
+    const fx = document.createElement('button');
+    fx.type = 'button';
+    fx.className = 'pe-tt-btn pe-tt-fx' + (overridesOpen ? ' is-active' : '');
+    fx.title = 'Direct formatting overrides (bold, italic, underline, colour, link)';
+    fx.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.4" fill="currentColor"/>'
+      + '<line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2.4" fill="currentColor"/></svg>';
+    fx.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    fx.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+    fx.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      overridesOpen = !overridesOpen;
+      bar.classList.toggle('pe-tt-show-ovr', overridesOpen);
+      fx.classList.toggle('is-active', overridesOpen);
+      // height changed → reposition so the bar still hugs the editable.
+      positionTextToolbar(bar, ed);
+    });
+    bar.appendChild(fx);
+    // The collapsible secondary row goes last and on its own line (CSS
+    // flex-basis:100%); hidden unless overridesOpen.
+    if (overridesOpen) bar.classList.add('pe-tt-show-ovr');
+    bar.appendChild(ovr);
     document.body.appendChild(bar);
     positionTextToolbar(bar, ed);
     updateToolbarPressed();
