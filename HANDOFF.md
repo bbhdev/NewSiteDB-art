@@ -421,12 +421,13 @@ repurposed** to carry complete-style ids. Key decisions:
   browser-inherited defaults. → This **revises A1's degradation note**: a dangling/absent
   style ref must resolve to the **default element style**, not "inherit" (the
   graceful-inherit framing was for the old typographyId model; under totality the fallback
-  is the default style). Open sub-questions for A2 (flagged to author): does style-level
-  colour "— inherit —" survive? Reasoning: a *defined* style declaring inherit-colour is a
-  governed choice, not divergence (divergence = the per-instance escape hatch), so it can
-  stay; but the **default style itself should carry a concrete palette colour** as the root
-  fallback (with general-background pending, inherit-at-root would resolve to the site text
-  colour — acceptable but less explicit). Confirm before A2 hardens it.
+  is the default style). **Style-level colour "— inherit —" — CONFIRMED by author
+  (2026-06): it stays.** A *defined* style declaring inherit-colour is a governed choice,
+  not divergence (divergence = the per-instance escape hatch). BUT the **default style must
+  carry a concrete palette colour** (it's the root fallback — it can't itself inherit, or
+  there's nothing to resolve to). A2 enforces this: the default style's colour field has no
+  "— inherit —" option (or validation rejects a null colour on the default); non-default
+  styles keep it.
 - **One registry (target):** unify `typography-tokens.json` (`.ty-<id>`) as THE element-
   style registry; the separate `char-styles.json` / `.mk-cs-<id>` layer is retired. The
   registry must guarantee exactly one `isDefault` style (seed one; forbid deleting the last
