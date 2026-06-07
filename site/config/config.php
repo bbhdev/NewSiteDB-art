@@ -1044,7 +1044,39 @@ HTML;
             'letterSpacingPx' => $clamp($t['letterSpacingPx']  ?? null, -20.0, 50.0,  0.0),
             'italic'          => !empty($t['italic']),
             'color'           => $colorRaw !== '' ? $colorRaw : null,
+            'isDefault'       => !empty($t['isDefault']),
           ];
+        }
+
+        // Totality (A2): the one-layer model forbids an "undefined style", so
+        // the registry must be non-empty and declare EXACTLY ONE default, and
+        // that default must carry a concrete colour (it is the root fallback —
+        // it can't itself inherit). These are governance contracts; the panel
+        // UI upholds them, so a violation here means a hand-edited / buggy POST.
+        if (count($clean) === 0) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'At least one element style is required (there is no “undefined style”).']),
+            'application/json', 400, $hdrs
+          );
+        }
+        $defaults = array_values(array_filter($clean, function ($t) { return $t['isDefault']; }));
+        if (count($defaults) === 0) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'One element style must be marked as the default.']),
+            'application/json', 400, $hdrs
+          );
+        }
+        if (count($defaults) > 1) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Only one element style can be the default.']),
+            'application/json', 400, $hdrs
+          );
+        }
+        if ($defaults[0]['color'] === null) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'The default style “' . $defaults[0]['name'] . '” must have a colour (it is the root fallback and cannot inherit).']),
+            'application/json', 400, $hdrs
+          );
         }
 
         if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {

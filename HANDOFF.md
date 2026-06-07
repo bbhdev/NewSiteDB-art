@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.112):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.113):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -437,8 +437,17 @@ repurposed** to carry complete-style ids. Key decisions:
 - **A1 — add `color` (palette-ref) to the element style** ✅ DONE (v0.10.112). Data +
   panel field + CSS emitter + runtime read. *This is the author's "in particular it
   should include colours," shippable on its own.* (entry below.)
-- **A2** — rename the DRAW "Typography" panel to **"Element styles"**; retire the separate
-  Character-styles panel/file (collapse to one registry/layer).
+- **A2** — collapse to one registry. Sub-sliced:
+  - **A2-1 — totality / one DEFAULT style** ✅ DONE (v0.10.113). `isDefault` on each style;
+    seed + load-normalisation guarantee exactly one; save-route enforces it + default-carries-
+    concrete-colour; draw panel "Make default" radio-badge + delete-guard + default's colour
+    field drops "— inherit —". (entry below.)
+  - **A2-2** — rename the DRAW "Typography" panel label to **"Element styles"** (cosmetic;
+    file `typography-tokens.json`, route `dev/draw/typography`, class `.ty-<id>` all unchanged
+    per the A1 decision).
+  - **A2-3** — retire the separate **Character-styles authoring panel** in the draw editor
+    (the page-editor application surface + `.mk-cs-<id>` mark rendering stay until Slice B
+    repurposes the range-mark).
 - **B** — per-RANGE application in the PAGE editor: repurpose the `charStyle` range-mark to
   carry complete element-style ids; rect default style; styled rendering on the editor
   canvas. Reconcile the atomic-colour-vs-element-colour specificity tie (`.mk-color-<id>`
@@ -467,6 +476,33 @@ to `null` = inherit). Touched:
   Verified in the live editor: selecting "Accent" → live `.ty-heading` rule gains
   `color: var(--accent)`, sample renders orange, spec shows "· Accent". (Not saved — user
   data untouched.)
+
+**Element styles A2-1 — totality / one DEFAULT style (v0.10.113).** Enforces the
+one-layer model's "no undefined style": exactly one style is the project default; every
+text falls back to it (the page-editor consumption of that fallback is Slice B). Additive
+field `isDefault`, no schema bump. Touched:
+- `deco/index.php`: seed marks **Body** the default with a concrete colour (`'text'` palette
+  id); others `isDefault:false`. New **`deco_normalize_typography($tokens)`** guarantees
+  exactly one default (multiple → first wins; none → first becomes default; coerces bool) —
+  pure, no I/O. `deco_load_typography()` applies it on the file branch and now returns the
+  **seed** for an empty/invalid/zero-token registry ("zero styles" is not a valid state).
+  It does NOT invent a colour for a colourless legacy default (that's authoring-time).
+- `config.php` `dev/draw/typography` POST: `$clean[]` captures `isDefault`; after the loop
+  the route **rejects** (400, before any write) an empty registry, zero defaults, multiple
+  defaults, or a default whose `color` is null. Governance contract at the boundary; the
+  panel upholds it so a violation = hand-edited/buggy POST. Verified all four 400s.
+- `dev-draw.js`: each row gets a **"Make default" / "★ Default"** badge-button in the head
+  (filled amber + disabled when current). `setDefaultTypo()` clears the flag on all others
+  and, if the promoted style was inherit-colour, auto-assigns a concrete palette colour
+  (prefers `'text'`, else first entry) so it stays saveable. The **default row's Colour
+  field omits "— inherit —"**. `deleteTypographyToken()` **blocks deleting the default**
+  (alert: make another default first). New-token seed gets `isDefault:false`.
+- `dev-draw.css`: `.ed-typo-default` (quiet outline) + `.is-default` (filled amber badge).
+- Verified live: a legacy file (6 tokens, no `isDefault`) loads with exactly one default
+  (the first, `heading`); "Make default" on Body moved the flag, forced Body's colour to
+  `text`, and stripped its inherit option; deleting the default was blocked, a non-default
+  reached `confirm()`. Not saved — user data untouched. NB: the seed default is Body, but a
+  legacy file's default normalises to its FIRST token until the author picks one and saves.
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the

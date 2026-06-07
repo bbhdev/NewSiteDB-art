@@ -12377,7 +12377,7 @@
     state.typography.push({
       id: id, name: 'New token', family: '',
       sizePx: 16, weight: 400, lineHeight: 1.4, letterSpacingPx: 0, italic: false,
-      color: null
+      color: null, isDefault: false
     });
     newTypoIds[id] = true;
     expandedTypoIds[id] = true;   // open the editor so fields are ready
@@ -12390,9 +12390,32 @@
     if (inp) { inp.focus(); inp.select(); }
   }
 
+  // Promote a style to THE project default (totality, A2). Clears the flag
+  // on every other style. The default is the root fallback, so it must carry
+  // a concrete colour: if the promoted style was inherit-colour (null), pick
+  // a concrete palette colour now (prefer the conventional 'text' id, else
+  // the first palette entry) so the registry stays saveable.
+  function setDefaultTypo(t) {
+    const list = state.typography || [];
+    if (t.color == null) {
+      const pal = state.palette || [];
+      const textEntry = pal.find(function (p) { return p.id === 'text'; });
+      t.color = textEntry ? textEntry.id : (pal[0] ? pal[0].id : null);
+    }
+    list.forEach(function (x) { x.isDefault = (x === t); });
+    rebuildTypographyClientCss();
+    markTypographyDirty();
+    renderTypographyList();
+  }
+
   function deleteTypographyToken(t) {
+    if (t.isDefault) {
+      alert('“' + (t.name || t.id) + '” is the project default style. ' +
+            'Make another style the default before deleting this one.');
+      return;
+    }
     if (!confirm('Delete typography token "' + (t.name || t.id) +
-                 '"? Text using it falls back to inherited styles.')) return;
+                 '"? Text using it falls back to the default style.')) return;
     state.typography = (state.typography || []).filter(function (x) { return x.id !== t.id; });
     delete newTypoIds[t.id];
     rebuildTypographyClientCss();
@@ -12437,6 +12460,22 @@
       idTag.title = newTypoIds[t.id]
         ? 'Stable id (tracks the name until first saved, then locks)'
         : 'Stable id — does not change on rename (rects reference it)';
+
+      // Default-style control (totality, A2): exactly one style is the
+      // project default — every text falls back to it, there is no
+      // "undefined style". The default is shown as a filled, disabled badge;
+      // any other row offers "Make default", which moves the flag (and, if
+      // that style was inherit-colour, forces a concrete colour since the
+      // default is the root fallback and can't inherit).
+      const defBtn = document.createElement('button');
+      defBtn.type = 'button';
+      defBtn.className = 'ed-mini ed-typo-default' + (t.isDefault ? ' is-default' : '');
+      defBtn.textContent = t.isDefault ? '★ Default' : 'Make default';
+      defBtn.disabled = !!t.isDefault;
+      defBtn.title = t.isDefault
+        ? 'Project default — every text falls back to this style'
+        : 'Make this the project default style';
+      defBtn.addEventListener('click', function () { setDefaultTypo(t); });
 
       const del = document.createElement('button');
       del.type = 'button';
@@ -12507,12 +12546,15 @@
       // Colour — a palette reference (never free hex). Element styles are
       // COMPLETE: colour is part of the style, resolved to a CSS value at
       // emit time via the palette. "— inherit —" (empty) leaves colour unset
-      // so the text inherits whatever the surrounding context provides.
-      const colourOptions = [{ value: '', label: '— inherit —' }].concat(
-        (state.palette || []).map(function (p) {
-          return { value: p.id, label: p.name || p.id };
-        })
-      );
+      // so the text inherits whatever the surrounding context provides —
+      // EXCEPT the default style, which is the root fallback and therefore
+      // must carry a concrete colour (no inherit option offered for it).
+      const paletteOpts = (state.palette || []).map(function (p) {
+        return { value: p.id, label: p.name || p.id };
+      });
+      const colourOptions = t.isDefault
+        ? paletteOpts
+        : [{ value: '', label: '— inherit —' }].concat(paletteOpts);
       edit.appendChild(selectField('Colour', (t.color != null ? t.color : ''), colourOptions, function (v) {
         t.color = v || null;
         afterFieldEdit();
@@ -12553,6 +12595,7 @@
       head.appendChild(toggle);
       head.appendChild(nameInp);
       head.appendChild(idTag);
+      head.appendChild(defBtn);
       head.appendChild(del);
       li.appendChild(head);
       li.appendChild(sample);

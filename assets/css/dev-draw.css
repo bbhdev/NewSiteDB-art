@@ -2685,6 +2685,21 @@ body.editor input[type="range"] {
 .ed-typo-toggle.is-open {
   color: #f0c25a; border-color: #c79a3a; background: #2a2410;
 }
+/* A2: project-default control. "Make default" is a quiet outline button;
+   the current default is a filled amber, disabled badge (the star reads as
+   "this is THE one"). Sized as a labelled control, not a micro-glyph. */
+.ed-typo-default {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.1;
+  color: #b8a76a; border-color: #5a5440;
+}
+.ed-typo-default:hover { background: #2a2410; border-color: #8a7d4a; }
+.ed-typo-default.is-default {
+  color: #1a1407; background: #d8b24a; border-color: #d8b24a;
+  font-weight: 600; cursor: default; opacity: 1;
+}
 /* Collapsible per-token field editor (3b-3). Indented + hairline left rule
    to read as "belongs to this row"; UI font forced so field labels never
    inherit a token's .ty-<id> styling from an ancestor. */

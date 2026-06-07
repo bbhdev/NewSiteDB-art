@@ -188,11 +188,47 @@ function deco_load_palette(string $contentDir): array
 function deco_default_typography(): array
 {
     return [
-        ['id' => 'heading',  'name' => 'Heading',    'family' => 'Playfair Display',   'sizePx' => 48, 'weight' => 600, 'lineHeight' => 1.1, 'letterSpacingPx' => 0,   'italic' => false, 'color' => null],
-        ['id' => 'subhead',  'name' => 'Subheading', 'family' => 'Cormorant Garamond', 'sizePx' => 30, 'weight' => 500, 'lineHeight' => 1.2, 'letterSpacingPx' => 0.5, 'italic' => false, 'color' => null],
-        ['id' => 'body',     'name' => 'Body',       'family' => 'Inter',              'sizePx' => 18, 'weight' => 400, 'lineHeight' => 1.5, 'letterSpacingPx' => 0,   'italic' => false, 'color' => null],
-        ['id' => 'caption',  'name' => 'Caption',    'family' => 'Inter',              'sizePx' => 13, 'weight' => 400, 'lineHeight' => 1.4, 'letterSpacingPx' => 0.4, 'italic' => false, 'color' => null],
+        // Totality (A2): exactly one style is the DEFAULT — every text falls
+        // back to it, there is no "undefined style". The default MUST carry a
+        // concrete palette colour (it is the root fallback and cannot itself
+        // inherit). Body is the natural default; its colour is the palette
+        // 'text' id (the conventional site text colour).
+        ['id' => 'heading',  'name' => 'Heading',    'family' => 'Playfair Display',   'sizePx' => 48, 'weight' => 600, 'lineHeight' => 1.1, 'letterSpacingPx' => 0,   'italic' => false, 'color' => null,   'isDefault' => false],
+        ['id' => 'subhead',  'name' => 'Subheading', 'family' => 'Cormorant Garamond', 'sizePx' => 30, 'weight' => 500, 'lineHeight' => 1.2, 'letterSpacingPx' => 0.5, 'italic' => false, 'color' => null,   'isDefault' => false],
+        ['id' => 'body',     'name' => 'Body',       'family' => 'Inter',              'sizePx' => 18, 'weight' => 400, 'lineHeight' => 1.5, 'letterSpacingPx' => 0,   'italic' => false, 'color' => 'text', 'isDefault' => true],
+        ['id' => 'caption',  'name' => 'Caption',    'family' => 'Inter',              'sizePx' => 13, 'weight' => 400, 'lineHeight' => 1.4, 'letterSpacingPx' => 0.4, 'italic' => false, 'color' => null,   'isDefault' => false],
     ];
+}
+
+/**
+ * Enforce the totality invariant on an element-style list: EXACTLY ONE
+ * style carries isDefault=true. Pure normalisation, no I/O:
+ *   - coerce every isDefault to bool;
+ *   - if several are true, keep the FIRST and clear the rest;
+ *   - if none is true, make the FIRST style the default.
+ * An empty list is returned unchanged (the caller decides whether to seed).
+ * Does NOT invent a colour for a colourless default — that's enforced at
+ * authoring time (the save route / panel); a legacy default with no colour
+ * degrades to inherit until the author sets one.
+ *
+ * @param  list<array> $tokens
+ * @return list<array>
+ */
+function deco_normalize_typography(array $tokens): array
+{
+    $seen = false;
+    foreach ($tokens as &$t) {
+        if (!is_array($t)) { $t = []; continue; }
+        $isDef = !empty($t['isDefault']);
+        if ($isDef && !$seen) { $t['isDefault'] = true; $seen = true; }
+        else                  { $t['isDefault'] = false; }
+    }
+    unset($t);
+    if (!$seen && count($tokens) > 0) {
+        // No default declared (e.g. legacy file predating isDefault) → first.
+        $tokens[0]['isDefault'] = true;
+    }
+    return $tokens;
 }
 
 /**
@@ -203,10 +239,17 @@ function deco_load_typography(string $contentDir): array
     $path = $contentDir . '/_shared/typography-tokens.json';
     if (is_file($path)) {
         $data = json_decode(file_get_contents($path), true);
-        if (is_array($data) && isset($data['tokens']) && is_array($data['tokens'])) {
-            return $data['tokens'];
+        if (is_array($data) && isset($data['tokens']) && is_array($data['tokens'])
+            && count($data['tokens']) > 0) {
+            // Normalise the totality invariant so callers (CSS emit, the page
+            // editor's default-style resolution) can rely on exactly one
+            // default — even for files written before isDefault existed.
+            return deco_normalize_typography($data['tokens']);
         }
     }
+    // No file, or an empty/invalid registry → the seed set (which already
+    // satisfies totality: one default, concrete colour). "Zero styles" is
+    // not a valid state under the one-layer model.
     return deco_default_typography();
 }
 
