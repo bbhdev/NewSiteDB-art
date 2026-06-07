@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.129):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.130):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -498,10 +498,49 @@ repurposed** to carry complete-style ids. Key decisions:
       A drag grip moves the whole `position:fixed` toolbar (pointer events → touch-ready);
       session-remembered position (viewport-clamped, double-tap grip to reset); the selection-
       panel typography picker null option relabelled "none" → "— Default (<name>) —". (entry below.)
+    - **B3-4 — floating-panel restyle: link first-class + computed pill layout** ✅ DONE
+      (v0.10.130). The bar is now a vertical row-stack: a TITLE BAR (drag grip + first-class
+      link & fx buttons), a PILLS row whose width is COMPUTED so the element-style pills tile on
+      the fewest rows that fit the viewport, then full-width link read-out / link input rows, then
+      the collapsible overrides. The link button left the overrides disclosure (it's first-class
+      now); the overrides inherit the bar's computed width so colour swatches stop wrapping. (entry below.)
     - **B3 COMPLETE.** Next: Slice C (runtime parity).
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B3-4 — floating-panel restyle: link first-class + computed pill layout
+(v0.10.130).** Two author-driven asks: (1) the link button was hidden inside the fx-overrides
+disclosure but is first-class, and (2) the element-style pills wrapped "every which way". Reshapes
+`buildTextToolbar` from a single flex-wrap bar into a VERTICAL ROW-STACK
+(`.pe-text-toolbar { flex-direction:column; align-items:stretch }`):
+- **(1) Title bar** (`.pe-tt-titlebar`) — the new drag handle. The grip is now a non-interactive
+  `<span>` (the whole title bar is the drag surface; pointerdown/dblclick handlers skip when the
+  target is a button so the link/fx clicks pass through). The first-class **link** button and the
+  **fx** toggle live in `.pe-tt-title-actions` on the right. Link is therefore ALWAYS visible; it
+  is no longer built into `ovr`.
+- **(2) Pills row** (`.pe-tt-pills`) — element-style buttons, with a width COMPUTED by the new
+  `layoutToolbarPills(bar, pills)`. Algorithm: the pills are a contiguous order-preserving list;
+  for a target row-count R the narrowest the container can be is the smallest max-row-width that
+  greedy-packs into ≤ R rows (found by BINARY SEARCH on that width, `minCapForRows`); iterate
+  R = 1,2,… and take the first whose minimal width ≤ the viewport-available span
+  (`innerWidth − 24 − barPadding`, floored at the widest single pill). This gives "one line if
+  there's room, else two, …" AND packs each chosen row-count as tightly as possible. The chosen
+  width is set on BOTH the pills and the bar, so the overrides row (a stretched column child)
+  inherits the generous width — the side benefit the author noted: colour swatches stop wrapping.
+  A `MIN_CONTENT` (184px) floor keeps the title bar from being crushed when few/narrow pills exist.
+- **Link read-out / input rows** (`.pe-tt-linkinfo`, `.pe-tt-link-row`) are now direct full-width
+  bar children (column-stretched) instead of `flex-basis:100%` wrap items.
+- **Overrides** (`.pe-tt-overrides`) hold ONLY the atomic escape hatch now (B/I/U + colour); the
+  link moved out. Dropped its `flex-basis:100%` (unneeded as a column child).
+- **Positioning fix**: now that the bar can be much wider (pills on one row), `positionTextToolbar`'s
+  AUTO branch clamps horizontally + vertically (was: only the remembered-position branch clamped),
+  so a wide bar never spills past the viewport's right edge.
+**Live-verified** (transient rect, reloaded to discard): with 7 element styles + 7 palette colours,
+pills fit ONE row at 855px (bar 646px, no overflow); the packing math (replicated against the real
+pill widths) yields 1 row @855, 2 rows @600/420, 3 rows @375/300 — minimum rows that fit, tightest
+width within that. Link + fx confirmed in the title bar, link absent from overrides; overrides
+colour swatches sit on a single row at the inherited wide width. No console errors.
 
 **Element styles B3-3 — draggable panel, remembered position, null-option relabel (v0.10.129);
 B3 COMPLETE.** Three pieces. (1) **Drag grip**: a six-dot grip is the bar's first child;

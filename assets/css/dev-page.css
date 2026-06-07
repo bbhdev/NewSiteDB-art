@@ -507,18 +507,44 @@ button.pe-save.is-flash {
 
 /* Slice TS1: floating B/I toolbar shown while a text rect is inline-edited.
    position:fixed (set in JS) above the editable. Above all canvas chrome. */
+/* v0.10.130: vertical stack of rows (title bar · pills · link read-out · link
+   input · overrides). Width is set inline by layoutToolbarPills so the pills
+   tile on the fewest rows that fit the viewport; children stretch to it. */
 .pe-text-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem;
-  max-width: 22rem;
-  padding: 0.25rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  padding: 0.3rem;
   background: #1c1c1e;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 0.5rem;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   z-index: 9999;
+}
+/* (1) title bar — drag handle. Grip left, first-class actions right. */
+.pe-tt-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  cursor: grab;
+  touch-action: none;        /* let pointer-drag own the gesture (tablet) */
+}
+.pe-tt-titlebar:active { cursor: grabbing; }
+.pe-tt-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+/* (2) pills row — element-style buttons; width set inline. Centred so a short
+   final row sits under the others rather than hugging the left edge. */
+.pe-tt-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
 }
 .pe-tt-btn {
   min-width: 2rem;
@@ -682,20 +708,17 @@ button.pe-save.is-flash {
    style's own palette colour vanish into the orange). */
 .pe-tt-es.is-active > span { color: inherit !important; }
 
-/* Slice B3-2: the atomic OVERRIDES (B/I/U, colour, link) are the escape hatch,
-   not the default — they live in a collapsible secondary row, disclosed by the
-   fx toggle. Progressive-disclosure rule: governed element styles are primary
-   and always visible; raw overrides are one tap away. flex-basis:100% drops the
-   row onto its own line under the element-style buttons (the bar is flex-wrap). */
+/* Slice B3-2: the atomic OVERRIDES (B/I/U, colour) are the escape hatch, not
+   the default — they live in a collapsible row, disclosed by the fx toggle.
+   Progressive-disclosure rule: governed element styles are primary and always
+   visible; raw overrides are one tap away. As a column child it stretches to
+   the bar's computed width, so the colour swatches get room to wrap nicely. */
 .pe-tt-overrides { display: none; }
 .pe-text-toolbar.pe-tt-show-ovr .pe-tt-overrides {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
-  flex-basis: 100%;
-  width: 100%;
-  margin-top: 0.3rem;
   padding-top: 0.35rem;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
@@ -751,8 +774,7 @@ button.pe-save.is-flash {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  flex: 1 1 100%;
-  margin-top: 0.15rem;
+  width: 100%;
 }
 .pe-tt-link-input {
   flex: 1 1 auto;
@@ -788,8 +810,7 @@ button.pe-save.is-flash {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  flex: 1 1 100%;
-  margin-top: 0.15rem;
+  width: 100%;
   font-size: 0.78rem;
   color: rgba(232, 232, 234, 0.85);
 }

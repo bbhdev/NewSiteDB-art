@@ -1551,10 +1551,13 @@
       return;
     }
     const rc = ed.getBoundingClientRect();
-    bar.style.left = Math.max(4, rc.left) + 'px';
+    // Hug the editable's left, but clamp so a wide bar (pills on one row) never
+    // spills past the right edge of the viewport.
+    const left = Math.min(Math.max(4, rc.left), Math.max(4, vw - w - 4));
+    bar.style.left = left + 'px';
     let top = rc.top - h - 6;
     if (top < 4) top = rc.bottom + 6;
-    bar.style.top = top + 'px';
+    bar.style.top = Math.min(Math.max(4, top), Math.max(4, vh - h - 4)) + 'px';
   }
 
   // Slice B3-3: drag the whole toolbar by its grip. Pointer events + capture so
@@ -1587,6 +1590,67 @@
     document.addEventListener('pointercancel', up);
   }
 
+  // v0.10.130: size the element-style pill container by CALCULATION. The pills
+  // are a contiguous, order-preserving list; we want them on the MINIMUM number
+  // of rows R such that the row-packing still fits the viewport (one line if
+  // there's room, else two, …). For a fixed R the narrowest the container can
+  // be is the smallest max-row-width that greedy-packs into ≤ R rows — found by
+  // binary search on that width. We try R = 1, 2, … and take the first whose
+  // minimal width fits the available viewport span. The chosen width is set on
+  // the pills AND the bar, so the overrides row (width:100%) inherits the same
+  // generous width (its colour swatches then wrap into fewer rows — the side
+  // benefit the user asked for).
+  function layoutToolbarPills(bar, pills) {
+    const items = Array.prototype.slice.call(pills.children);
+    const n = items.length;
+    if (!n) return;
+    const cs = getComputedStyle(pills);
+    const gap = parseFloat(cs.columnGap || cs.gap || '0') || 6;
+    const widths = items.map(function (el) { return el.offsetWidth; });
+    let total = 0, maxW = 0;
+    for (let i = 0; i < n; i++) {
+      total += widths[i];
+      if (widths[i] > maxW) maxW = widths[i];
+    }
+    total += gap * (n - 1);
+    // greedy row count for a given max-row-width cap
+    const rowsFor = function (cap) {
+      let rows = 1, cur = 0;
+      for (let i = 0; i < n; i++) {
+        const next = (cur === 0) ? widths[i] : (cur + gap + widths[i]);
+        if (next <= cap + 0.5) { cur = next; }
+        else { rows++; cur = widths[i]; }
+      }
+      return rows;
+    };
+    // smallest cap (≥ maxW) that packs into ≤ R rows
+    const minCapForRows = function (R) {
+      let lo = maxW, hi = total, best = total;
+      for (let it = 0; it < 40 && lo <= hi; it++) {
+        const mid = (lo + hi) / 2;
+        if (rowsFor(mid) <= R) { best = mid; hi = mid - 0.5; }
+        else { lo = mid + 0.5; }
+      }
+      return best;
+    };
+    const barPad = (parseFloat(getComputedStyle(bar).paddingLeft) || 0)
+                 + (parseFloat(getComputedStyle(bar).paddingRight) || 0);
+    // viewport span available to the pills (24px outer margin + the bar's own
+    // horizontal padding). Never below the widest single pill.
+    const avail = Math.max(maxW, window.innerWidth - 24 - barPad);
+    let chosen = Math.min(total, avail);
+    for (let R = 1; R <= n; R++) {
+      const cap = minCapForRows(R);
+      if (cap <= avail) { chosen = cap; break; }
+    }
+    // Keep the title bar (grip + link + fx) from being crushed when only a few
+    // narrow pills exist: a sensible minimum content width.
+    const MIN_CONTENT = 184;
+    const contentW = Math.max(Math.ceil(chosen), MIN_CONTENT);
+    pills.style.width = contentW + 'px';
+    bar.style.width = (contentW + barPad) + 'px';
+  }
+
   // Build (or tear down) the floating text toolbar. Called from render():
   // removes any stale bar, and when editing builds a fresh one over the
   // active editable. B / I atomic toggles (TS1/TS2) + a palette colour-
@@ -1600,35 +1664,106 @@
     const bar = document.createElement('div');
     bar.id = 'pe-text-toolbar';
     bar.className = 'pe-text-toolbar';
-    // B3-2: the bar holds the PRIMARY governed row (element-style buttons +
-    // the fx toggle) directly; all ATOMIC overrides go into `ovr`, a collapsible
-    // secondary row appended last and shown only when overridesOpen. Building
-    // the atomics into `ovr` (not `bar`) is what keeps the element-style buttons
-    // the first, foregrounded children of the bar.
-    const ovr = document.createElement('div');
-    ovr.className = 'pe-tt-overrides';
-    // B3-3: drag grip — the first child of the bar (the primary row). Grab it to
-    // move the whole toolbar; double-tap it to reset to auto-positioning. Same
-    // focus-guard as the buttons. Six-dot grip glyph, sized as a real touch
-    // target (icon rule) so it works on the tablet editor.
-    const grip = document.createElement('button');
-    grip.type = 'button';
+    // ---------------------------------------------------------------------
+    // v0.10.130 layout. The bar is a vertical stack of rows:
+    //   (1) TITLE BAR    — drag grip (left) + first-class actions (link, fx).
+    //   (2) PILLS        — the governed element-style buttons, in a container
+    //                      whose width is COMPUTED (layoutToolbarPills) so the
+    //                      pills tile on the minimum number of rows that fit
+    //                      the viewport (one line if there's room, else two…).
+    //   (3) LINK READ-OUT — full-width, shown only when the selection is a link.
+    //   (4) LINK INPUT    — full-width, only while linkEditOpen.
+    //   (5) OVERRIDES     — collapsible atomic row (B/I/U + colour). Inherits
+    //                      the bar's computed width → colour swatches get room.
+    // The link button is now FIRST-CLASS (lives in the title bar, always
+    // visible) — it is no longer hidden inside the overrides disclosure.
+    // ---------------------------------------------------------------------
+
+    // (1) TITLE BAR — the drag handle. Dragging anywhere on it (except its
+    // buttons) moves the whole toolbar; double-tap (off a button) resets to
+    // auto-positioning. Pointer events → touch-ready (tablet editor is a
+    // first-class target). preventDefault keeps the editable focused so its
+    // blur→commit never fires mid-drag.
+    const titlebar = document.createElement('div');
+    titlebar.className = 'pe-tt-titlebar';
+    titlebar.addEventListener('mousedown', function (ev) {
+      if (!ev.target.closest('button')) ev.preventDefault();
+    });
+    titlebar.addEventListener('pointerdown', function (ev) {
+      if (ev.target.closest('button')) return;   // let link/fx clicks through
+      startToolbarDrag(ev, bar);
+    });
+    titlebar.addEventListener('dblclick', function (ev) {
+      if (ev.target.closest('button')) return;
+      ev.preventDefault();
+      toolbarPos = null;                 // reset → auto-position
+      const g = titlebar.querySelector('.pe-tt-grip');
+      if (g) g.classList.remove('pe-tt-grip-moved');
+      const ed2 = surface && surface.querySelector('.pe-rect-text.is-editing');
+      if (ed2) positionTextToolbar(bar, ed2);
+    });
+    // Drag grip (a non-interactive glyph — the whole title bar is the drag
+    // surface; the grip just signals it). Six-dot grip, sized as a real touch
+    // affordance (icon rule).
+    const grip = document.createElement('span');
     grip.className = 'pe-tt-grip' + (toolbarPos ? ' pe-tt-grip-moved' : '');
     grip.title = 'Drag to move · double-tap to reset position';
     grip.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor">'
       + '<circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/>'
       + '<circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/>'
       + '<circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
-    grip.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
-    grip.addEventListener('pointerdown', function (ev) { startToolbarDrag(ev, bar); });
-    grip.addEventListener('dblclick', function (ev) {
+    titlebar.appendChild(grip);
+    // First-class actions, right side of the title bar.
+    const titleActions = document.createElement('div');
+    titleActions.className = 'pe-tt-title-actions';
+    // LINK control (first-class). A chain-link button that opens the inline URL
+    // editor. dataset.attr='link' makes it light up via the generic pressed-
+    // state loop (rangeAttrCoverage) whenever the selection is linked. Icon
+    // (not microscopic): ~1.15rem chain-link SVG inside the 2rem button.
+    const lb = document.createElement('button');
+    lb.type = 'button';
+    lb.className = 'pe-tt-btn pe-tt-link';
+    lb.dataset.attr = 'link';
+    lb.title = 'Link (selection)';
+    lb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07L11.5 4.5"/>'
+      + '<path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07L12.5 19.5"/></svg>';
+    lb.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    lb.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+    lb.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
+    titleActions.appendChild(lb);
+    // fx toggle — reveals/hides the atomic overrides row. Sliders icon (not
+    // microscopic — ~1.2rem in the 2rem button, thick stroke). It carries no
+    // dataset.attr, so the .pe-tt-btn pressed-state loop leaves it alone; we
+    // drive its own is-active from overridesOpen.
+    const fx = document.createElement('button');
+    fx.type = 'button';
+    fx.className = 'pe-tt-btn pe-tt-fx' + (overridesOpen ? ' is-active' : '');
+    fx.title = 'Direct formatting overrides (bold, italic, underline, colour)';
+    fx.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.4" fill="currentColor"/>'
+      + '<line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2.4" fill="currentColor"/></svg>';
+    fx.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    fx.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+    fx.addEventListener('click', function (ev) {
       ev.preventDefault();
-      toolbarPos = null;                 // reset → auto-position
-      grip.classList.remove('pe-tt-grip-moved');
-      const ed2 = surface && surface.querySelector('.pe-rect-text.is-editing');
-      if (ed2) positionTextToolbar(bar, ed2);
+      overridesOpen = !overridesOpen;
+      bar.classList.toggle('pe-tt-show-ovr', overridesOpen);
+      fx.classList.toggle('is-active', overridesOpen);
+      // height changed → reposition so the bar still hugs the editable.
+      positionTextToolbar(bar, ed);
     });
-    bar.appendChild(grip);
+    titleActions.appendChild(fx);
+    titlebar.appendChild(titleActions);
+    bar.appendChild(titlebar);
+
+    // (5) OVERRIDES container (built now, appended later). Holds the ATOMIC
+    // escape-hatch controls only: B/I/U + colour. Collapsible, shown only when
+    // overridesOpen. (The link button is no longer here — it's first-class.)
+    const ovr = document.createElement('div');
+    ovr.className = 'pe-tt-overrides';
     const defs = [
       { attr: 'strong',    label: 'B', title: 'Bold (selection)' },
       { attr: 'em',        label: 'I', title: 'Italic (selection)' },
@@ -1678,19 +1813,20 @@
         mkSwatch(String(p.id), (p.name || p.id) + ' (selection)', p.value || '');
       });
     }
-    // Slice B3-1: ELEMENT-STYLE buttons — the governed PRIMARY authoring path.
+
+    // (2) PILLS — ELEMENT-STYLE buttons, the governed PRIMARY authoring path.
     // (Replaces the retired TS4 relative char-style chips; the charStyle
     //  mechanism is repurposed under attr 'elementStyle' carrying a complete
-    //  registry id, decision A — see classForMark.) A divider, a "clear" chip
-    //  (removes the elementStyle mark → the range reverts to the rect's DEFAULT
-    //  element style; totality means there is no "no style"), then one button
-    //  per registered element style. Each button's label is wrapped in its own
+    //  registry id, decision A — see classForMark.) A "clear" chip (removes the
+    //  elementStyle mark → the range reverts to the rect's DEFAULT element
+    //  style; totality means there is no "no style"), then one button per
+    //  registered element style. Each button's label is wrapped in its own
     //  .ty-<id> span so it PREVIEWS the complete style it applies (same "what
     //  you see is what the run becomes" principle as the colour swatches). Same
     //  pointerdown/mousedown focus-guard so the editable keeps focus+selection.
+    const pills = document.createElement('div');
+    pills.className = 'pe-tt-pills';
     if (state.typography && state.typography.length) {
-      // B3-2: element styles are the FIRST children of the bar (the primary
-      // governed row) — no leading divider needed.
       const defId = defaultStyleId();
       const mkEsBtn = function (value, label, title, previewId) {
         const c = document.createElement('button');
@@ -1712,7 +1848,7 @@
           ev.preventDefault();
           applyElementStyle(value === '' ? null : value);
         });
-        bar.appendChild(c);
+        pills.appendChild(c);
       };
       mkEsBtn('', '×', 'Clear element style — revert selection to rect default', null);
       state.typography.forEach(function (es) {
@@ -1722,26 +1858,7 @@
         mkEsBtn(String(es.id), label, base + (es.id === defId ? ' — rect default (selection)' : ' (selection)'), es.id);
       });
     }
-    // TS3-b-2 LINK control. A divider, then a chain-link button that opens the
-    // inline URL editor. dataset.attr='link' makes it light up via the generic
-    // pressed-state loop (rangeAttrCoverage) whenever the selection is linked.
-    // Icon (not microscopic): ~1.15rem chain-link SVG inside the 2rem button.
-    const linkSep = document.createElement('span');
-    linkSep.className = 'pe-tt-sep';
-    ovr.appendChild(linkSep);
-    const lb = document.createElement('button');
-    lb.type = 'button';
-    lb.className = 'pe-tt-btn pe-tt-link';
-    lb.dataset.attr = 'link';
-    lb.title = 'Link (selection)';
-    lb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
-      + '<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07L11.5 4.5"/>'
-      + '<path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07L12.5 19.5"/></svg>';
-    lb.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
-    lb.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
-    lb.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
-    ovr.appendChild(lb);
+    bar.appendChild(pills);
 
     // v0.10.102: live link READ-OUT. The structure is built once (hidden by
     // default); updateToolbarPressed fills + shows it whenever the selection is
@@ -1787,7 +1904,7 @@
     infoEdit.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
     infoEdit.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
     info.appendChild(infoEdit);
-    ovr.appendChild(info);
+    bar.appendChild(info);   // (3) full-width row, directly under the pills
 
     // When the editor is open, append a full-width input row (wraps under the
     // buttons — the toolbar is flex-wrap). The <input> is the ONE control that
@@ -1833,40 +1950,17 @@
       const err = document.createElement('span');
       err.className = 'pe-tt-link-err';
       rowEl.appendChild(err);
-      ovr.appendChild(rowEl);
+      bar.appendChild(rowEl);   // (4) full-width input row
     }
-    // B3-2: the fx toggle (primary row) reveals/hides the atomic overrides row.
-    // Sliders icon (not microscopic — ~1.2rem in the 2rem button, thick stroke).
-    // Same focus-guard so the editable keeps focus + selection. It carries no
-    // dataset.attr, so the .pe-tt-btn pressed-state loop leaves it alone; we
-    // drive its own is-active from overridesOpen.
-    const fxSep = document.createElement('span');
-    fxSep.className = 'pe-tt-sep';
-    bar.appendChild(fxSep);
-    const fx = document.createElement('button');
-    fx.type = 'button';
-    fx.className = 'pe-tt-btn pe-tt-fx' + (overridesOpen ? ' is-active' : '');
-    fx.title = 'Direct formatting overrides (bold, italic, underline, colour, link)';
-    fx.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
-      + '<line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.4" fill="currentColor"/>'
-      + '<line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2.4" fill="currentColor"/></svg>';
-    fx.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
-    fx.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
-    fx.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      overridesOpen = !overridesOpen;
-      bar.classList.toggle('pe-tt-show-ovr', overridesOpen);
-      fx.classList.toggle('is-active', overridesOpen);
-      // height changed → reposition so the bar still hugs the editable.
-      positionTextToolbar(bar, ed);
-    });
-    bar.appendChild(fx);
-    // The collapsible secondary row goes last and on its own line (CSS
-    // flex-basis:100%); hidden unless overridesOpen.
+    // (5) The collapsible overrides row goes last; hidden unless overridesOpen.
     if (overridesOpen) bar.classList.add('pe-tt-show-ovr');
     bar.appendChild(ovr);
     document.body.appendChild(bar);
+    // Now that the pills are in the DOM and measurable, compute the container
+    // width so they tile on the fewest rows that fit the viewport. This sets
+    // the bar's width too → the overrides row (width:100%) inherits it, so the
+    // colour swatches get the same room instead of wrapping in a narrow column.
+    layoutToolbarPills(bar, pills);
     positionTextToolbar(bar, ed);
     updateToolbarPressed();
     if (!selChangeBound) {
