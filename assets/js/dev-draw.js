@@ -12375,7 +12375,7 @@
     if (!Array.isArray(state.typography)) state.typography = [];
     const id = uniqueTypoId('token');
     state.typography.push({
-      id: id, name: 'New token', family: '',
+      id: id, name: 'New style', family: '',
       sizePx: 16, weight: 400, lineHeight: 1.4, letterSpacingPx: 0, italic: false,
       color: null, isDefault: false
     });
@@ -12414,7 +12414,7 @@
             'Make another style the default before deleting this one.');
       return;
     }
-    if (!confirm('Delete typography token "' + (t.name || t.id) +
+    if (!confirm('Delete element style "' + (t.name || t.id) +
                  '"? Text using it falls back to the default style.')) return;
     state.typography = (state.typography || []).filter(function (x) { return x.id !== t.id; });
     delete newTypoIds[t.id];
@@ -12431,7 +12431,7 @@
     if (!tokens.length) {
       const empty = document.createElement('li');
       empty.className = 'ed-typo-empty';
-      empty.textContent = 'No typography tokens yet — use “+ Token”.';
+      empty.textContent = 'No element styles yet — use “+ Style”.';
       listEl.appendChild(empty);
       return;
     }
@@ -12692,7 +12692,7 @@
     if (!tokens.length) {
       const empty = document.createElement('p');
       empty.className = 'ed-typo-empty';
-      empty.textContent = 'No typography tokens to preview yet.';
+      empty.textContent = 'No element styles to preview yet.';
       body.appendChild(empty);
     } else {
       tokens.forEach(function (tok) {

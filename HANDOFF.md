@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.113):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.114):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -442,12 +442,12 @@ repurposed** to carry complete-style ids. Key decisions:
     seed + load-normalisation guarantee exactly one; save-route enforces it + default-carries-
     concrete-colour; draw panel "Make default" radio-badge + delete-guard + default's colour
     field drops "— inherit —". (entry below.)
-  - **A2-2** — rename the DRAW "Typography" panel label to **"Element styles"** (cosmetic;
-    file `typography-tokens.json`, route `dev/draw/typography`, class `.ty-<id>` all unchanged
-    per the A1 decision).
-  - **A2-3** — retire the separate **Character-styles authoring panel** in the draw editor
-    (the page-editor application surface + `.mk-cs-<id>` mark rendering stay until Slice B
-    repurposes the range-mark).
+  - **A2-2 + A2-3 — one panel** ✅ DONE (v0.10.114). Renamed the DRAW panel to **"Element
+    styles"** (`+ Style`; file/route/`.ty-` class unchanged) AND removed the separate
+    **Character-styles authoring panel** (done together to avoid a confusing dual-panel
+    state). The char-styles data + `.mk-cs-<id>` rendering + page-editor picker survive until
+    Slice B repurposes the range-mark; the now-unreachable char-style JS in dev-draw.js is
+    guarded (no-ops) and removed in Slice D. (entry below.)
 - **B** — per-RANGE application in the PAGE editor: repurpose the `charStyle` range-mark to
   carry complete element-style ids; rect default style; styled rendering on the editor
   canvas. Reconcile the atomic-colour-vs-element-colour specificity tie (`.mk-color-<id>`
@@ -503,6 +503,22 @@ field `isDefault`, no schema bump. Touched:
   `text`, and stripped its inherit option; deleting the default was blocked, a non-default
   reached `confirm()`. Not saved — user data untouched. NB: the seed default is Body, but a
   legacy file's default normalises to its FIRST token until the author picks one and saves.
+
+**Element styles A2-2 + A2-3 — collapse to one panel (v0.10.114).** The author's
+one-layer mental model made the two side-by-side panels ("Typography" + "Character
+styles") contradictory, so both moved in one step. `draw.php`: the typography `<section>`
+heading is now **"Element styles"**, its add button **"+ Style"** (title "Add an element
+style"); the entire **Character styles `<section>` is removed**. `dev-draw.js`: user-facing
+"token" wording → "style" (delete confirm, both empty-states, new-style default name). The
+file (`typography-tokens.json`), route (`dev/draw/typography`), and CSS class (`.ty-<id>`)
+are deliberately UNCHANGED — only the label is "Element styles" (per the A1 decision; a
+file/class rename isn't worth a migration). The char-style JS (renderCharStyleList,
+addCharStyle, saveCharStyles, the live-CSS mirror, etc.) is now unreachable from the UI but
+**left in place, guarded** (its init checks `if (newCsBtn)` and `renderCharStyleList`
+early-returns on the missing `#charstyle-list`) — verified no console errors. Dead-code
+removal is Slice D. Verified live: panels are Groups / Canvas / Design colors / **Element
+styles** only; no "Character styles"; `#charstyle-list` gone; 6 style rows still render;
+add button reads "+ Style"; console clean.
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
