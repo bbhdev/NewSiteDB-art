@@ -1315,6 +1315,30 @@
     updateToolbarPressed();
   }
 
+  // Slice B3 — apply (or, value === null, CLEAR) a COMPLETE element style over
+  // the current selection. The governed primary action: it sets an
+  // `elementStyle` range mark carrying a `.ty-<id>` registry id (overwrite
+  // semantics via setMark — one element style per char). Clearing removes the
+  // mark so the range reverts to the rect's DEFAULT element style (totality:
+  // there is no "no style"). Structurally identical to applyCharStyle /
+  // applyColor; only the attr differs. Selection-only — a collapsed caret is a
+  // no-op (a pending element style is a possible later follow-on).
+  function applyElementStyle(value) {
+    if (editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const sel = getCaretOffset(ed);
+    if (!sel || sel.end <= sel.start) return;    // selection required
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) return;
+    const len = editText.length;
+    r.marks = normalizeMarks(setMark(r.marks || [], sel.start, sel.end, 'elementStyle', value), len);
+    markDirty();
+    renderRunsInto(ed, editText, r.marks);
+    setSelectionRange(ed, sel.start, sel.end);
+    updateToolbarPressed();
+  }
+
   // TS3-b-2: open the inline link-URL editor for the current selection.
   // Selection-only (like colour) — a collapsed caret is a no-op. We capture
   // the selection range NOW, while focus is still in the editable (the Link
@@ -1448,17 +1472,18 @@
         sws[k].classList.toggle('is-active', on);
       }
     }
-    // TS4 Slice 2: char-style chips — light the chip whose value uniformly
+    // Slice B3-1: element-style buttons — light the button whose value uniformly
     // covers the selection (or contains the caret); light "clear" when there's
-    // a selection carrying no single char-style. Mirrors the colour-swatch loop.
-    const csChips = bar.querySelectorAll('.pe-tt-cs');
-    if (csChips.length) {
-      const curCs = currentMarkValue(marks, sel, 'charStyle');
-      const curCsKey = curCs == null ? null : markValKey(curCs);
-      for (let k = 0; k < csChips.length; k++) {
-        const v = csChips[k].dataset.value;
-        const on = (v === '') ? (hasSel && curCsKey === null) : (curCsKey === v);
-        csChips[k].classList.toggle('is-active', on);
+    // a selection carrying no single element style (→ it shows the rect default).
+    // Mirrors the colour-swatch loop.
+    const esBtns = bar.querySelectorAll('.pe-tt-es');
+    if (esBtns.length) {
+      const curEs = currentMarkValue(marks, sel, 'elementStyle');
+      const curEsKey = curEs == null ? null : markValKey(curEs);
+      for (let k = 0; k < esBtns.length; k++) {
+        const v = esBtns[k].dataset.value;
+        const on = (v === '') ? (hasSel && curEsKey === null) : (curEsKey === v);
+        esBtns[k].classList.toggle('is-active', on);
       }
     }
     // v0.10.102: live link read-out. Show the URL (+ verify / edit) whenever
@@ -1561,24 +1586,30 @@
         mkSwatch(String(p.id), (p.name || p.id) + ' (selection)', p.value || '');
       });
     }
-    // TS4 Slice 2: char-style chips. A divider, a "clear style" chip, then one
-    // chip per registered char-style. Each chip's label is wrapped in its own
-    // .mk-cs-<id> span so it PREVIEWS the style it applies (same "what you see
-    // is what the run becomes" principle as the colour swatches). Same
-    // pointerdown/mousedown focus-guard so the editable keeps focus+selection.
-    if (state.charStyles && state.charStyles.length) {
-      const csSep = document.createElement('span');
-      csSep.className = 'pe-tt-sep';
-      bar.appendChild(csSep);
-      const mkCsChip = function (value, label, title, previewId) {
+    // Slice B3-1: ELEMENT-STYLE buttons — the governed PRIMARY authoring path.
+    // (Replaces the retired TS4 relative char-style chips; the charStyle
+    //  mechanism is repurposed under attr 'elementStyle' carrying a complete
+    //  registry id, decision A — see classForMark.) A divider, a "clear" chip
+    //  (removes the elementStyle mark → the range reverts to the rect's DEFAULT
+    //  element style; totality means there is no "no style"), then one button
+    //  per registered element style. Each button's label is wrapped in its own
+    //  .ty-<id> span so it PREVIEWS the complete style it applies (same "what
+    //  you see is what the run becomes" principle as the colour swatches). Same
+    //  pointerdown/mousedown focus-guard so the editable keeps focus+selection.
+    if (state.typography && state.typography.length) {
+      const esSep = document.createElement('span');
+      esSep.className = 'pe-tt-sep';
+      bar.appendChild(esSep);
+      const defId = defaultStyleId();
+      const mkEsBtn = function (value, label, title, previewId) {
         const c = document.createElement('button');
         c.type = 'button';
-        c.className = 'pe-tt-cs' + (value === '' ? ' pe-tt-cs-clear' : '');
+        c.className = 'pe-tt-es' + (value === '' ? ' pe-tt-es-clear' : '');
         c.title = title;
         c.dataset.value = value;
         if (previewId) {
           const lbl = document.createElement('span');
-          lbl.className = 'mk-cs-' + safeMarkId(previewId);
+          lbl.className = 'ty-' + safeMarkId(previewId);
           lbl.textContent = label;
           c.appendChild(lbl);
         } else {
@@ -1588,14 +1619,16 @@
         c.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
         c.addEventListener('click', function (ev) {
           ev.preventDefault();
-          applyCharStyle(value === '' ? null : value);
+          applyElementStyle(value === '' ? null : value);
         });
         bar.appendChild(c);
       };
-      mkCsChip('', '×', 'Clear character style (selection)', null);
-      state.charStyles.forEach(function (cs) {
-        if (!cs || !cs.id) return;
-        mkCsChip(String(cs.id), (cs.name || cs.id), (cs.name || cs.id) + ' (selection)', cs.id);
+      mkEsBtn('', '×', 'Clear element style — revert selection to rect default', null);
+      state.typography.forEach(function (es) {
+        if (!es || !es.id) return;
+        const base = (es.name || es.id);
+        const label = (es.id === defId) ? (base + ' ◦') : base;
+        mkEsBtn(String(es.id), label, base + (es.id === defId ? ' — rect default (selection)' : ' (selection)'), es.id);
       });
     }
     // TS3-b-2 LINK control. A divider, then a chain-link button that opens the

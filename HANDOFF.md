@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.126):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.127):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -487,12 +487,40 @@ repurposed** to carry complete-style ids. Key decisions:
     null` (and any dangling ref) now resolves to the **declared default** element style, not
     browser defaults. *Colour axis at container level is masked by the load-bearing
     `.pe-rect-text` editor override until Slice D — see entry below.* (entry below.)
-  - **B3** — toolbar/panel rework (HANDOFF "one-layer" arch notes): primary panel = element-
-    style BUTTONS; atomic overrides behind an icon → secondary panel; whole panel draggable +
-    `position:fixed`. PENDING.
+  - **B3** — toolbar/panel rework (HANDOFF "one-layer" arch notes), in sub-slices:
+    - **B3-1 — element-style BUTTONS (governed primary picker)** ✅ DONE (v0.10.127). Replaces the
+      retired TS4 char-style chips with one button per registered element style (+ a "clear"
+      chip → revert range to rect default), each previewing via `.ty-<id>`. (entry below.)
+    - **B3-2** — atomic overrides (B/I/U, colour, link) moved behind an icon → secondary panel. PENDING.
+    - **B3-3** — whole panel draggable + `position:fixed`, remembering session position. PENDING.
+    - Also folded in: relabel the selection-panel typography picker null option "none" → "— Default (<name>) —".
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B3-1 — element-style buttons, the governed primary picker (v0.10.127).** The
+first user-facing authoring UI of Slice B. In `dev-page.js`: a new `applyElementStyle(value)`
+(structural twin of `applyCharStyle`/`applyColor`; only the attr differs — `setMark(...,
+'elementStyle', value)` with overwrite semantics, selection-required, collapsed-caret no-op).
+`value === null` CLEARS the mark → the range reverts to the rect's DEFAULT element style
+(totality: there is no "no style"). In `buildTextToolbar` the retired `.pe-tt-cs` char-style
+chip block is REPLACED by a `.pe-tt-es` block: a divider, a `×` clear chip, then one button per
+`state.typography` entry. Each button label is wrapped in its own `.ty-<id>` span so it PREVIEWS
+the complete style (family / weight / italic / colour) — but `.pe-tt-es > span` pins font-size /
+line-height / letter-spacing (`!important`, (0,1,1) beats the `.ty-<id>` (0,1,0)) so a 48px
+style can't blow up the toolbar. The lone default style is flagged with a trailing `◦`.
+`updateToolbarPressed`'s old `csChips` loop now reads `currentMarkValue(marks, sel,
+'elementStyle')` over `.pe-tt-es` (lights the covering style, or the clear chip when the
+selection carries no single element style → it's showing the rect default). CSS for `.pe-tt-es`
+in `dev-page.css` mirrors `.pe-tt-cs` geometry, a shade heavier border to read as primary.
+**Live-verified** (in-memory transient text rect, never saved, reloaded to discard): toolbar
+builds 8 buttons + 0 old chips; clicking `heading` sets `{start:0,end:20,attr:'elementStyle',
+value:'heading'}` and renders `<span class="ty-heading">`; computed style confirms the full
+six-axis override of the rect default (GFS Didot 48px, italic→normal, #6666FF, ls −2px vs
+container Bodoni Moda 16px); clicking `×` empties the marks. The retired `charStyle` mechanism
+(`applyCharStyle`, the `classForMark` charStyle branch) stays as a guarded no-op until Slice D
+removes the dead relative-char-style code. *NOTE: first authoring UI — may warrant on-device
+validation before pushing (still local).*
 
 **Element styles B2 — rect default-style resolution, type axes (v0.10.126).** Consumes A2's
 totality guarantee at render time. Two helpers added in `dev-page.js` (right after `typoById`):

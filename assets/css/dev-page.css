@@ -635,6 +635,53 @@ button.pe-save.is-flash {
   color: #fff;
 }
 
+/* Slice B3-1: element-style buttons — the GOVERNED primary picker. Visually a
+   shade heavier than the colour swatches / old char chips to read as the
+   primary authoring action. Same pill geometry as .pe-tt-cs. */
+.pe-tt-es {
+  height: 2rem;
+  padding: 0 0.55rem;
+  max-width: 10rem;
+  font-size: 0.82rem;
+  line-height: 1;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-tt-es:hover { background: #3a3a3c; }
+/* The preview span shows the style's FAMILY / WEIGHT / ITALIC / COLOUR but is
+   pinned to the chip's own size — an element style's absolute sizePx (e.g. 48px)
+   would otherwise blow up the toolbar. (0,1,1) beats the .ty-<id> (0,1,0) size. */
+.pe-tt-es > span {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 0.82rem !important;
+  line-height: 1 !important;
+  letter-spacing: normal !important;
+}
+/* "Clear" chip: revert selection to the rect default — neutral × pill. */
+.pe-tt-es-clear {
+  min-width: 2rem;
+  padding: 0;
+  font-size: 1.05rem;
+  color: #c8c8ca;
+}
+.pe-tt-es.is-active {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+/* Keep the preview span legible against the active accent fill (don't let the
+   style's own palette colour vanish into the orange). */
+.pe-tt-es.is-active > span { color: inherit !important; }
+
 /* TS3-b-2 link control. The chain-link button matches the B/I buttons; its
    icon fills a clear share of the button (icon-sizing rule — no microscopic
    glyph, also a usable touch target for the tablet editor). The inline URL
