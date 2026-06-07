@@ -3926,6 +3926,21 @@ they're not lost:
 edits a behavior and asks "why isn't it moving in the editor?", that's why.
 They have to test on the live page (`/`).
 
+### No undo in the page editor (known gap, v0.10.102)
+
+The Phase 2 page editor (`/dev/page`, `dev-page.js`) has **no undo/redo**.
+Destructive verbs — delete rect, and any state mutation (move/resize/text
+edit/mark apply) — cannot be reverted; the only recourse is to re-do the edit
+by hand or reload before saving (reload discards unsaved in-memory state).
+User flagged this as "not urgent but obviously necessary" (delete-then-undo).
+It is a SUBSTANTIAL feature, not a quick fix — it needs its own slice. Likely
+shape: a bounded undo stack of state snapshots (or inverse-ops) keyed to the
+mutation points that already call `markDirty()` (`addRect`, delete,
+geometry commits, `setRectText`, the mark-engine ops `applyMark`/`setMark`,
+image binding). Snapshot-of-`state.rects` is simplest and robust given the
+data is small; ⌘Z / ⌘⇧Z bindings + a stack depth cap. Defer until it's
+scheduled — do NOT fold it into an unrelated slice.
+
 ## Limitations removed by user decisions
 
 These were once listed as multi-block restrictions. They are no longer
