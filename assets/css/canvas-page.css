@@ -78,8 +78,9 @@ body.canvas-page-body {
 /* Slice TS1: atomic text-style marks (runtime). Same two rules as the
    editor (dev-page.css) for visual parity — a direct class on the run's
    <span> overrides the inherited .ty-<id> typography token. */
-.rect-text .mk-strong { font-weight: 700; }
-.rect-text .mk-em     { font-style: italic; }
+.rect-text .mk-strong    { font-weight: 700; }
+.rect-text .mk-em        { font-style: italic; }
+.rect-text .mk-underline { text-decoration: underline; }
 /* TS3-b: link runs — underline affordance only; colour comes from the
    separate `color` mark or the inherited typography token (parity with the
    editor's .mk-link). The <a>'s default pointer cursor signals the link. */

@@ -599,7 +599,7 @@
   // so M2 named-style layers slot in later without touching the resolver.
   // Atomic axes only (value ignored); valued axes are handled in
   // classForMark() below.
-  const MARK_ATTR_CLASS = { strong: 'mk-strong', em: 'mk-em' };
+  const MARK_ATTR_CLASS = { strong: 'mk-strong', em: 'mk-em', underline: 'mk-underline' };
 
   // Sanitise a mark value into a CSS-class-safe id fragment (mirrors the
   // PHP preg_replace in deco_marks_classes / the .mk-color-<id> emitter).
@@ -1427,8 +1427,9 @@
     bar.id = 'pe-text-toolbar';
     bar.className = 'pe-text-toolbar';
     const defs = [
-      { attr: 'strong', label: 'B', title: 'Bold (selection)' },
-      { attr: 'em',     label: 'I', title: 'Italic (selection)' }
+      { attr: 'strong',    label: 'B', title: 'Bold (selection)' },
+      { attr: 'em',        label: 'I', title: 'Italic (selection)' },
+      { attr: 'underline', label: 'U', title: 'Underline (selection)' }
     ];
     defs.forEach(function (def) {
       const b = document.createElement('button');
@@ -2490,11 +2491,13 @@
             insertPlainTextAtCaret(txt, '\n');
           } else if ((ev.metaKey || ev.ctrlKey) && !ev.altKey
                      && (ev.key === 'b' || ev.key === 'B'
-                      || ev.key === 'i' || ev.key === 'I')) {
+                      || ev.key === 'i' || ev.key === 'I'
+                      || ev.key === 'u' || ev.key === 'U')) {
             // ⌘/Ctrl+B / +I → route to OUR mark engine. CRITICAL: must
             // preventDefault — contenteditable="true" otherwise runs the
-            // browser's native execCommand('bold'/'italic'), which injects
-            // foreign <b>/<i> nodes OUTSIDE the marks model (button never
+            // browser's native execCommand('bold'/'italic'/'underline'),
+            // which injects foreign <b>/<i>/<u> nodes OUTSIDE the marks
+            // model (button never
             // updates; the styling is silently dropped on commit when the
             // node collapses through textContent; caret offsets can desync
             // mid-edit). Toggling through toggleStyle keeps the model the
@@ -2503,7 +2506,7 @@
             // native command active is a correctness hazard, not polish.)
             ev.preventDefault();
             const k = ev.key.toLowerCase();
-            toggleStyle(k === 'b' ? 'strong' : 'em');
+            toggleStyle(k === 'b' ? 'strong' : (k === 'i' ? 'em' : 'underline'));
           }
         });
         // Typing / IME / delete: patch-in-place, remap marks, no re-render

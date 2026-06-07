@@ -308,7 +308,7 @@ function deco_text_segments(string $text, $marks): array
  */
 function deco_marks_classes(array $attrs): array
 {
-    static $map = ['strong' => 'mk-strong', 'em' => 'mk-em'];
+    static $map = ['strong' => 'mk-strong', 'em' => 'mk-em', 'underline' => 'mk-underline'];
     $cls = [];
     foreach ($attrs as $a) {
         if (is_array($a)) {

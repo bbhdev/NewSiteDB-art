@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.103):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.104):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -209,9 +209,29 @@ open/prefill/apply (renders `<a class="mk-link mk-color-… mk-strong" href>`
 existing safe link intact, empty-Apply removes the link leaving colour+
 strong, Cancel closes + restores selection, pressed-state toggles, blur
 guard keeps the edit alive; and the save route rejects a `javascript:`
-link with NO write (file byte-identical). **Next: TS4** — M2 named
-character-styles (incl. the `token` axis); also pending: underline (3rd
-atomic axis), retire the v0.10.93 neutral-editor-colour override.
+link with NO write (file byte-identical).
+**Underline — 3rd atomic axis (v0.10.104):** completes the atomic-toggle set
+(strong/em/underline). Pure additive wiring, no schema bump (same `value:true`
+shape inside rects-content v3). Five touch points, all symmetric to strong/em:
+(1) `MARK_ATTR_CLASS` in dev-page.js gains `underline:'mk-underline'`;
+(2) `buildTextToolbar` `defs` gains `{attr:'underline',label:'U',title:'Underline (selection)'}`
+— pressed-state (none/some/all → is-active/is-mixed) works for free via
+`rangeAttrCoverage`/`dataset.attr`; (3) ⌘/Ctrl+U routed to `toggleStyle('underline')`
+in the editable keydown (preventDefault stops native `execCommand('underline')`
+injecting foreign `<u>` outside the model — same correctness hazard as ⌘B/⌘I);
+(4) `.mk-underline{text-decoration:underline}` added to BOTH dev-page.css
+(`.pe-rect-text`) and canvas-page.css (`.rect-text`) for editor↔runtime parity;
+(5) PHP `deco_marks_classes` static `$map` gains `'underline'=>'mk-underline'`.
+NO save-route change — the route validates mark *shape* only (slug regex
+`/^[a-z][a-z0-9_-]{0,31}$/` + `value===true`), no attr allowlist, so `underline`
+passes already. Validated via preview synthetic test: edit-entry → select "T2" →
+U button → `<span class="mk-underline">` with computed `text-decoration:underline`,
+button `is-active`, composes with existing colour/strong/em marks; reloaded to
+discard the in-memory mutation (no Save fired, fixture untouched). Runtime PHP
+parity relied on symmetry with strong/em (already render at runtime) since
+verifying it would require persisting an underline mark to the shared fixture.
+**Next: TS4** — M2 named character-styles (incl. the `token` axis); also
+pending: retire the v0.10.93 neutral-editor-colour override.
 **Side-panel tweak (v0.10.98):** the TYPE row's font preview was wrapping
 to multiple lines and sitting in the narrow content column (5.5rem label +
 flex content), pushing the TEXT/NOTE/coords affordances below the fold.

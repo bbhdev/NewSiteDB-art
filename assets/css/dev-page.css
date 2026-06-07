@@ -476,8 +476,9 @@ button.pe-save.is-flash {
    (direct child rule > inherited value) — so an author override always
    wins over the base face. Static rules for now; valued/prepared styles
    (color/token/link) get a dynamic emitter in a later slice (TS3). */
-.pe-rect-text .mk-strong { font-weight: 700; }
-.pe-rect-text .mk-em     { font-style: italic; }
+.pe-rect-text .mk-strong    { font-weight: 700; }
+.pe-rect-text .mk-em        { font-style: italic; }
+.pe-rect-text .mk-underline { text-decoration: underline; }
 /* TS3-b: link runs carry ONLY the underline affordance — colour is the
    separate `color` mark axis, so a link inherits the text/typography colour
    (or its own colour mark) with no cascade fight. In the editor the <a> is
