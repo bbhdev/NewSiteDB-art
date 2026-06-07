@@ -136,6 +136,12 @@
   // Separate from selectedId: a rect is selected first, then double-clicked
   // to enter editing; exiting editing keeps it selected.
   let editingId = null;
+  // Slice TS1 (v0.10.86): last-known plain text of the rect currently being
+  // inline-edited. The contenteditable `input` handler diffs the live
+  // textContent against this to compute a single {p,d,i} edit, remaps the
+  // rect's style marks through it, then updates editText. Reset on
+  // enterEditMode; meaningless while editingId == null.
+  let editText = '';
   // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
   // use the native 'dblclick' event because the pointerdown handler calls
   // preventDefault() on every rect hit, and preventDefault on pointerdown
@@ -527,6 +533,242 @@
     r.text = next;
     markDirty();
     render();
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Slice TS1: rich-text offset-marks engine.
+  //
+  // A text rect's styling is stored as `rect.marks` — an array of
+  //   { start, end, attr, value }   over the half-open range [start,end)
+  // against the plain `rect.text`. Marks are the NSAttributedString shape:
+  // text + keyed-attribute ranges. *Runs* (contiguous same-style segments)
+  // are DERIVED at render time by segments() — never stored or hand-edited.
+  //
+  // TS1 ships two atomic toggle attrs: 'strong' and 'em', value === true.
+  // The shape already accommodates valued attrs (color/token/link, TS3).
+  // Composition rule: same attr → overwrite/coalesce; different attr →
+  // compose. All ops below are PURE and keep marks normalized.
+  // ════════════════════════════════════════════════════════════════
+
+  // Ordered layer map attr → CSS class. Written as a table (not a switch)
+  // so M2 named-style layers slot in later without touching the resolver.
+  const MARK_ATTR_CLASS = { strong: 'mk-strong', em: 'mk-em' };
+
+  function attrsToClasses(attrs) {
+    const cls = [];
+    for (let k = 0; k < attrs.length; k++) {
+      const c = MARK_ATTR_CLASS[attrs[k]];
+      if (c && cls.indexOf(c) === -1) cls.push(c);
+    }
+    return cls;
+  }
+
+  // Common prefix/suffix diff → a single edit: at position p, d chars were
+  // deleted and i chars inserted. Covers type/delete/paste/replace uniformly
+  // (run against the input event's before/after textContent). Offsets are
+  // UTF-16 code units — same unit contenteditable selection uses.
+  function diffText(o, n) {
+    o = o == null ? '' : String(o);
+    n = n == null ? '' : String(n);
+    const ol = o.length, nl = n.length;
+    const max = Math.min(ol, nl);
+    let p = 0;
+    while (p < max && o.charCodeAt(p) === n.charCodeAt(p)) p++;
+    let s = 0;
+    while (s < (max - p) && o.charCodeAt(ol - 1 - s) === n.charCodeAt(nl - 1 - s)) s++;
+    return { p: p, d: ol - p - s, i: nl - p - s };
+  }
+
+  // Map one old-text offset through an edit. isStart selects the boundary
+  // convention so a strictly-inside insertion GROWS a mark while an
+  // insertion at either boundary leaves the new text unstyled (the user
+  // can then style it). For a deletion, survivors clip to the edit point.
+  function remapPos(x, p, d, i, isStart) {
+    if (d === 0) {
+      // pure insertion at p
+      if (isStart) return x <  p ? x : x + i;   // start==p → after the insert
+      else         return x <= p ? x : x + i;   // end==p   → before the insert
+    }
+    const end = p + d;
+    if (x <= p)   return x;
+    if (x >= end) return x - d + i;
+    // x fell inside the deleted hole: a start jumps past the inserted text,
+    // an end clamps to the edit point — neither swallows the inserted chars.
+    return isStart ? p + i : p;
+  }
+
+  // Remap every mark through an edit; drop any that collapsed to empty
+  // (fully covered by a deletion). Survivors keep their attr/value — this
+  // is how runs persist across text modification.
+  function remapMarks(marks, p, d, i) {
+    const out = [];
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      const ns = remapPos(m.start, p, d, i, true);
+      const ne = remapPos(m.end,   p, d, i, false);
+      if (ne > ns) out.push({ start: ns, end: ne, attr: m.attr, value: m.value });
+    }
+    return out;
+  }
+
+  // Does every char in [a,b) already carry `attr`? (uniformity query that
+  // drives toggle semantics). Merges that attr's intervals and checks for
+  // full coverage with no gap.
+  function rangeHasAttr(marks, a, b, attr) {
+    if (b <= a) return false;
+    const iv = [];
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr === attr && m.end > a && m.start < b) {
+        iv.push([Math.max(m.start, a), Math.min(m.end, b)]);
+      }
+    }
+    iv.sort(function (x, y) { return x[0] - y[0]; });
+    let cur = a;
+    for (let k = 0; k < iv.length; k++) {
+      if (iv[k][0] > cur) return false;       // gap before this interval
+      if (iv[k][1] > cur) cur = iv[k][1];
+      if (cur >= b) return true;
+    }
+    return cur >= b;
+  }
+
+  // Remove `attr` over [a,b): clip overlapping marks of that attr. A mark
+  // that STRICTLY CONTAINS [a,b) splits into two — this is exactly how
+  // partial-removal creates new runs. Other attrs are untouched.
+  function removeAttrRange(marks, a, b, attr) {
+    const out = [];
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr !== attr || m.end <= a || m.start >= b) { out.push(m); continue; }
+      if (m.start < a) out.push({ start: m.start, end: a, attr: m.attr, value: m.value });
+      if (m.end   > b) out.push({ start: b, end: m.end, attr: m.attr, value: m.value });
+      // the [max(start,a), min(end,b)) middle is dropped
+    }
+    return out;
+  }
+
+  // Toggle an atomic attr over [a,b): if already uniform → remove, else add.
+  // Pure; caller normalizes the result.
+  function applyMark(marks, a, b, attr) {
+    if (b <= a) return marks.slice();
+    if (rangeHasAttr(marks, a, b, attr)) return removeAttrRange(marks, a, b, attr);
+    return marks.concat([{ start: a, end: b, attr: attr, value: true }]);
+  }
+
+  // Stable serialization key for a mark value (true vs string).
+  function markValKey(v) { return v === true ? 'true' : String(v); }
+
+  // Drop empties, clamp to [0,len], merge equal (attr,value) adjacent/
+  // overlapping ranges, and return in a deterministic order (by start,
+  // then attr) for stable on-disk diffs.
+  function normalizeMarks(marks, len) {
+    const cleaned = [];
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      const s = Math.max(0, Math.min(len, m.start | 0));
+      const e = Math.max(0, Math.min(len, m.end | 0));
+      if (e > s && m.attr) {
+        cleaned.push({ start: s, end: e, attr: String(m.attr),
+                       value: (m.value === undefined ? true : m.value) });
+      }
+    }
+    // group by (attr,value) then start, so a single pass can merge runs
+    cleaned.sort(function (x, y) {
+      if (x.attr !== y.attr) return x.attr < y.attr ? -1 : 1;
+      const xv = markValKey(x.value), yv = markValKey(y.value);
+      if (xv !== yv) return xv < yv ? -1 : 1;
+      return x.start - y.start;
+    });
+    const merged = [];
+    for (let k = 0; k < cleaned.length; k++) {
+      const m = cleaned[k];
+      const last = merged[merged.length - 1];
+      if (last && last.attr === m.attr && markValKey(last.value) === markValKey(m.value)
+          && m.start <= last.end) {
+        if (m.end > last.end) last.end = m.end;       // extend the run
+      } else {
+        merged.push({ start: m.start, end: m.end, attr: m.attr, value: m.value });
+      }
+    }
+    merged.sort(function (x, y) {
+      return (x.start - y.start) || (x.attr < y.attr ? -1 : x.attr > y.attr ? 1 : 0);
+    });
+    return merged;
+  }
+
+  // Derive runs: split `text` at every mark boundary and tag each segment
+  // with the attrs that fully cover it. Returns [{text, attrs:[…]}]. This
+  // is the one function reimplemented in PHP (canvas-page.php) for runtime
+  // parity. Empty marks → a single unstyled segment.
+  function segments(text, marks) {
+    text = text == null ? '' : String(text);
+    const len = text.length;
+    if (!len) return [];
+    const ms = marks || [];
+    if (!ms.length) return [{ text: text, attrs: [] }];
+    const bset = { 0: true };
+    bset[len] = true;
+    for (let k = 0; k < ms.length; k++) {
+      if (ms[k].start > 0 && ms[k].start < len) bset[ms[k].start] = true;
+      if (ms[k].end   > 0 && ms[k].end   < len) bset[ms[k].end]   = true;
+    }
+    const bounds = Object.keys(bset).map(Number).sort(function (a, b) { return a - b; });
+    const segs = [];
+    for (let k = 0; k < bounds.length - 1; k++) {
+      const s = bounds[k], e = bounds[k + 1];
+      if (e <= s) continue;
+      const attrs = [];
+      for (let j = 0; j < ms.length; j++) {
+        if (ms[j].start <= s && ms[j].end >= e && attrs.indexOf(ms[j].attr) === -1) {
+          attrs.push(ms[j].attr);
+        }
+      }
+      segs.push({ text: text.slice(s, e), attrs: attrs });
+    }
+    return segs;
+  }
+
+  // ── Caret helpers — read/restore selection across a span rebuild ──
+
+  // Selection offsets [start,end) relative to root's text content, or null
+  // if there's no selection inside root.
+  function getCaretOffset(root) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+    const pre = range.cloneRange();
+    pre.selectNodeContents(root);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const start = pre.toString().length;
+    return { start: start, end: start + range.toString().length };
+  }
+
+  // Find the text node + local offset for a global text offset within root.
+  function locateOffset(root, target) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let acc = 0, node = walker.nextNode(), last = null;
+    while (node) {
+      const len = node.nodeValue.length;
+      if (target <= acc + len) return { node: node, offset: target - acc };
+      acc += len; last = node; node = walker.nextNode();
+    }
+    if (last) return { node: last, offset: last.nodeValue.length };
+    return { node: root, offset: 0 };
+  }
+
+  // Restore a [a,b) selection inside root after its spans were rebuilt.
+  function setSelectionRange(root, a, b) {
+    try {
+      const sp = locateOffset(root, a), ep = locateOffset(root, b);
+      const r = document.createRange();
+      r.setStart(sp.node, sp.offset);
+      r.setEnd(ep.node, ep.offset);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (e) { /* selection API unavailable — focus alone is fine */ }
   }
 
   // ────────────────────────────────────────────────────────────────
