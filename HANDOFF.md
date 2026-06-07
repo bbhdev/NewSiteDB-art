@@ -396,11 +396,32 @@ repurposed** to carry complete-style ids. Key decisions:
   style (today's `typographyId`); a range mark overrides it for a sub-sequence.
 - **Colour is a PALETTE-ID reference** on the style (never free hex), resolved to a CSS
   value at emit time via the palette — mirrors the atomic `color` mark.
-- **Escape hatch retained:** atomic inline marks (strong/em/underline/color) stay as the
-  sparse per-axis override, winning over the element style. Rare special cases only;
-  abuse risk acknowledged.
+- **Escape hatch retained but NOT first-class (author precision, 2026-06):** atomic inline
+  marks (strong/em/underline/color) stay as the sparse per-axis override, winning over the
+  element style — but the UI **must not encourage them**. The primary styles panel presents
+  **ONLY the named element styles, as buttons** (the governed path). The atomic overrides
+  are **hidden behind an icon** that opens a **separate overrides panel** containing all of
+  them. Two reasons: (1) deliberately de-emphasise divergence; (2) the full set of overrides
+  may be too much to show on the primary panel. → This is a Slice-B change: the existing
+  TS1 B/I toolbar + TS4 char-style picker on the page editor must be reworked into
+  "element-style buttons (primary) + an icon that reveals the overrides panel (secondary)".
+- **Totality — one DEFAULT, no undefined style (author precision, 2026-06):** the registry
+  **declares exactly ONE style as the default**, and **there is NO possibility of an
+  undefined/unset style**. Every text resolves to a *defined* element style: a rect's
+  default and every range both fall back to the **declared default style**, NOT to
+  browser-inherited defaults. → This **revises A1's degradation note**: a dangling/absent
+  style ref must resolve to the **default element style**, not "inherit" (the
+  graceful-inherit framing was for the old typographyId model; under totality the fallback
+  is the default style). Open sub-questions for A2 (flagged to author): does style-level
+  colour "— inherit —" survive? Reasoning: a *defined* style declaring inherit-colour is a
+  governed choice, not divergence (divergence = the per-instance escape hatch), so it can
+  stay; but the **default style itself should carry a concrete palette colour** as the root
+  fallback (with general-background pending, inherit-at-root would resolve to the site text
+  colour — acceptable but less explicit). Confirm before A2 hardens it.
 - **One registry (target):** unify `typography-tokens.json` (`.ty-<id>`) as THE element-
-  style registry; the separate `char-styles.json` / `.mk-cs-<id>` layer is retired.
+  style registry; the separate `char-styles.json` / `.mk-cs-<id>` layer is retired. The
+  registry must guarantee exactly one `isDefault` style (seed one; forbid deleting the last
+  / the default without reassigning).
 
 **Revised slice plan (replaces "TS4 Slice 4"):**
 - **A1 — add `color` (palette-ref) to the element style** ✅ DONE (v0.10.112). Data +
