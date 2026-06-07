@@ -771,6 +771,28 @@
     } catch (e) { /* selection API unavailable — focus alone is fine */ }
   }
 
+  // Paint derived runs into a container (used by both the static display and
+  // the live editor — same span structure, so styling is identical whether
+  // or not the rect is being edited = live WYSIWYG). Content always via
+  // textContent / createTextNode — no markup honoured.
+  function renderRunsInto(container, text, marks) {
+    container.textContent = '';
+    const segs = segments(text || '', marks);
+    if (!segs.length) { container.textContent = text || ''; return; }
+    for (let si = 0; si < segs.length; si++) {
+      const seg = segs[si];
+      const classes = attrsToClasses(seg.attrs);
+      if (!classes.length) {
+        container.appendChild(document.createTextNode(seg.text));
+      } else {
+        const sp = document.createElement('span');
+        sp.className = classes.join(' ');
+        sp.textContent = seg.text;
+        container.appendChild(sp);
+      }
+    }
+  }
+
   // ────────────────────────────────────────────────────────────────
   // Slice T2: inline on-canvas text editing. Double-click a text rect
   // → its .pe-rect-text becomes contenteditable="plaintext-only" (a
@@ -815,6 +837,7 @@
     drag = null;
     selectedId = rectId;
     editingId  = rectId;
+    editText   = r.text || '';   // TS1: baseline for the input-diff remap
     render();          // rebuilds the rect with a contenteditable text node
     focusEditable();   // then seats focus + caret (caret at end)
   }
@@ -833,7 +856,16 @@
     const r = state.rects.find(function (x) { return x.id === id; });
     if (r) {
       const next = raw.trim() === '' ? null : raw.slice(0, 5000);
-      if ((r.text || null) !== next) { r.text = next; markDirty(); }
+      let changed = false;
+      if ((r.text || null) !== next) { r.text = next; changed = true; }
+      // TS1: keep marks consistent with the committed text. Empty text drops
+      // all marks; otherwise clamp/normalize against the final length (also
+      // catches the 5000-char cap trimming the tail).
+      const nextMarks = next == null ? [] : normalizeMarks(r.marks || [], next.length);
+      if (JSON.stringify(r.marks || []) !== JSON.stringify(nextMarks)) {
+        r.marks = nextMarks; changed = true;
+      }
+      if (changed) markDirty();
     }
     if (doRender) render();
   }
@@ -845,6 +877,46 @@
     if (editingId == null) return;
     editingId = null;
     render();
+  }
+
+  // Slice TS1: process one edit of the live editable. Diffs the current
+  // textContent against editText → a single {p,d,i}, remaps the rect's marks
+  // through it (survivors keep their style), normalizes, and records the new
+  // text as editText. Does NOT render — the browser already shows the typed
+  // text in place (patch-in-place keeps caret + IME composition intact);
+  // spans only rebuild on a style apply or on commit.
+  function handleEditInput(el) {
+    if (editingId == null) return;
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) return;
+    const t = String(el.textContent || '');
+    if (t === editText) return;
+    const e = diffText(editText, t);
+    if (e.d !== 0 || e.i !== 0) {
+      r.marks = normalizeMarks(remapMarks(r.marks || [], e.p, e.d, e.i), t.length);
+    }
+    editText = t;
+    markDirty();
+  }
+
+  // Insert literal plain text at the caret (used for Enter→'\n' and
+  // paste→plaintext, since contenteditable="true" would otherwise insert
+  // <div>/<br> on Enter and rich HTML on paste — neither survives our
+  // textContent model). Real '\n' chars round-trip through textContent under
+  // white-space:pre-wrap. After mutating the DOM we run handleEditInput
+  // ourselves (a manual Range edit does not fire the 'input' event).
+  function insertPlainTextAtCaret(el, str) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(str);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    handleEditInput(el);
   }
 
   // "Match rect to image": eliminate the aspect mismatch by resizing the
@@ -1684,38 +1756,21 @@
     if (rect.kind === 'text' && (rect.text || isEditingThis)) {
       const txt = document.createElement('div');
       txt.className = 'pe-rect-text';
-      if (!isEditingThis) {
-        // Slice TS1: static display renders DERIVED runs — segments() splits
-        // rect.text at every mark boundary; each run with style becomes a
-        // <span class="mk-…"> whose direct class beats the inherited .ty-<id>
-        // typography token from `el` (the CSS descendant/inheritance order
-        // working in our favour). Plain runs are bare text nodes. Content is
-        // always set via textContent / createTextNode — no markup honoured.
-        const segs = segments(rect.text || '', rect.marks);
-        if (!segs.length) {
-          txt.textContent = rect.text || '';
-        } else {
-          for (let si = 0; si < segs.length; si++) {
-            const seg = segs[si];
-            const classes = attrsToClasses(seg.attrs);
-            if (!classes.length) {
-              txt.appendChild(document.createTextNode(seg.text));
-            } else {
-              const sp = document.createElement('span');
-              sp.className = classes.join(' ');
-              sp.textContent = seg.text;
-              txt.appendChild(sp);
-            }
-          }
-        }
-      }
+      // Slice TS1: always paint the DERIVED runs (segments → <span class=
+      // "mk-…"> per styled run). Each span's direct class beats the inherited
+      // .ty-<id> typography token from `el` (the CSS descendant/inheritance
+      // order working in our favour). Painting the same runs in edit mode is
+      // what makes typing live-WYSIWYG — text typed inside a bold run lands
+      // in the bold span and shows bold immediately.
+      renderRunsInto(txt, rect.text || '', rect.marks);
       if (isEditingThis) {
-        txt.textContent = rect.text || '';
         txt.classList.add('is-editing');
-        // plaintext-only: WebKit/Blink strip paste formatting + keep the
-        // content as plain text with real newlines (textContent captures
-        // them). Spellcheck off — this is design copy, not prose review.
-        txt.contentEditable = 'plaintext-only';
+        // contenteditable="true" (NOT plaintext-only) so the styled child
+        // spans survive editing — that's the live-WYSIWYG requirement. The
+        // cost: Enter and paste must be intercepted (true would insert
+        // <div>/<br> and rich HTML, neither of which round-trips through our
+        // textContent model). Spellcheck off — design copy, not prose review.
+        txt.contentEditable = 'true';
         txt.spellcheck = false;
         txt.addEventListener('keydown', function (ev) {
           if (ev.key === 'Escape') {
@@ -1723,11 +1778,23 @@
             ev.stopPropagation();
             cancelEdit();
           } else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
-            // Plain Enter inserts a newline (native, plaintext-only);
             // Cmd/Ctrl+Enter commits — mirrors the T1 textarea contract.
             ev.preventDefault();
             commitEdit(true);
+          } else if (ev.key === 'Enter') {
+            // Plain Enter → insert a real '\n' (not a <br>/<div>).
+            ev.preventDefault();
+            insertPlainTextAtCaret(txt, '\n');
           }
+        });
+        // Typing / IME / delete: patch-in-place, remap marks, no re-render.
+        txt.addEventListener('input', function () { handleEditInput(txt); });
+        // Paste arrives as plain text only.
+        txt.addEventListener('paste', function (ev) {
+          ev.preventDefault();
+          const cd = ev.clipboardData || window.clipboardData;
+          const t = cd ? cd.getData('text/plain') : '';
+          if (t) insertPlainTextAtCaret(txt, t);
         });
         // Clicking away (another rect, the panel, empty canvas) commits.
         txt.addEventListener('blur', function () { commitEdit(true); });
