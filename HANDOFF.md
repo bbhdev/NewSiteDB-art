@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.91):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.93):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -63,7 +63,24 @@ B/I toolbar, v0.10.86 → v0.10.91) landed** — text rects now carry a
 `marks` field (additive within schema v3, no bump); the contenteditable
 surface is now `true` (live styled spans while typing); a floating B/I
 toolbar applies/composes/removes atomic styles over a selection; render
-parity in JS + PHP. The M1/M2 cascade roadmap (named char-styles as the
+parity in JS + PHP. **Two post-TS1 fixes followed user testing:**
+(v0.10.92) ⌘B/⌘I are now intercepted (preventDefault) and routed
+through the mark engine — `contenteditable="true"` runs native
+`execCommand('bold'/'italic')` on those shortcuts, which would inject
+foreign `<b>`/`<i>`/`style=` nodes OUTSIDE the marks model and silently
+corrupt saved data; routing them through `toggleStyle` also fixes the
+toolbar pressed-state not updating after a keyboard toggle. (Note: a
+single-master display font like Bungee Hairline has no bold weight, so
+`font-weight:700` is visually imperceptible on a heading token — that's
+the font, not a bug; test bold on a body/Inter token.) (v0.10.93) The
+editor renders `.pe-rect-text` in a neutral high-contrast dark
+(`rgba(0,0,0,0.85)`) instead of the inherited palette `text` token —
+editor stylesheet ONLY, runtime (canvas-page.css) still honours the real
+palette colour. Rationale: the palette `text` token is currently
+`#FFDD00` (yellow), unreadable on pale pastel kind backgrounds, and there
+is no per-text colour UI yet (that's TS3). **TEMPORARY — remove the
+override once TS3 gives text its own `color` mark** (comment in-place in
+dev-page.css). The M1/M2 cascade roadmap (named char-styles as the
 governed default, atomic overrides as the escape hatch) + deferred
 TS2/TS3/TS4 are in the Slice TS1 entry's roadmap callout below.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
