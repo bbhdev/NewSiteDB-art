@@ -2655,9 +2655,16 @@ body.editor input[type="range"] {
 }
 .ed-typo-row:last-child { border-bottom: 0; }
 .ed-typo-head-btns { display: flex; gap: 0.3rem; }
+/* Two-row head (v0.10.117): stacked so the name gets a full-width row and
+   the row no longer overflows the side panel. */
 .ed-typo-head {
-  display: flex; align-items: center;
-  gap: 0.4rem; margin-bottom: 0.25rem;
+  display: flex; flex-direction: column;
+  gap: 0.3rem; margin-bottom: 0.25rem;
+}
+.ed-typo-head-top,
+.ed-typo-head-bottom {
+  display: flex; align-items: center; gap: 0.4rem;
+  min-width: 0;
 }
 .ed-typo-name {
   color: #f0f0f0; font-size: 0.85em; font-weight: 600;

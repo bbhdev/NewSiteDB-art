@@ -12595,11 +12595,20 @@
         markTypographyDirty();
       });
 
-      head.appendChild(toggle);
-      head.appendChild(nameInp);
-      head.appendChild(idTag);
-      head.appendChild(defBtn);
-      head.appendChild(del);
+      // Two-row head (v0.10.117): the single row crammed 5 controls wider
+      // than the side panel and left the name field short. Row 1 = the name
+      // (full width) + the default star; row 2 = Edit toggle + id chip + ×.
+      const headTop = document.createElement('div');
+      headTop.className = 'ed-typo-head-top';
+      headTop.appendChild(nameInp);
+      headTop.appendChild(defBtn);
+      const headBottom = document.createElement('div');
+      headBottom.className = 'ed-typo-head-bottom';
+      headBottom.appendChild(toggle);
+      headBottom.appendChild(idTag);
+      headBottom.appendChild(del);
+      head.appendChild(headTop);
+      head.appendChild(headBottom);
       li.appendChild(head);
       li.appendChild(sample);
       li.appendChild(spec);
