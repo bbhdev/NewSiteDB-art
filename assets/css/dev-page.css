@@ -437,16 +437,22 @@ button.pe-save.is-flash {
   pointer-events: none;
   position: relative;
   z-index: 1;
-  /* TEMPORARY editor-only legibility default (v0.10.93). The rect body
-     inherits the palette `text` token (--pe-palette-text) from .pe-rect,
-     but there is no per-text colour UI yet (that's TS3: valued `color`
-     marks), so EVERY text rect renders in the single palette text colour.
-     When that colour is light (e.g. a yellow #FFDD00 token) it's
-     unreadable on the pale pastel kind backgrounds. Override to a neutral
-     high-contrast dark HERE, in the editor only — the runtime
-     (canvas-page.css) keeps honouring the real palette colour so the
-     public page is unaffected. Remove this once TS3 gives text its own
-     colour and the author controls contrast directly. */
+  /* Editor-only legibility default (v0.10.93). The rect body inherits the
+     palette `text` token (--pe-palette-text) from .pe-rect; an uncoloured
+     text run therefore renders in the palette text colour. When that colour
+     is light (e.g. the yellow #FFDD00 token) it's unreadable on the pale
+     pastel kind backgrounds. Override to a neutral high-contrast dark HERE,
+     editor only. NOTE — this is LOAD-BEARING, not a quick temporary (the
+     original "remove once TS3" note was wrong): TS3 colour marks only
+     colour SOME runs; uncoloured runs still inherit the light token. A
+     coloured run's direct .mk-color-<id> class beats this inherited colour,
+     so this only affects UNcoloured text. The REAL retirement path is the
+     general page background (see HANDOFF "DECISION — general page
+     background"): once text rects render transparent over a real page
+     background, the author's text/background pairing is legible and this
+     override is deleted. Until then it stays. The runtime (canvas-page.css)
+     does NOT carry this override — it shows the (currently also placeholder)
+     kind fill, which the general-background work will replace too. */
   color: rgba(0, 0, 0, 0.85);
 }
 

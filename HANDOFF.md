@@ -78,9 +78,21 @@ editor renders `.pe-rect-text` in a neutral high-contrast dark
 editor stylesheet ONLY, runtime (canvas-page.css) still honours the real
 palette colour. Rationale: the palette `text` token is currently
 `#FFDD00` (yellow), unreadable on pale pastel kind backgrounds, and there
-is no per-text colour UI yet (that's TS3). **TEMPORARY — remove the
-override once TS3 gives text its own `color` mark** (comment in-place in
-dev-page.css). **Slice TS2 (toolbar completeness, v0.10.94 →
+is no per-text colour UI yet (that's TS3). **CORRECTION (2026-06): this
+is NOT a removable temporary, and the "remove once TS3" premise was
+wrong.** Investigation while planning the retirement found the override is
+LOAD-BEARING: kind-colour backgrounds (`--*-kind-text` etc., the pale
+`#cfe4ff` fill) are a Slice-1 placeholder used as the rect fill on BOTH
+surfaces (editor `.pe-rect--text` and runtime `.rect--text`), and the
+palette `text` token is authored to pair with a *general page background*
+that does not exist yet. TS3 colour marks only colour SOME runs; uncoloured
+runs still inherit the yellow token on the pale kind fill → unreadable. So
+coloured `mk-color-*` runs already override this rule (direct child class
+beats inherited parent colour); it only affects uncoloured text, where it
+supplies a legible editor default. **The real fix is the general
+background** (see the dedicated decision note further down) — once text
+rects render transparent over a real general background, the override
+falls out naturally. Until then it stays. **Slice TS2 (toolbar completeness, v0.10.94 →
 v0.10.95) landed** — two pieces (underline / a 3rd atomic axis was
 explicitly deferred): (TS2-a, v0.10.94) the B/I buttons are now
 THREE-state — `rangeAttrCoverage → none|some|all` drives off /
@@ -230,8 +242,32 @@ button `is-active`, composes with existing colour/strong/em marks; reloaded to
 discard the in-memory mutation (no Save fired, fixture untouched). Runtime PHP
 parity relied on symmetry with strong/em (already render at runtime) since
 verifying it would require persisting an underline mark to the shared fixture.
-**Next: TS4** — M2 named character-styles (incl. the `token` axis); also
-pending: retire the v0.10.93 neutral-editor-colour override.
+**Next: TS4** — M2 named character-styles (incl. the `token` axis).
+**Then: general page background** (see decision note below) — which is the
+real retirement path for the v0.10.93 override (do NOT just delete the
+override; it's load-bearing — confirmed 2026-06).
+
+**DECISION — general page background (planned, sequenced AFTER TS4).**
+Context: the v0.10.93 editor text-colour override exists only because there
+is no real page background yet — kind-colour fills are a Slice-1 placeholder
+and the palette `text` token has nothing legible to sit on. The principled
+fix is a **general (site) background**, the near-universal styling item.
+Trap that was caught while planning (do not repeat): a website has ONE
+general background; blocks are normally **transparent over it** or
+*intentionally* styled as exceptions. Giving a text block its OWN reference
+background inverts common usage. So Deco **text rects render transparent
+over the general background** (both editor and runtime, fed from one source
+— no editor-only "reference background" that would drift). Decisions taken:
+(1) **Data home = per-page config** (`pageCfg`) with a **site-wide default
+fallback** — a cascade (site default < page override) from the start, not a
+single palette token. (2) Once it lands: text rects transparent over the
+general background → palette `text` legible by author pairing → true
+editor↔runtime WYSIWYG → **the v0.10.93 override is then deleted as a side
+effect.** (3) Editor kind-identification for text rects moves off the fill
+(which becomes transparent) onto the kind label + a border/stripe; image /
+drilldown / deco-mount keep their pastel placeholder fills (content
+stand-ins = the "intentional exceptions"). Pulled EARLIER than originally
+planned because it's the foundation that unblocks the override retirement.
 **Side-panel tweak (v0.10.98):** the TYPE row's font preview was wrapping
 to multiple lines and sitting in the narrow content column (5.5rem label +
 flex content), pushing the TEXT/NOTE/coords affordances below the fold.
