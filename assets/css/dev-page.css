@@ -513,6 +513,18 @@ button.pe-save.is-flash {
   border-color: var(--pe-palette-accent, #ff5500);
   color: #fff;
 }
+/* TS2: indeterminate / "mixed" state — the selection is partially styled
+   (some chars carry the attr, some don't). Visually distinct from the solid
+   active fill: a faint accent tint behind a dashed accent border, so the
+   author can tell at a glance that one more click will make the whole
+   selection uniform (→ active) rather than toggling it off. is-active wins
+   if both somehow apply. */
+.pe-tt-btn.is-mixed {
+  background: color-mix(in srgb, var(--pe-palette-accent, #ff5500) 22%, transparent);
+  border-style: dashed;
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
 
 /* Slice T2: small helper hint under a panel field (e.g. "double-click to
    edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */

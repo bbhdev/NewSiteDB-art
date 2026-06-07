@@ -637,6 +637,22 @@
     return cur >= b;
   }
 
+  // Coverage of `attr` over [a,b): 'none' | 'some' | 'all'. Drives the
+  // toolbar's three-state pressed display (TS2): a selection that is fully
+  // styled shows the button active, a partially-styled one shows it in the
+  // indeterminate "mixed" state, none shows it off. 'some' iff any mark of
+  // that attr overlaps the range but it isn't uniformly covered.
+  function rangeAttrCoverage(marks, a, b, attr) {
+    if (b <= a) return 'none';
+    let any = false;
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr === attr && m.end > a && m.start < b) { any = true; break; }
+    }
+    if (!any) return 'none';
+    return rangeHasAttr(marks, a, b, attr) ? 'all' : 'some';
+  }
+
   // Remove `attr` over [a,b): clip overlapping marks of that attr. A mark
   // that STRICTLY CONTAINS [a,b) splits into two — this is exactly how
   // partial-removal creates new runs. Other attrs are untouched.
@@ -945,7 +961,10 @@
     updateToolbarPressed();
   }
 
-  // Reflect whether each attr fully covers the current selection.
+  // Reflect each attr's coverage over the current selection as a THREE-state
+  // pressed display (TS2): 'all' → .is-active, 'some' → .is-mixed
+  // (indeterminate), 'none' → off. A collapsed caret has no selection to
+  // cover → all buttons off (TS2-b adds pending/effective-state lighting).
   function updateToolbarPressed() {
     const bar = document.getElementById('pe-text-toolbar');
     if (!bar || editingId == null) return;
@@ -954,11 +973,13 @@
     const sel = getCaretOffset(ed);
     const r = state.rects.find(function (x) { return x.id === editingId; });
     const marks = (r && r.marks) || [];
+    const hasSel = !!(sel && sel.end > sel.start);
     const btns = bar.querySelectorAll('.pe-tt-btn');
     for (let k = 0; k < btns.length; k++) {
       const attr = btns[k].dataset.attr;
-      const on = !!(sel && sel.end > sel.start && rangeHasAttr(marks, sel.start, sel.end, attr));
-      btns[k].classList.toggle('is-active', on);
+      const cov = hasSel ? rangeAttrCoverage(marks, sel.start, sel.end, attr) : 'none';
+      btns[k].classList.toggle('is-active', cov === 'all');
+      btns[k].classList.toggle('is-mixed',  cov === 'some');
     }
   }
 
