@@ -320,7 +320,7 @@ $payload = json_encode([
         <h3>Element styles</h3>
         <span class="ed-typo-head-btns">
           <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
-          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save</button>
+          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save styles</button>
         </span>
       </header>
       <ul id="typography-list" class="ed-typo-list"></ul>
@@ -336,7 +336,7 @@ $payload = json_encode([
              fold once the user scrolled up to other sections. Hidden when
              clean, so there is no permanent chrome. */ ?>
     <div class="ed-typo-save-bar" id="typo-save-bar" hidden>
-      <button type="button" id="typo-save-bar-btn" class="ed-mini">Save changes</button>
+      <button type="button" id="typo-save-bar-btn" class="ed-mini">Save styles</button>
     </div>
 
   </aside>

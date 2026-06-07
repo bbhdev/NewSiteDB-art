@@ -12361,10 +12361,12 @@
   }
 
   // Reflect dirty/clean on one in-panel (per-row) Save button: filled amber
-  // + enabled "Save changes" when dirty, greyed + disabled "Saved" when clean.
+  // + enabled "Save styles" when dirty, greyed + disabled "Saved" when clean.
+  // ("Save styles", not "Save changes" — disambiguates from the toolbar Save
+  // and from other editable objects; this registry saves only the styles.)
   function applyTypoEditSaveState(btn) {
     if (typographyDirty) {
-      btn.classList.add('is-dirty'); btn.disabled = false; btn.textContent = 'Save changes';
+      btn.classList.add('is-dirty'); btn.disabled = false; btn.textContent = 'Save styles';
     } else {
       btn.classList.remove('is-dirty'); btn.disabled = true; btn.textContent = 'Saved';
     }
@@ -12372,9 +12374,9 @@
   function markTypographyDirty() {
     typographyDirty = true;
     // Panel-head Save reflects dirtiness when in view; label matches the
-    // in-panel save ("Save changes") for consistency.
+    // in-panel save ("Save styles") for consistency.
     const btn = document.getElementById('save-typography-btn');
-    if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save changes'; }
+    if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save styles'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
     // Always-reachable cue: the sticky-bottom save bar appears only while dirty
     // and stays pinned to the sidebar viewport bottom at any scroll position
@@ -12386,12 +12388,12 @@
     // button), and because the bar hides immediately on save that stale label
     // would resurface — spuriously saying "Saved" — on the next edit.
     const barBtn = document.getElementById('typo-save-bar-btn');
-    if (barBtn) { barBtn.disabled = false; barBtn.textContent = 'Save changes'; }
+    if (barBtn) { barBtn.disabled = false; barBtn.textContent = 'Save styles'; }
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
-    if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save'; }
+    if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save styles'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
     const bar = document.getElementById('typo-save-bar');
     if (bar) bar.hidden = true;
@@ -12723,7 +12725,7 @@
       if (btn) { btn.disabled = false; btn.textContent = 'Saved.'; }
       setTimeout(function () {
         const b = document.getElementById('save-typography-btn');
-        if (b && !typographyDirty) b.textContent = 'Save';
+        if (b && !typographyDirty) b.textContent = 'Save styles';
       }, 1800);
     } catch (err) {
       console.error('[dev-draw] typography save failed:', err);
@@ -12731,7 +12733,7 @@
       alert('Typography save failed: ' + err.message);
       setTimeout(function () {
         const b = document.getElementById('save-typography-btn');
-        if (b) b.textContent = typographyDirty ? 'Save •' : 'Save';
+        if (b) b.textContent = 'Save styles';
       }, 1800);
     }
   }

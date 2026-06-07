@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.123):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.124):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -665,9 +665,18 @@ small slices (DRAW-only; no data/route/schema change).
   button to "Saved." on success but its 1800ms reset only targets `#save-typography-btn`
   (the header). Since the bar HIDES immediately on save, the sticky button kept the stale
   "Saved." text and it resurfaced — spuriously — the next time an edit re-showed the bar.
-  Fix: `markTypographyDirty()` now resets `#typo-save-bar-btn` to "Save changes" + enabled
+  Fix: `markTypographyDirty()` now resets `#typo-save-bar-btn` to "Save styles" + enabled
   every time it un-hides the bar. Verified: forced the stale state, fired a new edit → bar
-  reopens reading "Save changes".
+  reopens reading "Save styles".
+- **V6.2 (v0.10.124) — relabel all element-style save buttons "Save styles".** "Save changes"
+  (and the bare header "Save") was ambiguous: the toolbar has its own Save, and other objects
+  are editable too. All three element-style save controls — panel-head `#save-typography-btn`,
+  the in-panel `.ed-typo-edit-save`, and the sticky-bar `#typo-save-bar-btn` — now read
+  **"Save styles"** in their action state (header shows it both clean and dirty, differing only
+  by the amber fill; in-panel clean stays the status word "Saved" disabled; transient
+  "Saving…"/"Saved."/"Failed" unchanged). The retired char-styles panel's save buttons were
+  left as-is. Verified live: header (clean+dirty), in-panel (dirty), and bar all read
+  "Save styles"; in-panel clean = "Saved"; reload clean; no console errors.
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
