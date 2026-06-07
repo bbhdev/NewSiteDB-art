@@ -437,6 +437,17 @@ button.pe-save.is-flash {
   pointer-events: none;
   position: relative;
   z-index: 1;
+  /* TEMPORARY editor-only legibility default (v0.10.93). The rect body
+     inherits the palette `text` token (--pe-palette-text) from .pe-rect,
+     but there is no per-text colour UI yet (that's TS3: valued `color`
+     marks), so EVERY text rect renders in the single palette text colour.
+     When that colour is light (e.g. a yellow #FFDD00 token) it's
+     unreadable on the pale pastel kind backgrounds. Override to a neutral
+     high-contrast dark HERE, in the editor only — the runtime
+     (canvas-page.css) keeps honouring the real palette colour so the
+     public page is unaffected. Remove this once TS3 gives text its own
+     colour and the author controls contrast directly. */
+  color: rgba(0, 0, 0, 0.85);
 }
 
 /* Slice T2: inline edit mode. The node becomes contenteditable, so it must
