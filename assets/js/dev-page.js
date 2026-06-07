@@ -146,6 +146,15 @@
   // listener that keeps the B/I toolbar's pressed-state in sync with the
   // current selection while editing.
   let selChangeBound = false;
+  // Slice TS2-b (v0.10.95): collapsed-caret PENDING format. When the author
+  // toggles B/I with no selection (just a caret), there's no text to mark
+  // yet — instead we remember the intended attrs here and apply them to the
+  // NEXT typed characters. A Set of attr names, or null when there is no
+  // override (typing then inherits naturally via remapMarks). An EMPTY Set is
+  // a real override too: "type unstyled here" (e.g. caret inside a bold run,
+  // hit B, type → plain). Edit-scoped, never persisted; reset on
+  // enter/commit/cancel and cleared when the caret moves or a selection forms.
+  let pendingAttrs = null;
   // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
   // use the native 'dblclick' event because the pointerdown handler calls
   // preventDefault() on every rect hit, and preventDefault on pointerdown
@@ -653,6 +662,20 @@
     return rangeHasAttr(marks, a, b, attr) ? 'all' : 'some';
   }
 
+  // Attrs that a collapsed caret at offset `c` would NATURALLY inherit when
+  // text is typed there — i.e. those strictly CONTAINING c (m.start < c <
+  // m.end). This mirrors remapMarks' insertion rule (a strictly-inside insert
+  // grows the mark; a boundary/outside insert stays unstyled). Used to seed
+  // pending-format and to light the toolbar when the caret sits inside a run.
+  function effAttrsAt(marks, c) {
+    const out = [];
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.start < c && m.end > c && out.indexOf(m.attr) === -1) out.push(m.attr);
+    }
+    return out;
+  }
+
   // Remove `attr` over [a,b): clip overlapping marks of that attr. A mark
   // that STRICTLY CONTAINS [a,b) splits into two — this is exactly how
   // partial-removal creates new runs. Other attrs are untouched.
@@ -858,6 +881,7 @@
     selectedId = rectId;
     editingId  = rectId;
     editText   = r.text || '';   // TS1: baseline for the input-diff remap
+    pendingAttrs = null;         // TS2-b: no carried-over pending format
     render();          // rebuilds the rect with a contenteditable text node
     focusEditable();   // then seats focus + caret (caret at end)
   }
@@ -873,6 +897,7 @@
     const elx = surface && surface.querySelector('.pe-rect-text.is-editing');
     const raw = elx ? String(elx.textContent || '') : '';
     editingId = null;
+    pendingAttrs = null;   // TS2-b: edit-scoped pending format ends with the edit
     const r = state.rects.find(function (x) { return x.id === id; });
     if (r) {
       const next = raw.trim() === '' ? null : raw.slice(0, 5000);
@@ -896,6 +921,7 @@
   function cancelEdit() {
     if (editingId == null) return;
     editingId = null;
+    pendingAttrs = null;   // TS2-b: drop pending format on cancel
     render();
   }
 
@@ -905,7 +931,7 @@
   // text as editText. Does NOT render — the browser already shows the typed
   // text in place (patch-in-place keeps caret + IME composition intact);
   // spans only rebuild on a style apply or on commit.
-  function handleEditInput(el) {
+  function handleEditInput(el, ev) {
     if (editingId == null) return;
     const r = state.rects.find(function (x) { return x.id === editingId; });
     if (!r) return;
@@ -913,7 +939,33 @@
     if (t === editText) return;
     const e = diffText(editText, t);
     if (e.d !== 0 || e.i !== 0) {
-      r.marks = normalizeMarks(remapMarks(r.marks || [], e.p, e.d, e.i), t.length);
+      let m = remapMarks(r.marks || [], e.p, e.d, e.i);
+      // TS2-b: a collapsed-caret pending format applies to the just-inserted
+      // text [p, p+i). For every toggle attr: ensure it's present iff pending
+      // wants it. This both ADDS style the natural remap wouldn't (typing at a
+      // run boundary or in plain text) and REMOVES style it would (typing
+      // inside a run with that attr toggled OFF in pending → splits the run).
+      let styledInsert = false;
+      if (pendingAttrs != null && e.i > 0) {
+        const a = e.p, b = e.p + e.i;
+        Object.keys(MARK_ATTR_CLASS).forEach(function (attr) {
+          const want = pendingAttrs.has(attr);
+          const has  = rangeHasAttr(m, a, b, attr);
+          if (want && !has)      m = m.concat([{ start: a, end: b, attr: attr, value: true }]);
+          else if (!want && has) m = removeAttrRange(m, a, b, attr);
+        });
+        styledInsert = true;
+      }
+      r.marks = normalizeMarks(m, t.length);
+      // Live WYSIWYG for pending: the raw chars were patched into the DOM
+      // UNSTYLED (or in the wrong run), so the spans no longer match the model
+      // — repaint and restore the caret to just after the insert. Skip during
+      // IME composition: rebuilding the node mid-composition aborts it; the
+      // marks are still correct and the style shows on compositionend/commit.
+      if (styledInsert && !(ev && ev.isComposing)) {
+        renderRunsInto(el, t, r.marks);
+        setSelectionRange(el, e.p + e.i, e.p + e.i);
+      }
     }
     editText = t;
     markDirty();
@@ -950,14 +1002,39 @@
     const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
     if (!ed) return;
     const sel = getCaretOffset(ed);
-    if (!sel || sel.end <= sel.start) return;   // need a non-empty selection
+    if (!sel) return;                            // no caret in the editable
     const r = state.rects.find(function (x) { return x.id === editingId; });
     if (!r) return;
+
+    // Collapsed caret → set/clear PENDING format (TS2-b). Nothing to mark yet;
+    // the next typed chars pick it up in handleEditInput. Seed from what the
+    // caret would naturally inherit so toggling reflects the real next-char
+    // state (e.g. caret inside bold → pending starts {strong}, B turns it off).
+    if (sel.end <= sel.start) {
+      if (pendingAttrs == null) pendingAttrs = new Set(effAttrsAt(r.marks || [], sel.start));
+      if (pendingAttrs.has(attr)) pendingAttrs.delete(attr);
+      else pendingAttrs.add(attr);
+      updateToolbarPressed();
+      return;
+    }
+
+    // Non-empty selection → apply over the range now; a pending override (if
+    // any) is irrelevant once real text is styled, so drop it.
+    pendingAttrs = null;
     const len = editText.length;
     r.marks = normalizeMarks(applyMark(r.marks || [], sel.start, sel.end, attr), len);
     markDirty();
     renderRunsInto(ed, editText, r.marks);      // rebuild spans from the model
     setSelectionRange(ed, sel.start, sel.end);  // keep the selection
+    updateToolbarPressed();
+  }
+
+  // Forget any collapsed-caret pending format and refresh the toolbar. Called
+  // when the author moves the caret (arrows / click) or forms a selection —
+  // the pending intent was tied to the old caret position.
+  function clearPending() {
+    if (pendingAttrs == null) return;
+    pendingAttrs = null;
     updateToolbarPressed();
   }
 
@@ -974,10 +1051,20 @@
     const r = state.rects.find(function (x) { return x.id === editingId; });
     const marks = (r && r.marks) || [];
     const hasSel = !!(sel && sel.end > sel.start);
+    const caretEff = (sel && !hasSel) ? effAttrsAt(marks, sel.start) : null;
     const btns = bar.querySelectorAll('.pe-tt-btn');
     for (let k = 0; k < btns.length; k++) {
       const attr = btns[k].dataset.attr;
-      const cov = hasSel ? rangeAttrCoverage(marks, sel.start, sel.end, attr) : 'none';
+      let cov;
+      if (hasSel) {
+        cov = rangeAttrCoverage(marks, sel.start, sel.end, attr);   // none|some|all
+      } else if (pendingAttrs != null) {
+        cov = pendingAttrs.has(attr) ? 'all' : 'none';              // explicit override
+      } else if (caretEff) {
+        cov = caretEff.indexOf(attr) !== -1 ? 'all' : 'none';       // natural state at caret
+      } else {
+        cov = 'none';
+      }
       btns[k].classList.toggle('is-active', cov === 'all');
       btns[k].classList.toggle('is-mixed',  cov === 'some');
     }
@@ -1031,7 +1118,17 @@
     if (!selChangeBound) {
       selChangeBound = true;
       document.addEventListener('selectionchange', function () {
-        if (editingId != null) updateToolbarPressed();
+        if (editingId == null) return;
+        // TS2-b: a NON-EMPTY selection supersedes a pending collapsed-caret
+        // format — drop it. This is race-free: typing only ever yields a
+        // collapsed caret, so it never trips this branch (the inserted-text
+        // styling is handled in handleEditInput, not here).
+        if (pendingAttrs != null) {
+          const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+          const sel = ed && getCaretOffset(ed);
+          if (sel && sel.end > sel.start) pendingAttrs = null;
+        }
+        updateToolbarPressed();
       });
     }
   }
@@ -1375,6 +1472,11 @@
     // logic below renders), then proceeds to select/drag the new target.
     if (editingId != null) {
       if (ev.target.closest && ev.target.closest('.pe-rect-text.is-editing')) {
+        // Click inside the editable → native caret placement. The pending
+        // collapsed-caret format was tied to the OLD caret, so discard it
+        // (TS2-b); the new caret seeds a fresh pending only if the author
+        // toggles again. updateToolbarPressed runs via selectionchange.
+        clearPending();
         return;
       }
       commitEdit(false);
@@ -1890,6 +1992,15 @@
         txt.contentEditable = 'true';
         txt.spellcheck = false;
         txt.addEventListener('keydown', function (ev) {
+          // TS2-b: caret-moving keys discard any pending collapsed-caret
+          // format (it was tied to the old caret position). Don't
+          // preventDefault — the browser still moves the caret normally.
+          if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight'
+           || ev.key === 'ArrowUp'   || ev.key === 'ArrowDown'
+           || ev.key === 'Home'      || ev.key === 'End'
+           || ev.key === 'PageUp'    || ev.key === 'PageDown') {
+            clearPending();
+          }
           if (ev.key === 'Escape') {
             ev.preventDefault();
             ev.stopPropagation();
@@ -1920,8 +2031,10 @@
             toggleStyle(k === 'b' ? 'strong' : 'em');
           }
         });
-        // Typing / IME / delete: patch-in-place, remap marks, no re-render.
-        txt.addEventListener('input', function () { handleEditInput(txt); });
+        // Typing / IME / delete: patch-in-place, remap marks, no re-render
+        // (except when a pending format must repaint the inserted run — see
+        // handleEditInput). Pass the event so it can detect IME composition.
+        txt.addEventListener('input', function (ev) { handleEditInput(txt, ev); });
         // Paste arrives as plain text only.
         txt.addEventListener('paste', function (ev) {
           ev.preventDefault();
