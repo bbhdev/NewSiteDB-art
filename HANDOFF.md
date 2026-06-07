@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.116):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.119):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -579,6 +579,31 @@ small slices (DRAW-only; no data/route/schema change).
   font-family fallback) get dark OS dropdowns. *Note: the author's on-disk typography file
   currently has `color: null` on every style (no colours picked yet) — the picker reflects
   that as inherit/none until they choose; the save route enforces a colour on the default.*
+
+**Element-styles panel UI polish — second feedback round (V1 .117, V2 .118, V3 .119).**
+- **V1 (v0.10.117) — two-row head.** The single head row crammed 5 controls wider than the
+  side panel and kept the name short. `.ed-typo-head` is now `flex-direction: column`:
+  **row 1** = the style NAME (full width) + the default star; **row 2** = Edit toggle +
+  `ty-<id>` chip + ×. (`.ed-typo-head-top` / `.ed-typo-head-bottom`.) Verified row overflow 0.
+- **V2 (v0.10.118) — dark dropdowns.** (a) The font-family picker **trigger** button (▾) was
+  a browser-default white button → styled dark (its popup was already a dark custom div).
+  (b) The Weight field was a native `<select>`: `color-scheme: dark` themes its popup on
+  desktop WebKit but **iOS ignores it** (renders a system white menu/wheel). Added a new
+  **`darkSelectField()`** — a div-based custom dropdown (same pop pattern as the font
+  picker: dark trigger + dark `.ed-dark-select-pop` option list) that is dark on EVERY
+  platform and friendlier for the tablet-first-class target than a native wheel. Swapped the
+  element-style Weight field to it; **`selectField()` is untouched elsewhere** (only Weight
+  migrated — other native selects can migrate later if their popups matter on iOS).
+- **V3 (v0.10.119) — in-panel Save = dirty indicator.** The global Save button scrolls out
+  of view once styles fill the panel, and dirtiness only showed on that off-screen button.
+  Added a Save button at the **foot of each open edit subpanel** (`.ed-typo-edit-save`):
+  saves the whole registry (same `saveTypography()` route) AND doubles as the dirty light —
+  clean = greyed/disabled "Saved", dirty = filled-amber/enabled "Save changes".
+  `markTypographyDirty()`/`clearTypographyDirty()` now refresh every such button via the new
+  `applyTypoEditSaveState()` so all open rows + the post-save re-render stay in sync.
+  *(The author floated a "big outline around all styles" as an alternative dirty cue; the
+  in-panel save button was their preferred option and is what shipped. If a global always-
+  visible dirty cue is still wanted for the collapsed case, revisit.)*
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
