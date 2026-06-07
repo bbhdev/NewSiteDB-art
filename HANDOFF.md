@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.114):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.116):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -550,6 +550,35 @@ early-returns on the missing `#charstyle-list`) — verified no console errors. 
 removal is Slice D. Verified live: panels are Groups / Canvas / Design colors / **Element
 styles** only; no "Character styles"; `#charstyle-list` gone; 6 style rows still render;
 add button reads "+ Style"; console clean.
+
+**Element-styles panel UI polish — post-A2 on-device feedback (U1 v0.10.115, U2 v0.10.116).**
+On-device A2 testing surfaced six issues, all in the DRAW element-styles panel; fixed in two
+small slices (DRAW-only; no data/route/schema change).
+- **Root cause of four of them was one thing:** the head row was crowded by the wide
+  "Make default" text button, which squeezed the style **name `<input>` to a ~0-width
+  sliver** (it read as a mysterious "small item" right of Edit, and made it look like styles
+  had no name — they always did: names live in `t.name`, the field was just invisible) and
+  pushed the delete **×** off the right edge (row-dependent overflow → "jiggle").
+- **U1 (v0.10.115):** name input given `flex: 1 1 7rem; min-width: 4.5rem` (placeholder
+  "Style name") so it always has presence; **"Make default"/"★ Default" text button → a
+  compact STAR icon** (`.ed-typo-default` now 1.7rem square, 1.05rem glyph — above
+  micro-glyph per the icon rule): **☆** outline (quiet) = promotable, **★** filled near-black
+  on the amber badge = is-default (`aria-label` carries meaning). Freeing that width fixed
+  the name sliver AND the × overflow (verified `delRightOverflow == 0` on all 6 rows). The
+  expanded field editor (`.ed-typo-edit`) got a distinctive "editing this style" look:
+  `#050505` inset background + full amber outline `#c79a3a` (matches the open Edit button),
+  replacing the old hairline left rule.
+- **U2 (v0.10.116):** the Colour field was a native `<select>` → **white popup on the dark
+  UI**, and showed colour **names only, not the colours**. New **`typoColourField()`** = an
+  inline palette-**swatch** picker (mirrors `strokeField`, reuses `.ed-color-picker`/`.swatch`
+  CSS): each palette colour shown as a real circular swatch (name as title). Inline ⇒ **no
+  popup at all** ⇒ white-popup gone by construction, colours visible. **Totality preserved:**
+  the "inherit" pill is gated by `allowInherit` — the **default style gets no inherit pill**
+  (root fallback, must carry a concrete colour); non-default styles keep it. Also added
+  `color-scheme: dark` to `.ed-field select` so the remaining native selects (Weight,
+  font-family fallback) get dark OS dropdowns. *Note: the author's on-disk typography file
+  currently has `color: null` on every style (no colours picked yet) — the picker reflects
+  that as inherit/none until they choose; the save route enforces a colour on the default.*
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
