@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.98):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.99):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -170,11 +170,48 @@ sits in contenteditable so a plain click places the caret (doesn't
 navigate); `cursor:text` reinforces that. Validated: safeHref allowlist
 unit cases; runtime + editor render BYTE-IDENTICAL structure (anchor,
 escaped href, `javascript:` stripped, link+colour+strong composition,
-computed underline). **No toolbar yet** — link marks were hand-seeded for
-this slice. **Next: TS3-b-2** — link button + inline URL input
-(progressive disclosure, prefill existing href, apply/remove via
-`setMark(…,'link',href)`, pressed-state) + the save-route scheme check for
-`attr==='link'`.
+computed underline). Link marks were hand-seeded for that sub-slice; the
+authoring UI is TS3-b-2 (below).
+**Slice TS3-b-2 (link authoring UI + save-route gate, v0.10.99) landed.**
+The text toolbar gained a chain-link button + an inline URL editor, plus a
+save-route scheme check. Three things made link's UI genuinely different
+from the colour swatches (which apply on click and never take focus):
+(1) **The URL `<input>` must take focus** — and focusing it blurs the
+editable, whose `blur`→`commitEdit` would otherwise tear down the whole
+edit before the author can type. Fix: the editable's blur handler checks
+`ev.relatedTarget` — if focus moved INTO `#pe-text-toolbar` (the input or
+its Apply/Cancel buttons) it skips the commit; every other blur commits as
+before. The Apply/Cancel buttons still use the `pointerdown`+`mousedown`
+preventDefault focus-guard (like B/I) so clicking them keeps focus in the
+input. (2) **Selection capture timing** — the Link button preventDefaults
+its pointerdown (selection stays alive), `openLinkInput` snapshots the
+range into `savedLinkRange` BEFORE moving focus to the input, and
+apply/remove operate on that saved range (the live DOM selection is gone
+once the input has focus). On close, focus + the saved selection are
+restored to the editable so editing continues seamlessly. (3) **Progressive
+disclosure** — closed = just the link button; open = the button + a
+full-width input row (wraps under the buttons; the toolbar is flex-wrap)
+with Apply (✓) and Cancel (×). The input PREFILLS the existing href when
+the selection is one uniform link (`currentMarkValue(...,'link')`); empty +
+Apply REMOVES the link; an unsafe/unsupported scheme is rejected inline
+(`safeHref` returns null → red `.pe-tt-link-err`, editor stays open) so a
+bad value never even becomes a mark. The link button reuses the generic
+`rangeAttrCoverage` pressed-state loop (`dataset.attr='link'`) — it lights
+when the selection is fully linked, for free. Apply/remove go through the
+SAME generic `setMark(…,'link',value|null)` engine op — zero new engine
+code. **Save-route gate** (config.php): after the generic mark-shape
+validation, `attr==='link'` values are run through `deco_safe_href` (the
+same allowlist as render); a value that fails → the route `$fail`s BEFORE
+writing, so a forged save body can't persist a `javascript:`/`data:` link.
+Validated end-to-end via preview eval (synchronous-pointerdown edit entry):
+open/prefill/apply (renders `<a class="mk-link mk-color-… mk-strong" href>`
+— composes with colour+strong), `javascript:` rejected inline with the
+existing safe link intact, empty-Apply removes the link leaving colour+
+strong, Cancel closes + restores selection, pressed-state toggles, blur
+guard keeps the edit alive; and the save route rejects a `javascript:`
+link with NO write (file byte-identical). **Next: TS4** — M2 named
+character-styles (incl. the `token` axis); also pending: underline (3rd
+atomic axis), retire the v0.10.93 neutral-editor-colour override.
 **Side-panel tweak (v0.10.98):** the TYPE row's font preview was wrapping
 to multiple lines and sitting in the narrow content column (5.5rem label +
 flex content), pushing the TEXT/NOTE/coords affordances below the fold.

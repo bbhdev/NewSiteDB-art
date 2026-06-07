@@ -574,6 +574,51 @@ button.pe-save.is-flash {
   border-color: #fff;
 }
 
+/* TS3-b-2 link control. The chain-link button matches the B/I buttons; its
+   icon fills a clear share of the button (icon-sizing rule — no microscopic
+   glyph, also a usable touch target for the tablet editor). The inline URL
+   editor wraps to its own full-width row under the buttons (the toolbar is
+   flex-wrap). The <input> is the one control that takes focus on purpose. */
+.pe-tt-link svg,
+.pe-tt-link-ok svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+  margin: 0 auto;
+}
+.pe-tt-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1 1 100%;
+  margin-top: 0.15rem;
+}
+.pe-tt-link-input {
+  flex: 1 1 auto;
+  min-width: 6rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  font-size: 0.85rem;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.35rem;
+}
+.pe-tt-link-input::placeholder { color: rgba(232, 232, 234, 0.4); }
+.pe-tt-link-input:focus {
+  outline: none;
+  border-color: var(--pe-palette-accent, #ff5500);
+}
+.pe-tt-link-cancel { font-size: 1.2rem; }
+/* Inline rejection notice (unsafe/unsupported scheme). Hidden when empty so
+   it doesn't reserve a blank line on the common success path. */
+.pe-tt-link-err {
+  flex: 1 1 100%;
+  font-size: 0.72rem;
+  color: #ff453a;
+}
+.pe-tt-link-err:empty { display: none; }
+
 /* Slice T2: small helper hint under a panel field (e.g. "double-click to
    edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */
 .pe-field-hint {

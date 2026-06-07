@@ -1434,6 +1434,19 @@ HTML;
               if ($mv !== true && !(is_string($mv) && mb_strlen($mv) <= 256)) {
                 return $fail('Rect mark value must be true or a string (<=256 chars).');
               }
+              // v0.10.99 (TS3-b-2): link href governance at SAVE time. The
+              // runtime renderer already applies the same allowlist via
+              // deco_safe_href (render-time defence-in-depth), but enforcing
+              // it here too means a forged save body can never persist a
+              // javascript:/data:/etc. link into rects.json in the first
+              // place. The editor only ever emits string hrefs for `link`.
+              if ($m['attr'] === 'link') {
+                $safe = function_exists('deco_safe_href') ? deco_safe_href($mv) : null;
+                if (!is_string($mv) || $safe === null) {
+                  return $fail('Rect link mark value must be a safe URL '
+                    . '(relative, #anchor, or http(s)/mailto/tel).');
+                }
+              }
             }
           }
         }

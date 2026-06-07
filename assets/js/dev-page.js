@@ -166,6 +166,17 @@
   // hit B, type → plain). Edit-scoped, never persisted; reset on
   // enter/commit/cancel and cleared when the caret moves or a selection forms.
   let pendingAttrs = null;
+  // Slice TS3-b-2 (v0.10.99): inline LINK url editor state. Unlike the colour
+  // swatches (which apply on click and NEVER take focus — they preventDefault
+  // so the editable keeps focus + selection), the link URL needs a real
+  // <input> that DOES take focus. Focusing it blurs the editable, so two
+  // things are needed: (1) capture the selection range BEFORE the input steals
+  // focus (savedLinkRange) so the mark lands on the right text after the fact;
+  // (2) guard the editable's blur→commit against focus moving into the toolbar
+  // (see the blur handler). linkEditOpen drives the toolbar's input-row
+  // disclosure. Both reset on enter/commit/cancel of the edit.
+  let linkEditOpen = false;
+  let savedLinkRange = null;
   // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
   // use the native 'dblclick' event because the pointerdown handler calls
   // preventDefault() on every rect hit, and preventDefault on pointerdown
@@ -1021,6 +1032,8 @@
     editingId  = rectId;
     editText   = r.text || '';   // TS1: baseline for the input-diff remap
     pendingAttrs = null;         // TS2-b: no carried-over pending format
+    linkEditOpen = false;        // TS3-b-2: no carried-over link editor
+    savedLinkRange = null;
     render();          // rebuilds the rect with a contenteditable text node
     focusEditable();   // then seats focus + caret (caret at end)
   }
@@ -1037,6 +1050,8 @@
     const raw = elx ? String(elx.textContent || '') : '';
     editingId = null;
     pendingAttrs = null;   // TS2-b: edit-scoped pending format ends with the edit
+    linkEditOpen = false;  // TS3-b-2: link editor is edit-scoped too
+    savedLinkRange = null;
     const r = state.rects.find(function (x) { return x.id === id; });
     if (r) {
       const next = raw.trim() === '' ? null : raw.slice(0, 5000);
@@ -1061,6 +1076,8 @@
     if (editingId == null) return;
     editingId = null;
     pendingAttrs = null;   // TS2-b: drop pending format on cancel
+    linkEditOpen = false;  // TS3-b-2: drop link editor on cancel
+    savedLinkRange = null;
     render();
   }
 
@@ -1199,6 +1216,83 @@
     updateToolbarPressed();
   }
 
+  // TS3-b-2: open the inline link-URL editor for the current selection.
+  // Selection-only (like colour) — a collapsed caret is a no-op. We capture
+  // the selection range NOW, while focus is still in the editable (the Link
+  // button preventDefault'd its pointerdown so the selection is intact), then
+  // rebuild the toolbar with the input row and move focus to the input. The
+  // editable's blur is guarded against toolbar focus, so the edit survives.
+  // The input is prefilled with the existing href when the selection is one
+  // uniform link (so the author edits rather than retypes).
+  function openLinkInput() {
+    if (editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const sel = getCaretOffset(ed);
+    if (!sel || sel.end <= sel.start) return;    // selection required
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) return;
+    const cur = currentMarkValue(r.marks || [], sel, 'link');
+    savedLinkRange = { start: sel.start, end: sel.end };
+    linkEditOpen = true;
+    buildTextToolbar();                          // rebuild bar WITH the input row
+    const bar = document.getElementById('pe-text-toolbar');
+    const inp = bar && bar.querySelector('.pe-tt-link-input');
+    if (inp) {
+      inp.value = (typeof cur === 'string') ? cur : '';
+      inp.focus();
+      inp.select();
+    }
+  }
+
+  // Apply (or remove) the link over the saved range from the input value.
+  // Empty value → REMOVE the link over the range. A non-empty value that
+  // fails the href allowlist (safeHref) is rejected with an inline error and
+  // the editor stays open — defence-in-depth alongside the save-route + the
+  // render-time guard, so a bad scheme never even becomes a mark. On success
+  // the spans rebuild and the editor closes (restoring the selection).
+  function applyLinkFromInput() {
+    if (editingId == null || !savedLinkRange) { closeLinkInput(true); return; }
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) { closeLinkInput(true); return; }
+    const bar = document.getElementById('pe-text-toolbar');
+    const inp = bar && bar.querySelector('.pe-tt-link-input');
+    const raw = inp ? String(inp.value || '').trim() : '';
+    const rng = savedLinkRange;
+    const len = editText.length;
+    if (raw !== '' && safeHref(raw) == null) {
+      const err = bar && bar.querySelector('.pe-tt-link-err');
+      if (err) err.textContent = 'Unsafe or unsupported URL — not applied.';
+      if (inp) { inp.focus(); inp.select(); }
+      return;                                    // keep the editor open
+    }
+    // setMark with null clears the attr over the range; with a string sets it.
+    r.marks = normalizeMarks(
+      setMark(r.marks || [], rng.start, rng.end, 'link', raw === '' ? null : raw), len);
+    markDirty();
+    closeLinkInput(true);
+  }
+
+  // Close the inline link editor (apply / cancel / blur). Rebuilds the spans
+  // from the current model, returns the toolbar to its closed state, and (when
+  // restoreFocus) puts focus + the saved selection back on the editable so the
+  // author keeps editing exactly where they were.
+  function closeLinkInput(restoreFocus) {
+    const rng = savedLinkRange;
+    linkEditOpen = false;
+    savedLinkRange = null;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    const r = editingId != null
+      ? state.rects.find(function (x) { return x.id === editingId; }) : null;
+    if (ed && r) renderRunsInto(ed, editText, r.marks || []);
+    buildTextToolbar();
+    if (restoreFocus && ed && rng) {
+      ed.focus();
+      setSelectionRange(ed, rng.start, rng.end);
+    }
+    updateToolbarPressed();
+  }
+
   // Reflect each attr's coverage over the current selection as a THREE-state
   // pressed display (TS2): 'all' → .is-active, 'some' → .is-mixed
   // (indeterminate), 'none' → off. A collapsed caret has no selection to
@@ -1315,6 +1409,73 @@
         if (!p || !p.id) return;
         mkSwatch(String(p.id), (p.name || p.id) + ' (selection)', p.value || '');
       });
+    }
+    // TS3-b-2 LINK control. A divider, then a chain-link button that opens the
+    // inline URL editor. dataset.attr='link' makes it light up via the generic
+    // pressed-state loop (rangeAttrCoverage) whenever the selection is linked.
+    // Icon (not microscopic): ~1.15rem chain-link SVG inside the 2rem button.
+    const linkSep = document.createElement('span');
+    linkSep.className = 'pe-tt-sep';
+    bar.appendChild(linkSep);
+    const lb = document.createElement('button');
+    lb.type = 'button';
+    lb.className = 'pe-tt-btn pe-tt-link';
+    lb.dataset.attr = 'link';
+    lb.title = 'Link (selection)';
+    lb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07L11.5 4.5"/>'
+      + '<path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07L12.5 19.5"/></svg>';
+    lb.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    lb.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+    lb.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
+    bar.appendChild(lb);
+
+    // When the editor is open, append a full-width input row (wraps under the
+    // buttons — the toolbar is flex-wrap). The <input> is the ONE control that
+    // intentionally takes focus; its Apply/Cancel buttons preventDefault so
+    // focus stays in the input while they act on it.
+    if (linkEditOpen) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'pe-tt-link-row';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'pe-tt-link-input';
+      inp.placeholder = 'https://…   (leave empty to remove)';
+      inp.spellcheck = false;
+      inp.autocomplete = 'off';
+      // Enter applies, Escape cancels. stopPropagation so the global canvas
+      // keydown (Delete/Escape-deselect) never sees these while typing a URL.
+      inp.addEventListener('keydown', function (ev) {
+        ev.stopPropagation();
+        if (ev.key === 'Enter')       { ev.preventDefault(); applyLinkFromInput(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); closeLinkInput(true); }
+      });
+      rowEl.appendChild(inp);
+      const ok = document.createElement('button');
+      ok.type = 'button';
+      ok.className = 'pe-tt-btn pe-tt-link-ok';
+      ok.title = 'Apply link';
+      ok.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+        + ' stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+        + '<path d="M5 13l4 4L19 7"/></svg>';
+      ok.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+      ok.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+      ok.addEventListener('click', function (ev) { ev.preventDefault(); applyLinkFromInput(); });
+      rowEl.appendChild(ok);
+      const cx = document.createElement('button');
+      cx.type = 'button';
+      cx.className = 'pe-tt-btn pe-tt-link-cancel';
+      cx.title = 'Cancel';
+      cx.textContent = '×';
+      cx.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+      cx.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+      cx.addEventListener('click', function (ev) { ev.preventDefault(); closeLinkInput(true); });
+      rowEl.appendChild(cx);
+      const err = document.createElement('span');
+      err.className = 'pe-tt-link-err';
+      rowEl.appendChild(err);
+      bar.appendChild(rowEl);
     }
     document.body.appendChild(bar);
     positionTextToolbar(bar, ed);
@@ -2247,7 +2408,16 @@
           if (t) insertPlainTextAtCaret(txt, t);
         });
         // Clicking away (another rect, the panel, empty canvas) commits.
-        txt.addEventListener('blur', function () { commitEdit(true); });
+        // TS3-b-2 EXCEPTION: focus moving INTO the toolbar (the link URL
+        // <input>, or its Apply/Cancel buttons) must NOT commit — that would
+        // tear down the edit and the input before the author can type a URL.
+        // relatedTarget is the element receiving focus; if it's inside the
+        // toolbar, skip the commit. All other blurs commit as before.
+        txt.addEventListener('blur', function (ev) {
+          const rt = ev && ev.relatedTarget;
+          if (rt && rt.closest && rt.closest('#pe-text-toolbar')) return;
+          commitEdit(true);
+        });
       }
       el.appendChild(txt);
       el.classList.add('has-text');
