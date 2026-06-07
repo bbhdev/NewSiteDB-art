@@ -2832,8 +2832,12 @@ body.editor input[type="range"] {
   border-radius: 3px; padding: 0.02rem 0.3rem;
 }
 .ed-typo-sample {
-  color: #e5e5e5;
-  background: #1b1e24; border: 1px solid #2a2e35; border-radius: 4px;
+  /* v0.10.131: light "paper" specimen surface (same tone as the preview modal,
+     #f7f6f3 + dark default text) so a style's own — usually dark — colour stays
+     readable. The previous dark #1b1e24 box swallowed dark text colours. Also
+     the faithful preview: page text normally sits on a light background. */
+  color: #1b1d21;
+  background: #f7f6f3; border: 1px solid #d4d0c8; border-radius: 4px;
   padding: 0.35rem 0.5rem;
   max-height: 3.4em; overflow: hidden;
   word-break: break-word;

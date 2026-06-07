@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.130):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.131):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -508,6 +508,24 @@ repurposed** to carry complete-style ids. Key decisions:
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B3-5 — readable specimen previews on a light "paper" surface (v0.10.131).**
+Author report: a style whose own colour is dark (e.g. Body3 #1b1d21, Caption6 #774411) was
+unreadable in the dark-toolbar pill previews and the dark Draw row sample — dark text on a dark
+chip. Two offered fixes (artificially lighten the text vs. lighten the background); chose the
+BACKGROUND, both because it's more faithful (page text normally sits on a light background, so the
+pill now shows what the run actually becomes) and because it reuses an existing precedent: the Draw
+"View in panel" preview modal already renders specimens on a `#f7f6f3` paper surface. Applied that
+same paper tone in two places: (1) the Page floater element-style pills (`.pe-tt-es` → bg `#f7f6f3`,
+default text `#1b1d21`, dark-alpha border) — the `.ty-<id>` preview span's own colour still wins,
+so light AND dark style colours are now legible; the "clear ×" chip is a UI ACTION not a specimen so
+it KEEPS the dark toolbar palette; the is-active state is unchanged (accent-orange fill + white
+text, still readable). (2) the Draw element-styles row sample (`.ed-typo-sample` → same paper bg +
+dark default text). **Live-verified**: floater pills show dark Body3 (27,29,33) / Caption6
+(119,68,17) and light pink/blue styles all readable on paper; active pill = white-on-orange; the
+clear chip stays dark; Draw samples render on paper with dark colours now visible. No console
+errors. (Tradeoff noted: a style designed in a LIGHT colour for a dark page would be the inverse
+problem on paper — but that's rare and the preview modal already made the same paper choice.)
 
 **Element styles B3-4 — floating-panel restyle: link first-class + computed pill layout
 (v0.10.130).** Two author-driven asks: (1) the link button was hidden inside the fx-overrides

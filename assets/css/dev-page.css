@@ -670,9 +670,14 @@ button.pe-save.is-flash {
   max-width: 10rem;
   font-size: 0.82rem;
   line-height: 1;
-  color: #e8e8ea;
-  background: #2c2c2e;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  /* v0.10.131: render the style PREVIEW on a light "paper" surface (same tone
+     as the Draw preview modal, #f7f6f3) so a style's own — usually dark —
+     colour stays readable. On the dark toolbar a dark text colour vanished.
+     This is also the FAITHFUL preview: page text normally sits on a light
+     background, so the pill shows what the run will actually look like. */
+  color: #1b1d21;
+  background: #f7f6f3;
+  border: 1px solid rgba(0, 0, 0, 0.28);
   border-radius: 0.35rem;
   cursor: pointer;
   user-select: none;
@@ -681,7 +686,7 @@ button.pe-save.is-flash {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pe-tt-es:hover { background: #3a3a3c; }
+.pe-tt-es:hover { background: #fffdf8; border-color: rgba(0, 0, 0, 0.45); }
 /* The preview span shows the style's FAMILY / WEIGHT / ITALIC / COLOUR but is
    pinned to the chip's own size — an element style's absolute sizePx (e.g. 48px)
    would otherwise blow up the toolbar. (0,1,1) beats the .ty-<id> (0,1,0) size. */
@@ -692,13 +697,18 @@ button.pe-save.is-flash {
   line-height: 1 !important;
   letter-spacing: normal !important;
 }
-/* "Clear" chip: revert selection to the rect default — neutral × pill. */
+/* "Clear" chip: revert selection to the rect default. It's a UI ACTION, not a
+   style specimen — keep it on the dark toolbar palette (a paper chip would
+   wrongly imply it previews a style). */
 .pe-tt-es-clear {
   min-width: 2rem;
   padding: 0;
   font-size: 1.05rem;
   color: #c8c8ca;
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, 0.18);
 }
+.pe-tt-es-clear:hover { background: #3a3a3c; border-color: rgba(255, 255, 255, 0.18); }
 .pe-tt-es.is-active {
   background: var(--pe-palette-accent, #ff5500);
   border-color: var(--pe-palette-accent, #ff5500);
