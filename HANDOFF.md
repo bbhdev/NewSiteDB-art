@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.100):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.102):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -239,6 +239,29 @@ content and is always visible on the canvas, so there's no risk of "data
 the author can't see," and close only HIDES the editor (never clears
 `r.text` — unlike the optional-feature close which discards values).
 Editor-only; no runtime parity needed.
+**(v0.10.101 refinement)** the closed affordance is now a COMPACT button on
+the TEXT label's own row (label-left layout, button in the content column —
+not stacked full-width), and the open state's collapse control is a labelled
+"Done" text button (was a bare "×", which read as delete/cancel; it only
+hides the editor and the text already committed on blur).
+**Side-panel link read-out (v0.10.102):** addresses "once a URL is entered
+there's no apparent way to read/check or change it." The text toolbar now
+carries a live link READ-OUT (`.pe-tt-linkinfo`, built hidden in
+`buildTextToolbar`, populated + toggled in `updateToolbarPressed`): whenever
+the selection is a single uniform link (and the editor isn't already open),
+it shows the URL text (underlined; click → `openLinkInput` to change it), an
+"open in a new tab" anchor (href = `safeHref`'d URL, to VERIFY the
+destination), and a pencil edit button. It hides when the editor is open
+(the prefilled input shows the URL then) or when the selection isn't a
+uniform link. The toolbar is repositioned (`positionTextToolbar`) only on a
+visibility TRANSITION, so its height change never overlaps the editable while
+selection-drag doesn't cause per-event jitter. The verify anchor lives inside
+`#pe-text-toolbar`, so the editable's blur guard skips `commitEdit` when focus
+moves to it — the edit session survives a verify click. Validated via preview
+(synthetic edit-entry + programmatic selection): apply a link → read-out
+shows the URL + verify-href + pencil, chain button lit; pencil/URL-click
+reopens the editor prefilled; read-out hides while editing and when the
+selection leaves the link. Editor-only; no runtime parity needed.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool

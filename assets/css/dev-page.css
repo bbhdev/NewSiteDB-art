@@ -619,6 +619,51 @@ button.pe-save.is-flash {
 }
 .pe-tt-link-err:empty { display: none; }
 
+/* v0.10.102: live link read-out — appears (full-width, wraps under the button
+   row) when the selection is a single uniform link, so the entered URL is
+   always visible / verifiable / editable. URL text (click → edit), an "open in
+   new tab" verify anchor, and a pencil edit button. */
+.pe-tt-linkinfo {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 1 100%;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: rgba(232, 232, 234, 0.85);
+}
+.pe-tt-linkinfo-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(232, 232, 234, 0.4);
+  text-underline-offset: 2px;
+}
+.pe-tt-linkinfo-url:hover { color: #fff; text-decoration-color: #fff; }
+.pe-tt-linkinfo-open,
+.pe-tt-linkinfo-edit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.pe-tt-linkinfo-open:hover,
+.pe-tt-linkinfo-edit:hover { background: #3a3a3c; }
+.pe-tt-linkinfo-open svg,
+.pe-tt-linkinfo-edit svg { width: 1rem; height: 1rem; display: block; }
+
 /* Slice T2: small helper hint under a panel field (e.g. "double-click to
    edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */
 .pe-field-hint {

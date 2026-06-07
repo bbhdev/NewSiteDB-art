@@ -1346,6 +1346,31 @@
         sws[k].classList.toggle('is-active', on);
       }
     }
+    // v0.10.102: live link read-out. Show the URL (+ verify / edit) whenever
+    // the selection is a single uniform link AND the editor isn't already open
+    // (the prefilled input shows it then). Reposition the toolbar only on a
+    // visibility TRANSITION so its height change doesn't overlap the editable,
+    // while selection-drag doesn't cause per-event jitter.
+    const info = bar.querySelector('.pe-tt-linkinfo');
+    if (info) {
+      const curLink = currentMarkValue(marks, sel, 'link');
+      const show = (typeof curLink === 'string' && curLink !== '' && !linkEditOpen);
+      const wasShown = info.style.display !== 'none';
+      if (show) {
+        const urlEl = info.querySelector('.pe-tt-linkinfo-url');
+        const openEl = info.querySelector('.pe-tt-linkinfo-open');
+        if (urlEl) { urlEl.textContent = curLink; urlEl.title = 'Edit this link: ' + curLink; }
+        if (openEl) {
+          const safe = safeHref(curLink);
+          if (safe) { openEl.href = safe; openEl.style.display = ''; openEl.title = 'Open in a new tab: ' + safe; }
+          else { openEl.removeAttribute('href'); openEl.style.display = 'none'; }
+        }
+        info.style.display = '';
+      } else {
+        info.style.display = 'none';
+      }
+      if (show !== wasShown) positionTextToolbar(bar, ed);
+    }
   }
 
   // Position the (fixed) toolbar just above the editable — or below if it
@@ -1440,6 +1465,52 @@
     lb.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
     lb.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
     bar.appendChild(lb);
+
+    // v0.10.102: live link READ-OUT. The structure is built once (hidden by
+    // default); updateToolbarPressed fills + shows it whenever the selection is
+    // a single uniform link, so an entered URL is always visible/checkable/
+    // changeable — not hidden behind a guess at the chain button. Three parts:
+    //   • the URL text (click → openLinkInput to CHANGE it),
+    //   • an "open ↗" anchor (verify the destination in a new tab),
+    //   • a pencil (also opens the editor — an explicit edit affordance).
+    // Hidden while the editor is open (the prefilled input already shows it).
+    const info = document.createElement('div');
+    info.className = 'pe-tt-linkinfo';
+    info.style.display = 'none';
+    const infoUrl = document.createElement('span');
+    infoUrl.className = 'pe-tt-linkinfo-url';
+    infoUrl.title = 'Edit this link';
+    infoUrl.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    infoUrl.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+    infoUrl.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
+    info.appendChild(infoUrl);
+    // The open-in-new-tab anchor genuinely navigates (no preventDefault on
+    // click). It lives INSIDE #pe-text-toolbar, so the editable's blur guard
+    // skips commitEdit when focus moves to it — the edit session survives the
+    // verify click. href is set (safeHref'd) in updateToolbarPressed.
+    const infoOpen = document.createElement('a');
+    infoOpen.className = 'pe-tt-linkinfo-open';
+    infoOpen.target = '_blank';
+    infoOpen.rel = 'noopener noreferrer';
+    infoOpen.title = 'Open in a new tab to verify';
+    infoOpen.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/>'
+      + '<path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>';
+    info.appendChild(infoOpen);
+    const infoEdit = document.createElement('button');
+    infoEdit.type = 'button';
+    infoEdit.className = 'pe-tt-linkinfo-edit';
+    infoEdit.title = 'Edit this link';
+    infoEdit.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M4 20h4l10-10a2.83 2.83 0 0 0-4-4L4 16v4z"/>'
+      + '<path d="M13.5 6.5l4 4"/></svg>';
+    infoEdit.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+    infoEdit.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+    infoEdit.addEventListener('click', function (ev) { ev.preventDefault(); openLinkInput(); });
+    info.appendChild(infoEdit);
+    bar.appendChild(info);
 
     // When the editor is open, append a full-width input row (wraps under the
     // buttons — the toolbar is flex-wrap). The <input> is the ONE control that
