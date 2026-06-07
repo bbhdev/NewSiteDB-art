@@ -2832,15 +2832,30 @@ body.editor input[type="range"] {
   border-radius: 3px; padding: 0.02rem 0.3rem;
 }
 .ed-typo-sample {
-  /* v0.10.131: light "paper" specimen surface (same tone as the preview modal,
-     #f7f6f3 + dark default text) so a style's own — usually dark — colour stays
-     readable. The previous dark #1b1e24 box swallowed dark text colours. Also
-     the faithful preview: page text normally sits on a light background. */
+  /* v0.10.132: the BASE rule is the touch / no-hover state — a light "paper"
+     specimen surface (#f7f6f3 + dark text, matching the preview modal) so a
+     style's own — usually dark — colour stays readable when there's no hover to
+     reveal it. Pointer devices override this below (@media hover:hover): dark
+     resting box + paper reveal on hover, restoring the dark panel aesthetic. */
   color: #1b1d21;
   background: #f7f6f3; border: 1px solid #d4d0c8; border-radius: 4px;
   padding: 0.35rem 0.5rem;
   max-height: 3.4em; overflow: hidden;
   word-break: break-word;
+}
+/* v0.10.132 — POINTER devices (mouse, Apple Pencil hover): dark specimen box at
+   rest (keeps the panel's dark aesthetic), lift to light "paper" on hover so the
+   style's own colour becomes legible. Mirrors the Page floater pill behaviour.
+   Touch / no-hover devices skip this and keep the always-paper base above. */
+@media (hover: hover) {
+  .ed-typo-sample {
+    color: #e5e5e5;
+    background: #1b1e24; border-color: #2a2e35;
+  }
+  .ed-typo-sample:hover {
+    color: #1b1d21;
+    background: #efe9dd; border-color: #d4d0c8;
+  }
 }
 .ed-typo-spec {
   /* Force the panel UI font here — the row may sit under a .ty-<id>

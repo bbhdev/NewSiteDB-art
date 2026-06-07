@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.131):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.132):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -509,7 +509,32 @@ repurposed** to carry complete-style ids. Key decisions:
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
 
-**Element styles B3-5 — readable specimen previews on a light "paper" surface (v0.10.131).**
+**Element styles B3-6 — specimen readability via HOVER-REVEAL, not always-paper (v0.10.132).**
+Follow-up to B3-5: the author found the always-paper chips "very readable but bad for the UI
+feeling" — a row of bright paper chips on the dark toolbar broke the dark aesthetic. New approach:
+restore the dark resting chip and REVEAL the specimen on hover. Implemented with `@media (hover:
+hover)` so it's device-aware:
+- **Base rule (touch / `hover: none`)** = the v0.10.131 always-paper surface — on a phone there's
+  no hover to lift the chip, so paper-at-rest stays the only way to read a dark specimen.
+- **`@media (hover: hover)` (mouse, and Apple Pencil hover on iPad later)** = dark resting chip
+  (`.pe-tt-es` → `#2c2c2e`/`#e8e8ea`, restoring the dark look); on `:hover` the chip lifts to a
+  light paper-tinted surface `#efe9dd` with dark text, where the style's own (often dark) colour
+  becomes legible. The clear-× chip is re-asserted dark-on-hover (it's a UI action, not a specimen,
+  so it must NOT lift to paper — the generic `.pe-tt-es:hover` would otherwise catch it). The
+  is-active chip is re-asserted accent-fill on hover (the paper reveal must not override the
+  selected state).
+Applied the identical pattern to the Draw row sample (`.ed-typo-sample`): paper base, dark box
+(`#1b1e24`) at rest under `hover:hover`, paper `#efe9dd` reveal on hover. **Live-verified** via
+CSSOM + computed style at v0.10.132 (desktop reports `hover:hover`): Draw sample resting bg
+`#1b1e24` with the style's pink colour showing through, `:hover` rule = `#efe9dd`/`#1b1d21`; Page
+floater base = paper, `hover:hover` resting = dark, `:hover` = paper reveal, clear chip dark, active
+white-on-accent. No console errors. (Tradeoff for the Draw panel: it's a vertical LIST, so the
+author now reads dark specimens one at a time by hovering, rather than all at a glance — acceptable
+given the names are always shown separately in the row head and the dark aesthetic was the explicit
+ask; revisit if the list browse-ability suffers.)
+
+**Element styles B3-5 — readable specimen previews on a light "paper" surface (v0.10.131,
+SUPERSEDED by B3-6 on hover-capable devices; still the touch/no-hover base).**
 Author report: a style whose own colour is dark (e.g. Body3 #1b1d21, Caption6 #774411) was
 unreadable in the dark-toolbar pill previews and the dark Draw row sample — dark text on a dark
 chip. Two offered fixes (artificially lighten the text vs. lighten the background); chose the

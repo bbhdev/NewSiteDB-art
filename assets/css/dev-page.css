@@ -670,11 +670,12 @@ button.pe-save.is-flash {
   max-width: 10rem;
   font-size: 0.82rem;
   line-height: 1;
-  /* v0.10.131: render the style PREVIEW on a light "paper" surface (same tone
-     as the Draw preview modal, #f7f6f3) so a style's own — usually dark —
-     colour stays readable. On the dark toolbar a dark text colour vanished.
-     This is also the FAITHFUL preview: page text normally sits on a light
-     background, so the pill shows what the run will actually look like. */
+  /* v0.10.132: the BASE rule is the touch / no-hover state — a light "paper"
+     specimen surface (same tone as the Draw preview modal, #f7f6f3) so a
+     style's own — usually dark — colour stays readable when there's no hover
+     to reveal it. Pointer devices override this below (@media hover:hover):
+     dark resting chip + paper reveal on hover, which keeps the toolbar's dark
+     UI feel intact. (hover:hover also covers Apple Pencil hover on iPad.) */
   color: #1b1d21;
   background: #f7f6f3;
   border: 1px solid rgba(0, 0, 0, 0.28);
@@ -686,7 +687,6 @@ button.pe-save.is-flash {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pe-tt-es:hover { background: #fffdf8; border-color: rgba(0, 0, 0, 0.45); }
 /* The preview span shows the style's FAMILY / WEIGHT / ITALIC / COLOUR but is
    pinned to the chip's own size — an element style's absolute sizePx (e.g. 48px)
    would otherwise blow up the toolbar. (0,1,1) beats the .ty-<id> (0,1,0) size. */
@@ -717,6 +717,43 @@ button.pe-save.is-flash {
 /* Keep the preview span legible against the active accent fill (don't let the
    style's own palette colour vanish into the orange). */
 .pe-tt-es.is-active > span { color: inherit !important; }
+
+/* v0.10.132 — POINTER devices (mouse, and Apple Pencil hover on iPad): restore
+   the dark toolbar aesthetic at rest, and REVEAL the specimen on hover. The
+   always-paper chip (v0.10.131) read perfectly but broke the dark UI feel; here
+   the resting chip is dark again and the author lifts a single chip to a light
+   "paper" surface by hovering, where the style's own (often dark) colour becomes
+   legible. Touch / no-hover devices skip this block entirely and keep the
+   always-paper base rule above (their only way to read a dark specimen). */
+@media (hover: hover) {
+  .pe-tt-es {
+    color: #e8e8ea;
+    background: #2c2c2e;
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  .pe-tt-es:hover {
+    color: #1b1d21;
+    background: #efe9dd;          /* light paper-tinted reveal (lifted variant of the old #3a3a3c hover) */
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+  /* The clear × is a UI action, not a specimen — it must NOT lift to paper on
+     hover (the generic .pe-tt-es:hover above would otherwise catch it). */
+  .pe-tt-es-clear,
+  .pe-tt-es-clear:hover {
+    color: #c8c8ca;
+    background: #2c2c2e;
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  .pe-tt-es-clear:hover { background: #3a3a3c; }
+  /* Active chip keeps its accent fill even under the cursor (don't let the
+     paper reveal override the selected state). */
+  .pe-tt-es.is-active,
+  .pe-tt-es.is-active:hover {
+    background: var(--pe-palette-accent, #ff5500);
+    border-color: var(--pe-palette-accent, #ff5500);
+    color: #fff;
+  }
+}
 
 /* Slice B3-2: the atomic OVERRIDES (B/I/U, colour) are the escape hatch, not
    the default — they live in a collapsible row, disclosed by the fx toggle.
