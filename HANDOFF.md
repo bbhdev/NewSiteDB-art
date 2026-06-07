@@ -449,6 +449,20 @@ repurposed** to carry complete-style ids. Key decisions:
   hard `kind==='text'` gates beyond what the current mechanism already has). The full
   Draw↔Page convergence is its own future track, not Slice B — but B must not dig the fork
   deeper.
+- **The convergence payoff is a property *union*, not just "behaves like a text block"
+  (author refinement, 2026-06).** The two forks today carry **complementary, non-overlapping
+  capability sets:** a **Draw text block has behaviors** (animation / interaction) **but
+  limited style;** a **Page text block has (rich element) style but no behaviors.** So
+  mounting a Draw text block inside a Page **deco-mount** isn't merely "make Page-text behave
+  like Draw" — it lets a *single piece of text* carry **both** Draw's behaviors **and** the
+  Page element-style system at once. That combination is the interesting capability the
+  convergence unlocks; it's the actual reason to pursue deco-mount over duplicating features
+  on either side. **Caveat flagged by the author:** the Draw text block's *own* limited
+  styling "may have become outdated" now that the Element-styles registry exists — so part of
+  convergence is likely **retiring Draw's bespoke text styling in favour of the shared
+  Element-styles registry**, leaving Draw to own *behaviors* and the registry to own *style*
+  (clean separation of concerns). Not actioned now; recorded so the convergence track
+  doesn't re-entrench Draw's old style layer.
 
 **Revised slice plan (replaces "TS4 Slice 4"):**
 - **A1 — add `color` (palette-ref) to the element style** ✅ DONE (v0.10.112). Data +
