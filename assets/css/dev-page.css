@@ -709,6 +709,32 @@ button.pe-save.is-flash {
   margin: 0 auto;
 }
 
+/* Slice B3-3: drag grip — grab to move the whole toolbar, double-tap to reset.
+   Flush-left, a touch quieter than the action buttons (it's chrome, not an
+   action), but a real grab target: cursor:grab + a clear six-dot glyph sized
+   per the icon rule, touch-friendly for the tablet editor. */
+.pe-tt-grip {
+  min-width: 1.5rem;
+  height: 2rem;
+  padding: 0 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: none;
+  border-radius: 0.35rem;
+  cursor: grab;
+  touch-action: none;            /* let pointer-drag own the gesture (no scroll) */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pe-tt-grip:hover { color: rgba(255, 255, 255, 0.9); background: #2c2c2e; }
+.pe-tt-grip:active { cursor: grabbing; }
+.pe-tt-grip svg { width: 1.15rem; height: 1.15rem; display: block; }
+/* Once moved, tint the grip so the reset affordance (dbl-tap) is discoverable. */
+.pe-tt-grip-moved { color: var(--pe-palette-accent, #ff5500); }
+
 /* TS3-b-2 link control. The chain-link button matches the B/I buttons; its
    icon fills a clear share of the button (icon-sizing rule — no microscopic
    glyph, also a usable touch target for the tablet editor). The inline URL

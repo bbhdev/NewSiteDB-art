@@ -218,6 +218,14 @@
   // so a fresh edit starts with the governed path foregrounded. Progressive
   // disclosure (project rule): the escape hatch is one tap away, not in your face.
   let overridesOpen = false;
+  // Slice B3-3: a session-remembered MANUAL position for the text toolbar. Once
+  // the user drags it (via the grip), positionTextToolbar honours {left, top}
+  // (clamped to the viewport so it can never be lost off-screen) instead of
+  // auto-hugging the editable. Session-only (not persisted); cleared by a
+  // double-tap on the grip → back to auto-positioning. Pointer events (not
+  // mouse) so the drag works with touch — the tablet editor is a first-class
+  // target (CLAUDE.md standing constraint).
+  let toolbarPos = null;     // { left, top } or null = auto-position
   // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
   // use the native 'dblclick' event because the pointerdown handler calls
   // preventDefault() on every rect hit, and preventDefault on pointerdown
@@ -1527,15 +1535,56 @@
     }
   }
 
-  // Position the (fixed) toolbar just above the editable — or below if it
-  // would clip the top of the viewport.
+  // Position the (fixed) toolbar. If the user has dragged it (toolbarPos set),
+  // honour that — clamped so it stays reachable on screen. Otherwise auto-hug
+  // the editable: just above it, or below if that would clip the top.
   function positionTextToolbar(bar, ed) {
-    const rc = ed.getBoundingClientRect();
     bar.style.position = 'fixed';
+    const w = bar.offsetWidth, h = bar.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (toolbarPos) {
+      // Keep at least a sliver on screen (never fully lost / unreachable).
+      const left = Math.min(Math.max(4, toolbarPos.left), Math.max(4, vw - w - 4));
+      const top  = Math.min(Math.max(4, toolbarPos.top),  Math.max(4, vh - h - 4));
+      bar.style.left = left + 'px';
+      bar.style.top  = top + 'px';
+      return;
+    }
+    const rc = ed.getBoundingClientRect();
     bar.style.left = Math.max(4, rc.left) + 'px';
-    let top = rc.top - bar.offsetHeight - 6;
+    let top = rc.top - h - 6;
     if (top < 4) top = rc.bottom + 6;
     bar.style.top = top + 'px';
+  }
+
+  // Slice B3-3: drag the whole toolbar by its grip. Pointer events + capture so
+  // it works with both mouse and touch. preventDefault on pointerdown keeps the
+  // editable focused (no blur→commit mid-drag). Updates toolbarPos live so the
+  // position survives the selectionchange-driven rebuilds.
+  function startToolbarDrag(ev, bar) {
+    ev.preventDefault();
+    const rc = bar.getBoundingClientRect();
+    const dx = ev.clientX - rc.left;
+    const dy = ev.clientY - rc.top;
+    const move = function (e) {
+      toolbarPos = { left: e.clientX - dx, top: e.clientY - dy };
+      bar.style.position = 'fixed';
+      bar.style.left = toolbarPos.left + 'px';
+      bar.style.top  = toolbarPos.top + 'px';
+      const g = bar.querySelector('.pe-tt-grip');
+      if (g) g.classList.add('pe-tt-grip-moved');   // tint immediately, no rebuild
+    };
+    const up = function () {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      // Re-clamp into the viewport on release.
+      const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+      if (ed) positionTextToolbar(bar, ed);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
   }
 
   // Build (or tear down) the floating text toolbar. Called from render():
@@ -1558,6 +1607,28 @@
     // the first, foregrounded children of the bar.
     const ovr = document.createElement('div');
     ovr.className = 'pe-tt-overrides';
+    // B3-3: drag grip — the first child of the bar (the primary row). Grab it to
+    // move the whole toolbar; double-tap it to reset to auto-positioning. Same
+    // focus-guard as the buttons. Six-dot grip glyph, sized as a real touch
+    // target (icon rule) so it works on the tablet editor.
+    const grip = document.createElement('button');
+    grip.type = 'button';
+    grip.className = 'pe-tt-grip' + (toolbarPos ? ' pe-tt-grip-moved' : '');
+    grip.title = 'Drag to move · double-tap to reset position';
+    grip.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor">'
+      + '<circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/>'
+      + '<circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/>'
+      + '<circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+    grip.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+    grip.addEventListener('pointerdown', function (ev) { startToolbarDrag(ev, bar); });
+    grip.addEventListener('dblclick', function (ev) {
+      ev.preventDefault();
+      toolbarPos = null;                 // reset → auto-position
+      grip.classList.remove('pe-tt-grip-moved');
+      const ed2 = surface && surface.querySelector('.pe-rect-text.is-editing');
+      if (ed2) positionTextToolbar(bar, ed2);
+    });
+    bar.appendChild(grip);
     const defs = [
       { attr: 'strong',    label: 'B', title: 'Bold (selection)' },
       { attr: 'em',        label: 'I', title: 'Italic (selection)' },
@@ -3266,7 +3337,13 @@
       sel.className = 'pe-input';
       const none = document.createElement('option');
       none.value = '';
-      none.textContent = '— none —';
+      // B3-3: under B2 totality, typographyId == null is NOT "no style" — it
+      // means "follow whatever the registry's DEFAULT element style is" (and
+      // tracks a later default change). Label it as such so the author knows the
+      // rect is governed, not unstyled.
+      const defId = defaultStyleId();
+      const defName = (defId && typoById[defId]) ? (typoById[defId].name || defId) : null;
+      none.textContent = defName ? ('— Default (' + defName + ') —') : '— Default —';
       if (r.typographyId == null) none.selected = true;
       sel.appendChild(none);
       let refDangles = (r.typographyId != null && !typoById[r.typographyId]);

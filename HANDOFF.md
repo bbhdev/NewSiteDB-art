@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.128):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.129):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -494,11 +494,35 @@ repurposed** to carry complete-style ids. Key decisions:
     - **B3-2 — atomic overrides behind an fx disclosure** ✅ DONE (v0.10.128). B/I/U, colour
       swatches, link all moved into a collapsible secondary row; element-style buttons + an fx
       toggle are the always-visible primary row. (entry below.)
-    - **B3-3** — whole panel draggable + `position:fixed`, remembering session position. PENDING.
-    - Also folded in: relabel the selection-panel typography picker null option "none" → "— Default (<name>) —".
+    - **B3-3 — draggable panel + remembered position + null-option relabel** ✅ DONE (v0.10.129).
+      A drag grip moves the whole `position:fixed` toolbar (pointer events → touch-ready);
+      session-remembered position (viewport-clamped, double-tap grip to reset); the selection-
+      panel typography picker null option relabelled "none" → "— Default (<name>) —". (entry below.)
+    - **B3 COMPLETE.** Next: Slice C (runtime parity).
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B3-3 — draggable panel, remembered position, null-option relabel (v0.10.129);
+B3 COMPLETE.** Three pieces. (1) **Drag grip**: a six-dot grip is the bar's first child;
+`startToolbarDrag` uses POINTER events + a document-level move/up (not mouse) so it works with
+touch — the tablet editor is a first-class target (CLAUDE.md). preventDefault on pointerdown
+keeps the editable focused (no blur→commit mid-drag). (2) **Remembered position**: a session
+`toolbarPos {left,top}` (module-level, not persisted); once set, `positionTextToolbar` honours it
+— viewport-CLAMPED so the bar can never be lost off-screen — instead of auto-hugging the
+editable; it survives the selectionchange rebuilds. The grip tints (`pe-tt-grip-moved`, accent)
+once moved, both live (set in the drag `move`) and on rebuild (built from `toolbarPos`).
+Double-tap the grip → `toolbarPos = null` → back to auto-position + un-tint. `overridesOpen`
+resets per edit but `toolbarPos` deliberately does NOT (it's a placement preference that should
+persist across edits in the session). (3) **Null-option relabel**: the selection-panel
+typography `<select>`'s null option was "— none —"; under B2 totality `typographyId == null`
+means "follow the registry DEFAULT element style", so it now reads "— Default (<name>) —"
+(name resolved via `defaultStyleId()` + `typoById`). **Live-verified** (transient rect, reloaded
+to discard): grip drags the bar by an exact delta and clamps on release; position + tint persist
+across a selectionchange rebuild; double-tap resets to auto; the panel select's first option
+reads "— Default (Default text style0) —" and is selected for a null-typographyId rect. No
+console errors. **Whole B3 (toolbar/panel rework) now complete** — element styles are the
+governed primary, atomics are the disclosed escape hatch, the panel is movable & touch-ready.
 
 **Element styles B3-2 — atomic overrides behind an fx disclosure (v0.10.128).** Reshapes the
 text toolbar to match the governance posture: the GOVERNED element-style buttons (B3-1) are the
