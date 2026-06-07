@@ -12360,15 +12360,26 @@
     el.textContent = css;
   }
 
+  // Reflect dirty/clean on one in-panel (per-row) Save button: filled amber
+  // + enabled "Save changes" when dirty, greyed + disabled "Saved" when clean.
+  function applyTypoEditSaveState(btn) {
+    if (typographyDirty) {
+      btn.classList.add('is-dirty'); btn.disabled = false; btn.textContent = 'Save changes';
+    } else {
+      btn.classList.remove('is-dirty'); btn.disabled = true; btn.textContent = 'Saved';
+    }
+  }
   function markTypographyDirty() {
     typographyDirty = true;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save •'; }
+    document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save'; }
+    document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
   }
 
   function addTypographyToken() {
@@ -12562,6 +12573,20 @@
         t.color = v || null;
         afterFieldEdit();
       }));
+
+      // In-panel Save (v0.10.119) — the global Save button is easily scrolled
+      // out of view once styles fill the panel. This button lives at the foot
+      // of the open editor (right where the author is working) and doubles as
+      // the dirty indicator: filled amber + enabled when there are unsaved
+      // changes, greyed "Saved" + disabled when clean. It saves the whole
+      // element-style registry (same route as the global button).
+      const editSave = document.createElement('button');
+      editSave.type = 'button';
+      editSave.className = 'ed-mini ed-typo-edit-save';
+      editSave.title = 'Save all element-style changes';
+      editSave.addEventListener('click', function () { saveTypography(editSave); });
+      applyTypoEditSaveState(editSave);
+      edit.appendChild(editSave);
 
       function setExpanded(on) {
         edit.style.display = on ? '' : 'none';
