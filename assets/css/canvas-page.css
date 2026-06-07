@@ -80,6 +80,10 @@ body.canvas-page-body {
    <span> overrides the inherited .ty-<id> typography token. */
 .rect-text .mk-strong { font-weight: 700; }
 .rect-text .mk-em     { font-style: italic; }
+/* TS3-b: link runs — underline affordance only; colour comes from the
+   separate `color` mark or the inherited typography token (parity with the
+   editor's .mk-link). The <a>'s default pointer cursor signals the link. */
+.rect-text .mk-link { text-decoration: underline; }
 
 .rect--text       { background: var(--cp-kind-text); }
 .rect--image      { background: var(--cp-kind-image); }

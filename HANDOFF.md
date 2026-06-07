@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.96):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.97):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -140,6 +140,41 @@ PHP runtime spans + emitted rules, editor render-from-disk, interactive
 swatch apply, overwrite-split, clear, and computed-RGB parity. Next:
 **TS3-b (link)**, then **TS4 (M2 named char-styles, incl. the `token`
 axis)**.
+**Slice TS3-b-1 (link marks — render + runtime parity + governance,
+v0.10.97) landed.** The `link` valued axis needs ZERO new engine ops —
+`setMark`/`segments`/`currentMarkValue`/`normalizeMarks` are already
+generic over valued attrs. Link differs from colour in three ways only,
+all at the render/governance edges: (1) **renders as a real `<a href>`**,
+not a `<span class>` — the value is an href (attribute), not a class
+fragment. `renderRunsInto` (JS) and the `canvas-page.php` loop emit
+`<a class="mk-link …" href>` for a link segment, with any atomic/colour
+classes riding on the SAME `<a>` (a bold-coloured link styles correctly;
+validated: link+colour+strong over "four" split at the strong boundary
+into two anchors `mk-link mk-color-… [mk-strong]`). `classForMark`/
+`deco_marks_classes` return null for `link` (no class); `mk-link` is added
+explicitly at render. (2) **Governance:** `safeHref` (JS) /
+`deco_safe_href` (PHP) — IDENTICAL allowlist: relative/anchor/root-
+relative always safe; `http(s):`/`mailto:`/`tel:` the only permitted
+explicit schemes; ANY other scheme-like prefix (`javascript:`, `data:`,
+`vbscript:`, `file:`, incl. uppercase/whitespace-padded) → rejected → the
+run renders as PLAIN TEXT (no anchor). Render-time defence-in-depth
+(independent of the save-route check in TS3-b-2), so a hand-edited
+rects.json can't emit a `javascript:` link. `linkHref`/`deco_marks_href`
+pull the first safe href from a segment's attrs. (3) **CSS:**
+`.mk-link { text-decoration: underline }` ONLY (both dev-page.css and
+canvas-page.css) — NO colour, deliberately. Link = underline affordance;
+colour stays the separate `color` axis, so a link inherits the typography/
+colour-mark colour with ZERO cascade fight (sidesteps the equal-
+specificity `.mk-link` vs `.mk-color-*` problem entirely). The editor `<a>`
+sits in contenteditable so a plain click places the caret (doesn't
+navigate); `cursor:text` reinforces that. Validated: safeHref allowlist
+unit cases; runtime + editor render BYTE-IDENTICAL structure (anchor,
+escaped href, `javascript:` stripped, link+colour+strong composition,
+computed underline). **No toolbar yet** — link marks were hand-seeded for
+this slice. **Next: TS3-b-2** — link button + inline URL input
+(progressive disclosure, prefill existing href, apply/remove via
+`setMark(…,'link',href)`, pressed-state) + the save-route scheme check for
+`attr==='link'`.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool

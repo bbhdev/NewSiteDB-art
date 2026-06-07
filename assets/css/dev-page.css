@@ -478,6 +478,11 @@ button.pe-save.is-flash {
    (color/token/link) get a dynamic emitter in a later slice (TS3). */
 .pe-rect-text .mk-strong { font-weight: 700; }
 .pe-rect-text .mk-em     { font-style: italic; }
+/* TS3-b: link runs carry ONLY the underline affordance — colour is the
+   separate `color` mark axis, so a link inherits the text/typography colour
+   (or its own colour mark) with no cascade fight. In the editor the <a> is
+   inside contenteditable, so a plain click places the caret, not navigates. */
+.pe-rect-text .mk-link { text-decoration: underline; cursor: text; }
 
 /* Slice TS1: floating B/I toolbar shown while a text rect is inline-edited.
    position:fixed (set in JS) above the editable. Above all canvas chrome. */

@@ -595,6 +595,9 @@
   }
 
   // attrs is the value-bearing list produced by segments(): [{attr,value}].
+  // NB: the 'link' attr maps to NO class here (its value is an href, not a
+  // class fragment) — links are rendered as <a> by renderRunsInto / the PHP
+  // loop, with mk-link added there. classForMark returns null for it.
   function attrsToClasses(attrs) {
     const cls = [];
     for (let k = 0; k < attrs.length; k++) {
@@ -602,6 +605,33 @@
       if (c && cls.indexOf(c) === -1) cls.push(c);
     }
     return cls;
+  }
+
+  // TS3-b: governance for the `link` attr's value (an href). Returns a safe
+  // href string, or null to reject. Allowlist (mirrors PHP deco_safe_href):
+  // relative / anchor / root-relative are always safe; http(s):, mailto:,
+  // tel: are the permitted explicit schemes; ANY other scheme-like prefix
+  // (javascript:, data:, vbscript:, file:, …) is rejected; a bare value with
+  // no scheme is treated as a relative path (browser-safe). This is the only
+  // place a stored href is trusted — render-time defence-in-depth on top of
+  // the save-route check (TS3-b-2), so even a hand-edited rects.json can't
+  // emit a javascript: link.
+  function safeHref(v) {
+    if (typeof v !== 'string') return null;
+    v = v.trim();
+    if (!v) return null;
+    if (/^(#|\/|\.\/|\.\.\/)/.test(v)) return v;          // relative / anchor
+    if (/^(https?:|mailto:|tel:)/i.test(v)) return v;     // allowed schemes
+    if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return null;      // any other scheme → reject
+    return v;                                             // bare relative path
+  }
+
+  // The safe href carried by a segment's attrs (first `link` mark), or null.
+  function linkHref(attrs) {
+    for (let k = 0; k < attrs.length; k++) {
+      if (attrs[k].attr === 'link') return safeHref(attrs[k].value);
+    }
+    return null;
   }
 
   // Common prefix/suffix diff → a single edit: at position p, d chars were
@@ -922,7 +952,19 @@
     for (let si = 0; si < segs.length; si++) {
       const seg = segs[si];
       const classes = attrsToClasses(seg.attrs);
-      if (!classes.length) {
+      const href = linkHref(seg.attrs);
+      if (href) {
+        // TS3-b: link segment → real <a>. mk-link carries the underline
+        // affordance; any atomic/color classes ride on the same element so a
+        // bold-coloured link styles correctly. Content via textContent (no
+        // markup honoured); href already passed safeHref(). In contenteditable
+        // a plain click places the caret rather than navigating.
+        const a = document.createElement('a');
+        a.className = ('mk-link ' + classes.join(' ')).trim();
+        a.setAttribute('href', href);
+        a.textContent = seg.text;
+        container.appendChild(a);
+      } else if (!classes.length) {
         container.appendChild(document.createTextNode(seg.text));
       } else {
         const sp = document.createElement('span');

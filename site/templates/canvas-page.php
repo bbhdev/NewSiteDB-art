@@ -168,16 +168,22 @@ foreach ($typography as $t) {
                 width: <?= $w ?>px; height: <?= $h ?>px;">
       <?php if ($text !== null): ?>
       <div class="rect-text"><?php
-        // TS1: render derived runs — each styled run as <span class="mk-…">,
-        // plain runs as escaped text. Mirrors the editor's segment render.
-        // esc() on every run keeps it XSS-safe (no markup honoured).
+        // TS1/TS3: render derived runs — a link run as <a class="mk-link …"
+        // href>, a styled run as <span class="mk-…">, a plain run as escaped
+        // text. Mirrors the editor's renderRunsInto. esc() on every run AND on
+        // the (already safeHref'd) href keeps it XSS-safe (no markup honoured).
         $segs = deco_text_segments($text, $marks);
         if (empty($segs)) {
             echo esc($text);
         } else {
             foreach ($segs as $seg) {
-                $cls = deco_marks_classes($seg['attrs']);
-                if (empty($cls)) {
+                $cls  = deco_marks_classes($seg['attrs']);
+                $href = deco_marks_href($seg['attrs']);
+                if ($href !== null) {
+                    $allCls = trim('mk-link ' . implode(' ', $cls));
+                    echo '<a class="' . esc($allCls) . '" href="' . esc($href) . '">'
+                       . esc($seg['text']) . '</a>';
+                } elseif (empty($cls)) {
                     echo esc($seg['text']);
                 } else {
                     echo '<span class="' . esc(implode(' ', $cls)) . '">'

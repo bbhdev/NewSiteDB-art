@@ -331,6 +331,40 @@ function deco_marks_classes(array $attrs): array
 }
 
 /**
+ * TS3-b — governance for a `link` mark's href value. Returns a safe href, or
+ * null to reject. Mirrors safeHref() in dev-page.js exactly: relative /
+ * anchor / root-relative always safe; http(s):, mailto:, tel: are the only
+ * permitted explicit schemes; any other scheme-like prefix (javascript:,
+ * data:, vbscript:, file:, …) is rejected; a bare value with no scheme is a
+ * relative path (browser-safe). Render-time defence-in-depth: even a
+ * hand-edited rects.json can never emit a javascript: anchor.
+ */
+function deco_safe_href($v): ?string
+{
+    if (!is_string($v)) return null;
+    $v = trim($v);
+    if ($v === '') return null;
+    if (preg_match('/^(#|\/|\.\/|\.\.\/)/', $v)) return $v;       // relative / anchor
+    if (preg_match('/^(https?:|mailto:|tel:)/i', $v)) return $v;  // allowed schemes
+    if (preg_match('/^[a-z][a-z0-9+.-]*:/i', $v)) return null;    // any other scheme → reject
+    return $v;                                                    // bare relative path
+}
+
+/**
+ * The safe href carried by a run's value-bearing attrs (first `link`), or
+ * null. Tolerates the legacy bare-string attr shape defensively.
+ */
+function deco_marks_href(array $attrs): ?string
+{
+    foreach ($attrs as $a) {
+        if (is_array($a) && isset($a['attr']) && $a['attr'] === 'link') {
+            return deco_safe_href(array_key_exists('value', $a) ? $a['value'] : null);
+        }
+    }
+    return null;
+}
+
+/**
  * TS3-a — emit one CSS rule per palette colour: `.mk-color-<id> { color:
  * <value>; }`. The dynamic sibling of deco_typography_css(): both the
  * editor template (page.php) and the runtime template (canvas-page.php)
