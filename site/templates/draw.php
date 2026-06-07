@@ -162,7 +162,7 @@ $payload = json_encode([
            token so the typography panel's per-row previews render with the
            real family/size — same emitter the page editor & runtime use. */ ?>
   <?= deco_google_fonts_link($contentRoot) ?>
-  <style id="ed-typography-css"><?= deco_typography_css($typography) ?></style>
+  <style id="ed-typography-css"><?= deco_typography_css($typography, $palette) ?></style>
   <?php /* TS4 Slice 3: one bare `.mk-cs-<id>` rule per char-style so the
            char-style panel's per-row previews render with the real relative
            styling — the SAME emitter the page editor & runtime use. The JS

@@ -225,7 +225,7 @@ $payload = str_replace('<', '\\u003c', $payload);
     /* Typography tokens (Slice 3a) — one .ty-<id> rule per token, the
        SAME emitter the runtime template uses, so a text rect's chosen
        token previews here exactly as it renders on the public page. */
-<?= deco_typography_css($typography) ?>
+<?= deco_typography_css($typography, $palette) ?>
     /* TS3-a: one .mk-color-<id> rule per palette colour, the SAME
        emitter the runtime uses, so a colour mark previews here exactly
        as it renders on the public page (WYSIWYG colour parity). */

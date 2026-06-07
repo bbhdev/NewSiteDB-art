@@ -121,7 +121,7 @@ $charStyles = deco_load_charstyles($contentRoot);
   <link rel="stylesheet" href="<?= url('assets/css/canvas-page.css') ?>?v=<?= $v ?>">
   <?= deco_google_fonts_link($contentRoot) ?>
   <style>
-<?= deco_typography_css($typography) ?>
+<?= deco_typography_css($typography, $palette) /* element styles incl. palette-resolved colour */ ?>
 <?= deco_palette_marks_css($palette) /* TS3-a: .mk-color-<id> per palette colour */ ?>
 <?= deco_charstyle_marks_css($charStyles) /* TS4: .mk-cs-<id> per char-style — bare single-class sits between the inherited .ty-<id> token and the atomic .rect-text .mk-* axes (specificity = the cascade) */ ?>
     :root {

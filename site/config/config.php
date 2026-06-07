@@ -1022,6 +1022,18 @@ HTML;
             );
           }
 
+          // Colour: optional palette-ID reference. Empty/absent → null
+          // (inherit). Format-only check (matches the palette id contract);
+          // membership is NOT enforced — a dangling ref degrades gracefully
+          // (no colour emitted → inherit), like a dangling typographyId.
+          $colorRaw = isset($t['color']) ? trim((string) $t['color']) : '';
+          if ($colorRaw !== '' && !preg_match('/^[a-z0-9_-]{1,64}$/', $colorRaw)) {
+            return new Kirby\Http\Response(
+              json_encode(['ok' => false, 'error' => 'Invalid colour ref for "' . $id . '" (palette id: lowercase a-z, 0-9, _ or -).']),
+              'application/json', 400, $hdrs
+            );
+          }
+
           $clean[] = [
             'id'              => $id,
             'name'            => $name,
@@ -1031,6 +1043,7 @@ HTML;
             'lineHeight'      => $clamp($t['lineHeight']       ?? null, 0.5,   4.0,   1.4),
             'letterSpacingPx' => $clamp($t['letterSpacingPx']  ?? null, -20.0, 50.0,  0.0),
             'italic'          => !empty($t['italic']),
+            'color'           => $colorRaw !== '' ? $colorRaw : null,
           ];
         }
 

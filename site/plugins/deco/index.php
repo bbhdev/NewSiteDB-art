@@ -152,10 +152,24 @@ function deco_load_palette(string $contentDir): array
 }
 
 /**
- * Phase-2 typography tokens (Slice 3a). A token is a named, type-only
- * text style — family / size / weight / line-height / letter-spacing /
- * italic. Colour is deliberately NOT part of a token (it stays the
- * orthogonal palette concern), so one token is reusable in any colour.
+ * Phase-2 ELEMENT STYLES (one-layer model, v0.10.112+). A style is a
+ * named, COMPLETE text-style container — family / size / weight /
+ * line-height / letter-spacing / italic / COLOUR — that an author
+ * applies to any text sequence (the offset-marks range method), with one
+ * style designated the text object's default. There is a single styles
+ * registry (this one); the earlier relative "char-style" middle layer is
+ * retired and its range-mark mechanism repurposed to carry these complete
+ * styles. The atomic inline marks (strong/em/underline/color) remain as
+ * the sparse escape hatch and win per-axis over a style.
+ *
+ * `color` is a PALETTE-ID reference (governance: colours come from the
+ * palette, never free hex) or null/absent → inherit. Resolved to a CSS
+ * value at emit time via the palette (deco_typography_css below). Earlier
+ * tokens with no `color` key keep inheriting — additive, no migration.
+ *
+ * The on-disk file + canonical location are unchanged for now
+ * (typography-tokens.json, shape { schemaVersion, tokens }) — renaming
+ * the artefact is a later cleanup slice, not worth a migration here.
  *
  * Canonical location is content/_shared/typography-tokens.json with
  * shape { schemaVersion, tokens: [...] } — the same site-wide _shared
@@ -174,10 +188,10 @@ function deco_load_palette(string $contentDir): array
 function deco_default_typography(): array
 {
     return [
-        ['id' => 'heading',  'name' => 'Heading',    'family' => 'Playfair Display',   'sizePx' => 48, 'weight' => 600, 'lineHeight' => 1.1, 'letterSpacingPx' => 0,   'italic' => false],
-        ['id' => 'subhead',  'name' => 'Subheading', 'family' => 'Cormorant Garamond', 'sizePx' => 30, 'weight' => 500, 'lineHeight' => 1.2, 'letterSpacingPx' => 0.5, 'italic' => false],
-        ['id' => 'body',     'name' => 'Body',       'family' => 'Inter',              'sizePx' => 18, 'weight' => 400, 'lineHeight' => 1.5, 'letterSpacingPx' => 0,   'italic' => false],
-        ['id' => 'caption',  'name' => 'Caption',    'family' => 'Inter',              'sizePx' => 13, 'weight' => 400, 'lineHeight' => 1.4, 'letterSpacingPx' => 0.4, 'italic' => false],
+        ['id' => 'heading',  'name' => 'Heading',    'family' => 'Playfair Display',   'sizePx' => 48, 'weight' => 600, 'lineHeight' => 1.1, 'letterSpacingPx' => 0,   'italic' => false, 'color' => null],
+        ['id' => 'subhead',  'name' => 'Subheading', 'family' => 'Cormorant Garamond', 'sizePx' => 30, 'weight' => 500, 'lineHeight' => 1.2, 'letterSpacingPx' => 0.5, 'italic' => false, 'color' => null],
+        ['id' => 'body',     'name' => 'Body',       'family' => 'Inter',              'sizePx' => 18, 'weight' => 400, 'lineHeight' => 1.5, 'letterSpacingPx' => 0,   'italic' => false, 'color' => null],
+        ['id' => 'caption',  'name' => 'Caption',    'family' => 'Inter',              'sizePx' => 13, 'weight' => 400, 'lineHeight' => 1.4, 'letterSpacingPx' => 0.4, 'italic' => false, 'color' => null],
     ];
 }
 
@@ -207,13 +221,31 @@ function deco_load_typography(string $contentDir): array
  * a hand-edited tokens file can never inject arbitrary CSS: id and
  * family are character-whitelisted, numerics are range-clamped.
  */
-function deco_typography_css(array $tokens): string
+function deco_typography_css(array $tokens, array $palette = []): string
 {
     $num = function (float $v): string {
         // Trim trailing zeros so "1.10" → "1.1", "0.00" → "0".
         $s = rtrim(rtrim(number_format($v, 3, '.', ''), '0'), '.');
         return $s === '' ? '0' : $s;
     };
+    // Palette id → safe CSS colour value (same allow-list as
+    // deco_palette_marks_css, so a hand-edited file can't inject CSS).
+    $colourSafe = function ($v) {
+        if (!is_string($v) || $v === '') return null;
+        $ok = preg_match(
+            '/^(#[0-9a-fA-F]{3,8}|var\(--[a-zA-Z0-9_-]+\)|rgba?\([0-9.,%\s\/-]+\)|hsla?\([0-9.,%\s\/-]+\)|[a-zA-Z]+)$/',
+            $v
+        );
+        return $ok ? $v : null;
+    };
+    $paletteValue = [];
+    foreach ($palette as $p) {
+        if (!is_array($p) || !isset($p['id'])) continue;
+        $pid = preg_replace('/[^a-z0-9_-]/i', '', (string) $p['id']);
+        if ($pid === '') continue;
+        $pv = $colourSafe($p['value'] ?? null);
+        if ($pv !== null) $paletteValue[$pid] = $pv;
+    }
     $out = '';
     foreach ($tokens as $t) {
         if (!is_array($t) || !isset($t['id'])) continue;
@@ -226,6 +258,13 @@ function deco_typography_css(array $tokens): string
         $ls     = max(-20.0, min(50.0,  isset($t['letterSpacingPx']) ? (float) $t['letterSpacingPx'] : 0.0));
         $italic = !empty($t['italic']);
         $fam    = ($family !== '') ? ("'" . $family . "', ") : '';
+        // Colour: a palette id resolved to its value. Unset / dangling →
+        // no `color` declaration → text inherits (page default), exactly
+        // like a dangling typographyId degrades gracefully.
+        $colId  = isset($t['color']) ? preg_replace('/[^a-z0-9_-]/i', '', (string) $t['color']) : '';
+        $colCss = ($colId !== '' && isset($paletteValue[$colId]))
+                ? (' color: ' . $paletteValue[$colId] . ';')
+                : '';
         $out .= '.ty-' . $id . ' {'
               . ' font-family: ' . $fam . 'sans-serif;'
               . ' font-size: ' . $num($size) . 'px;'
@@ -233,6 +272,7 @@ function deco_typography_css(array $tokens): string
               . ' line-height: ' . $num($lh) . ';'
               . ' letter-spacing: ' . $num($ls) . 'px;'
               . ' font-style: ' . ($italic ? 'italic' : 'normal') . ';'
+              . $colCss
               . " }\n";
     }
     return $out;

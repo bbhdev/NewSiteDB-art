@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.111):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.112):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -380,10 +380,63 @@ per-row edit affordance was a tiny grey `▸` triangle the author couldn't find
 button (label + chevron, amber when open) — a labelled control, not an icon-only
 micro-glyph (icon-sizing rule). JS: the toggle textContent is now `Edit ▾`/`Edit ▸`.
 
-**Next: TS4 Slice 4** — dangling-ref/governance polish. **BUT see the open
-architectural question below** — the author has asked for a larger rethink of
-what "a project style" is (complete named styles incl. colour, not relative
-deltas) that supersedes the current Slice-4 framing. Resolve that first.
+**ARCHITECTURE — "Element styles" one-layer model (decided 2026-06, supersedes the
+TS4 relative-char-style direction).** The author rethought what "a project style"
+is. Conclusion: a project defines **COMPLETE, named styles for each kind of text
+element** ("normal text is so-and-so, titles so-and-so, subtitles…") with **no
+opportunity to diverge** — a style carries EVERYTHING, *in particular colour*, not
+just typography. The designer's mental model is **ONE layer**: a single registry of
+named complete-property containers. The relative em-delta "char-style" middle layer
+(TS4 Slices 1–3) is **RETIRED as a concept**; its **range-mark MECHANISM is
+repurposed** to carry complete-style ids. Key decisions:
+- **Applied to ANY text sequence via the offset-marks range method** — NOT snapped to
+  paragraph granularity. (Author correction: text is first-class content; forcing many
+  positioned blocks for what is mentally one text element is backwards. The range engine
+  already proven in TS1–TS4 is exactly right.) Each text rect keeps a DEFAULT element
+  style (today's `typographyId`); a range mark overrides it for a sub-sequence.
+- **Colour is a PALETTE-ID reference** on the style (never free hex), resolved to a CSS
+  value at emit time via the palette — mirrors the atomic `color` mark.
+- **Escape hatch retained:** atomic inline marks (strong/em/underline/color) stay as the
+  sparse per-axis override, winning over the element style. Rare special cases only;
+  abuse risk acknowledged.
+- **One registry (target):** unify `typography-tokens.json` (`.ty-<id>`) as THE element-
+  style registry; the separate `char-styles.json` / `.mk-cs-<id>` layer is retired.
+
+**Revised slice plan (replaces "TS4 Slice 4"):**
+- **A1 — add `color` (palette-ref) to the element style** ✅ DONE (v0.10.112). Data +
+  panel field + CSS emitter + runtime read. *This is the author's "in particular it
+  should include colours," shippable on its own.* (entry below.)
+- **A2** — rename the DRAW "Typography" panel to **"Element styles"**; retire the separate
+  Character-styles panel/file (collapse to one registry/layer).
+- **B** — per-RANGE application in the PAGE editor: repurpose the `charStyle` range-mark to
+  carry complete element-style ids; rect default style; styled rendering on the editor
+  canvas. Reconcile the atomic-colour-vs-element-colour specificity tie (`.mk-color-<id>`
+  is bare (0,1,0) — would tie a future range element-colour class).
+- **C** — runtime parity (PHP renders ranges + colour through the same cascade).
+- **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
+  style-ref governance; **then general page background** (below).
+
+**Element styles A1 — colour on the element style (v0.10.112).** Additive, no schema bump
+(the typography envelope keeps `schemaVersion:1`; `color` is an optional field defaulting
+to `null` = inherit). Touched:
+- `deco/index.php`: `deco_default_typography()` seeds gain `'color' => null`;
+  `deco_typography_css(array $tokens, array $palette = [])` now takes the palette and
+  resolves a token's `color` (a palette id) to its value via a `$colourSafe` allow-list
+  (same regex as `deco_palette_marks_css` — blocks e.g. `javascript:…`), emitting
+  `color: <value>;` into the `.ty-<id>` rule. Unset/dangling/unsafe → no `color` →
+  inherit (graceful, like a dangling `typographyId`). Verified all four cases via a
+  standalone harness.
+- Templates `canvas-page.php` / `page.php` / `draw.php` now pass `$palette` to the emitter.
+- `config.php` `dev/draw/typography` POST route: `$clean[]` gains a validated optional
+  `color` (palette-id format `/^[a-z0-9_-]{1,64}$/` or `null`; format-only, membership not
+  enforced — dangling degrades gracefully). Invalid format → 400.
+- `dev-draw.js`: typography token editor gains a **Colour** `selectField` ("— inherit —"
+  + palette entries); `rebuildTypographyClientCss()` and `typoSpecLine()` resolve the
+  palette-id colour for the live preview + spec line; new-token seed gets `color:null`.
+  Verified in the live editor: selecting "Accent" → live `.ty-heading` rule gains
+  `color: var(--accent)`, sample renders orange, spec shows "· Accent". (Not saved — user
+  data untouched.)
+
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
 override; it's load-bearing — confirmed 2026-06).

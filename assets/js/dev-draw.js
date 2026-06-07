@@ -12319,6 +12319,10 @@
     const ls = (t.letterSpacingPx != null ? t.letterSpacingPx : 0);
     let s = fam + ' · ' + size + 'px · ' + w + ' · lh ' + lh + ' · ls ' + ls;
     if (t.italic) s += ' · italic';
+    if (t.color) {
+      const c = (state.palette || []).find(function (p) { return p.id === t.color; });
+      s += ' · ' + (c ? c.name : t.color);
+    }
     return s;
   }
 
@@ -12344,9 +12348,14 @@
       const w = Math.round(clampTypoNum(t.weight, 100, 900, 400));
       const lh = clampTypoNum(t.lineHeight, 0.5, 4, 1.4);
       const ls = clampTypoNum(t.letterSpacingPx, -20, 50, 0);
+      // Colour: palette-id ref resolved to its value (mirrors the PHP
+      // emitter). Dangling/unset → no colour → inherit, identical to runtime.
+      const colId = String(t.color != null ? t.color : '').replace(/[^a-z0-9_-]/gi, '');
+      const colVal = colId ? (state.palette || []).find(function (p) { return p.id === colId; }) : null;
+      const colCss = (colVal && colVal.value) ? (' color: ' + colVal.value + ';') : '';
       return '.ty-' + id + ' { font-family: ' + fam + 'sans-serif; font-size: ' + size +
              'px; font-weight: ' + w + '; line-height: ' + lh + '; letter-spacing: ' + ls +
-             'px; font-style: ' + (t.italic ? 'italic' : 'normal') + '; }';
+             'px; font-style: ' + (t.italic ? 'italic' : 'normal') + ';' + colCss + ' }';
     }).join('\n');
     el.textContent = css;
   }
@@ -12367,7 +12376,8 @@
     const id = uniqueTypoId('token');
     state.typography.push({
       id: id, name: 'New token', family: '',
-      sizePx: 16, weight: 400, lineHeight: 1.4, letterSpacingPx: 0, italic: false
+      sizePx: 16, weight: 400, lineHeight: 1.4, letterSpacingPx: 0, italic: false,
+      color: null
     });
     newTypoIds[id] = true;
     expandedTypoIds[id] = true;   // open the editor so fields are ready
@@ -12491,6 +12501,20 @@
 
       edit.appendChild(checkboxField('Italic', !!t.italic, function (v) {
         t.italic = !!v;
+        afterFieldEdit();
+      }));
+
+      // Colour — a palette reference (never free hex). Element styles are
+      // COMPLETE: colour is part of the style, resolved to a CSS value at
+      // emit time via the palette. "— inherit —" (empty) leaves colour unset
+      // so the text inherits whatever the surrounding context provides.
+      const colourOptions = [{ value: '', label: '— inherit —' }].concat(
+        (state.palette || []).map(function (p) {
+          return { value: p.id, label: p.name || p.id };
+        })
+      );
+      edit.appendChild(selectField('Colour', (t.color != null ? t.color : ''), colourOptions, function (v) {
+        t.color = v || null;
         afterFieldEdit();
       }));
 
