@@ -75,6 +75,12 @@ body.canvas-page-body {
   overflow-wrap: anywhere;
 }
 
+/* Slice TS1: atomic text-style marks (runtime). Same two rules as the
+   editor (dev-page.css) for visual parity — a direct class on the run's
+   <span> overrides the inherited .ty-<id> typography token. */
+.rect-text .mk-strong { font-weight: 700; }
+.rect-text .mk-em     { font-style: italic; }
+
 .rect--text       { background: var(--cp-kind-text); }
 .rect--image      { background: var(--cp-kind-image); }
 .rect--drilldown  { background: var(--cp-kind-drilldown); }

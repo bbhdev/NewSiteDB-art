@@ -239,6 +239,70 @@ function deco_typography_css(array $tokens): string
 }
 
 /**
+ * Slice TS1 — derive rich-text runs from offset marks (runtime parity).
+ *
+ * PHP mirror of segments() in assets/js/dev-page.js: split $text at every
+ * mark boundary and tag each run with the attrs that FULLY cover it, so the
+ * runtime (canvas-page.php) and the editor produce byte-identical run
+ * structure. Returns [['text'=>…, 'attrs'=>[…]], …]; empty marks → a single
+ * unstyled run.
+ *
+ * Offsets are treated as character indices (mb_*). The editor emits UTF-16
+ * code-unit offsets, which match for the BMP (all ordinary design copy);
+ * astral characters (emoji) could mis-slice — acceptable for TS1's
+ * strong/em scope and noted in HANDOFF.
+ */
+function deco_text_segments(string $text, $marks): array
+{
+    $len = mb_strlen($text, 'UTF-8');
+    if ($len === 0) return [];
+    $ms = is_array($marks) ? $marks : [];
+    if (count($ms) === 0) return [['text' => $text, 'attrs' => []]];
+    $bset = [0 => true, $len => true];
+    foreach ($ms as $m) {
+        if (!is_array($m)) continue;
+        $s = isset($m['start']) ? (int) $m['start'] : 0;
+        $e = isset($m['end'])   ? (int) $m['end']   : 0;
+        if ($s > 0 && $s < $len) $bset[$s] = true;
+        if ($e > 0 && $e < $len) $bset[$e] = true;
+    }
+    $bounds = array_keys($bset);
+    sort($bounds, SORT_NUMERIC);
+    $segs = [];
+    for ($k = 0; $k < count($bounds) - 1; $k++) {
+        $s = $bounds[$k];
+        $e = $bounds[$k + 1];
+        if ($e <= $s) continue;
+        $attrs = [];
+        foreach ($ms as $m) {
+            if (!is_array($m)) continue;
+            $msS = isset($m['start']) ? (int) $m['start'] : 0;
+            $msE = isset($m['end'])   ? (int) $m['end']   : 0;
+            $a   = isset($m['attr'])  ? (string) $m['attr'] : '';
+            if ($a !== '' && $msS <= $s && $msE >= $e && !in_array($a, $attrs, true)) {
+                $attrs[] = $a;
+            }
+        }
+        $segs[] = ['text' => mb_substr($text, $s, $e - $s, 'UTF-8'), 'attrs' => $attrs];
+    }
+    return $segs;
+}
+
+/**
+ * Slice TS1 — map a run's attrs to CSS classes. Ordered table (mirrors
+ * MARK_ATTR_CLASS in dev-page.js) so M2 layers slot in later unchanged.
+ */
+function deco_marks_classes(array $attrs): array
+{
+    static $map = ['strong' => 'mk-strong', 'em' => 'mk-em'];
+    $cls = [];
+    foreach ($attrs as $a) {
+        if (isset($map[$a]) && !in_array($map[$a], $cls, true)) $cls[] = $map[$a];
+    }
+    return $cls;
+}
+
+/**
  * Build the Google-Fonts <link> for the site's font bundle
  * (content/_shared/font-bundle.json). The standalone Phase-2 templates
  * (page.php editor, canvas-page.php runtime) are NOT the main site shell

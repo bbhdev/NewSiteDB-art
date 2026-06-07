@@ -150,6 +150,11 @@ foreach ($typography as $t) {
     // Empty/absent text falls back to the kind stub, exactly as before.
     $text  = ($kind === 'text' && isset($r['text']) && is_string($r['text'])
               && trim($r['text']) !== '') ? $r['text'] : null;
+    // Slice TS1: style marks (offset ranges). Read defensively — the file
+    // may predate marks (→ []), in which case the run render collapses to a
+    // single esc($text), identical to the pre-TS1 output.
+    $marks = ($kind === 'text' && isset($r['marks']) && is_array($r['marks']))
+              ? $r['marks'] : [];
     $rectClass = 'rect rect--' . esc($kind) . ($tyId ? ' ty-' . esc($tyId) : '')
                . ($text !== null ? ' has-text' : '');
 ?>
@@ -161,7 +166,25 @@ foreach ($typography as $t) {
                 left: <?= $x ?>px; top: <?= $y ?>px;
                 width: <?= $w ?>px; height: <?= $h ?>px;">
       <?php if ($text !== null): ?>
-      <div class="rect-text"><?= esc($text) ?></div>
+      <div class="rect-text"><?php
+        // TS1: render derived runs — each styled run as <span class="mk-…">,
+        // plain runs as escaped text. Mirrors the editor's segment render.
+        // esc() on every run keeps it XSS-safe (no markup honoured).
+        $segs = deco_text_segments($text, $marks);
+        if (empty($segs)) {
+            echo esc($text);
+        } else {
+            foreach ($segs as $seg) {
+                $cls = deco_marks_classes($seg['attrs']);
+                if (empty($cls)) {
+                    echo esc($seg['text']);
+                } else {
+                    echo '<span class="' . esc(implode(' ', $cls)) . '">'
+                       . esc($seg['text']) . '</span>';
+                }
+            }
+        }
+      ?></div>
       <?php else: ?>
       <span class="rect-stub-label"><?= esc($kind) ?></span>
       <span class="rect-stub-id"><?= esc($rid) ?></span>
