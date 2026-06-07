@@ -1426,9 +1426,16 @@ HTML;
                   || $m['start'] < 0 || $m['start'] >= $m['end'] || $m['end'] > $textLen) {
                 return $fail('Rect mark range must satisfy 0 <= start < end <= text length.');
               }
+              // Attr is a code-controlled axis identifier, not user
+              // content. Most are lowercase slugs (strong/em/underline/
+              // color/link); `charStyle` (TS4) is camelCase — so the body
+              // allows [a-zA-Z0-9_-]. First char stays lowercase. This was
+              // the cause of the v0.10.107 "save failed · lowercase slug"
+              // bug: the TS4 charStyle attr never validated under the old
+              // strictly-lowercase pattern.
               if (!is_string($m['attr'])
-                  || !preg_match('/^[a-z][a-z0-9_-]{0,31}$/', $m['attr'])) {
-                return $fail('Rect mark attr must be a lowercase slug (1..32 chars).');
+                  || !preg_match('/^[a-z][a-zA-Z0-9_-]{0,31}$/', $m['attr'])) {
+                return $fail('Rect mark attr must be a slug starting lowercase (1..32 chars).');
               }
               $mv = $m['value'];
               if ($mv !== true && !(is_string($mv) && mb_strlen($mv) <= 256)) {

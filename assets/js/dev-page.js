@@ -3398,11 +3398,16 @@
     if (!statusEl) return;
     // Transient (saved / error) overrides the steady-state line for a few
     // seconds so the author sees the outcome of the last Save click.
+    // Error transients are STICKY (until = Infinity): a save failure must
+    // not silently vanish — it clears only on the next save attempt or a
+    // subsequent success.
     if (transientStatus && Date.now() < transientStatus.until) {
       statusEl.textContent = transientStatus.text;
+      statusEl.classList.toggle('is-error', !!transientStatus.isError);
       return;
     }
     transientStatus = null;
+    statusEl.classList.remove('is-error');
     const sel = selectedId
       ? (function () {
           const r = state.rects.find(function (x) { return x.id === selectedId; });
@@ -3417,10 +3422,17 @@
       state.chapters.length + ' chapter(s) · class=' + state.canvas.classId +
       sel + dirtyTag;
   }
-  function setTransient(text, ms) {
-    transientStatus = { text: text, until: Date.now() + (ms || 2500) };
+  // ms <= 0  → sticky (until = Infinity); used for save failures so the
+  // message persists until the next save attempt. isError → red pill.
+  function setTransient(text, ms, isError) {
+    const sticky = !(ms > 0);
+    transientStatus = {
+      text: text,
+      until: sticky ? Infinity : (Date.now() + ms),
+      isError: !!isError
+    };
     writeStatus();
-    setTimeout(function () { writeStatus(); }, (ms || 2500) + 50);
+    if (!sticky) setTimeout(function () { writeStatus(); }, ms + 50);
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -3433,6 +3445,9 @@
   async function doSave() {
     if (!dirty || saving) return;
     saving = true;
+    // Clear any sticky error from a previous failed attempt so the
+    // "saving…" state shows cleanly and a fixed error doesn't linger.
+    transientStatus = null;
     syncSaveButton();
     writeStatus();
     try {
@@ -3450,7 +3465,7 @@
       try { json = await res.json(); } catch (_) {}
       if (!res.ok || !json || json.ok !== true) {
         const msg = (json && json.error) ? json.error : ('HTTP ' + res.status);
-        setTransient('save failed · ' + msg, 4000);
+        setTransient('⚠ save failed · ' + msg, 0, true); // sticky error
         console.error('[dev-page] save failed', res.status, json);
       } else {
         markClean();
@@ -3459,7 +3474,7 @@
       }
     } catch (err) {
       console.error('[dev-page] save error', err);
-      setTransient('save error · ' + (err && err.message ? err.message : 'network'), 4000);
+      setTransient('⚠ save error · ' + (err && err.message ? err.message : 'network'), 0, true); // sticky
     } finally {
       saving = false;
       syncSaveButton();

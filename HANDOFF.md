@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.107):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.108):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -311,6 +311,28 @@ proving compose+cascade through the real UI. Reloaded to discard (no Save fired;
 on-disk marks unchanged). No schema/save-route change (still a string-valued
 mark). **No authoring UI for the registry yet** — char-styles come from
 `deco_default_charstyles()` until Slice 3 builds the editor.
+
+**TS4 Slice 2 bugfix — save rejected `charStyle` marks (v0.10.108):** the very
+first real save of a char-style failed with `save failed · Rect mark attr must
+be a lowercase slug (1..32 chars)`. Root cause: the save-route attr validator in
+`config.php` (~L1429) was `/^[a-z][a-z0-9_-]{0,31}$/` — **strictly lowercase**,
+written when every axis name (strong/em/underline/color/link) was a lowercase
+slug. TS4 introduced the FIRST camelCase attr, `charStyle`, and nothing updated
+the validator. Fix: body now allows `[a-zA-Z0-9_-]` (first char still lowercase):
+`/^[a-z][a-zA-Z0-9_-]{0,31}$/`; message reworded to "slug starting lowercase".
+Verified end-to-end via a real save-route round-trip (curl POST with a `charStyle`
+mark → `{"ok":true}`, persisted on disk, then restored original — content left
+byte-identical). **Lesson:** the attr namespace is camelCase-capable now; any
+future axis name is fine as long as it starts lowercase.
+
+Same iteration also fixed the **save-error toast UX** (author missed the failure
+because it was discreet and auto-vanished): save failures now render as a
+**sticky red pill** (`.pe-status.is-error`, white/bold on `#c4283b`) that persists
+until the next save attempt or a success — instead of the grey, glanced-past,
+4s-auto-clearing line. Mechanism: `setTransient(text, ms, isError)` — `ms <= 0`
+→ `until = Infinity` (sticky); `isError` toggles the `is-error` class in
+`writeStatus`; `doSave` clears `transientStatus` at the start of each attempt so
+a fixed error doesn't linger. Success/info toasts stay transient as before.
 
 **Next: TS4 Slice 3** — char-style authoring panel (create/edit/delete entries
 in `_shared/char-styles.json`, like the typography panel), then Slice 4

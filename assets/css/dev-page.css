@@ -182,6 +182,20 @@ button.pe-save.is-flash {
   min-width: 0;
 }
 
+/* Save-failure state. The steady status line is deliberately low-key
+   (grey, glanced-past) — but a SAVE FAILURE must not be. It gets a red
+   pill, bold weight, and (in JS) stays sticky until the next save attempt
+   instead of auto-clearing. Author complaint that triggered this: the
+   error was so discreet it went unnoticed, and then vanished. */
+.pe-status.is-error {
+  color: #fff;
+  font-weight: 700;
+  background: #c4283b;
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  flex: 0 1 auto;
+}
+
 /* Body grid: sidebar + canvas. ──────────────────────────────── */
 
 .pe-body {
