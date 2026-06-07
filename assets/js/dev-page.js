@@ -629,6 +629,17 @@
     // to the atomic .pe-rect-text .mk-* axes (0,2,0) — that ordering IS the
     // rect-base < char-style < atomic-override cascade, no resolver needed.
     if (attr === 'charStyle') { const id = safeMarkId(value); return id ? 'mk-cs-' + id : null; }
+    // Slice B (2026-06, decision A): the `elementStyle` range mark carries a
+    // COMPLETE element-style id and emits the SAME `.ty-<id>` class the rect's
+    // default style uses — one registry, one emitter. Applied DIRECTLY on the
+    // run span, `.ty-<id>` (0,1,0) beats the rect's INHERITED `.ty-<id>` base
+    // (direct > inherited has no specificity) → range overrides rect-default;
+    // and loses to the atomic `.pe-rect-text .mk-*` axes (0,2,0) → strong/em/
+    // underline escape-hatch still wins. The element-style's own colour ties
+    // the atomic `.mk-color-<id>`; that tie is broken in deco_palette_marks_css
+    // (atomic colour qualified to (0,2,0)). Replaces the retired relative
+    // `charStyle` axis (kept above as a no-op until Slice D removes it).
+    if (attr === 'elementStyle') { const id = safeMarkId(value); return id ? 'ty-' + id : null; }
     return MARK_ATTR_CLASS[attr] || null;
   }
 

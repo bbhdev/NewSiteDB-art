@@ -488,7 +488,17 @@ function deco_palette_marks_css(array $palette): string
         if ($id === '') continue;
         $val = $safe($p['value'] ?? null);
         if ($val === null) continue;
-        $out .= '.mk-color-' . $id . ' { color: ' . $val . '; }' . "\n";
+        // Slice B (2026-06): qualify the atomic colour mark with its container
+        // class in BOTH contexts so its specificity is (0,2,0) — one notch above
+        // the (0,1,0) `.ty-<id>` an `elementStyle` range mark applies directly on
+        // the same run. Without this, an element-style's own colour would TIE the
+        // atomic colour escape-hatch and source-order would decide; with it the
+        // per-instance colour override always wins (escape-hatch > element style).
+        // Both prefixes are emitted (editor `.pe-rect-text`, runtime `.rect-text`)
+        // mirroring the static atomic strong/em rules; the irrelevant-context
+        // selector simply never matches. Covers run <span>s and link <a>s alike.
+        $out .= '.pe-rect-text .mk-color-' . $id . ', .rect-text .mk-color-' . $id
+              . ' { color: ' . $val . '; }' . "\n";
     }
     return $out;
 }

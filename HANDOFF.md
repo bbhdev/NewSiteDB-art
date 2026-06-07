@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.124):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.125):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -479,13 +479,61 @@ repurposed** to carry complete-style ids. Key decisions:
     state). The char-styles data + `.mk-cs-<id>` rendering + page-editor picker survive until
     Slice B repurposes the range-mark; the now-unreachable char-style JS in dev-draw.js is
     guarded (no-ops) and removed in Slice D. (entry below.)
-- **B** — per-RANGE application in the PAGE editor: repurpose the `charStyle` range-mark to
-  carry complete element-style ids; rect default style; styled rendering on the editor
-  canvas. Reconcile the atomic-colour-vs-element-colour specificity tie (`.mk-color-<id>`
-  is bare (0,1,0) — would tie a future range element-colour class).
+- **B** — per-RANGE application in the PAGE editor. Sub-sliced:
+  - **B1 — data + render layer** ✅ DONE (v0.10.125). New `elementStyle` range mark carrying
+    a COMPLETE element-style id; `classForMark` emits the SAME `.ty-<id>` class directly on the
+    run span; the atomic-colour tie broken in the shared emitter. (entry below.)
+  - **B2** — rect default-style resolution under totality: `typographyId == null` (and any
+    dangling rect/range ref) resolves to the **declared default** element style, not browser
+    inherit. PENDING.
+  - **B3** — toolbar/panel rework (HANDOFF "one-layer" arch notes): primary panel = element-
+    style BUTTONS; atomic overrides behind an icon → secondary panel; whole panel draggable +
+    `position:fixed`. PENDING.
 - **C** — runtime parity (PHP renders ranges + colour through the same cascade).
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles B1 — per-range application, data + render layer (v0.10.125).** The first
+Slice-B sub-slice: a text range can now carry a COMPLETE element style, rendered on the editor
+canvas. Additive, no schema bump (the `marks` array already accepts any attr — the save-route
+attr pattern `^[a-z][a-zA-Z0-9_-]{0,31}$` admits `elementStyle`, and registry membership is
+intentionally NOT enforced; so `config.php` needed NO change). Decisions (author-confirmed):
+
+- **Decision A — reuse the `.ty-<id>` class, ONE registry, no second emitter.** A range mark
+  `{attr:'elementStyle', value:'<ty-id>'}` makes `classForMark` (dev-page.js) return the SAME
+  `ty-<id>` class the rect-default uses. Applied DIRECTLY on the run `<span>`, `.ty-<id>`
+  (0,1,0) beats the rect container's INHERITED `.ty-<id>` (inheritance has no specificity) →
+  **range overrides rect-default**; and loses to the atomic `.pe-rect-text .mk-*` axes (0,2,0)
+  → **strong/em/underline escape-hatch still wins**. The cascade is pure specificity; no
+  resolver code, no second CSS rule-set. *Rejected* alt: a separate `.mk-es-<id>` emitter —
+  it buys zero cascade advantage (direct-vs-inherited does the work either way) while creating
+  a permanent dual-emitter sync burden for one registry. Why A is safe: `deco_typography_css`
+  writes **all six type axes explicitly** (family/size/weight/line-height/letter-spacing/
+  font-style), so a direct-on-span application fully overrides with no leakage — verified. The
+  ONE incomplete axis is `color` (omitted when the style is colour-inherit), which is exactly
+  the intended behaviour: a colour-inherit range inherits up to the rect's concrete colour
+  (and, once B2 lands, the rect's null→default style guarantees that concrete colour exists).
+- **Decision — new `elementStyle` attr** (not overloading the legacy `charStyle` attr). Clean
+  break in persisted data; the old `charStyle` mark/`mk-cs-<id>` path stays as a guarded no-op
+  removed in Slice D.
+- **Colour tie-break (the one required change beyond the class map).** A range element-style's
+  own colour (`.ty-<id>`, 0,1,0) would TIE the atomic `.mk-color-<id>` (0,1,0) on the same run
+  → source-order would decide. Fixed by qualifying the atomic colour with its container class
+  in BOTH contexts: `deco_palette_marks_css` now emits
+  `.pe-rect-text .mk-color-<id>, .rect-text .mk-color-<id> { … }` (0,2,0) — so the per-instance
+  colour override always beats the element style's colour. (Mirrors how the static atomic
+  strong/em rules are written per-context; covers run `<span>`s and link `<a>`s alike. Also
+  pre-satisfies the runtime side, shrinking Slice C.)
+
+Touched: `assets/js/dev-page.js` (`classForMark` +`elementStyle` branch); `deco/index.php`
+(`deco_palette_marks_css` dual-prefix colour rule); `VERSION` → 0.10.125. **Not yet touched
+(deferred):** PHP `deco_marks_classes` `elementStyle`→`ty-<id>` mapping = Slice C (runtime
+parity); the toolbar picker that lets authors APPLY an element style to a range = B3 (B1 was
+validated by hand-seeding a mark in-memory, never saved). Verified live (preview kirby, home
+page, in-memory test rect: rect-default `body` Inter/18px; a `heading` range rendered GFS
+Didot/48px/#6666FF overriding it; a `heading`+atomic-`color` range rendered GFS Didot/48px but
+the atomic #FFDD00 colour — escape-hatch beats element-style colour). No console errors;
+reloaded to discard the test rect.
 
 **Element styles A1 — colour on the element style (v0.10.112).** Additive, no schema bump
 (the typography envelope keeps `schemaVersion:1`; `color` is an optional field defaulting
