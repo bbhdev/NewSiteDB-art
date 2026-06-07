@@ -12554,13 +12554,11 @@
       // so the text inherits whatever the surrounding context provides —
       // EXCEPT the default style, which is the root fallback and therefore
       // must carry a concrete colour (no inherit option offered for it).
-      const paletteOpts = (state.palette || []).map(function (p) {
-        return { value: p.id, label: p.name || p.id };
-      });
-      const colourOptions = t.isDefault
-        ? paletteOpts
-        : [{ value: '', label: '— inherit —' }].concat(paletteOpts);
-      edit.appendChild(selectField('Colour', (t.color != null ? t.color : ''), colourOptions, function (v) {
+      // Inline palette-swatch picker (shows the actual colours, dark UI,
+      // no native <select> white popup). The default style gets no "inherit"
+      // pill (totality — it's the root fallback and must carry a concrete
+      // colour); non-default styles may inherit.
+      edit.appendChild(typoColourField('Colour', (t.color != null ? t.color : null), !t.isDefault, function (v) {
         t.color = v || null;
         afterFieldEdit();
       }));
@@ -16301,6 +16299,56 @@
       onChange(null);
     });
     picker.appendChild(clr);
+
+    wrap.appendChild(lbl); wrap.appendChild(picker);
+    return wrap;
+  }
+
+  // Element-style Colour field — same inline palette-swatch picker as
+  // strokeField (dark, shows the actual colours, no native <select> white
+  // popup), but the "inherit" pill is gated by `allowInherit`. The project
+  // DEFAULT style is the root fallback and cannot itself inherit, so it is
+  // built with allowInherit=false (totality, A2): every text resolves to a
+  // concrete colour. Non-default styles may inherit (a governed choice).
+  function typoColourField(label, value, allowInherit, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ed-field';
+    const lbl = document.createElement('label'); lbl.textContent = label;
+
+    const picker = document.createElement('div');
+    picker.className = 'ed-color-picker';
+
+    function activate(target) {
+      picker.querySelectorAll('.swatch').forEach(function (s) { s.classList.remove('is-active'); });
+      target.classList.add('is-active');
+    }
+
+    (state.palette || []).forEach(function (c) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'swatch' + (value === c.id ? ' is-active' : '');
+      btn.style.background = c.value;
+      btn.title = c.name || c.id;
+      btn.setAttribute('aria-label', c.name || c.id);
+      btn.addEventListener('click', function () {
+        activate(btn);
+        onChange(c.id);
+      });
+      picker.appendChild(btn);
+    });
+
+    if (allowInherit) {
+      const clr = document.createElement('button');
+      clr.type = 'button';
+      clr.className = 'swatch is-clear' + (!value ? ' is-active' : '');
+      clr.textContent = 'inherit';
+      clr.title = 'No colour on this style — inherit from context';
+      clr.addEventListener('click', function () {
+        activate(clr);
+        onChange(null);
+      });
+      picker.appendChild(clr);
+    }
 
     wrap.appendChild(lbl); wrap.appendChild(picker);
     return wrap;
