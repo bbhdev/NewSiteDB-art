@@ -1078,6 +1078,58 @@ button.pe-save.is-flash {
   gap: 0.25rem;
 }
 .pe-selection-row--stack > label { width: auto; }
+/* v0.10.100: the open text-editor stack carries its own "Text" header, so
+   the row()'s own (empty) label is suppressed to avoid a blank gutter line. */
+.pe-selection-row--nolabel > label { display: none; }
+
+/* v0.10.100 side-panel TEXT disclosure. Closed = a full-width "Edit text
+   here" button (the rect's text is already on the canvas, so the panel keeps
+   it collapsed to save space). The icon is sized per the icon rule — a clear
+   ~1.1rem pencil, not a microscopic glyph — and doubles as a tablet-friendly
+   touch target. */
+.pe-text-disclose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+.pe-text-disclose:hover { background: #3a3a3c; }
+.pe-text-disclose svg { width: 1.1rem; height: 1.1rem; flex: none; }
+/* Open state: the editor stack (header + textarea + hint) fills the panel. */
+.pe-text-edit-stack { display: flex; flex-direction: column; gap: 0.3rem; }
+.pe-text-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pe-text-edit-head > span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(232, 232, 234, 0.65);
+}
+.pe-text-collapse {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.pe-text-collapse:hover { background: #3a3a3c; }
 .pe-selection-row select.pe-input {
   flex: 1;
   padding: 0.2rem 0.3rem;

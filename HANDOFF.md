@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.99):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.100):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -223,6 +223,22 @@ preview is now single-line (`white-space:nowrap; overflow:hidden;
 text-overflow:clip`; removed `max-height`/`word-break`) so a long sample
 clips at the panel edge instead of wrapping. Editor-only; no runtime
 parity needed.
+**Side-panel tweak (v0.10.100):** the TEXT field is no longer rendered as
+an always-visible textarea — that reclaims ~4 rows + a hint of panel space
+for a value the author can already see ON the canvas. Closed (the default
+now) the TEXT row is a single full-width `+`-style button "✎ Edit text
+here" (`.pe-text-disclose`, pencil SVG sized to the icon rule); clicking it
+adds `r.id` to the session-only `panelTextOpen` Set, re-renders, and focuses
+the textarea with caret-to-end. Open shows a `.pe-text-edit-stack` (header
+row: "Text" label + a `×` collapse that removes the id from `panelTextOpen`
+and re-renders; then the full-width textarea + hint), laid out via the
+`pe-selection-row--stack pe-selection-row--nolabel` modifiers so it spans
+the whole panel. This is a DELIBERATE deviation from the project's
+auto-open-if-populated progressive-disclosure rule: the text is primary
+content and is always visible on the canvas, so there's no risk of "data
+the author can't see," and close only HIDES the editor (never clears
+`r.text` — unlike the optional-feature close which discards values).
+Editor-only; no runtime parity needed.
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool

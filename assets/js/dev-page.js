@@ -192,6 +192,16 @@
   // Objects panel (v0.10.70) — session-only display mode: 'type' groups by
   // kind, 'z' is one flat list ordered by layer. Not persisted.
   let objectsSortMode = 'type';
+  // Slice (v0.10.100) — side-panel TEXT editor disclosure. The rect's text is
+  // already visible on the canvas, so the panel doesn't show the (space-hungry)
+  // textarea by default; it's opened on demand via an "Edit text here" button,
+  // per rect, for this session only. A Set of rect ids that are currently
+  // open. NOTE: unlike the behavior-block disclosure pattern, closing here only
+  // HIDES the editor — it never clears r.text (text is primary content, not an
+  // optional sparse feature). And it does NOT auto-open when text exists: the
+  // canvas already shows that text, so there's no "data with no UI" risk that
+  // the auto-open rule guards against.
+  const panelTextOpen = new Set();
   // Fixed kind order for the 'type' grouping (mirrors the Add-rect menu);
   // any unrecognised kind falls to the end.
   const KIND_ORDER = ['text', 'image', 'drilldown', 'deco-mount'];
@@ -2996,37 +3006,89 @@
       // the whole panel width. Every other row keeps the label-left layout.
       body.appendChild(row('Type', typoWrap, 'pe-selection-row--stack'));
 
-      // Slice T1: plain-text body content. A multiline textarea kept in a
-      // plain, comfortable editing face (NOT the rect's typography token —
-      // a 48px heading token would make this narrow-panel field unusable;
-      // the live canvas already shows the styled result). Commits on blur
-      // and on Cmd/Ctrl+Enter (plain Enter inserts a newline — the textarea
-      // IS the place where Enter must mean newline, not submit). Escape
-      // reverts to the saved value. Empty/whitespace clears to null.
-      const textArea = document.createElement('textarea');
-      textArea.className = 'pe-input pe-rect-textarea';
-      textArea.rows = 4;
-      textArea.maxLength = 5000;
-      textArea.placeholder = 'text content (optional)';
-      textArea.value = r.text || '';
-      textArea.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
-          ev.preventDefault(); textArea.blur();
-        } else if (ev.key === 'Escape') {
-          ev.preventDefault(); textArea.value = r.text || ''; textArea.blur();
-        }
-      });
-      textArea.addEventListener('blur', function () {
-        setRectText(r.id, textArea.value);
-      });
-      body.appendChild(row('Text', textArea));
+      // Slice T1 / v0.10.100: plain-text body content, behind a disclosure.
+      // The text is already shown on the canvas, so the panel keeps it closed
+      // by default (an "Edit text here" button) to save vertical space; opened
+      // on demand it becomes a full-width textarea (the empty label gutter is
+      // reclaimed, like the Type preview). The textarea stays in a plain,
+      // comfortable editing face (NOT the rect's typography token — a 48px
+      // heading token would make this narrow field unusable; the live canvas
+      // already shows the styled result). Commits on blur and on
+      // Cmd/Ctrl+Enter (plain Enter inserts a newline — the textarea IS the
+      // place where Enter means newline, not submit). Escape reverts.
+      if (!panelTextOpen.has(r.id)) {
+        // Closed: a single full-width disclosure button.
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'pe-text-disclose';
+        openBtn.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+          + ' stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'
+          + '<path d="M4 20h4l10-10a2.83 2.83 0 0 0-4-4L4 16v4z"/>'
+          + '<path d="M13.5 6.5l4 4"/></svg>'
+          + '<span>Edit text here</span>';
+        openBtn.addEventListener('click', function () {
+          panelTextOpen.add(r.id);
+          render();
+          // Focus the freshly-built textarea (the panel was rebuilt by render).
+          const ta = document.querySelector('#selection-body .pe-rect-textarea');
+          if (ta) {
+            ta.focus();
+            const v = ta.value; ta.value = ''; ta.value = v;  // caret to end
+          }
+        });
+        body.appendChild(row('Text', openBtn, 'pe-selection-row--stack'));
+      } else {
+        // Open: a header row (label + collapse [×]) then the full-width
+        // textarea. The collapse only HIDES the editor — the textarea has
+        // already committed via its blur (focus moving to the × fires it), so
+        // no text is lost; r.text is never cleared here.
+        const head = document.createElement('div');
+        head.className = 'pe-text-edit-head';
+        const lab = document.createElement('span');
+        lab.textContent = 'Text';
+        const collapse = document.createElement('button');
+        collapse.type = 'button';
+        collapse.className = 'pe-text-collapse';
+        collapse.title = 'Hide editor';
+        collapse.textContent = '×';
+        collapse.addEventListener('click', function () {
+          panelTextOpen.delete(r.id);
+          render();
+        });
+        head.appendChild(lab);
+        head.appendChild(collapse);
 
-      // Slice T2: discoverability hint for inline on-canvas editing. The
-      // double-click gesture is invisible otherwise; this points to it.
-      const hint = document.createElement('div');
-      hint.className = 'pe-field-hint';
-      hint.textContent = 'Tip: double-click the rect to edit on the canvas (Esc cancels, ⌘↵ commits).';
-      body.appendChild(hint);
+        const textArea = document.createElement('textarea');
+        textArea.className = 'pe-input pe-rect-textarea';
+        textArea.rows = 4;
+        textArea.maxLength = 5000;
+        textArea.placeholder = 'text content (optional)';
+        textArea.value = r.text || '';
+        textArea.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+            ev.preventDefault(); textArea.blur();
+          } else if (ev.key === 'Escape') {
+            ev.preventDefault(); textArea.value = r.text || ''; textArea.blur();
+          }
+        });
+        textArea.addEventListener('blur', function () {
+          setRectText(r.id, textArea.value);
+        });
+
+        const stack = document.createElement('div');
+        stack.className = 'pe-text-edit-stack';
+        stack.appendChild(head);
+        stack.appendChild(textArea);
+
+        // Slice T2: discoverability hint for inline on-canvas editing.
+        const hint = document.createElement('div');
+        hint.className = 'pe-field-hint';
+        hint.textContent = 'Tip: double-click the rect to edit on the canvas (Esc cancels, ⌘↵ commits).';
+        stack.appendChild(hint);
+
+        body.appendChild(row('', stack, 'pe-selection-row--stack pe-selection-row--nolabel'));
+      }
     }
 
     // Geometry — four small numeric inputs (x / y / w / h). Tab
