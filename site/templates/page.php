@@ -177,6 +177,13 @@ $paletteText   = $paletteSafe($paletteByID['text']   ?? null, 'var(--text)');
 // panel can build its "Type" dropdown + live preview.
 $typography = deco_load_typography($contentRoot);
 
+// Char-styles (TS4) — named RELATIVE type-only styles applied per text
+// range (the `charStyle` mark axis), the cascade's middle layer. Same
+// shared-artefact pattern as typography tokens; emitted both as .mk-cs-<id>
+// CSS rules (below) AND as data in the payload so the toolbar picker
+// (Slice 2) can build its char-style menu.
+$charStyles = deco_load_charstyles($contentRoot);
+
 $payload = json_encode([
     'pageId'        => $targetSlug,
     'pages'         => $pageOptions,
@@ -189,6 +196,7 @@ $payload = json_encode([
     'chapters'      => $chapters,
     'rects'         => $rects,
     'typography'    => $typography,
+    'charStyles'    => $charStyles,
     'palette'       => $palette,
     'version'       => $v,
 ], JSON_UNESCAPED_SLASHES);
@@ -222,6 +230,12 @@ $payload = str_replace('<', '\\u003c', $payload);
        emitter the runtime uses, so a colour mark previews here exactly
        as it renders on the public page (WYSIWYG colour parity). */
 <?= deco_palette_marks_css($palette) ?>
+    /* TS4: one .mk-cs-<id> rule per char-style (named RELATIVE type-only
+       style), the SAME emitter the runtime uses. Bare single-class so it
+       beats the rect's inherited .ty-<id> base token but loses to the atomic
+       .pe-rect-text .mk-strong axes — that specificity ordering IS the
+       rect-base < char-style < atomic cascade. */
+<?= deco_charstyle_marks_css($charStyles) ?>
     /* Palette-driven custom properties — emitted at template time so
        the editor's accent/text track the project palette without a
        JS round-trip. Kind-background defaults stay here too so a

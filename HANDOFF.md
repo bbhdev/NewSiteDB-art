@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.104):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.106):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -242,7 +242,50 @@ button `is-active`, composes with existing colour/strong/em marks; reloaded to
 discard the in-memory mutation (no Save fired, fixture untouched). Runtime PHP
 parity relied on symmetry with strong/em (already render at runtime) since
 verifying it would require persisting an underline mark to the shared fixture.
-**Next: TS4** — M2 named character-styles (incl. the `token` axis).
+**TS4 Slice 1 — M2 named character-styles, engine+render+cascade (v0.10.106):**
+A **char-style** is a NAMED, **RELATIVE**, **type-only** style applied to a text
+RANGE via a new valued mark axis `charStyle` (string value = style id). This is
+the deliberate counter to a trap we named explicitly: reusing absolute rect-role
+typography tokens (e.g. "Heading 48px") *inline* would blow up a few words to
+heading size. So char-styles express **deltas in CSS-native relative units** —
+`sizeEm`→`font-size:<n>em`, `weight`→`font-weight:bolder|lighter`,
+`italic`→`font-style:italic|normal`, `letterSpacingEm`→`letter-spacing:<n>em`.
+Colour is deliberately NOT a char-style field (it stays the orthogonal `color`
+axis), exactly like typography tokens. Honest limitations baked in: bolder/lighter
+are coarse (no arbitrary +200); letter-spacing replaces, not adds.
+
+The **cascade — rect base token < named char-style < atomic override — needs NO
+resolver logic; it falls out of CSS specificity:**
+- atomic axes emit as descendant selectors `.pe-rect-text .mk-strong` / runtime
+  `.rect-text .mk-strong` → specificity **(0,2,0)**;
+- char-styles emit as a BARE single class `.mk-cs-<id>` → **(0,1,0)**;
+- the rect's typography token `.ty-<id>` sets font props on the rect and reaches
+  the run only by *inheritance* — a direct class on the child always beats it.
+So `.mk-cs-<id>` (0,1,0) beats the inherited token; the atomic `.mk-*` (0,2,0)
+beats `.mk-cs-<id>`. Verified empirically (synthetic fixture under a real
+`.pe-rect-text`, base 20px/400): char-style alone → 100 (bare beats inherited);
+char-style **+ strong** → 700 (atomic wins). That is the full M1/M2 ordering.
+
+Registry mirrors typography-tokens.json: `_shared/char-styles.json` shape
+`{schemaVersion, styles:[{id,name,sizeEm?,weight?,italic?,letterSpacingEm?}]}`,
+with `deco_default_charstyles()` seeding `lead-in`/`fine-print`/`quote` so the
+axis works end-to-end with **no file present**. Slice 1 touch points (all
+symmetric to the `color` axis): PHP `deco_load_charstyles`/`deco_charstyle_marks_css`
++ a `charStyle` branch in `deco_marks_classes` (index.php); both templates load
+`$charStyles` and emit `deco_charstyle_marks_css($charStyles)` in their `<style>`
+block (page.php editor + canvas-page.php runtime — verified identical 3 rules on
+both surfaces); editor JS `classForMark` gains a `charStyle`→`mk-cs-<id>` branch
+and `state.charStyles`/`csById` normalization (consumed by the Slice-2 picker).
+**No schema bump** (additive within rects-content v3). **No save-route change** —
+`charStyle` is a string-valued mark; the route validates mark *shape* only
+(slug regex + value ≤256 chars), no attr allowlist, so it passes already.
+There is **no authoring UI yet** — a charStyle mark can't be *created* in the
+editor until Slice 2, so this slice was verified at the CSS/render+parity layer
+(no mark persisted to the shared fixture, no Save fired).
+
+**Next: TS4 Slice 2** — toolbar char-style picker (`setMark`/`currentMarkValue`,
+mirroring the colour swatches + Type picker), then Slice 3 (authoring panel like
+the typography panel) and Slice 4 (dangling-ref/governance polish).
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
 override; it's load-bearing — confirmed 2026-06).

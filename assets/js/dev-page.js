@@ -128,6 +128,18 @@
     if (p && p.id) paletteById[p.id] = p;
   });
 
+  // Char-styles (TS4 / M2). Named RELATIVE type-only styles a text range can
+  // reference via a `charStyle` mark; the template emits one .mk-cs-<id> rule
+  // per entry. In Slice 1 the list is normalized here but not yet surfaced in
+  // the UI — the Slice-2 toolbar picker consumes csById, mirroring the colour
+  // swatches + Type picker. Holding the list now keeps the payload contract
+  // stable and lets render preview a hand-seeded charStyle mark immediately.
+  state.charStyles = Array.isArray(state.charStyles) ? state.charStyles : [];
+  const csById = {};
+  state.charStyles.forEach(function (c) {
+    if (c && c.id) csById[c.id] = c;
+  });
+
   // Slice 2 step 4b: per-page image library, fetched once from
   // GET dev/page/images/<pageId>. null = not yet loaded; [] =
   // loaded-empty. imageByFilename indexes the list so renderRect and
@@ -612,6 +624,11 @@
   // colours get two different classes. Mirrors PHP deco_marks_classes().
   function classForMark(attr, value) {
     if (attr === 'color') { const id = safeMarkId(value); return id ? 'mk-color-' + id : null; }
+    // TS4: charStyle is a named RELATIVE type-only style → bare .mk-cs-<id>.
+    // Specificity (0,1,0) beats the rect's inherited .ty-<id> token but loses
+    // to the atomic .pe-rect-text .mk-* axes (0,2,0) — that ordering IS the
+    // rect-base < char-style < atomic-override cascade, no resolver needed.
+    if (attr === 'charStyle') { const id = safeMarkId(value); return id ? 'mk-cs-' + id : null; }
     return MARK_ATTR_CLASS[attr] || null;
   }
 
