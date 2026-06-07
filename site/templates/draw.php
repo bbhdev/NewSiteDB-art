@@ -319,6 +319,21 @@ $payload = json_encode([
               title="Preview every token as real paragraphs">View all in panel</button>
     </section>
 
+    <?php /* TS4 Slice 3: character-style authoring. Reuses the .ed-typo-*
+             list/row styling (identical structure). Char-styles are the
+             named, RELATIVE inline overrides applied via the page editor's
+             toolbar; here is where they're created/edited/deleted. */ ?>
+    <section class="ed-panel">
+      <header class="ed-panel-head">
+        <h3>Character styles</h3>
+        <span class="ed-typo-head-btns">
+          <button type="button" id="new-charstyle-btn" class="ed-mini" title="Add a character style">+ Style</button>
+          <button type="button" id="save-charstyles-btn" class="ed-mini" title="Write char-styles.json">Save</button>
+        </span>
+      </header>
+      <ul id="charstyle-list" class="ed-typo-list"></ul>
+    </section>
+
   </aside>
 
   <div class="ed-mode-banner" id="set-origin-banner" hidden>

@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.108):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.110):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -334,9 +334,42 @@ until the next save attempt or a success — instead of the grey, glanced-past,
 `writeStatus`; `doSave` clears `transientStatus` at the start of each attempt so
 a fixed error doesn't linger. Success/info toasts stay transient as before.
 
-**Next: TS4 Slice 3** — char-style authoring panel (create/edit/delete entries
-in `_shared/char-styles.json`, like the typography panel), then Slice 4
-(dangling-ref/governance polish).
+**TS4 Slice 3 — char-style authoring panel (v0.10.109 backend + v0.10.110 UI):**
+the surface for CREATING/editing/deleting char-styles, in the DRAW editor
+(`/dev/draw`) — NOT the page editor. Modeled on the typography panel but adapted
+for the char-style **omit-unset** data model.
+- **Slice 3.1 — save route (v0.10.109, config.php):** new `dev/draw/charstyles`
+  GET|POST, a clone of `dev/draw/typography`. POST validates+persists
+  `_shared/char-styles.json` (`{schemaVersion:1, styles, savedAt, count}`, atomic
+  .tmp+rename). The KEY difference from typography: **omit-unset** — every field
+  (`sizeEm`/`weight`/`italic`/`letterSpacingEm`) is OPTIONAL; only set fields are
+  written to the stored entry, so an unset key is ABSENT (→ inherits), never a
+  zero/empty placeholder. `italic` is **tri-state**: key absent (inherit) ≠
+  `false`/"upright" ≠ `true`. Clamps: sizeEm 0.1–10, letterSpacingEm −2..2;
+  `weight` only `bolder`|`lighter`; id `/^[a-z0-9_-]{1,64}$/` with dup rejection.
+  GET returns `{ok, styles}`. This envelope's `schemaVersion:1` is its own axis
+  (mirrors typography-tokens.json) — NOT the rects-content axis, so no bump/auth.
+- **Slice 3.2 — panel UI (v0.10.110, dev-draw.js + draw.php + dev-draw.css):**
+  draw.php loads `$charStyles = deco_load_charstyles(...)`, passes it in the JSON
+  payload, and emits an `#ed-charstyle-css` `<style>`. The panel reuses the
+  `.ed-typo-*` row/header/spec CSS (DRY) with a "Character styles" section
+  (`+ Style` / `Save`, `#charstyle-list`). Each row: name input (slugify-renames
+  the id for UNSAVED styles only), `cs-<id>` tag, sample `Base text <span
+  class="mk-cs-<id>">styled Ag</span>`, a spec line (set fields joined, or
+  "inherit (no overrides)"), and expanded fields = `csEmField` Size (em),
+  select Weight, select Italic, `csEmField` Letter spacing (em). `csEmField`
+  blanks→`onChange(null)`; each handler does `delete c.field` when unset, so the
+  in-memory object stays omit-unset too. `rebuildCharstyleClientCss()` mirrors the
+  PHP `deco_charstyle_marks_css()` emitter into `#ed-charstyle-css-live` for live
+  preview (only set fields, same clamps). `addCharStyle()` pushes `{id, name:'New
+  style'}` only (no fields). Save POSTs `{styles}`, adopts `j.styles`, locks the
+  new-id slugify-rename. Dirty state: amber `#save-charstyles-btn.is-dirty`.
+  Verified end-to-end through the real UI: add → slug-rename → set sizeEm (live
+  preview + spec update, omit-unset confirmed) → Save (file written with only set
+  fields, tri-state italic intact) → Delete; then the test file was removed to
+  restore the no-file seed-fallback state (content left as found).
+
+**Next: TS4 Slice 4** — dangling-ref/governance polish.
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
 override; it's load-bearing — confirmed 2026-06).

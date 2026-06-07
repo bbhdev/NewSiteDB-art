@@ -2679,8 +2679,16 @@ body.editor input[type="range"] {
 .ed-typo-edit .ed-field { margin: 0; }
 /* Dirty indicator on the panel-head Save button — unsaved create/rename/
    delete since the last write. */
-#save-typography-btn.is-dirty {
+#save-typography-btn.is-dirty,
+#save-charstyles-btn.is-dirty {
   border-color: #c79a3a; color: #f0c25a;
+}
+/* TS4 Slice 3: char-style sample row reuses .ed-typo-sample as the box but
+   shows the relative effect inline — plain base text + a .mk-cs-<id> span —
+   so size/weight/italic deltas read against the surrounding base. The base
+   sits at a fixed, comfortable size so an em-relative override is legible. */
+.ed-cs-sample {
+  font-size: 0.95rem; line-height: 1.4;
 }
 .ed-typo-id {
   color: #8a9099; font-size: 0.68em; flex: none;
