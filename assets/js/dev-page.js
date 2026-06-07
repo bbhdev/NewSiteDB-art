@@ -847,6 +847,22 @@
     return null;
   }
 
+  // The [start,end) of the `attr` run that strictly CONTAINS offset `pos`
+  // (boundaries excluded — matches currentMarkValue's collapsed-caret rule).
+  // Marks are normalized to one run per (attr,value), so the first hit is the
+  // whole run. Returns null if `pos` isn't inside such a run. Used so a
+  // collapsed caret inside a link can edit the whole link without selecting
+  // the label by hand first (v0.10.103).
+  function markRangeAt(marks, pos, attr) {
+    for (let k = 0; k < marks.length; k++) {
+      const m = marks[k];
+      if (m.attr === attr && m.start < pos && m.end > pos) {
+        return { start: m.start, end: m.end };
+      }
+    }
+    return null;
+  }
+
   // Drop empties, clamp to [0,len], merge equal (attr,value) adjacent/
   // overlapping ranges, and return in a deterministic order (by start,
   // then attr) for stable on-disk diffs.
@@ -1239,11 +1255,24 @@
     const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
     if (!ed) return;
     const sel = getCaretOffset(ed);
-    if (!sel || sel.end <= sel.start) return;    // selection required
+    if (!sel) return;
     const r = state.rects.find(function (x) { return x.id === editingId; });
     if (!r) return;
-    const cur = currentMarkValue(r.marks || [], sel, 'link');
-    savedLinkRange = { start: sel.start, end: sel.end };
+    const marks = r.marks || [];
+    // A real selection edits/creates a link over it. A COLLAPSED caret inside
+    // an existing link edits that whole link run (v0.10.103 — the read-out's
+    // URL/pencil resolve the link at the caret, so the edit gesture must too;
+    // before, a caret-without-selection opened nothing). A collapsed caret NOT
+    // on a link is a no-op (creating a link needs a selection to span).
+    let range;
+    if (sel.end > sel.start) {
+      range = { start: sel.start, end: sel.end };
+    } else {
+      range = markRangeAt(marks, sel.start, 'link');
+      if (!range) return;
+    }
+    const cur = currentMarkValue(marks, range, 'link');
+    savedLinkRange = { start: range.start, end: range.end };
     linkEditOpen = true;
     buildTextToolbar();                          // rebuild bar WITH the input row
     const bar = document.getElementById('pe-text-toolbar');

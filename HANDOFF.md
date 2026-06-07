@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.102):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.103):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -262,6 +262,17 @@ moves to it — the edit session survives a verify click. Validated via preview
 shows the URL + verify-href + pencil, chain button lit; pencil/URL-click
 reopens the editor prefilled; read-out hides while editing and when the
 selection leaves the link. Editor-only; no runtime parity needed.
+**(v0.10.103 fix)** the read-out resolves a link at a COLLAPSED caret (via
+`currentMarkValue`, which checks a caret strictly inside a mark), but
+`openLinkInput` had bailed on any caret without a selection — so clicking the
+edit pencil / URL with the cursor merely placed inside a link did nothing.
+Fixed with a `markRangeAt(marks, pos, attr)` helper: a collapsed caret inside
+a link now expands to that link's full run and edits the whole label (the
+natural "click in a link to edit it" gesture); a real selection still
+edits/creates over the selection; a collapsed caret NOT on a link stays a
+no-op (creating a link needs a span). Validated via preview: caret-only inside
+a link → pencil opens the editor prefilled, and applying changes the entire
+link run (the restored selection spans the whole label).
 Slice 2 brought the image pipeline + out-of-workflow image workshop
 (see the Slice 2 entry below).
 A navigation-cleanup batch (v0.10.39→0.10.44) re-homed the dev-tool
