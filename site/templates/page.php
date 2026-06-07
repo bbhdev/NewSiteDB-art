@@ -127,6 +127,12 @@ $rects = array_map(function ($r) {
     // without it behaves exactly as before. Only meaningful on text
     // rects; carried (null) on all kinds for grep-ability.
     if (!array_key_exists('typographyId', $r)) $r['typographyId'] = null;
+    // v0.10.91 (Slice TS1): `marks` — atomic text-style ranges over the
+    // rect's `text` (see the dev/page/save validator for the shape).
+    // Additive within schema v3 with a [] default, so NOT a schema bump:
+    // a v3 file predating marks reaches JS with marks:[] and the mark
+    // engine renders a single unstyled run, identical to pre-TS1.
+    if (!array_key_exists('marks', $r) || !is_array($r['marks'])) $r['marks'] = [];
     return $r;
 }, $rects);
 // Editor always emits the current schema version on save. Declaring 3

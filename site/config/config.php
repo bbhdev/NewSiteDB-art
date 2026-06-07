@@ -1395,6 +1395,47 @@ HTML;
               return $fail('Rect text exceeds 5000 characters.');
             }
           }
+          // v0.10.91 (Slice TS1): optional `marks` field — atomic text-style
+          // ranges over the rect's `text`. Shape per element:
+          //   { start:int, end:int, attr:string, value:(true|string) }
+          // over the half-open interval [start,end). The editor's mark
+          // engine always emits NORMALIZED, in-bounds marks; this is a
+          // defensive SHAPE-only gate (a hand-edited or stale rects.json
+          // can't inject garbage). Like `typographyId`, attr-registry
+          // membership is intentionally NOT enforced — an unknown attr
+          // simply maps to no CSS class at render and degrades gracefully.
+          // Additive within schema v3 with a [] default → NOT a schema bump.
+          // Bounds use mb_strlen on the (already validated) text; a marks
+          // array on a rect with no/empty text is rejected since there are
+          // no valid offsets to anchor to.
+          if (isset($r['marks']) && $r['marks'] !== null && $r['marks'] !== []) {
+            if (!is_array($r['marks']) || array_keys($r['marks']) !== range(0, count($r['marks']) - 1)) {
+              return $fail('Rect marks must be a JSON array.');
+            }
+            $textLen = (isset($r['text']) && is_string($r['text'])) ? mb_strlen($r['text']) : 0;
+            if (count($r['marks']) > 1000) {
+              return $fail('Rect marks exceeds 1000 entries.');
+            }
+            foreach ($r['marks'] as $m) {
+              if (!is_array($m)
+                  || !isset($m['start'], $m['end'], $m['attr'])
+                  || !array_key_exists('value', $m)) {
+                return $fail('Rect mark must have start, end, attr, value.');
+              }
+              if (!is_int($m['start']) || !is_int($m['end'])
+                  || $m['start'] < 0 || $m['start'] >= $m['end'] || $m['end'] > $textLen) {
+                return $fail('Rect mark range must satisfy 0 <= start < end <= text length.');
+              }
+              if (!is_string($m['attr'])
+                  || !preg_match('/^[a-z][a-z0-9_-]{0,31}$/', $m['attr'])) {
+                return $fail('Rect mark attr must be a lowercase slug (1..32 chars).');
+              }
+              $mv = $m['value'];
+              if ($mv !== true && !(is_string($mv) && mb_strlen($mv) <= 256)) {
+                return $fail('Rect mark value must be true or a string (<=256 chars).');
+              }
+            }
+          }
         }
 
         // Normalise on write: ensure each rect carries an explicit
@@ -1424,6 +1465,13 @@ HTML;
           // value collapses to null.
           $r['text'] = (isset($r['text']) && is_string($r['text']) && trim($r['text']) !== '')
             ? $r['text'] : null;
+          // v0.10.91 (Slice TS1): marks — re-index to a clean JSON array
+          // (array_values strips any non-sequential keys), and force [] when
+          // the rect ended up with no text (no offsets to anchor to). The
+          // engine already normalizes/sorts client-side; this only fixes the
+          // on-disk shape to an unambiguous list.
+          $r['marks'] = ($r['text'] !== null && isset($r['marks']) && is_array($r['marks']))
+            ? array_values($r['marks']) : [];
           return $r;
         }, $rects);
 
