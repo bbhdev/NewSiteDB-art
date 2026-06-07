@@ -87,6 +87,11 @@ if (empty($palette)) {
 // set when the file is absent, so the panel always has something to show.
 $typography = deco_load_typography($contentRoot);
 
+// Character styles (TS4 Slice 3). Same _shared pattern as typography:
+// deco_load_charstyles() seeds defaults when the file is absent, so the
+// char-style panel always has something to author/preview.
+$charStyles = deco_load_charstyles($contentRoot);
+
 // Scan the target page's template for `id="…"` attributes so the
 // trigger-field combobox can suggest selectors that actually exist
 // (e.g. "#projects" if the home template has <h2 id="projects">).
@@ -138,6 +143,7 @@ $payload = json_encode([
   'byClass'            => $byClass,
   'palette'            => $palette,
   'typography'         => $typography,
+  'charStyles'         => $charStyles,
   'page'               => $pageCfg,
   'triggerSuggestions' => $triggerSuggestions,
   'imageSources'       => $imageSources,
@@ -157,6 +163,11 @@ $payload = json_encode([
            real family/size — same emitter the page editor & runtime use. */ ?>
   <?= deco_google_fonts_link($contentRoot) ?>
   <style id="ed-typography-css"><?= deco_typography_css($typography) ?></style>
+  <?php /* TS4 Slice 3: one bare `.mk-cs-<id>` rule per char-style so the
+           char-style panel's per-row previews render with the real relative
+           styling — the SAME emitter the page editor & runtime use. The JS
+           rebuilds this live (#ed-charstyle-css-live) as fields change. */ ?>
+  <style id="ed-charstyle-css"><?= deco_charstyle_marks_css($charStyles) ?></style>
 </head>
 <body class="editor">
 
