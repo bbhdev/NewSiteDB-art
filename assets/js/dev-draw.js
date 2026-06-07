@@ -12381,6 +12381,12 @@
     // (the sticky header it replaced slid out of view when scrolled up).
     const bar = document.getElementById('typo-save-bar');
     if (bar) bar.hidden = false;
+    // Reset the bar button label every time the bar reappears: saveTypography()
+    // leaves it reading "Saved." (its 1800ms reset only targets the header
+    // button), and because the bar hides immediately on save that stale label
+    // would resurface — spuriously saying "Saved" — on the next edit.
+    const barBtn = document.getElementById('typo-save-bar-btn');
+    if (barBtn) { barBtn.disabled = false; barBtn.textContent = 'Save changes'; }
   }
   function clearTypographyDirty() {
     typographyDirty = false;

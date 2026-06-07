@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.122):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.123):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -661,6 +661,13 @@ small slices (DRAW-only; no data/route/schema change).
   sticky-header CSS (`#element-styles-section .ed-panel-head{position:sticky…}`) was removed.
   Verified live: bar hidden when clean, shown when dirty; scrolled to sidebar TOP it stays
   pinned at the viewport bottom (barBottom≈sidebarBottom); reload discards; no console errors.
+- **V6.1 (v0.10.123) — stale "Saved." label fix.** `saveTypography(btn)` sets the passed
+  button to "Saved." on success but its 1800ms reset only targets `#save-typography-btn`
+  (the header). Since the bar HIDES immediately on save, the sticky button kept the stale
+  "Saved." text and it resurfaced — spuriously — the next time an edit re-showed the bar.
+  Fix: `markTypographyDirty()` now resets `#typo-save-bar-btn` to "Save changes" + enabled
+  every time it un-hides the bar. Verified: forced the stale state, fired a new edit → bar
+  reopens reading "Save changes".
 
 **Then: general page background** (see decision note below) — which is the
 real retirement path for the v0.10.93 override (do NOT just delete the
