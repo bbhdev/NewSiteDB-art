@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.132):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.133):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -504,10 +504,43 @@ repurposed** to carry complete-style ids. Key decisions:
       the fewest rows that fit the viewport, then full-width link read-out / link input rows, then
       the collapsible overrides. The link button left the overrides disclosure (it's first-class
       now); the overrides inherit the bar's computed width so colour swatches stop wrapping. (entry below.)
-    - **B3 COMPLETE.** Next: Slice C (runtime parity).
-- **C** — runtime parity (PHP renders ranges + colour through the same cascade).
+    - **B3 COMPLETE.**
+    - **C — runtime parity (element-style ranges render on the public page)** ✅ DONE
+      (v0.10.133). The single remaining gap was a one-branch addition: PHP `deco_marks_classes`
+      now maps `elementStyle` → bare `ty-<id>`, mirroring `classForMark()` in dev-page.js. The
+      rest of the runtime pipeline was already in place (`deco_text_segments` segmentation,
+      `deco_typography_css` already emits the `.ty-<id>` rules, canvas-page.php already renders
+      runs via `deco_marks_classes`, the save route already accepts `elementStyle` marks via the
+      lenient slug+value validation). (entry below.)
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
+
+**Element styles C — runtime parity: element-style ranges render on the public page (v0.10.133).**
+The last piece of the element-styles unit. An `elementStyle` range mark carries a complete
+element-style id and (decision A) emits the SAME bare `.ty-<id>` class the rect's default style
+uses. The editor already did this (`classForMark` in dev-page.js); the public runtime did not —
+`deco_marks_classes` had branches for strong/em/underline/color/charStyle but no `elementStyle`,
+so a styled range fell through to no class and rendered as the rect default on the public page.
+Fix = one branch in `deco_marks_classes` (`site/plugins/deco/index.php`): `elementStyle` → `ty-`
++ sanitised id, exactly mirroring the JS. **Everything else was already in place** and needed no
+change:
+- `deco_text_segments` already segments marks identically to the JS `segments`.
+- `deco_typography_css` already emits the bare `.ty-<id>` rules (0,1,0) — so the class an
+  elementStyle range emits already HAS a styled rule at runtime; canvas-page.php already calls it.
+- canvas-page.php already renders each run via `deco_marks_classes` → `<span class="…">`.
+- The save route already persists `elementStyle` marks (attr matches the lenient
+  `/^[a-z][a-zA-Z0-9_-]{0,31}$/` slug; a style-id string value ≤256 chars is allowed).
+- The colour tie-break (atomic `.mk-color-<id>` qualified to (0,2,0) so it beats an element
+  style's own colour) was already done back in B1 (v0.10.125) — "pre-satisfies the runtime side".
+**Cascade at runtime** (pure CSS specificity, no resolver): rect base `.ty-<id>` (inherited) <
+range `.ty-<id>` on the span (direct, 0,1,0) < atomic `.rect-text .mk-*` (0,2,0). **Live-verified**
+on the public page `/test-page-3` (which carries three real elementStyle ranges): rendered
+`<span class="ty-heading">`, `<span class="ty-caption">`, `<span class="ty-test-style">` with the
+correct text slices, and the matching `.ty-test-style { … Bodoni Moda 25px italic; color:#FF88FF }`
+rule present in the page `<style>`. Text content is `esc()`-escaped (no markup honoured). HTTP 200,
+no errors. With C done, the element-styles unit (B1→B6 + C) is functionally complete editor→runtime;
+only Slice D (dead-code cleanup + the load-bearing `.pe-rect-text` colour override retirement)
+remains before the whole unit can clear the push bar.
 
 **Element styles B3-6 — specimen readability via HOVER-REVEAL, not always-paper (v0.10.132).**
 Follow-up to B3-5: the author found the always-paper chips "very readable but bad for the UI

@@ -416,6 +416,22 @@ function deco_marks_classes(array $attrs): array
             // (degrades like a dangling typographyId).
             $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $val);
             if ($id !== '') $c = 'mk-cs-' . $id;
+        } elseif ($attr === 'elementStyle') {
+            // Slice C (2026-06, decision A): runtime mirror of classForMark()
+            // in dev-page.js. An `elementStyle` range mark carries a COMPLETE
+            // element-style id and emits the SAME bare `.ty-<id>` class the
+            // rect's default style uses — one registry, one emitter
+            // (deco_typography_css already emits the rule). Applied DIRECTLY on
+            // the run span, `.ty-<id>` (0,1,0) beats the rect's INHERITED
+            // `.ty-<id>` base (direct > inherited, no specificity needed) →
+            // range overrides rect-default; and loses to the atomic
+            // `.rect-text .mk-*` axes (0,2,0) → strong/em/underline still win.
+            // The element-style's own colour ties the atomic `.mk-color-<id>`;
+            // that tie is broken in deco_palette_marks_css (atomic colour
+            // qualified to (0,2,0)). Unknown id → no class (degrades like a
+            // dangling typographyId).
+            $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $val);
+            if ($id !== '') $c = 'ty-' . $id;
         } elseif (isset($map[$attr])) {
             $c = $map[$attr];
         }
