@@ -1881,6 +1881,22 @@
             // Plain Enter → insert a real '\n' (not a <br>/<div>).
             ev.preventDefault();
             insertPlainTextAtCaret(txt, '\n');
+          } else if ((ev.metaKey || ev.ctrlKey) && !ev.altKey
+                     && (ev.key === 'b' || ev.key === 'B'
+                      || ev.key === 'i' || ev.key === 'I')) {
+            // ⌘/Ctrl+B / +I → route to OUR mark engine. CRITICAL: must
+            // preventDefault — contenteditable="true" otherwise runs the
+            // browser's native execCommand('bold'/'italic'), which injects
+            // foreign <b>/<i> nodes OUTSIDE the marks model (button never
+            // updates; the styling is silently dropped on commit when the
+            // node collapses through textContent; caret offsets can desync
+            // mid-edit). Toggling through toggleStyle keeps the model the
+            // single source of truth and updates the pressed-state. (⌘B/⌘I
+            // were named for TS2; pulled forward here because leaving the
+            // native command active is a correctness hazard, not polish.)
+            ev.preventDefault();
+            const k = ev.key.toLowerCase();
+            toggleStyle(k === 'b' ? 'strong' : 'em');
           }
         });
         // Typing / IME / delete: patch-in-place, remap marks, no re-render.
