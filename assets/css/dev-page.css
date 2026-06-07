@@ -468,6 +468,41 @@ button.pe-save.is-flash {
 .pe-rect-text .mk-strong { font-weight: 700; }
 .pe-rect-text .mk-em     { font-style: italic; }
 
+/* Slice TS1: floating B/I toolbar shown while a text rect is inline-edited.
+   position:fixed (set in JS) above the editable. Above all canvas chrome. */
+.pe-text-toolbar {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  z-index: 9999;
+}
+.pe-tt-btn {
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.45rem;
+  font-size: 1.05rem;
+  line-height: 1;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pe-tt-btn:hover { background: #3a3a3c; }
+.pe-tt-strong { font-weight: 800; }
+.pe-tt-em     { font-style: italic; font-family: Georgia, 'Times New Roman', serif; }
+.pe-tt-btn.is-active {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+
 /* Slice T2: small helper hint under a panel field (e.g. "double-click to
    edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */
 .pe-field-hint {

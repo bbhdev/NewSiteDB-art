@@ -142,6 +142,10 @@
   // rect's style marks through it, then updates editText. Reset on
   // enterEditMode; meaningless while editingId == null.
   let editText = '';
+  // Slice TS1 (v0.10.90): one-time guard for the document selectionchange
+  // listener that keeps the B/I toolbar's pressed-state in sync with the
+  // current selection while editing.
+  let selChangeBound = false;
   // Slice T2 (v0.10.85): manual double-click/double-tap detection. We can't
   // use the native 'dblclick' event because the pointerdown handler calls
   // preventDefault() on every rect hit, and preventDefault on pointerdown
@@ -917,6 +921,98 @@
     sel.removeAllRanges();
     sel.addRange(range);
     handleEditInput(el);
+  }
+
+  // ── Slice TS1: B/I styling toolbar (floats while editing) ──
+
+  // Toggle an atomic style over the current selection. Collapsed caret is a
+  // no-op for now (pending-format is TS2). Uses editText/r.marks (the LIVE
+  // edit state — r.text is stale until commit), rebuilds the run spans in
+  // place, and restores the selection so the author can keep toggling.
+  function toggleStyle(attr) {
+    if (editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const sel = getCaretOffset(ed);
+    if (!sel || sel.end <= sel.start) return;   // need a non-empty selection
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    if (!r) return;
+    const len = editText.length;
+    r.marks = normalizeMarks(applyMark(r.marks || [], sel.start, sel.end, attr), len);
+    markDirty();
+    renderRunsInto(ed, editText, r.marks);      // rebuild spans from the model
+    setSelectionRange(ed, sel.start, sel.end);  // keep the selection
+    updateToolbarPressed();
+  }
+
+  // Reflect whether each attr fully covers the current selection.
+  function updateToolbarPressed() {
+    const bar = document.getElementById('pe-text-toolbar');
+    if (!bar || editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const sel = getCaretOffset(ed);
+    const r = state.rects.find(function (x) { return x.id === editingId; });
+    const marks = (r && r.marks) || [];
+    const btns = bar.querySelectorAll('.pe-tt-btn');
+    for (let k = 0; k < btns.length; k++) {
+      const attr = btns[k].dataset.attr;
+      const on = !!(sel && sel.end > sel.start && rangeHasAttr(marks, sel.start, sel.end, attr));
+      btns[k].classList.toggle('is-active', on);
+    }
+  }
+
+  // Position the (fixed) toolbar just above the editable — or below if it
+  // would clip the top of the viewport.
+  function positionTextToolbar(bar, ed) {
+    const rc = ed.getBoundingClientRect();
+    bar.style.position = 'fixed';
+    bar.style.left = Math.max(4, rc.left) + 'px';
+    let top = rc.top - bar.offsetHeight - 6;
+    if (top < 4) top = rc.bottom + 6;
+    bar.style.top = top + 'px';
+  }
+
+  // Build (or tear down) the floating B/I toolbar. Called from render():
+  // removes any stale bar, and when editing builds a fresh one over the
+  // active editable. TS1 ships two buttons (bold, italic).
+  function buildTextToolbar() {
+    const old = document.getElementById('pe-text-toolbar');
+    if (old) old.remove();
+    if (editingId == null) return;
+    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
+    if (!ed) return;
+    const bar = document.createElement('div');
+    bar.id = 'pe-text-toolbar';
+    bar.className = 'pe-text-toolbar';
+    const defs = [
+      { attr: 'strong', label: 'B', title: 'Bold (selection)' },
+      { attr: 'em',     label: 'I', title: 'Italic (selection)' }
+    ];
+    defs.forEach(function (def) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pe-tt-btn pe-tt-' + def.attr;
+      b.textContent = def.label;
+      b.title = def.title;
+      b.dataset.attr = def.attr;
+      // CRITICAL: preventDefault on pointerdown keeps focus + selection in
+      // the editable, so its blur→commit doesn't fire before the click
+      // applies the style (and the selection survives to be styled).
+      b.addEventListener('pointerdown', function (ev) { ev.preventDefault(); });
+      b.addEventListener('mousedown',   function (ev) { ev.preventDefault(); });
+      b.addEventListener('click', function (ev) { ev.preventDefault(); toggleStyle(def.attr); });
+      bar.appendChild(b);
+    });
+    document.body.appendChild(bar);
+    positionTextToolbar(bar, ed);
+    updateToolbarPressed();
+    if (!selChangeBound) {
+      selChangeBound = true;
+      document.addEventListener('selectionchange', function () {
+        if (editingId != null) updateToolbarPressed();
+      });
+    }
   }
 
   // "Match rect to image": eliminate the aspect mismatch by resizing the
@@ -1935,6 +2031,9 @@
     // when it's already focused, so a stray render mid-edit doesn't jump
     // the caret — only a render that destroyed+recreated the node re-focuses.
     focusEditable();
+    // Slice TS1: float the B/I toolbar over the active editable (or remove
+    // it when not editing). After focusEditable so the editable + caret exist.
+    buildTextToolbar();
   }
 
   // ────────────────────────────────────────────────────────────────
