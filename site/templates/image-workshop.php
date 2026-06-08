@@ -59,5 +59,6 @@ $batches = $page->childrenAndDrafts()->sortBy('title', 'asc');
     <?php endif; ?>
   </main>
   <!-- v<?= $v ?> -->
+  <?php snippet('sync-peer-indicator') ?>
 </body>
 </html>

@@ -2216,6 +2216,44 @@ HTML;
           'application/json'
         );
       }
+    ],
+
+    /*
+     * GET /sync/peer/<role> — proxy a peer's /sync/state through this
+     * node, using THIS node's stored shared secret to authenticate
+     * upstream. Used by L's editor-side indicator (Slice S2b) to
+     * surface A's lastActivityAt to the browser without leaking the
+     * shared secret into page source and without CORS friction
+     * (browser hits same origin).
+     *
+     * Auth: NONE on this proxy route. Rationale:
+     *   - On L (localhost, the only place this indicator runs in
+     *     S2b), Mac firewall blocks LAN access by default — only the
+     *     local browser can reach it.
+     *   - Adding bearer auth here would require embedding the shared
+     *     secret in page source for the JS to use, which defeats
+     *     the whole point of the proxy.
+     *   - The proxy returns READ-ONLY peer state (a few timestamps)
+     *     — no write surface, no PII. Worst-case leak on a
+     *     misconfigured network: someone learns when A was last
+     *     authored.
+     *
+     * The route is registered globally but the role-gated snippet
+     * (snippets/sync-peer-indicator.php) only emits a polling call
+     * on the L node, so A and B never invoke it in normal use.
+     */
+    [
+      'pattern' => 'sync/peer/(:any)',
+      'method'  => 'GET',
+      'action'  => function ($role) {
+        $result = sync_fetch_peer_state((string)$role);
+        $status = $result['ok'] ? 200 : 502;
+        return new Kirby\Http\Response(
+          json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+          'application/json',
+          $status
+        );
+      }
     ]
   ]
 ];

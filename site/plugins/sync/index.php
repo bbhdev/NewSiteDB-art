@@ -334,6 +334,62 @@ function sync_notify_peers_of_local_activity(string $at): array
 }
 
 /**
+ * Server-side GET of a peer's /sync/state, using this node's stored
+ * shared secret as the bearer token. Used by L's editor-side
+ * indicator (S2b) to surface A's lastActivityAt without leaking the
+ * secret into browser JS or tripping CORS.
+ *
+ * Returns:
+ *   ['ok' => true,  'state' => <peer's state array>, 'role' => <peer's reported role>, 'time' => <peer's wall clock>]
+ *   ['ok' => false, 'error' => <short reason>, 'code' => <http code or 0>]
+ *
+ * Short timeouts — must NEVER block UI more than a couple seconds.
+ */
+function sync_fetch_peer_state(string $role): array
+{
+    $sync = option('sync');
+    if (!is_array($sync) || empty($sync['secret'])) {
+        return ['ok' => false, 'error' => 'sync not configured', 'code' => 0];
+    }
+    $peers = is_array($sync['peers'] ?? null) ? $sync['peers'] : [];
+    if (empty($peers[$role])) {
+        return ['ok' => false, 'error' => 'no peer URL for role ' . $role, 'code' => 0];
+    }
+    $url = rtrim((string)$peers[$role], '/') . '/sync/state';
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'error' => 'curl not available', 'code' => 0];
+    }
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . (string)$sync['secret'],
+            'User-Agent: NewSiteDB-art-sync/' . (option('version') ?? 'dev'),
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT        => 5,
+        CURLOPT_FOLLOWLOCATION => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+    if ($code !== 200 || $resp === false) {
+        return ['ok' => false, 'error' => $err !== '' ? $err : ('HTTP ' . $code), 'code' => $code];
+    }
+    $decoded = json_decode((string)$resp, true);
+    if (!is_array($decoded) || empty($decoded['ok'])) {
+        return ['ok' => false, 'error' => 'bad response shape', 'code' => $code];
+    }
+    return [
+        'ok'    => true,
+        'state' => $decoded['state'] ?? null,
+        'role'  => $decoded['role']  ?? $role,
+        'time'  => $decoded['time']  ?? null,
+    ];
+}
+
+/**
  * Convenience for save routes: record local activity AND push to
  * upstream peer in one call. Returns the timestamp written so the
  * save handler can include it in its own response if desired.

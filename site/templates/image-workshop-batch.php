@@ -566,5 +566,6 @@ foreach ($images as $img) {
     })();
   </script>
   <!-- v<?= $v ?> -->
+  <?php snippet('sync-peer-indicator') ?>
 </body>
 </html>

@@ -365,5 +365,6 @@ $payload = str_replace('<', '\\u003c', $payload);
 <script id="editor-data" type="application/json"><?= $payload ?></script>
 <script src="<?= url('assets/js/dev-page.js') ?>?v=<?= $v ?>"></script>
 <!-- v<?= $v ?> -->
+<?php snippet('sync-peer-indicator') ?>
 </body>
 </html>
