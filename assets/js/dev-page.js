@@ -149,18 +149,6 @@
     if (p && p.id) paletteById[p.id] = p;
   });
 
-  // Char-styles (TS4 / M2). Named RELATIVE type-only styles a text range can
-  // reference via a `charStyle` mark; the template emits one .mk-cs-<id> rule
-  // per entry. In Slice 1 the list is normalized here but not yet surfaced in
-  // the UI — the Slice-2 toolbar picker consumes csById, mirroring the colour
-  // swatches + Type picker. Holding the list now keeps the payload contract
-  // stable and lets render preview a hand-seeded charStyle mark immediately.
-  state.charStyles = Array.isArray(state.charStyles) ? state.charStyles : [];
-  const csById = {};
-  state.charStyles.forEach(function (c) {
-    if (c && c.id) csById[c.id] = c;
-  });
-
   // Slice 2 step 4b: per-page image library, fetched once from
   // GET dev/page/images/<pageId>. null = not yet loaded; [] =
   // loaded-empty. imageByFilename indexes the list so renderRect and
@@ -661,11 +649,6 @@
   // colours get two different classes. Mirrors PHP deco_marks_classes().
   function classForMark(attr, value) {
     if (attr === 'color') { const id = safeMarkId(value); return id ? 'mk-color-' + id : null; }
-    // TS4: charStyle is a named RELATIVE type-only style → bare .mk-cs-<id>.
-    // Specificity (0,1,0) beats the rect's inherited .ty-<id> token but loses
-    // to the atomic .pe-rect-text .mk-* axes (0,2,0) — that ordering IS the
-    // rect-base < char-style < atomic-override cascade, no resolver needed.
-    if (attr === 'charStyle') { const id = safeMarkId(value); return id ? 'mk-cs-' + id : null; }
     // Slice B (2026-06, decision A): the `elementStyle` range mark carries a
     // COMPLETE element-style id and emits the SAME `.ty-<id>` class the rect's
     // default style uses — one registry, one emitter. Applied DIRECTLY on the
@@ -674,8 +657,8 @@
     // and loses to the atomic `.pe-rect-text .mk-*` axes (0,2,0) → strong/em/
     // underline escape-hatch still wins. The element-style's own colour ties
     // the atomic `.mk-color-<id>`; that tie is broken in deco_palette_marks_css
-    // (atomic colour qualified to (0,2,0)). Replaces the retired relative
-    // `charStyle` axis (kept above as a no-op until Slice D removes it).
+    // (atomic colour qualified to (0,2,0)). (Replaced the retired TS4 relative
+    // `charStyle`/`mk-cs-<id>` axis, removed in Slice D.)
     if (attr === 'elementStyle') { const id = safeMarkId(value); return id ? 'ty-' + id : null; }
     return MARK_ATTR_CLASS[attr] || null;
   }
@@ -1308,37 +1291,13 @@
     updateToolbarPressed();
   }
 
-  // TS4 Slice 2: set (or clear, value === null) a named character-style over
-  // the current selection. Structurally identical to applyColor — a valued
-  // axis with OVERWRITE semantics (one charStyle per char) via setMark — only
-  // the attr differs. Selection-only; a collapsed caret is a no-op (a pending
-  // char-style is a deferred follow-on, same as pending colour). The style is
-  // the cascade's middle layer: it restyles the run relative to the rect's
-  // base token, and any atomic strong/em/underline on the same chars still
-  // wins (pure CSS specificity — see classForMark / deco_charstyle_marks_css).
-  function applyCharStyle(value) {
-    if (editingId == null) return;
-    const ed = surface && surface.querySelector('.pe-rect-text.is-editing');
-    if (!ed) return;
-    const sel = getCaretOffset(ed);
-    if (!sel || sel.end <= sel.start) return;    // selection required
-    const r = state.rects.find(function (x) { return x.id === editingId; });
-    if (!r) return;
-    const len = editText.length;
-    r.marks = normalizeMarks(setMark(r.marks || [], sel.start, sel.end, 'charStyle', value), len);
-    markDirty();
-    renderRunsInto(ed, editText, r.marks);
-    setSelectionRange(ed, sel.start, sel.end);
-    updateToolbarPressed();
-  }
-
   // Slice B3 — apply (or, value === null, CLEAR) a COMPLETE element style over
   // the current selection. The governed primary action: it sets an
   // `elementStyle` range mark carrying a `.ty-<id>` registry id (overwrite
   // semantics via setMark — one element style per char). Clearing removes the
   // mark so the range reverts to the rect's DEFAULT element style (totality:
-  // there is no "no style"). Structurally identical to applyCharStyle /
-  // applyColor; only the attr differs. Selection-only — a collapsed caret is a
+  // there is no "no style"). Structurally identical to applyColor; only the
+  // attr differs. Selection-only — a collapsed caret is a
   // no-op (a pending element style is a possible later follow-on).
   function applyElementStyle(value) {
     if (editingId == null) return;

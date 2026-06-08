@@ -621,49 +621,9 @@ button.pe-save.is-flash {
   border-color: #fff;
 }
 
-/* TS4 Slice 2 char-style chips — named text pills appended after the colour
-   swatches. Unlike a colour (one visual swatch) a char-style is named, so the
-   chip carries its NAME, wrapped in a .mk-cs-<id> span that previews the actual
-   style (relative size/weight/italic). Pill height matches the B/I buttons so
-   the row reads as one toolbar; auto width fits the label. Clearly tappable
-   (≥2rem) for the future tablet editor. */
-.pe-tt-cs {
-  height: 2rem;
-  padding: 0 0.5rem;
-  max-width: 9rem;
-  font-size: 0.82rem;
-  line-height: 1;
-  color: #e8e8ea;
-  background: #2c2c2e;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 0.35rem;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pe-tt-cs:hover { background: #3a3a3c; }
-/* The preview span keeps the chip a single line regardless of the style's
-   relative size (the chip clips/centres it); it only needs to hint the look. */
-.pe-tt-cs > span { display: inline-block; vertical-align: middle; }
-/* "Clear style" chip: the conventional none affordance, a neutral × pill. */
-.pe-tt-cs-clear {
-  min-width: 2rem;
-  padding: 0;
-  font-size: 1.05rem;
-  color: #c8c8ca;
-}
-.pe-tt-cs.is-active {
-  background: var(--pe-palette-accent, #ff5500);
-  border-color: var(--pe-palette-accent, #ff5500);
-  color: #fff;
-}
-
 /* Slice B3-1: element-style buttons — the GOVERNED primary picker. Visually a
-   shade heavier than the colour swatches / old char chips to read as the
-   primary authoring action. Same pill geometry as .pe-tt-cs. */
+   shade heavier than the colour swatches to read as the primary authoring
+   action. (Replaced the retired TS4 char-style chips, removed in Slice D.) */
 .pe-tt-es {
   height: 2rem;
   padding: 0 0.55rem;
