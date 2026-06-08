@@ -260,8 +260,21 @@ function sync_ping_peer(string $peerUrl, string $secret, string $role, string $a
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
     curl_close($ch);
+    $ok = $code === 200 && $resp !== false;
+    // Diagnostic — surfaces failures that are otherwise invisible due
+    // to the fire-and-forget contract. Goes to PHP error log; for
+    // `php -S` that's the terminal stderr where the server runs.
+    // Remove (or gate behind a debug option) once handshake is
+    // confirmed working on the L install.
+    if (!$ok) {
+        error_log(sprintf(
+            '[sync_ping_peer] FAILED url=%s code=%d curl_err=%s resp=%s',
+            $url, $code, $err !== '' ? $err : '(none)',
+            $resp === false ? '(false)' : substr((string)$resp, 0, 200)
+        ));
+    }
     return [
-        'ok'    => $code === 200 && $resp !== false,
+        'ok'    => $ok,
         'code'  => $code,
         'error' => $err !== '' ? $err : null,
     ];
