@@ -152,7 +152,7 @@ return [
    * array_replace_recursive, so a host-scoped override may set just
    * the differing keys (role, host) and inherit the rest.
    *
-   * Slice S1 SCOPE: this block + the /api/sync/whoami route that
+   * Slice S1 SCOPE: this block + the /sync/whoami route that
    * reads it. No actual content sync yet — those slices follow.
    *
    * SECRET — TEMPORARY shape, ROTATE BEFORE SLICE S4.
@@ -171,12 +171,17 @@ return [
    *   S1–S3 simple; per-pair secrets are a future refinement if
    *   security review warrants it.
    *
-   * ROUTE NAMESPACE — /api/sync/* (NOT /dev/sync/*).
-   *   The host-scoped 403 gate (see config.<HOST>.php) blocks every
-   *   /dev/* path that lacks a Panel session. Sync endpoints are
-   *   machine-to-machine and authenticate by bearer token, so they
-   *   live OUTSIDE the /dev tree to bypass that gate cleanly.
-   *   /api/sync/* is the new namespace.
+   * ROUTE NAMESPACE — top-level /sync/* (NOT /dev/sync/* or /api/sync/*).
+   *   Two constraints squeeze the choice:
+   *   (a) The host-scoped 403 gate (config.<HOST>.php) blocks every
+   *       /dev/* path that lacks a Panel session. Sync endpoints are
+   *       machine-to-machine and bearer-authed, so /dev/sync/* is out.
+   *   (b) Kirby RESERVES /api/* for its own internal API router. A
+   *       custom route at api/sync/whoami never reaches us — Kirby's
+   *       API router strips the prefix and 404s on "sync/whoami". So
+   *       /api/sync/* is out too.
+   *   Top-level /sync/* sidesteps both: outside the gate, outside
+   *   Kirby's API router.
    */
   'sync' => [
     'role'   => 'L',
@@ -2064,7 +2069,7 @@ HTML;
     /*
      * Sync layer — node identity probe (v0.10.140, Slice S1).
      *
-     *   GET /api/sync/whoami
+     *   GET /sync/whoami
      *   Authorization: Bearer <sync.secret>
      *   →  200 { ok, role, host, appVersion, schemaVersion, time, peers }
      *      401 { ok:false, error:"unauthorized" }      — missing/bad token
@@ -2076,11 +2081,11 @@ HTML;
      * later slices (timestamp handshake, manifest diff, page sync)
      * can be layered on a verified foundation.
      *
-     * Namespace choice — `/api/sync/*` (NOT `/dev/sync/*`):
-     *   The host-scoped 403 gate (config.<HOST>.php) blocks every
-     *   /dev/* path that lacks a Panel session. Sync calls are
-     *   machine-to-machine and authenticate by bearer token, so
-     *   they must live outside the /dev tree to bypass that gate.
+     * Namespace choice — top-level `/sync/*`:
+     *   /dev/sync/* trips the host-scoped Panel-auth 403 gate, and
+     *   /api/sync/* is intercepted by Kirby's reserved API router
+     *   (which 404s on unknown patterns it doesn't own). Top-level
+     *   /sync/* avoids both — see the sync option block above.
      *
      * Auth: shared bearer token (see option('sync.secret')). The
      * comparison uses hash_equals to avoid leaking timing info on a
@@ -2092,7 +2097,7 @@ HTML;
      * acceptable since they hold the token anyway.
      */
     [
-      'pattern' => 'api/sync/whoami',
+      'pattern' => 'sync/whoami',
       'method'  => 'GET',
       'action'  => function () {
         $sync = option('sync');
