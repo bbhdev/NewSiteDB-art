@@ -10,11 +10,20 @@
 # then asks for confirmation before the real transfer.
 #
 # Usage:
-#   deploy/deploy.sh                   # dry run, then prompt, then transfer
-#   deploy/deploy.sh -y                # skip the confirmation prompt
-#   deploy/deploy.sh --no-delete       # upload/update only, never remove server files
-#   deploy/deploy.sh --skip-icloud-check  # bypass the iCloud-placeholder pre-check
-#   deploy/deploy.sh --help
+#   deploy/deploy.sh [<target>] [flags]
+#
+#   <target>                          # one of the names listed in deploy.env's
+#                                     # TARGETS (e.g. newsitedbart.bbh.fr).
+#                                     # Omit to use DEFAULT_TARGET.
+#   -y, --yes                         # skip the confirmation prompt
+#   --no-delete                       # upload/update only, never remove server files
+#   --skip-icloud-check               # bypass the iCloud-placeholder pre-check
+#   -h, --help
+#
+# Target naming convention: target name == site's SERVER_NAME (the domain
+# browsers hit). This keeps the CLI arg, the resolve_target branch in
+# deploy.env, and the host-scoped config filename
+# site/config/config.<SERVER_NAME>.php in lockstep.
 #
 # iCloud pre-check: this project lives in iCloud Drive. If "Optimize Mac
 # Storage" has evicted any file to a dataless placeholder stub, rsync will
@@ -22,48 +31,82 @@
 # the script scans for dataless files (BSD `find -flags +dataless`) and
 # aborts if any are found, with instructions to materialize them first.
 #
-# One-time setup: create deploy/deploy.env (gitignored) exporting the
-# target, e.g.
-#   REMOTE_HOST="newsitedbart"   # an alias from ~/.ssh/config
-#   REMOTE_PATH="/home/clients/94e3ce6271e3648b7b00d6c32be0a6e2/sites/newsitedbart.bbh.fr"
+# One-time setup: create deploy/deploy.env (gitignored) from
+# deploy/deploy.env.example, defining TARGETS, DEFAULT_TARGET, and a
+# resolve_target() case branch per target.
 
 set -euo pipefail
 
-# ── Defaults (override via env or deploy/deploy.env) ──────────────────
-# These are deliberate sentinel placeholders — the check below aborts if
-# REMOTE_HOST is still the placeholder, forcing the user to create deploy.env.
-# REMOTE_PATH's default is never reached in practice (sentinel check fires first).
-REMOTE_HOST="${REMOTE_HOST:-PLACEHOLDER-set-in-deploy.env}"
-REMOTE_PATH="${REMOTE_PATH:-/PLACEHOLDER/set-in-deploy.env}"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-[ -f "$SCRIPT_DIR/deploy.env" ] && . "$SCRIPT_DIR/deploy.env"
 EXCLUDE_FILE="$SCRIPT_DIR/deploy-exclude.txt"
 
-# ── Flags ─────────────────────────────────────────────────────────────
+if [ ! -f "$SCRIPT_DIR/deploy.env" ]; then
+  echo "✗ deploy/deploy.env is missing." >&2
+  echo "  Copy deploy/deploy.env.example to deploy/deploy.env and fill in your targets." >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/deploy.env"
+
+# ── Flags + positional target ─────────────────────────────────────────
 ASSUME_YES=0
 DELETE="--delete"
 SKIP_ICLOUD_CHECK=0
+TARGET=""
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)             ASSUME_YES=1 ;;
     --no-delete)          DELETE="" ;;
     --skip-icloud-check)  SKIP_ICLOUD_CHECK=1 ;;
     -h|--help)
-      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
+      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
       exit 0 ;;
-    *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+    -*) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+    *)
+      if [ -n "$TARGET" ]; then
+        echo "✗ Multiple targets given ('$TARGET' and '$arg'); only one allowed." >&2
+        exit 2
+      fi
+      TARGET="$arg"
+      ;;
   esac
 done
 
 command -v rsync >/dev/null || { echo "✗ rsync not found in PATH" >&2; exit 1; }
 [ -f "$EXCLUDE_FILE" ] || { echo "✗ Missing exclude file: $EXCLUDE_FILE" >&2; exit 1; }
-if [ "$REMOTE_HOST" = "PLACEHOLDER-set-in-deploy.env" ]; then
-  echo "✗ REMOTE_HOST is still the placeholder." >&2
-  echo "  Create deploy/deploy.env from deploy/deploy.env.example first." >&2
+
+# ── Resolve target → REMOTE_HOST + REMOTE_PATH ────────────────────────
+: "${TARGETS:?TARGETS not set in deploy.env}"
+: "${DEFAULT_TARGET:?DEFAULT_TARGET not set in deploy.env}"
+command -v resolve_target >/dev/null \
+  || { echo "✗ resolve_target() not defined in deploy.env" >&2; exit 1; }
+
+[ -z "$TARGET" ] && TARGET="$DEFAULT_TARGET"
+
+# Verify the target name is in the declared TARGETS list (catches typos
+# even when resolve_target has a stray branch the list doesn't mention).
+known=0
+for t in $TARGETS; do
+  [ "$t" = "$TARGET" ] && { known=1; break; }
+done
+if [ "$known" -ne 1 ]; then
+  echo "✗ Unknown target: '$TARGET'" >&2
+  echo "  Known targets: $TARGETS" >&2
+  exit 2
+fi
+
+REMOTE_HOST=""
+REMOTE_PATH=""
+if ! resolve_target "$TARGET"; then
+  echo "✗ resolve_target('$TARGET') failed — add a case branch in deploy.env." >&2
   exit 1
 fi
+if [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_PATH" ]; then
+  echo "✗ resolve_target('$TARGET') did not set REMOTE_HOST and REMOTE_PATH." >&2
+  exit 1
+fi
+echo "▶ Target: $TARGET  →  $REMOTE_HOST:$REMOTE_PATH"
 
 # ── iCloud-placeholder pre-check ──────────────────────────────────────
 # This project lives in iCloud Drive. With "Optimize Mac Storage" enabled,
