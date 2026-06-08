@@ -27,10 +27,10 @@ if ($role !== 'L') return;
 <div id="sync-peer-indicator"
      style="position:fixed;bottom:8px;right:8px;z-index:9999;
             font:11px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;
-            background:rgba(0,0,0,0.65);color:#fff;
+            background:#2a2a2a;color:#fff;
             padding:4px 8px;border-radius:4px;
             pointer-events:none;user-select:none;
-            opacity:0.55;transition:opacity 0.2s;">
+            transition:background-color 0.2s, color 0.2s;">
   <span data-role="label">A: …</span>
 </div>
 <script>
@@ -40,6 +40,26 @@ if ($role !== 'L') return;
   var el = document.getElementById('sync-peer-indicator');
   if (!el) return;
   var label = el.querySelector('[data-role="label"]');
+
+  // Activity-age threshold below which the indicator turns yellow
+  // (S2b feedback): when both L and A have been authored very
+  // recently, the risk of concurrent-edit conflicts is real and
+  // worth flagging passively. 2h is generous enough to cover a
+  // distracted "I'll continue tomorrow" pattern without yelling
+  // about it; below that, the author should pause and check.
+  var WARN_THRESHOLD_SECONDS = 2 * 3600;
+
+  // Three visual states. Solid backgrounds (no opacity) — earlier
+  // semi-transparent styling washed into the page-area outline and
+  // was harder to read than necessary.
+  //   ok    — calm dark pill, the steady state
+  //   warn  — yellow, A was active very recently (≤ WARN_THRESHOLD)
+  //   error — red, A unreachable / proxy failure
+  var STYLES = {
+    ok:    { bg: '#2a2a2a', fg: '#ffffff' },
+    warn:  { bg: '#e8b22b', fg: '#1f1f1f' },
+    error: { bg: '#c93333', fg: '#ffffff' }
+  };
 
   function relTime(iso) {
     if (!iso) return 'no activity yet';
@@ -56,9 +76,19 @@ if ($role !== 'L') return;
     return d.toISOString().slice(0, 10);
   }
 
-  function setLabel(text, dim) {
+  // Seconds since the given ISO timestamp, or null if missing/invalid.
+  function ageSeconds(iso) {
+    if (!iso) return null;
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    return Math.max(0, (Date.now() - d.getTime()) / 1000);
+  }
+
+  function setLabel(text, state) {
     label.textContent = 'A: ' + text;
-    el.style.opacity = dim ? '0.35' : '0.55';
+    var s = STYLES[state] || STYLES.ok;
+    el.style.background = s.bg;
+    el.style.color = s.fg;
   }
 
   function poll() {
@@ -66,12 +96,15 @@ if ($role !== 'L') return;
       .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
       .then(function (j) {
         if (!j || !j.ok || !j.state) {
-          setLabel('unreachable', true);
+          setLabel('unreachable', 'error');
           return;
         }
-        setLabel('active ' + relTime(j.state.lastActivityAt), false);
+        var iso = j.state.lastActivityAt;
+        var age = ageSeconds(iso);
+        var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
+        setLabel('active ' + relTime(iso), state);
       })
-      .catch(function () { setLabel('unreachable', true); });
+      .catch(function () { setLabel('unreachable', 'error'); });
   }
 
   poll();
