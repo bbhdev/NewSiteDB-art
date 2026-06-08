@@ -515,6 +515,18 @@ repurposed** to carry complete-style ids. Key decisions:
 - **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
   style-ref governance; **then general page background** (below).
 
+> **Working rule — legacy/test data has no value (2026-06).** Existing
+> `content/*` is disposable test data, not real content. Do NOT spend effort fixing
+> how legacy/unstyled rects render, and do NOT pre-compute fix options before
+> confirming the issue is worth solving — establishing value comes first.
+> *Recorded dead end (don't re-investigate):* unstyled text shows differently
+> editor vs runtime — editor forces `.pe-rect-text { color: rgba(0,0,0,0.85) }`
+> (black) on uncoloured runs, while the runtime applies NO style to a null/dangling
+> `typographyId` rect (canvas-page.php never mirrored B2 totality → text inherits
+> the block/palette colour, and browser-default family/size). Only bites legacy
+> `typographyId:null` test rects; real styled content never hits it. Intentionally
+> NOT fixed.
+
 **Element styles C — runtime parity: element-style ranges render on the public page (v0.10.133).**
 The last piece of the element-styles unit. An `elementStyle` range mark carries a complete
 element-style id and (decision A) emits the SAME bare `.ty-<id>` class the rect's default style
