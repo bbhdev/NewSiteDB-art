@@ -1,88 +1,63 @@
 # ─────────────────────────────────────────────────────────────────────
-# Editor-written content data — TWO-LAYER SYNC SEPARATION
+# Content-layer filter for deploy.sh — Option B (pages = content).
 # ─────────────────────────────────────────────────────────────────────
 #
-# These patterns mirror the gitignored content-data block in
-# `.gitignore`. They list every file the editor writes at runtime —
-# drawings, layouts, palette, masters, image-workshop output, uploaded
-# images, etc.
+# DESIGN: The entire /content/ tree is content-layer EXCEPT a small,
+# explicit allow-list of code-side scaffolding files. The content-sync
+# layer (per-page `_sync` stamps in page.json, bidirectional A↔B + UI-
+# triggered L↔A/B) owns everything else.
 #
-# Why excluded from code deploys: servers A and B can edit content
-# independently (planned bidirectional content sync). A code deploy that
-# also pushed content would clobber whatever the server's editor most
-# recently saved. The separation is mandatory.
+# This is one-way L→A/B deploy is the wrong tool for multi-master state.
+# Pages can be created on any node; the sync layer is the only mechanism
+# that can move new pages between nodes. Deploy.sh stays purely code.
 #
-# Sync responsibility moves to a separate layer (NOT deploy.sh) that
-# arbitrates per-page using `_sync` stamps embedded in each page.json —
-# newer-stamp wins, whole page is the atomic unit. Not yet built; this
-# exclude file is the deploy side of the contract.
+# WHY NOT --exclude-from with `!` re-includes: rsync's --exclude-from
+# does NOT honor `!` for re-includes (that's gitignore syntax). The
+# proper rsync mechanism is --filter='merge FILE' with explicit `+`
+# (include) and `-` (exclude) prefixes, evaluated FIRST-MATCH-WINS in
+# top-to-bottom order. deploy.sh now uses `--filter='merge ...'` to
+# load this file.
 #
-# One-time exception: `deploy.sh --bootstrap` does NOT load this file,
+# ONE-TIME EXCEPTION: `deploy.sh --bootstrap` does NOT load this file,
 # so a freshly-seeded server can be brought up to local state in one
-# pass. After bootstrap, normal `deploy.sh` runs always include this
-# file again.
+# pass. After bootstrap, normal `deploy.sh` always loads it again.
 #
-# Keep this list in lockstep with the `.gitignore` content section. If
-# new editor-written files appear, add them to both.
+# ALLOW-LIST RATIONALE: A few files under /content/ are NOT editor-
+# written content — they're routing scaffolding for /dev tool surfaces
+# (the editor itself) and Kirby's required error page. Those ride with
+# code so the editor and error page exist on every node from day one.
+# The list is small, stable, and orthogonal to user content.
 # ─────────────────────────────────────────────────────────────────────
 
-# Root-level page (home, served from /content directly)
-/content/colors.json
-/content/page.json
+# Allow /content/ itself to be traversed by rsync (without this, the
+# leaf includes below never match because rsync skips the parent dir).
++ /content/
 
-# Per-page (one level deep) data files
-/content/*/page.json
-/content/*/instances.json
-/content/*/lines.json
-/content/*/groups.json
-/content/*/rects.json
+# /dev tool route records — page existence + blueprint binding for the
+# four editor surfaces (/dev root, /dev/page, /dev/draw, /dev/image-workshop).
+# These are code-side: they define editor routes, hold no user content.
++ /content/dev/
++ /content/dev/default.txt
++ /content/dev/page/
++ /content/dev/page/page.txt
++ /content/dev/draw/
++ /content/dev/draw/draw.txt
++ /content/dev/image-workshop/
++ /content/dev/image-workshop/image-workshop.txt
 
-# Subdir'd pages (two levels deep)
-/content/*/*/page.json
-/content/*/*/lines.json
-/content/*/*/groups.json
-/content/*/*/instances.json
-/content/*/*/rects.json
+# Kirby's required error page record (no editable fields; defines the
+# 404 page exists with the error blueprint).
++ /content/error/
++ /content/error/error.txt
 
-# Shared registries (palette, classes, masters, font bundle, typography)
-/content/_shared/classes.json
-/content/_shared/masters.json
-/content/_shared/palette.json
-/content/_shared/font-bundle.json
-# typography-tokens.json: written by the dev/draw/typography save route.
-# Not currently in .gitignore (gap to address separately), but must be
-# treated as content data here so code deploys don't clobber it.
-/content/_shared/typography-tokens.json
-
-# Per-page draft/upload area. Covers both `_drafts/images/` (uploaded
-# images attached to the page) and `_drafts/batch*/` (image-workshop
-# batches under their own pages). Catches both depth levels.
-# This subsumes the previous image-workshop-specific block:
-# `content/dev/image-workshop/_drafts/` is caught by the 2-level rule.
-# `content/dev/image-workshop/image-workshop.txt` is git-tracked and
-# rides the normal code mirror — no special re-include needed.
-/content/*/_drafts/
-/content/*/*/_drafts/
-
-# User-uploaded images attached to pages — published library path.
-# (HANDOFF mentions this layout; no instances on this branch yet, but
-# the exclude is cheap and future-proofing.)
-/content/*/images/
-/content/*/*/images/
-
-# Page-root images (anomaly path — UUID-named files sitting directly
-# under content/<page>/, observed for at least one test page). All
-# editor-written; never code. Exclude common image extensions at both
-# page-depth levels.
-/content/*/*.png
-/content/*/*.jpg
-/content/*/*.jpeg
-/content/*/*.webp
-/content/*/*.avif
-/content/*/*.gif
-/content/*/*/*.png
-/content/*/*/*.jpg
-/content/*/*/*.jpeg
-/content/*/*/*.webp
-/content/*/*/*.avif
-/content/*/*/*.gif
+# Everything else under /content/ is content-layer — owned by the sync
+# layer, never touched by deploy.sh in normal mode.
+#
+# This single rule covers: per-page directories (page.json + .txt
+# sidecars, rects.json + .txt sidecars, instances.json + .txt sidecars,
+# lines.json + .txt sidecars, groups.json + .txt sidecars), uploaded
+# images and their .txt sidecars at any depth, _drafts/ subtrees,
+# /content/_shared/ registries, root-level page.json + colors.json,
+# root-class records (medium/narrow/wide default.txt — UUIDs are
+# editor-generated identity, content-layer), and image-workshop _drafts.
+- /content/**

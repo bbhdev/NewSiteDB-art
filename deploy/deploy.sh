@@ -266,13 +266,19 @@ COMMON=(
   --exclude=/.htaccess
   --no-owner --no-group
 )
-# Layer 2 separation: in normal mode, the content-data exclude file is
-# loaded as a SECOND --exclude-from so editor-written files are left
-# alone (servers can edit them; the content-sync layer arbitrates).
-# --bootstrap drops this exclude for one run so a freshly-seeded server
-# can be replaced with local state in a single pass.
+# Layer 2 separation: in normal mode, the content-data filter file is
+# loaded so editor-written files are left alone (servers can edit them;
+# the content-sync layer arbitrates). --bootstrap drops this filter for
+# one run so a freshly-seeded server can be replaced with local state
+# in a single pass.
+#
+# IMPORTANT: this file uses `+`/`-` prefixes (rsync filter syntax) for
+# wholesale-exclude-with-allow-list semantics, so it MUST be loaded via
+# --filter='merge FILE' rather than --exclude-from. The latter treats
+# every line as an exclude and silently ignores `+`/`-`/`!` prefixes,
+# which silently breaks the allow-list. Do not change this back.
 if [ "$BOOTSTRAP" -ne 1 ]; then
-  COMMON+=( --exclude-from="$EXCLUDE_CONTENT_FILE" )
+  COMMON+=( --filter="merge $EXCLUDE_CONTENT_FILE" )
 fi
 
 SRC="$PROJECT_ROOT/"
@@ -293,7 +299,13 @@ EOF
 fi
 
 echo "▶ DRY RUN   $SRC"
-echo "        →   $DEST   (mirror=${DELETE:-off}${BOOTSTRAP:+, bootstrap=ON})"
+# Banner mode tag — `${BOOTSTRAP:+...}` expands when BOOTSTRAP is set
+# AND non-empty, which is true for BOTH "1" and "0" (bash :+ test is
+# emptiness, not truthiness). Use an explicit conditional so the tag
+# only appears when bootstrap is actually on.
+mode_tag=""
+[ "$BOOTSTRAP" -eq 1 ] && mode_tag=", bootstrap=ON"
+echo "        →   $DEST   (mirror=${DELETE:-off}${mode_tag})"
 echo "        +   .htaccess  (sent separately, comments stripped)"
 echo "─────────────────────────────────────────────────────────────────"
 rsync "${COMMON[@]}" --dry-run "$SRC" "$DEST"
