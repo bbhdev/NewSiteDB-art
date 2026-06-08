@@ -99,6 +99,26 @@
  */
 
 return [
+    /*
+     * Sync identity override (v0.10.140, Slice S1).
+     * This host is STAGING (role 'A'). See sync block in config.php
+     * for the architecture rationale; only the differing keys appear
+     * here. Kirby merges host config OVER base via
+     * array_replace_recursive, so the shared `secret` from config.php
+     * is inherited unless overridden.
+     *
+     * Peers: A's outbound peer is B (for the A→B propagate that
+     * publishes staging to public). A also receives FROM L, but L is
+     * a desktop with no inbound URL — A doesn't list L as a peer.
+     */
+    'sync' => [
+        'role'  => 'A',
+        'host'  => 'newsitedbart.bbh.fr',
+        'peers' => [
+            'B' => 'https://danielbondard.fr',
+        ],
+    ],
+
     'ready' => function ($kirby) {
         // Strip PHP fingerprint from EVERY response (not just /dev/draw).
         // `expose_php = Off` in php.ini would also do this server-wide,

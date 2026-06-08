@@ -133,6 +133,62 @@ return [
   ],
 
   /*
+   * Sync layer — node identity + shared-secret auth (v0.10.140, Slice S1).
+   *
+   * The forthcoming content-sync layer (per topology memory:
+   * sync-layer-topology-and-operations.md) treats this project's three
+   * runtime nodes as named participants:
+   *
+   *   L  = local Mac (this code path when SERVER_NAME doesn't match a
+   *        host-scoped override; the desktop dev environment).
+   *   A  = newsitedbart.bbh.fr — STAGING. Host-scoped config overrides
+   *        `role` to 'A' there.
+   *   B  = danielbondard.fr — PUBLIC, frozen by default. Host-scoped
+   *        config overrides `role` to 'B' there.
+   *
+   * This block is the DEFAULT — role='L'. Host-scoped configs
+   * (config.<SERVER_NAME>.php, rsync-excluded) override these values
+   * per environment. Kirby merges host config OVER base via
+   * array_replace_recursive, so a host-scoped override may set just
+   * the differing keys (role, host) and inherit the rest.
+   *
+   * Slice S1 SCOPE: this block + the /api/sync/whoami route that
+   * reads it. No actual content sync yet — those slices follow.
+   *
+   * SECRET — TEMPORARY shape, ROTATE BEFORE SLICE S4.
+   *   For S1 the bearer token is committed to git as a placeholder so
+   *   we can validate the topology without yet introducing rotation
+   *   infrastructure. When Slice S4 (real L↔A content sync) lands,
+   *   the secret moves to a gitignored sidecar file (e.g.
+   *   site/config/sync-secrets.php) and the value here becomes
+   *   useless. Until then, treat this string as low-value — it gates
+   *   only an identity-probe endpoint that returns role + host +
+   *   version. No content flows yet.
+   *
+   * AUTH MODEL — single shared bearer token across L, A, B.
+   *   All sync endpoints require `Authorization: Bearer <secret>`
+   *   matching `option('sync.secret')`. One token everywhere keeps
+   *   S1–S3 simple; per-pair secrets are a future refinement if
+   *   security review warrants it.
+   *
+   * ROUTE NAMESPACE — /api/sync/* (NOT /dev/sync/*).
+   *   The host-scoped 403 gate (see config.<HOST>.php) blocks every
+   *   /dev/* path that lacks a Panel session. Sync endpoints are
+   *   machine-to-machine and authenticate by bearer token, so they
+   *   live OUTSIDE the /dev tree to bypass that gate cleanly.
+   *   /api/sync/* is the new namespace.
+   */
+  'sync' => [
+    'role'   => 'L',
+    'host'   => 'localhost',
+    'secret' => 'placeholder-s1-rotate-before-s4-6085a2f6f5df590cbd911b75a9ce368d2c847b0d85b05533caeddb4421013051',
+    'peers'  => [
+      // L's only peer is A (staging). L pushes to A; never receives.
+      'A' => 'https://newsitedbart.bbh.fr',
+    ],
+  ],
+
+  /*
    * Panel left-sidebar menu (v0.10.39 — Phase 2 nav cleanup).
    *
    * Replaces the former dashboard info-section ("Dev tools") with
@@ -2002,6 +2058,87 @@ HTML;
           'ok' => true, 'filename' => $outName,
           'page' => $target->id(), 'title' => $target->title()->value(),
         ]);
+      }
+    ],
+
+    /*
+     * Sync layer — node identity probe (v0.10.140, Slice S1).
+     *
+     *   GET /api/sync/whoami
+     *   Authorization: Bearer <sync.secret>
+     *   →  200 { ok, role, host, appVersion, schemaVersion, time, peers }
+     *      401 { ok:false, error:"unauthorized" }      — missing/bad token
+     *      503 { ok:false, error:"sync not configured" } — option block missing
+     *
+     * Purpose: prove that L, A, and B each correctly identify
+     * themselves under their host-scoped Kirby config. No content
+     * exchange yet; the response is purely a self-description so
+     * later slices (timestamp handshake, manifest diff, page sync)
+     * can be layered on a verified foundation.
+     *
+     * Namespace choice — `/api/sync/*` (NOT `/dev/sync/*`):
+     *   The host-scoped 403 gate (config.<HOST>.php) blocks every
+     *   /dev/* path that lacks a Panel session. Sync calls are
+     *   machine-to-machine and authenticate by bearer token, so
+     *   they must live outside the /dev tree to bypass that gate.
+     *
+     * Auth: shared bearer token (see option('sync.secret')). The
+     * comparison uses hash_equals to avoid leaking timing info on a
+     * partial-match guess. Missing/blank Authorization → 401.
+     *
+     * No PII / secrets in the response: role + host + version
+     * timestamps + peer URLs only. Peers are URLs (already publicly
+     * known DNS names); leaking them to a token-holder is
+     * acceptable since they hold the token anyway.
+     */
+    [
+      'pattern' => 'api/sync/whoami',
+      'method'  => 'GET',
+      'action'  => function () {
+        $sync = option('sync');
+        if (!is_array($sync) || empty($sync['secret'])) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'sync not configured']),
+            'application/json', 503
+          );
+        }
+
+        // Extract bearer token. Some shared-hosting PHP setups don't
+        // populate $_SERVER['HTTP_AUTHORIZATION'] — fall back to
+        // apache_request_headers() and to REDIRECT_HTTP_AUTHORIZATION
+        // (mod_rewrite passthrough) before giving up.
+        $auth = $_SERVER['HTTP_AUTHORIZATION']
+             ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+             ?? '';
+        if ($auth === '' && function_exists('apache_request_headers')) {
+          $hdrs = apache_request_headers();
+          foreach ($hdrs as $k => $v) {
+            if (strcasecmp($k, 'Authorization') === 0) { $auth = $v; break; }
+          }
+        }
+        $token = '';
+        if (preg_match('/^\s*Bearer\s+(\S+)\s*$/i', (string)$auth, $m)) {
+          $token = $m[1];
+        }
+        if ($token === '' || !hash_equals((string)$sync['secret'], $token)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'unauthorized']),
+            'application/json', 401
+          );
+        }
+
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'             => true,
+            'role'           => $sync['role'] ?? null,
+            'host'           => $sync['host'] ?? ($_SERVER['SERVER_NAME'] ?? null),
+            'appVersion'     => option('version'),
+            'schemaVersion'  => option('schemaVersion'),
+            'time'           => date('c'),
+            'peers'          => $sync['peers'] ?? [],
+          ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+          'application/json'
+        );
       }
     ]
   ]

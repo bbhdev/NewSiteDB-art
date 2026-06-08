@@ -48,6 +48,27 @@
  */
 
 return [
+    /*
+     * Sync identity override (v0.10.140, Slice S1).
+     * This host is PUBLIC (role 'B'), frozen by default in the
+     * forthcoming sync model. See sync block in config.php for the
+     * architecture rationale; only the differing keys appear here.
+     * Kirby merges host config OVER base via array_replace_recursive,
+     * so the shared `secret` from config.php is inherited unless
+     * overridden.
+     *
+     * Peers: B's only outbound peer (in the rare unlock-B case) is
+     * A, for the mandatory B→A reverse-sync that prevents data loss
+     * before re-freezing. In normal operation B does not call out.
+     */
+    'sync' => [
+        'role'  => 'B',
+        'host'  => 'danielbondard.fr',
+        'peers' => [
+            'A' => 'https://newsitedbart.bbh.fr',
+        ],
+    ],
+
     'ready' => function ($kirby) {
         // Strip PHP fingerprint from EVERY response (not just /dev/draw).
         // `expose_php = Off` in php.ini would also do this server-wide,
