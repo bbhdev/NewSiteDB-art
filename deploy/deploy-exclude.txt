@@ -17,6 +17,7 @@
 /site/accounts/
 /site/sessions/
 /site/cache/
+/site/sync/
 /media/
 
 # ── Version control & OS junk ─────────────────────────────────────────

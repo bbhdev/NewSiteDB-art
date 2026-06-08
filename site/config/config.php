@@ -1174,6 +1174,14 @@ HTML;
         $kirby = kirby();
         $body  = $kirby->request()->body()->toArray();
 
+        // Sync S2: record local authoring activity + fire-and-forget
+        // ping to upstream peer (L→A in the current topology). Best-
+        // effort — see sync plugin for the no-throw contract. Done at
+        // entry rather than gated on success: a clicked Save IS author
+        // activity even when validation fails, and gating would require
+        // threading the call through every return path in this handler.
+        sync_record_activity_and_notify();
+
         $pageId  = $body['page']    ?? null;
         $byClass = $body['byClass'] ?? null;  // map of classId → { instances, groups }
         $masters = $body['masters'] ?? null;  // optional — site-wide visual definitions
@@ -1341,6 +1349,9 @@ HTML;
       'action'  => function () {
         $kirby = kirby();
         $body  = $kirby->request()->body()->toArray();
+
+        // Sync S2: see dev/draw/save for rationale on placement at entry.
+        sync_record_activity_and_notify();
 
         $pageId        = $body['page']          ?? null;
         $schemaVersion = $body['schemaVersion'] ?? null;
@@ -1851,6 +1862,9 @@ HTML;
         $kirby = kirby();
         $body  = $kirby->request()->body()->toArray();
 
+        // Sync S2: see dev/draw/save for rationale on placement at entry.
+        sync_record_activity_and_notify();
+
         $batchId  = $body['batch']    ?? null;
         $verdicts = $body['verdicts'] ?? null;
 
@@ -2100,38 +2114,13 @@ HTML;
       'pattern' => 'sync/whoami',
       'method'  => 'GET',
       'action'  => function () {
+        // Bearer-auth + header-extraction logic lives in the sync
+        // plugin (sync_authorize_request) for DRY across whoami /
+        // state / ping. See the original v0.10.140 inline version
+        // in git history for the header-extraction rationale.
+        if ($err = sync_authorize_request()) return $err;
+
         $sync = option('sync');
-        if (!is_array($sync) || empty($sync['secret'])) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'sync not configured']),
-            'application/json', 503
-          );
-        }
-
-        // Extract bearer token. Some shared-hosting PHP setups don't
-        // populate $_SERVER['HTTP_AUTHORIZATION'] — fall back to
-        // apache_request_headers() and to REDIRECT_HTTP_AUTHORIZATION
-        // (mod_rewrite passthrough) before giving up.
-        $auth = $_SERVER['HTTP_AUTHORIZATION']
-             ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-             ?? '';
-        if ($auth === '' && function_exists('apache_request_headers')) {
-          $hdrs = apache_request_headers();
-          foreach ($hdrs as $k => $v) {
-            if (strcasecmp($k, 'Authorization') === 0) { $auth = $v; break; }
-          }
-        }
-        $token = '';
-        if (preg_match('/^\s*Bearer\s+(\S+)\s*$/i', (string)$auth, $m)) {
-          $token = $m[1];
-        }
-        if ($token === '' || !hash_equals((string)$sync['secret'], $token)) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'unauthorized']),
-            'application/json', 401
-          );
-        }
-
         return new Kirby\Http\Response(
           json_encode([
             'ok'             => true,
@@ -2142,6 +2131,88 @@ HTML;
             'time'           => date('c'),
             'peers'          => $sync['peers'] ?? [],
           ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+          'application/json'
+        );
+      }
+    ],
+
+    /*
+     * GET /sync/state — return this node's sync state (Slice S2).
+     *
+     * Body: { ok, role, host, time, state: { schemaVersion,
+     *   lastActivityAt, lastActivityBy, peerStamps: {L,A,B} } }
+     *
+     * Authoritative read for "is my peer ahead of me?" — the L editor
+     * (in a later slice) will poll A's /sync/state on focus / reconnect
+     * and compare A's lastActivityAt with L's lastActivityAt to
+     * decide whether to show a strong reconnect alert.
+     *
+     * Auth: same shared-secret bearer token as whoami.
+     */
+    [
+      'pattern' => 'sync/state',
+      'method'  => 'GET',
+      'action'  => function () {
+        if ($err = sync_authorize_request()) return $err;
+        $sync = option('sync');
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'    => true,
+            'role'  => $sync['role'] ?? null,
+            'host'  => $sync['host'] ?? ($_SERVER['SERVER_NAME'] ?? null),
+            'time'  => date('c'),
+            'state' => sync_state_read(),
+          ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+          'application/json'
+        );
+      }
+    ],
+
+    /*
+     * POST /sync/ping — receive a peer's activity timestamp (Slice S2).
+     *
+     * Body (JSON): { role: 'L'|'A'|'B', at: ISO-8601 string }
+     *
+     * Side-effect: stores peerStamps[role] = at in this node's
+     * site/sync/state.json. No content sync, no manifest exchange —
+     * just "peer X was authoring at time T, FYI." The pinging peer
+     * uses fire-and-forget; we respond quickly and idempotently.
+     *
+     * Validation: role must be in {L,A,B}; `at` must be parseable by
+     * strtotime() (re-stamped via date('c') for canonical storage).
+     * Invalid payloads → 400 with diagnostic message.
+     *
+     * Auth: same shared-secret bearer token.
+     */
+    [
+      'pattern' => 'sync/ping',
+      'method'  => 'POST',
+      'action'  => function () {
+        if ($err = sync_authorize_request()) return $err;
+        $raw  = file_get_contents('php://input');
+        $body = json_decode((string)$raw, true);
+        if (!is_array($body)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'invalid JSON body']),
+            'application/json', 400
+          );
+        }
+        $role = (string)($body['role'] ?? '');
+        $at   = (string)($body['at']   ?? '');
+        if ($role === '' || $at === '') {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'missing role or at']),
+            'application/json', 400
+          );
+        }
+        if (!sync_record_peer_stamp($role, $at)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'rejected (bad role or unparsable timestamp)']),
+            'application/json', 400
+          );
+        }
+        return new Kirby\Http\Response(
+          json_encode(['ok' => true, 'time' => date('c')]) . "\n",
           'application/json'
         );
       }
