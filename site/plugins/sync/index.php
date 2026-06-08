@@ -195,7 +195,14 @@ function sync_state_write(array $state): bool
 function sync_record_local_activity(): string
 {
     $now   = date('c');
-    $role  = (string)(option('sync.role') ?? 'L');
+    // Read the sync block as one array — Kirby's option() dot-resolution
+    // of nested keys is unreliable in some setups (observed empirically:
+    // option('sync.role') returned null on the L install while
+    // option('sync') correctly returned the full array). The working
+    // /sync/* routes already use this pattern (option('sync') + index);
+    // matching it here keeps behavior consistent across read paths.
+    $sync  = option('sync');
+    $role  = is_array($sync) && !empty($sync['role']) ? (string)$sync['role'] : 'L';
     $state = sync_state_read();
     $state['lastActivityAt']        = $now;
     $state['lastActivityBy']        = $role;
@@ -295,13 +302,31 @@ function sync_ping_peer(string $peerUrl, string $secret, string $role, string $a
  */
 function sync_notify_peers_of_local_activity(string $at): array
 {
-    $role   = (string)(option('sync.role') ?? 'L');
-    $secret = (string)(option('sync.secret') ?? '');
-    $peers  = option('sync.peers') ?? [];
+    // See sync_record_local_activity for why we read option('sync') as
+    // one array instead of using dot-key access — dot-resolution was
+    // returning null for nested keys on the L install, silently bailing
+    // the entire ping path with no diagnostic signal.
+    $sync = option('sync');
+    if (!is_array($sync)) {
+        error_log('[sync_notify_peers] option("sync") is not an array — sync block missing from config?');
+        return [];
+    }
+    $role   = (string)($sync['role']   ?? '');
+    $secret = (string)($sync['secret'] ?? '');
+    $peers  = is_array($sync['peers'] ?? null) ? $sync['peers'] : [];
 
     // S2: only L pushes, and only to A. Bail early for other roles to
-    // keep the network quiet.
-    if ($role !== 'L' || !is_array($peers) || empty($peers['A']) || $secret === '') {
+    // keep the network quiet. Diagnostic logs make a silent bail
+    // distinguishable from a successful no-op (other roles).
+    if ($role !== 'L') {
+        return [];  // expected silence for A/B
+    }
+    if ($secret === '' || empty($peers['A'])) {
+        error_log(sprintf(
+            '[sync_notify_peers] L bail — secret=%s peersA=%s',
+            $secret === '' ? 'EMPTY' : 'set',
+            empty($peers['A']) ? 'EMPTY' : (string)$peers['A']
+        ));
         return [];
     }
 
