@@ -2227,16 +2227,20 @@ HTML;
      * (browser hits same origin).
      *
      * Auth: NONE on this proxy route. Rationale:
-     *   - On L (localhost, the only place this indicator runs in
-     *     S2b), Mac firewall blocks LAN access by default — only the
-     *     local browser can reach it.
+     *   - L's local PHP server binds loopback-only (`php -S` defaults
+     *     to 127.0.0.1), so the route is only reachable from the
+     *     same machine — the browser running the editor. No remote
+     *     client can hit it, with or without auth.
      *   - Adding bearer auth here would require embedding the shared
      *     secret in page source for the JS to use, which defeats
-     *     the whole point of the proxy.
+     *     the whole point of the proxy (keeping the secret server-
+     *     side).
      *   - The proxy returns READ-ONLY peer state (a few timestamps)
-     *     — no write surface, no PII. Worst-case leak on a
-     *     misconfigured network: someone learns when A was last
-     *     authored.
+     *     — no write surface, no PII.
+     *   - Caveat: anyone who explicitly binds the local server to a
+     *     non-loopback address (e.g. `php -S 0.0.0.0:8765` for a
+     *     LAN demo) takes on the responsibility to gate it
+     *     themselves. The default binding is what makes this safe.
      *
      * The route is registered globally but the role-gated snippet
      * (snippets/sync-peer-indicator.php) only emits a polling call
