@@ -55,6 +55,15 @@ Thumbs.db
 # stays environment-local (never pushed, never deleted).
 /site/config/config.*.php
 
+# ── Sync shared-secret sidecar — per-node, never push, never delete ───
+# Slice S4a (v0.10.149). The bearer token for /sync/* auth lives in a
+# gitignored, rsync-excluded sidecar file on each node. Provisioned via
+# sftp on first setup; rotated by editing the file on every node in
+# parallel. Excluding it here means a deploy can never accidentally
+# overwrite or remove the production secret. See site/config/config.php
+# "$syncSecret" block for the full rationale.
+/site/config/sync.secret.php
+
 # ── Server-owned web-server config — never push, never delete ─────────
 # .user.ini is host-managed (PHP version selector, memory_limit, …);
 # Infomaniak's Manager rewrites it on certain admin actions, so we

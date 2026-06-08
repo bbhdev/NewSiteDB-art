@@ -98,6 +98,39 @@ function parseOpenTypeFamilyName(string $path): ?string {
   }
 }
 
+/*
+ * Sync secret — read from gitignored sidecar (Slice S4a, v0.10.149).
+ *
+ * The shared bearer-token secret used by all /sync/* endpoints lives
+ * in a per-node sidecar file (site/config/sync.secret.php) that is:
+ *   - listed in .gitignore (never tracked)
+ *   - listed in deploy/deploy-exclude.txt (never rsync'd)
+ * which means it must be provisioned on each node manually (sftp).
+ * The sidecar's shape is dead-simple — a single PHP file returning
+ * the secret string: `<?php return 'real-secret-value';`
+ *
+ * Behavior when the file is missing or unreadable:
+ *   @include returns false → $syncSecret stays null → the 'secret'
+ *   option below is null → sync_authorize_request() returns 503
+ *   "sync not configured" on every /sync/* hit. Safe default — fail
+ *   closed, not open.
+ *
+ * Why a sidecar and not env vars: Infomaniak shared hosting makes
+ * env-var setup fragile across PHP version changes. A plain
+ * gitignored PHP file works on every host, can be inspected without
+ * an admin panel, and gets file-system permissions (chmod 600) for
+ * defense in depth.
+ *
+ * Rotation: change the value in the sidecar on all three nodes
+ * simultaneously (or accept a window of broken sync until the laggards
+ * catch up). No code change required — config.php just re-reads on
+ * every request.
+ */
+$syncSecret = @include __DIR__ . '/sync.secret.php';
+if (!is_string($syncSecret) || $syncSecret === '') {
+    $syncSecret = null;
+}
+
 return [
   /*
    * App version (semver). Read from the /VERSION file at the repo
@@ -155,15 +188,17 @@ return [
    * Slice S1 SCOPE: this block + the /sync/whoami route that
    * reads it. No actual content sync yet — those slices follow.
    *
-   * SECRET — TEMPORARY shape, ROTATE BEFORE SLICE S4.
-   *   For S1 the bearer token is committed to git as a placeholder so
-   *   we can validate the topology without yet introducing rotation
-   *   infrastructure. When Slice S4 (real L↔A content sync) lands,
-   *   the secret moves to a gitignored sidecar file (e.g.
-   *   site/config/sync-secrets.php) and the value here becomes
-   *   useless. Until then, treat this string as low-value — it gates
-   *   only an identity-probe endpoint that returns role + host +
-   *   version. No content flows yet.
+   * SECRET — read from gitignored sidecar (S4a, v0.10.149).
+   *   The actual value lives in site/config/sync.secret.php which is
+   *   gitignored AND rsync-excluded; see the $syncSecret block at the
+   *   top of this file for full rationale. The 'secret' key below
+   *   pulls from that variable. Missing sidecar → secret is null →
+   *   503 from /sync/*. As of S4a.1 the sidecar still holds the
+   *   original S1 placeholder value (i.e. the on-disk secret has not
+   *   yet been rotated — S4a.3 does that, after S4a.2 provisions the
+   *   sidecar on A and B). The secret is no longer in git history
+   *   going forward, but it remains in pre-S4a commits — that's why
+   *   the S1 value was always a placeholder, never a real secret.
    *
    * AUTH MODEL — single shared bearer token across L, A, B.
    *   All sync endpoints require `Authorization: Bearer <secret>`
@@ -186,7 +221,7 @@ return [
   'sync' => [
     'role'   => 'L',
     'host'   => 'localhost',
-    'secret' => 'placeholder-s1-rotate-before-s4-6085a2f6f5df590cbd911b75a9ce368d2c847b0d85b05533caeddb4421013051',
+    'secret' => $syncSecret,
     'peers'  => [
       // L's only peer is A (staging). L pushes to A; never receives.
       'A' => 'https://newsitedbart.bbh.fr',

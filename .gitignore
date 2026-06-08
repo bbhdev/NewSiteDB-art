@@ -1,3 +1,10 @@
+# Sync shared-secret sidecar (Slice S4a, v0.10.149).
+# Per-node bearer token for /sync/* auth — never tracked, never rsync'd.
+# Provisioned via sftp; rotated by changing the value on every node
+# simultaneously. See site/config/config.php "$syncSecret" block for
+# full rationale.
+/site/config/sync.secret.php
+
 /site/accounts/*
 !/site/accounts/index.html
 /site/cache/*
