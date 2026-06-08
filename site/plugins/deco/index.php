@@ -405,17 +405,6 @@ function deco_marks_classes(array $attrs): array
         if ($attr === 'color') {
             $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $val);
             if ($id !== '') $c = 'mk-color-' . $id;
-        } elseif ($attr === 'charStyle') {
-            // TS4: valued axis like `color`. value = a char-style id →
-            // .mk-cs-<id> (emitted by deco_charstyle_marks_css). The class
-            // is span-level (bare, specificity 0,1,0) so it BEATS the rect's
-            // inherited .ty-<id> base token (direct > inherited) but LOSES to
-            // the atomic axes (.rect-text .mk-strong, 0,2,0) — that is the
-            // `rect base < char-style < atomic` cascade, achieved purely by
-            // selector specificity, no resolver logic. Unknown id → no class
-            // (degrades like a dangling typographyId).
-            $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $val);
-            if ($id !== '') $c = 'mk-cs-' . $id;
         } elseif ($attr === 'elementStyle') {
             // Slice C (2026-06, decision A): runtime mirror of classForMark()
             // in dev-page.js. An `elementStyle` range mark carries a COMPLETE
@@ -515,92 +504,6 @@ function deco_palette_marks_css(array $palette): string
         // selector simply never matches. Covers run <span>s and link <a>s alike.
         $out .= '.pe-rect-text .mk-color-' . $id . ', .rect-text .mk-color-' . $id
               . ' { color: ' . $val . '; }' . "\n";
-    }
-    return $out;
-}
-
-/**
- * TS4 — named character-styles (M2), the cascade's middle layer. A char-style
- * is a NAMED, RELATIVE, type-only style applied to a text RANGE (a `charStyle`
- * mark), as opposed to a typography token (absolute, applied to the whole
- * rect). "Relative" is the key decision: deltas are expressed in CSS-native
- * relative units so an inline style never forces an absolute size jump on a
- * few words (the trap that ruled out reusing rect-level typography tokens):
- *   - sizeEm          → font-size: <n>em      (× the inherited rect-base size)
- *   - weight          → font-weight: bolder|lighter (relative to inherited)
- *   - italic (bool)   → font-style: italic|normal
- *   - letterSpacingEm → letter-spacing: <n>em (scales with the relative size)
- * Colour is deliberately NOT part of a char-style (it stays the orthogonal
- * `color` mark axis), exactly like typography tokens. Authored later (Slice 3)
- * in content/_shared/char-styles.json with shape { schemaVersion, styles }
- * mirroring typography-tokens.json; until then deco_default_charstyles()
- * seeds a set so the axis works end-to-end with no file present.
- *
- * @return list<array>
- */
-function deco_default_charstyles(): array
-{
-    return [
-        ['id' => 'lead-in',    'name' => 'Lead-in',    'sizeEm' => 1.2,  'weight' => 'bolder'],
-        ['id' => 'fine-print', 'name' => 'Fine print', 'sizeEm' => 0.8],
-        ['id' => 'quote',      'name' => 'Quote',      'sizeEm' => 1.05, 'italic' => true],
-    ];
-}
-
-/**
- * @return list<array>
- */
-function deco_load_charstyles(string $contentDir): array
-{
-    $path = $contentDir . '/_shared/char-styles.json';
-    if (is_file($path)) {
-        $data = json_decode(file_get_contents($path), true);
-        // Authored shape is { schemaVersion, styles:[...] }; tolerate a bare
-        // list too. Empty/absent → seed defaults (mirrors deco_load_typography).
-        if (is_array($data)) {
-            $styles = (isset($data['styles']) && is_array($data['styles'])) ? $data['styles'] : $data;
-            if (is_array($styles) && $styles !== []) return array_values($styles);
-        }
-    }
-    return deco_default_charstyles();
-}
-
-/**
- * Emit one `.mk-cs-<id>` rule per char-style — the SAME emitter editor and
- * runtime use, so a char-style mark previews identically (WYSIWYG). Each rule
- * is a BARE single class (specificity 0,1,0): beats the rect's inherited
- * .ty-<id> token, loses to the atomic `.rect-text .mk-strong` axes (0,2,0).
- * That ordering IS the M1/M2 cascade — no resolver code. All units relative;
- * unset fields are simply omitted so the inherited value shows through.
- */
-function deco_charstyle_marks_css(array $styles): string
-{
-    $num = function (float $v): string {
-        $s = rtrim(rtrim(number_format($v, 4, '.', ''), '0'), '.');
-        return $s === '' ? '0' : $s;
-    };
-    $out = '';
-    foreach ($styles as $s) {
-        if (!is_array($s) || !isset($s['id'])) continue;
-        $id = preg_replace('/[^a-z0-9_-]/i', '', (string) $s['id']);
-        if ($id === '') continue;
-        $decls = [];
-        if (isset($s['sizeEm'])) {
-            $em = max(0.1, min(10.0, (float) $s['sizeEm']));
-            $decls[] = 'font-size: ' . $num($em) . 'em';
-        }
-        if (isset($s['weight'])) {
-            $w = (string) $s['weight'];
-            if ($w === 'bolder' || $w === 'lighter') $decls[] = 'font-weight: ' . $w;
-        }
-        if (array_key_exists('italic', $s)) {
-            $decls[] = 'font-style: ' . (!empty($s['italic']) ? 'italic' : 'normal');
-        }
-        if (isset($s['letterSpacingEm'])) {
-            $ls = max(-2.0, min(2.0, (float) $s['letterSpacingEm']));
-            $decls[] = 'letter-spacing: ' . $num($ls) . 'em';
-        }
-        if ($decls) $out .= '.mk-cs-' . $id . ' { ' . implode('; ', $decls) . '; }' . "\n";
     }
     return $out;
 }

@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.135):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.136):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -524,13 +524,21 @@ repurposed** to carry complete-style ids. Key decisions:
       dev-draw.css (`#save-charstyles-btn.is-dirty`, `.ed-cs-sample`). The panel HTML was already
       retired in A2-3, so this was pure dead-code removal — the init wiring was guarded null-checks
       hitting non-existent DOM. (entry below.)
-    - **D3 — backend + registry** PENDING. Remove `deco_load_charstyles`/`deco_charstyle_marks_css`/
-      `deco_default_charstyles` + the `charStyle` branch in `deco_marks_classes`
-      (`site/plugins/deco/index.php`); the `dev/draw/charstyles` save route (`config.php`); the
-      `$charStyles` loading + `deco_charstyle_marks_css(...)` emission + `#ed-charstyle-css` `<style>`
-      in `canvas-page.php` / `page.php` / `draw.php`; and `content/_shared/char-styles.json`.
-      **CRITICAL: KEEP** the camelCase attr-slug pattern `/^[a-z][a-zA-Z0-9_-]{0,31}$/` in config.php
-      — `elementStyle` marks depend on it.
+    - **D3 — backend + registry** ✅ DONE (v0.10.136). Removed `deco_load_charstyles`/
+      `deco_charstyle_marks_css`/`deco_default_charstyles` + the `charStyle` branch in
+      `deco_marks_classes` (`site/plugins/deco/index.php`); the `dev/draw/charstyles` save+GET
+      route (`config.php`, now 404); the `$charStyles` loading + `deco_charstyle_marks_css(...)`
+      emission + `#ed-charstyle-css` `<style>` in `canvas-page.php` / `page.php` / `draw.php`.
+      **KEPT** (deliberately) the camelCase attr-slug pattern `/^[a-z][a-zA-Z0-9_-]{0,31}$/` in
+      config.php — `elementStyle` marks depend on it (comment updated to say so). The orphaned
+      `content/_shared/char-styles.json` is gitignored USER DATA — left on disk UNTOUCHED (nothing
+      reads it now; the user can delete it manually). Verified: all PHP lints clean; /dev/draw,
+      /dev/page, /test-page-3 all 200 with zero char-style refs; GET /dev/draw/charstyles → 404;
+      both editors init (page: rects render; draw: 7 typo + 7 palette rows) with no console errors.
+    - **SLICE D COMPLETE.** The stranded TS4 relative-char-style subsystem is fully removed across
+      page editor, Draw editor, and backend/runtime. Remaining D-bucket work (escape-hatch
+      reconciliation, dangling-style-ref governance, the `.pe-rect-text` colour-override retirement)
+      is independent and tracked separately below.
 
 > **Working rule — legacy/test data has no value (2026-06).** Existing
 > `content/*` is disposable test data, not real content. Do NOT spend effort fixing

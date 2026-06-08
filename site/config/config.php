@@ -1106,146 +1106,6 @@ HTML;
       }
     ],
 
-    /**
-     * Character styles (TS4 Slice 3, v0.10.109).
-     *
-     * Named, RELATIVE inline type styles, stored at
-     * content/_shared/char-styles.json with shape
-     *   { schemaVersion, styles: [ {id,name,sizeEm?,weight?,italic?,
-     *     letterSpacingEm?}, ... ], savedAt, count }
-     * — the same _shared pattern as typography-tokens.json. Authored in the
-     * draw editor (this route is its persistence layer); read everywhere via
-     * deco_load_charstyles() and emitted as CSS via deco_charstyle_marks_css()
-     * (the same bare `.mk-cs-<id>` emitter editor + runtime share — that
-     * single-class specificity IS the M1/M2 cascade).
-     *
-     *   GET  dev/draw/charstyles → { ok, styles: [...] }
-     *   POST dev/draw/charstyles   body { styles: [...] } → writes file
-     *
-     * CRITICAL difference from typography: char-style fields are OPTIONAL and
-     * UNSET FIELDS ARE OMITTED, so they inherit (a char-style that only sets
-     * sizeEm leaves weight/italic/letter-spacing to the rect base + atomic
-     * marks). The validator therefore treats null / '' / absent as "unset"
-     * and simply does not emit that key — it never substitutes a default.
-     * id  : ^[a-z0-9_-]{1,64}$ (also the charStyle mark value contract);
-     *       duplicates rejected (CSS classes would collide).
-     * name: non-empty, Unicode-tolerant, ≤64 (same set as typography).
-     * sizeEm          : clamped 0.1–10 when set.
-     * weight          : only 'bolder' | 'lighter' when set (else dropped).
-     * italic          : bool when set (tri-state: unset ≠ false ≠ true).
-     * letterSpacingEm : clamped -2–2 when set.
-     */
-    [
-      'pattern' => 'dev/draw/charstyles',
-      'method'  => 'GET|POST',
-      'action'  => function () {
-        $method    = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-        $hdrs      = ['Content-Type' => 'application/json'];
-        $sharedDir = kirby()->root('content') . '/_shared';
-        $csPath    = $sharedDir . '/char-styles.json';
-
-        if ($method === 'GET') {
-          $styles = deco_load_charstyles(kirby()->root('content'));
-          return new Kirby\Http\Response(
-            json_encode(['ok' => true, 'styles' => $styles]),
-            'application/json', 200, $hdrs
-          );
-        }
-
-        // POST: validate + write.
-        $body = kirby()->request()->body()->toArray();
-        $raw  = isset($body['styles']) && is_array($body['styles']) ? $body['styles'] : null;
-        if ($raw === null) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Missing or invalid "styles" array in body.']),
-            'application/json', 400, $hdrs
-          );
-        }
-
-        // "unset" test: a value the author left blank → omit the field.
-        $isUnset = function ($v) {
-          return $v === null || $v === '' || (is_string($v) && trim($v) === '');
-        };
-        $clamp = function ($v, $lo, $hi) {
-          $v = (float) $v;
-          return max($lo, min($hi, $v));
-        };
-        $clean   = [];
-        $seenIds = [];
-        foreach ($raw as $s) {
-          if (!is_array($s)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Each char-style must be an object.']),
-              'application/json', 400, $hdrs
-            );
-          }
-          $id = isset($s['id']) ? (string) $s['id'] : '';
-          if (!preg_match('/^[a-z0-9_-]{1,64}$/', $id)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid char-style id: "' . $id . '" (lowercase a-z, 0-9, _ or -, 1-64 chars).']),
-              'application/json', 400, $hdrs
-            );
-          }
-          if (isset($seenIds[$id])) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Duplicate char-style id: "' . $id . '".']),
-              'application/json', 400, $hdrs
-            );
-          }
-          $seenIds[$id] = true;
-
-          $name = isset($s['name']) ? trim((string) $s['name']) : '';
-          if ($name === '' || mb_strlen($name) > 64 || !preg_match("/^[\p{L}\p{N} _.,'()\[\]\\-]+$/u", $name)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid char-style name for "' . $id . '".']),
-              'application/json', 400, $hdrs
-            );
-          }
-
-          // Only set fields are emitted (unset → inherit).
-          $entry = ['id' => $id, 'name' => $name];
-          if (!$isUnset($s['sizeEm'] ?? null) && is_numeric($s['sizeEm'])) {
-            $entry['sizeEm'] = $clamp($s['sizeEm'], 0.1, 10.0);
-          }
-          $w = $s['weight'] ?? null;
-          if (!$isUnset($w) && ($w === 'bolder' || $w === 'lighter')) {
-            $entry['weight'] = $w;
-          }
-          if (array_key_exists('italic', $s) && !$isUnset($s['italic'])) {
-            $entry['italic'] = !empty($s['italic']) && $s['italic'] !== 'false';
-          }
-          if (!$isUnset($s['letterSpacingEm'] ?? null) && is_numeric($s['letterSpacingEm'])) {
-            $entry['letterSpacingEm'] = $clamp($s['letterSpacingEm'], -2.0, 2.0);
-          }
-          $clean[] = $entry;
-        }
-
-        if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
-            'application/json', 500, $hdrs
-          );
-        }
-        $payload = [
-          'schemaVersion' => 1,
-          'styles'        => $clean,
-          'savedAt'       => date('c'),
-          'count'         => count($clean),
-        ];
-        $tmpPath = $csPath . '.tmp';
-        $bytes   = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
-        if (@file_put_contents($tmpPath, $bytes) === false || !@rename($tmpPath, $csPath)) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Failed to write char-styles.json.']),
-            'application/json', 500, $hdrs
-          );
-        }
-        return new Kirby\Http\Response(
-          json_encode(['ok' => true, 'styles' => $clean, 'count' => count($clean)]),
-          'application/json', 200, $hdrs
-        );
-      }
-    ],
     [
       'pattern' => 'dev/draw/save',
       'method'  => 'POST',
@@ -1614,11 +1474,12 @@ HTML;
               }
               // Attr is a code-controlled axis identifier, not user
               // content. Most are lowercase slugs (strong/em/underline/
-              // color/link); `charStyle` (TS4) is camelCase — so the body
-              // allows [a-zA-Z0-9_-]. First char stays lowercase. This was
-              // the cause of the v0.10.107 "save failed · lowercase slug"
-              // bug: the TS4 charStyle attr never validated under the old
-              // strictly-lowercase pattern.
+              // color/link); `elementStyle` is camelCase — so the body
+              // allows [a-zA-Z0-9_-]. First char stays lowercase. DO NOT
+              // narrow this back to strictly-lowercase: the camelCase
+              // `elementStyle` mark axis depends on it (this same pattern
+              // originally landed for the retired TS4 `charStyle` axis,
+              // removed in Slice D — but elementStyle now relies on it).
               if (!is_string($m['attr'])
                   || !preg_match('/^[a-z][a-zA-Z0-9_-]{0,31}$/', $m['attr'])) {
                 return $fail('Rect mark attr must be a slug starting lowercase (1..32 chars).');

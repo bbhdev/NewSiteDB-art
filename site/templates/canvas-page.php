@@ -105,11 +105,6 @@ foreach ($typography as $t) {
     if (is_array($t) && isset($t['id'])) $typoIds[(string) $t['id']] = true;
 }
 
-// TS4: named character-styles (M2). Same shared artefact + emitter as the
-// editor so a `charStyle` mark renders identically here. No render-time gating
-// of refs is needed — a dangling ref just yields no .mk-cs-<id> rule and the
-// run falls back to its inherited typography token (graceful, like typo refs).
-$charStyles = deco_load_charstyles($contentRoot);
 ?>
 <!doctype html>
 <html lang="en">
@@ -123,7 +118,6 @@ $charStyles = deco_load_charstyles($contentRoot);
   <style>
 <?= deco_typography_css($typography, $palette) /* element styles incl. palette-resolved colour */ ?>
 <?= deco_palette_marks_css($palette) /* TS3-a: .mk-color-<id> per palette colour */ ?>
-<?= deco_charstyle_marks_css($charStyles) /* TS4: .mk-cs-<id> per char-style — bare single-class sits between the inherited .ty-<id> token and the atomic .rect-text .mk-* axes (specificity = the cascade) */ ?>
     :root {
       --cp-palette-text:    <?= $paletteText ?>;
       --cp-kind-text:       #cfe4ff;
