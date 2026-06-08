@@ -333,6 +333,151 @@ function sync_notify_peers_of_local_activity(string $at): array
     return ['A' => sync_ping_peer((string)$peers['A'], $secret, $role, $at)];
 }
 
+/*
+ * ─────────────────────────────────────────────────────────────────
+ * Slice S3 — per-page _sync stamps + diff manifest
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * Each page that's authored via /dev/* save routes gets a sidecar
+ * `_sync.json` file in its content directory, recording when it was
+ * last touched and by whom. This is the per-page complement to the
+ * node-wide state introduced in S2: state.json answers "was the
+ * NODE active?", _sync.json answers "was THIS PAGE modified?"
+ *
+ * Sidecar lives in the page's content dir, NEXT TO Kirby's content
+ * files (not inside them). Keeps Kirby's content parser untouched
+ * and means our format can evolve independently of the page schema.
+ *
+ * S3 intentionally records timestamps only, no contentHash — that's
+ * S4's job, where the sync diff logic will actually consume it. The
+ * shape includes a schemaVersion so we can add hash/conflict fields
+ * in S4 without ambiguity about old vs new sidecars.
+ */
+
+const SYNC_PAGE_SIDECAR_SCHEMA = 1;
+const SYNC_PAGE_SIDECAR_FILE   = '_sync.json';
+
+/**
+ * Pages excluded from the manifest. Match against page id prefix.
+ *   'dev'   — the entire editor surface (incl. drafts under
+ *             dev/image-workshop/*; those are author-staging
+ *             content but until S4 designs draft sync, we don't
+ *             include them in the manifest)
+ *   'error' — Kirby's 404 page
+ */
+function sync_manifest_excluded_prefixes(): array
+{
+    return ['dev', 'error'];
+}
+
+function sync_page_is_manifest_eligible(string $pageId): bool
+{
+    foreach (sync_manifest_excluded_prefixes() as $prefix) {
+        if ($pageId === $prefix || str_starts_with($pageId, $prefix . '/')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Read a page's sidecar, returning null if it doesn't exist or is
+ * unreadable. Tolerant of partial / corrupt files (returns null
+ * rather than throwing — the manifest then reports "no sync record"
+ * for that page, which is the correct interpretation).
+ */
+function sync_page_sidecar_read(string $contentDir): ?array
+{
+    $path = rtrim($contentDir, '/') . '/' . SYNC_PAGE_SIDECAR_FILE;
+    if (!is_file($path)) return null;
+    $raw = @file_get_contents($path);
+    if ($raw === false) return null;
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+/**
+ * Atomic-rename write of a page's sidecar. Best-effort — returns
+ * false on I/O failure, never throws. Save handlers must NOT
+ * propagate sidecar failures into the save's success/error path
+ * (same contract as state.json).
+ */
+function sync_page_sidecar_write(string $contentDir, array $data): bool
+{
+    $dir = rtrim($contentDir, '/');
+    if (!is_dir($dir)) return false;
+    $path = $dir . '/' . SYNC_PAGE_SIDECAR_FILE;
+    $tmp  = $path . '.tmp.' . bin2hex(random_bytes(4));
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
+    if ($json === false) return false;
+    if (@file_put_contents($tmp, $json) === false) return false;
+    if (!@rename($tmp, $path)) { @unlink($tmp); return false; }
+    return true;
+}
+
+/**
+ * Bump a page's _sync sidecar: set lastModifiedAt = now and
+ * lastModifiedBy = this node's role. Preserves lastSyncedAt (set
+ * by S4's sync action, not by author activity).
+ *
+ * Resolution: if $contentDir is omitted, looks up the Kirby page
+ * via kirby()->page($pageId)->root(). Handlers that already hold a
+ * Page object (e.g. image-workshop's draft batch) can pass
+ * $page->root() directly — saves a lookup AND handles drafts that
+ * kirby()->page() doesn't return.
+ *
+ * Returns the timestamp written, or null on any failure (page not
+ * resolvable, dir not writable). Failure is silent — save handlers
+ * never block on this.
+ */
+function sync_bump_page(string $pageId, ?string $contentDir = null): ?string
+{
+    if ($contentDir === null) {
+        $page = kirby()->page($pageId);
+        if (!$page) return null;
+        $contentDir = $page->root();
+    }
+    if (!is_dir($contentDir)) return null;
+
+    $now  = date('c');
+    $sync = option('sync');
+    $role = is_array($sync) && !empty($sync['role']) ? (string)$sync['role'] : 'L';
+
+    $existing = sync_page_sidecar_read($contentDir) ?? [];
+    $data = [
+        'schemaVersion'  => SYNC_PAGE_SIDECAR_SCHEMA,
+        'lastModifiedAt' => $now,
+        'lastModifiedBy' => $role,
+        'lastSyncedAt'   => $existing['lastSyncedAt'] ?? null,
+    ];
+    if (!sync_page_sidecar_write($contentDir, $data)) return null;
+    return $now;
+}
+
+/**
+ * Collect the diff manifest: one entry per eligible page (see
+ * sync_manifest_excluded_prefixes) with its current sidecar data
+ * (or null if the page has no sidecar yet).
+ *
+ * Drafts are NOT walked (kirby()->site()->index() excludes them).
+ * Pages that exist but have never been saved post-S3 appear with
+ * sync = null — the consumer treats null as "no sync history" and
+ * decides accordingly (likely: pull from peer if peer has data).
+ */
+function sync_collect_manifest(): array
+{
+    $pages = [];
+    foreach (kirby()->site()->index() as $p) {
+        $id = $p->id();
+        if (!sync_page_is_manifest_eligible($id)) continue;
+        $pages[] = [
+            'id'   => $id,
+            'sync' => sync_page_sidecar_read($p->root()),
+        ];
+    }
+    return $pages;
+}
+
 /**
  * Server-side GET of a peer's /sync/state, using this node's stored
  * shared secret as the bearer token. Used by L's editor-side

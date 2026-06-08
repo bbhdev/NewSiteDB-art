@@ -1314,6 +1314,13 @@ HTML;
           );
         }
 
+        // Sync S3: bump this page's _sync sidecar. Reached only on
+        // the success path — failed validation / write returns above
+        // don't get here, so the sidecar timestamp reliably means
+        // "this page WAS modified at this time" rather than "someone
+        // tried to save and failed."
+        sync_bump_page($pageId);
+
         return new Kirby\Http\Response(
           json_encode(['ok' => true]),
           'application/json'
@@ -1633,6 +1640,9 @@ HTML;
           return $fail('Failed to write rects.json.', 500);
         }
 
+        // Sync S3: bump this page's _sync sidecar on success path.
+        sync_bump_page($pageId);
+
         return new Kirby\Http\Response(
           json_encode(['ok' => true]),
           'application/json'
@@ -1922,6 +1932,17 @@ HTML;
           @unlink($tmp);
           return $fail('Failed to write verdicts.json.', 500);
         }
+
+        // Sync S3: bump the batch page's _sync sidecar. $batchPage
+        // is a draft Kirby page (image-workshop batches start as
+        // drafts) so kirby()->page() can't resolve it — pass the
+        // root() directly to bypass the lookup. Note that
+        // dev/image-workshop/* is currently excluded from the
+        // manifest (sync_manifest_excluded_prefixes), so this
+        // sidecar exists but is invisible to sync until S4
+        // designs draft/image sync. Keeping the hook now keeps the
+        // contract consistent across the three save handlers.
+        sync_bump_page($batchPage->id(), $batchPage->root());
 
         return new Kirby\Http\Response(
           json_encode(['ok' => true, 'count' => count($clean)]),
@@ -2213,6 +2234,45 @@ HTML;
         }
         return new Kirby\Http\Response(
           json_encode(['ok' => true, 'time' => date('c')]) . "\n",
+          'application/json'
+        );
+      }
+    ],
+
+    /*
+     * GET /sync/manifest — per-page _sync stamps (Slice S3).
+     *
+     * Returns:
+     *   { ok, role, host, time, pages: [ { id, sync: {...}|null }, ... ] }
+     *
+     * Excludes pages under 'dev' or 'error' prefixes — see
+     * sync_manifest_excluded_prefixes(). Drafts are not walked
+     * (kirby's site()->index() returns published pages only); this
+     * is a deliberate S3 limitation that S4 may revisit if draft
+     * sync turns out to matter.
+     *
+     * For each page: sync = the sidecar content (schemaVersion,
+     * lastModifiedAt, lastModifiedBy, lastSyncedAt) or null if the
+     * page has never been saved via /dev/* post-S3. Consumers
+     * interpret null as "no sync history" rather than "in sync."
+     *
+     * Auth: same shared-secret bearer token as the other /sync/*
+     * routes.
+     */
+    [
+      'pattern' => 'sync/manifest',
+      'method'  => 'GET',
+      'action'  => function () {
+        if ($err = sync_authorize_request()) return $err;
+        $sync = option('sync');
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'    => true,
+            'role'  => $sync['role'] ?? null,
+            'host'  => $sync['host'] ?? ($_SERVER['SERVER_NAME'] ?? null),
+            'time'  => date('c'),
+            'pages' => sync_collect_manifest(),
+          ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
           'application/json'
         );
       }
