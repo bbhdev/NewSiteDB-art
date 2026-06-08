@@ -188,17 +188,18 @@ return [
    * Slice S1 SCOPE: this block + the /sync/whoami route that
    * reads it. No actual content sync yet — those slices follow.
    *
-   * SECRET — read from gitignored sidecar (S4a, v0.10.149).
+   * SECRET — read from gitignored sidecar (S4a, v0.10.149/150).
    *   The actual value lives in site/config/sync.secret.php which is
    *   gitignored AND rsync-excluded; see the $syncSecret block at the
    *   top of this file for full rationale. The 'secret' key below
    *   pulls from that variable. Missing sidecar → secret is null →
-   *   503 from /sync/*. As of S4a.1 the sidecar still holds the
-   *   original S1 placeholder value (i.e. the on-disk secret has not
-   *   yet been rotated — S4a.3 does that, after S4a.2 provisions the
-   *   sidecar on A and B). The secret is no longer in git history
-   *   going forward, but it remains in pre-S4a commits — that's why
-   *   the S1 value was always a placeholder, never a real secret.
+   *   503 from /sync/*. As of v0.10.150 (S4a.3) the sidecar holds a
+   *   real `openssl rand -hex 32` secret, the same value on all three
+   *   nodes. The original S1 placeholder is retired — present only in
+   *   pre-S4a commit history (which is acceptable because it never
+   *   gated anything sensitive). Future rotations are a config-only
+   *   change: replace the value in the sidecar on every node at the
+   *   same time; no code change, no version bump required.
    *
    * AUTH MODEL — single shared bearer token across L, A, B.
    *   All sync endpoints require `Authorization: Bearer <secret>`
