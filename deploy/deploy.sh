@@ -17,8 +17,24 @@
 #                                     # Omit to use DEFAULT_TARGET.
 #   -y, --yes                         # skip the confirmation prompt
 #   --no-delete                       # upload/update only, never remove server files
+#   --bootstrap                       # ONE-TIME: also push editor-written content
+#                                     # data (drawings, layouts, images, …) that
+#                                     # normal deploys leave alone. Use only when
+#                                     # seeding a freshly-deployed server. After
+#                                     # this, the content-sync layer owns those
+#                                     # files. Confirms TWICE before transferring.
+#   --host-config                     # ONLY push site/config/config.<target>.php
+#                                     # (rsync-excluded from the normal mirror),
+#                                     # then curl-verify the /dev/draw 403 gate.
+#                                     # Mutually exclusive with the main deploy.
 #   --skip-icloud-check               # bypass the iCloud-placeholder pre-check
 #   -h, --help
+#
+# Two-layer sync model:
+#   Layer 1 (this script, no --bootstrap):  code only — L → A, L → B.
+#   Layer 2 (separate tool, TBD):           content bidirectional A↔B + L↔A/B,
+#                                           per-page _sync stamps in page.json.
+#   Bootstrap is the one-time bridge between them.
 #
 # Target naming convention: target name == site's SERVER_NAME (the domain
 # browsers hit). This keeps the CLI arg, the resolve_target branch in
@@ -40,6 +56,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 EXCLUDE_FILE="$SCRIPT_DIR/deploy-exclude.txt"
+EXCLUDE_CONTENT_FILE="$SCRIPT_DIR/deploy-exclude-content.txt"
 
 if [ ! -f "$SCRIPT_DIR/deploy.env" ]; then
   echo "✗ deploy/deploy.env is missing." >&2
@@ -53,14 +70,18 @@ fi
 ASSUME_YES=0
 DELETE="--delete"
 SKIP_ICLOUD_CHECK=0
+BOOTSTRAP=0
+HOST_CONFIG_ONLY=0
 TARGET=""
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)             ASSUME_YES=1 ;;
     --no-delete)          DELETE="" ;;
+    --bootstrap)          BOOTSTRAP=1 ;;
+    --host-config)        HOST_CONFIG_ONLY=1 ;;
     --skip-icloud-check)  SKIP_ICLOUD_CHECK=1 ;;
     -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
+      sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
       exit 0 ;;
     -*) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
     *)
@@ -73,8 +94,15 @@ for arg in "$@"; do
   esac
 done
 
+if [ "$BOOTSTRAP" -eq 1 ] && [ "$HOST_CONFIG_ONLY" -eq 1 ]; then
+  echo "✗ --bootstrap and --host-config are mutually exclusive." >&2
+  exit 2
+fi
+
 command -v rsync >/dev/null || { echo "✗ rsync not found in PATH" >&2; exit 1; }
 [ -f "$EXCLUDE_FILE" ] || { echo "✗ Missing exclude file: $EXCLUDE_FILE" >&2; exit 1; }
+[ -f "$EXCLUDE_CONTENT_FILE" ] \
+  || { echo "✗ Missing content exclude file: $EXCLUDE_CONTENT_FILE" >&2; exit 1; }
 
 # ── Resolve target → REMOTE_HOST + REMOTE_PATH ────────────────────────
 : "${TARGETS:?TARGETS not set in deploy.env}"
@@ -107,6 +135,51 @@ if [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_PATH" ]; then
   exit 1
 fi
 echo "▶ Target: $TARGET  →  $REMOTE_HOST:$REMOTE_PATH"
+
+# ── --host-config: SCP one file + curl-verify gate, then exit ─────────
+# The host-scoped Kirby config (site/config/config.<SERVER_NAME>.php) is
+# rsync-excluded from the normal mirror so each environment keeps its
+# own copy. This branch is the one-command push for that single file,
+# plus a logged-out curl to confirm the /dev/draw 403 gate is active.
+# No iCloud pre-check, no .htaccess staging — just one short SCP.
+if [ "$HOST_CONFIG_ONLY" -eq 1 ]; then
+  LOCAL_HC="$PROJECT_ROOT/site/config/config.$TARGET.php"
+  REMOTE_HC="$REMOTE_PATH/site/config/config.$TARGET.php"
+  if [ ! -f "$LOCAL_HC" ]; then
+    echo "✗ Local host-scoped config not found: $LOCAL_HC" >&2
+    echo "  Each target needs site/config/config.<target>.php (see existing siblings)." >&2
+    exit 1
+  fi
+  echo "▶ Pushing host-scoped config:"
+  echo "    $LOCAL_HC"
+  echo "  → $REMOTE_HOST:$REMOTE_HC"
+  if [ "$ASSUME_YES" -ne 1 ]; then
+    printf 'Proceed? [y/N] '
+    read -r reply
+    case "$reply" in
+      [yY]|[yY][eE][sS]) ;;
+      *) echo "Aborted."; exit 0 ;;
+    esac
+  fi
+  # scp preserves source mode by default; the in-repo file is 644 from
+  # git, no chmod gymnastics needed (unlike the staged .htaccess).
+  scp -p "$LOCAL_HC" "$REMOTE_HOST:$REMOTE_HC"
+  echo "✓ Host-scoped config uploaded."
+
+  # Verify the /dev/draw gate returns 403 when logged out. Uses HEAD
+  # so no body is downloaded; -o /dev/null silences any redirect chain
+  # output; -w '%{http_code}' prints just the status code.
+  GATE_URL="https://$TARGET/dev/draw"
+  echo "▶ Verifying gate: curl $GATE_URL  (expecting 403)"
+  status=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 10 "$GATE_URL" || echo "000")
+  case "$status" in
+    403) echo "  ✓ Gate active (HTTP $status)." ;;
+    200) echo "  ✗ Gate INERT — got HTTP 200. Check site/config/config.$TARGET.php loaded." >&2; exit 1 ;;
+    000) echo "  ✗ curl failed to reach $GATE_URL (network / DNS / TLS)." >&2; exit 1 ;;
+    *)   echo "  ⚠ Unexpected HTTP $status — investigate." >&2; exit 1 ;;
+  esac
+  exit 0
+fi
 
 # ── iCloud-placeholder pre-check ──────────────────────────────────────
 # This project lives in iCloud Drive. With "Optimize Mac Storage" enabled,
@@ -193,12 +266,34 @@ COMMON=(
   --exclude=/.htaccess
   --no-owner --no-group
 )
+# Layer 2 separation: in normal mode, the content-data exclude file is
+# loaded as a SECOND --exclude-from so editor-written files are left
+# alone (servers can edit them; the content-sync layer arbitrates).
+# --bootstrap drops this exclude for one run so a freshly-seeded server
+# can be replaced with local state in a single pass.
+if [ "$BOOTSTRAP" -ne 1 ]; then
+  COMMON+=( --exclude-from="$EXCLUDE_CONTENT_FILE" )
+fi
 
 SRC="$PROJECT_ROOT/"
 DEST="$REMOTE_HOST:$REMOTE_PATH/"
 
+if [ "$BOOTSTRAP" -eq 1 ]; then
+  cat >&2 <<EOF
+─────────────────────────────────────────────────────────────────────
+⚠  --bootstrap: editor-written content data WILL be pushed and (with
+   --delete) WILL overwrite/remove the server's existing content.
+   This is the one-time obsolete-seed replacement. Use ONLY when the
+   target server's content is known-obsolete; otherwise the
+   content-sync layer (not yet built) is the right tool.
+
+   Target: $TARGET  →  $REMOTE_HOST:$REMOTE_PATH
+─────────────────────────────────────────────────────────────────────
+EOF
+fi
+
 echo "▶ DRY RUN   $SRC"
-echo "        →   $DEST   (mirror=${DELETE:-off})"
+echo "        →   $DEST   (mirror=${DELETE:-off}${BOOTSTRAP:+, bootstrap=ON})"
 echo "        +   .htaccess  (sent separately, comments stripped)"
 echo "─────────────────────────────────────────────────────────────────"
 rsync "${COMMON[@]}" --dry-run "$SRC" "$DEST"
@@ -211,6 +306,13 @@ if [ "$ASSUME_YES" -ne 1 ]; then
     [yY]|[yY][eE][sS]) ;;
     *) echo "Aborted — nothing was changed on the server."; exit 0 ;;
   esac
+  if [ "$BOOTSTRAP" -eq 1 ]; then
+    printf '⚠  Second confirmation for --bootstrap. Type the target name (%s) to proceed: ' "$TARGET"
+    read -r reply2
+    if [ "$reply2" != "$TARGET" ]; then
+      echo "Aborted — target name not matched."; exit 0
+    fi
+  fi
 fi
 
 echo "▶ DEPLOYING …"

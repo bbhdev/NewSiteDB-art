@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────
+# Editor-written content data — TWO-LAYER SYNC SEPARATION
+# ─────────────────────────────────────────────────────────────────────
+#
+# These patterns mirror the gitignored content-data block in
+# `.gitignore`. They list every file the editor writes at runtime —
+# drawings, layouts, palette, masters, image-workshop output, uploaded
+# images, etc.
+#
+# Why excluded from code deploys: servers A and B can edit content
+# independently (planned bidirectional content sync). A code deploy that
+# also pushed content would clobber whatever the server's editor most
+# recently saved. The separation is mandatory.
+#
+# Sync responsibility moves to a separate layer (NOT deploy.sh) that
+# arbitrates per-page using `_sync` stamps embedded in each page.json —
+# newer-stamp wins, whole page is the atomic unit. Not yet built; this
+# exclude file is the deploy side of the contract.
+#
+# One-time exception: `deploy.sh --bootstrap` does NOT load this file,
+# so a freshly-seeded server can be brought up to local state in one
+# pass. After bootstrap, normal `deploy.sh` runs always include this
+# file again.
+#
+# Keep this list in lockstep with the `.gitignore` content section. If
+# new editor-written files appear, add them to both.
+# ─────────────────────────────────────────────────────────────────────
+
+# Root-level page (home, served from /content directly)
+/content/colors.json
+/content/page.json
+
+# Per-page (one level deep) data files
+/content/*/page.json
+/content/*/instances.json
+/content/*/lines.json
+/content/*/groups.json
+/content/*/rects.json
+
+# Subdir'd pages (two levels deep)
+/content/*/*/page.json
+/content/*/*/lines.json
+/content/*/*/groups.json
+/content/*/*/instances.json
+/content/*/*/rects.json
+
+# Shared registries (palette, classes, masters, font bundle, typography)
+/content/_shared/classes.json
+/content/_shared/masters.json
+/content/_shared/palette.json
+/content/_shared/font-bundle.json
+# typography-tokens.json: written by the dev/draw/typography save route.
+# Not currently in .gitignore (gap to address separately), but must be
+# treated as content data here so code deploys don't clobber it.
+/content/_shared/typography-tokens.json
+
+# Per-page draft/upload area. Covers both `_drafts/images/` (uploaded
+# images attached to the page) and `_drafts/batch*/` (image-workshop
+# batches under their own pages). Catches both depth levels.
+# This subsumes the previous image-workshop-specific block:
+# `content/dev/image-workshop/_drafts/` is caught by the 2-level rule.
+# `content/dev/image-workshop/image-workshop.txt` is git-tracked and
+# rides the normal code mirror — no special re-include needed.
+/content/*/_drafts/
+/content/*/*/_drafts/
+
+# User-uploaded images attached to pages — published library path.
+# (HANDOFF mentions this layout; no instances on this branch yet, but
+# the exclude is cheap and future-proofing.)
+/content/*/images/
+/content/*/*/images/
+
+# Page-root images (anomaly path — UUID-named files sitting directly
+# under content/<page>/, observed for at least one test page). All
+# editor-written; never code. Exclude common image extensions at both
+# page-depth levels.
+/content/*/*.png
+/content/*/*.jpg
+/content/*/*.jpeg
+/content/*/*.webp
+/content/*/*.avif
+/content/*/*.gif
+/content/*/*/*.png
+/content/*/*/*.jpg
+/content/*/*/*.jpeg
+/content/*/*/*.webp
+/content/*/*/*.avif
+/content/*/*/*.gif

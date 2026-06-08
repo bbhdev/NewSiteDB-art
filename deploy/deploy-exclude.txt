@@ -85,3 +85,12 @@ Thumbs.db
 # from removing them so a diagnostic session can stretch across multiple
 # deploys without re-uploading the probe each time.
 /x.php
+
+# ── Editor-written content data — see deploy-exclude-content.txt ──────
+# The content-data patterns (drawings, layouts, palette, masters,
+# image-workshop, uploaded images) live in a SEPARATE exclude file
+# (`deploy-exclude-content.txt`), referenced by deploy.sh as a second
+# --exclude-from. The split lets `deploy.sh --bootstrap` drop the second
+# file for a one-time obsolete-seed replacement, while normal deploys
+# always include it. See deploy-exclude-content.txt for the full list
+# and rationale.
