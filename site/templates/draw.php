@@ -312,9 +312,10 @@ $payload = json_encode([
              back to it. Authored here; persisted to typography-tokens.json
              (file/route/`.ty-` class unchanged — only the user-facing label
              is "Element styles" now). The former relative "Character styles"
-             panel was retired here (A2-3); its data + .mk-cs-<id> rendering
-             survive until Slice B repurposes the range-mark, and the dead JS
-             is removed in Slice D. */ ?>
+             panel was retired here (A2-3) and its dead authoring JS/CSS were
+             removed in Slice D2; the residual char-style DATA + .mk-cs-<id>
+             rendering plumbing (loader, emitter, save route, registry json)
+             are removed in Slice D3. */ ?>
     <section class="ed-panel" id="element-styles-section">
       <header class="ed-panel-head">
         <h3>Element styles</h3>

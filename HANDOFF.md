@@ -40,7 +40,7 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
-**Current state (v0.10.133):** Phase 1 complete (v0.9.0 milestone).
+**Current state (v0.10.135):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
@@ -512,8 +512,25 @@ repurposed** to carry complete-style ids. Key decisions:
       `deco_typography_css` already emits the `.ty-<id>` rules, canvas-page.php already renders
       runs via `deco_marks_classes`, the save route already accepts `elementStyle` marks via the
       lenient slug+value validation). (entry below.)
-- **D** — escape-hatch reconciliation + remove dead relative-char-style code + dangling-
-  style-ref governance; **then general page background** (below).
+- **D** — remove the stranded TS4 relative-char-style subsystem (sliced D1/D2/D3), then
+  escape-hatch reconciliation + dangling-style-ref governance; **then general page
+  background** (below).
+    - **D1 — page editor** ✅ DONE (v0.10.134). Removed `state.charStyles`/`csById` normalize,
+      the `charStyle` branch in `classForMark`, and the orphaned `applyCharStyle()` from
+      dev-page.js. (entry below.)
+    - **D2 — Draw editor authoring surface** ✅ DONE (v0.10.135). Removed the dead char-style
+      panel JS from dev-draw.js (state init, `rebuildCharstyleClientCss`, `renderCharStyleList`,
+      `addCharStyle`, `deleteCharStyle`, `saveCharStyles`, dirty flags, init wiring) + its CSS in
+      dev-draw.css (`#save-charstyles-btn.is-dirty`, `.ed-cs-sample`). The panel HTML was already
+      retired in A2-3, so this was pure dead-code removal — the init wiring was guarded null-checks
+      hitting non-existent DOM. (entry below.)
+    - **D3 — backend + registry** PENDING. Remove `deco_load_charstyles`/`deco_charstyle_marks_css`/
+      `deco_default_charstyles` + the `charStyle` branch in `deco_marks_classes`
+      (`site/plugins/deco/index.php`); the `dev/draw/charstyles` save route (`config.php`); the
+      `$charStyles` loading + `deco_charstyle_marks_css(...)` emission + `#ed-charstyle-css` `<style>`
+      in `canvas-page.php` / `page.php` / `draw.php`; and `content/_shared/char-styles.json`.
+      **CRITICAL: KEEP** the camelCase attr-slug pattern `/^[a-z][a-zA-Z0-9_-]{0,31}$/` in config.php
+      — `elementStyle` marks depend on it.
 
 > **Working rule — legacy/test data has no value (2026-06).** Existing
 > `content/*` is disposable test data, not real content. Do NOT spend effort fixing

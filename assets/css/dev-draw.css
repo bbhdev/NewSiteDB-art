@@ -2792,12 +2792,10 @@ body.editor input[type="range"] {
    delete since the last write. Filled amber (same as the in-panel save and the
    default-style badge) so "active" reads unambiguously, not just a faint
    border/text tint. */
-#save-typography-btn.is-dirty,
-#save-charstyles-btn.is-dirty {
+#save-typography-btn.is-dirty {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a; font-weight: 600;
 }
-#save-typography-btn.is-dirty:hover,
-#save-charstyles-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
+#save-typography-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
 /* Always-reachable dirty cue (v0.10.122): the sticky HEADER (v0.10.121) only
    solved the scroll-DOWN case — scrolling up to other sections slid the whole
    element-styles panel (and its pinned header) below the fold, and the header
@@ -2819,13 +2817,6 @@ body.editor input[type="range"] {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a;
 }
 #typo-save-bar-btn:hover { background: #e6bf57; border-color: #e6bf57; }
-/* TS4 Slice 3: char-style sample row reuses .ed-typo-sample as the box but
-   shows the relative effect inline — plain base text + a .mk-cs-<id> span —
-   so size/weight/italic deltas read against the surrounding base. The base
-   sits at a fixed, comfortable size so an em-relative override is legible. */
-.ed-cs-sample {
-  font-size: 0.95rem; line-height: 1.4;
-}
 .ed-typo-id {
   color: #8a9099; font-size: 0.68em; flex: none;
   background: #15171c; border: 1px solid #2a2e35;
