@@ -12272,6 +12272,11 @@
   // Esc handler for the standalone element-style Edit panel (v0.10.164).
   // Held so closeElementStylePanel can detach it; only one panel open at once.
   let esPanelKeyHandler = null;
+  // Slice 3b: last cross-page usage scan ({tokens, dangling, orphans, …}) from
+  // GET /dev/draw/typography/usage. null until "Check usage" runs. Drives the
+  // per-card usage badge in renderElementStyleDisplay; a re-scan refreshes it.
+  let typoUsageData = null;
+  let esReportKeyHandler = null;
 
   // Standard CSS font-weight steps, labelled. Values are numbers so they
   // match a numeric t.weight strictly in selectField; onChange parses back.
@@ -12580,6 +12585,22 @@
       const spacer = document.createElement('span');
       spacer.className = 'ed-es-card-spacer';
 
+      // Usage badge (Slice 3b): only after a scan has run. Shows the number of
+      // objects (text rects) explicitly referencing this style; for the default
+      // style, also "+N via default" (rects with no explicit style). Orphans
+      // (0 uses, and not the default carrying null refs) go amber.
+      let badge = null;
+      if (typoUsageData && typoUsageData.tokens && typoUsageData.tokens[t.id]) {
+        const u = typoUsageData.tokens[t.id];
+        badge = document.createElement('span');
+        badge.className = 'ed-es-card-usage' + (u.orphan ? ' is-orphan' : '');
+        let label = u.explicit + (u.explicit === 1 ? ' use' : ' uses');
+        if (u.isDefault && u.viaDefault > 0) label += ' +' + u.viaDefault + ' via default';
+        if (u.orphan) label = 'unused';
+        badge.textContent = label;
+        badge.title = 'Objects referencing this style across all pages (from the last “Check usage” scan)';
+      }
+
       const up = document.createElement('button');
       up.type = 'button';
       up.className = 'ed-mini ed-es-move';
@@ -12609,6 +12630,7 @@
       head.appendChild(idTag);
       head.appendChild(fam);
       head.appendChild(spacer);
+      if (badge) head.appendChild(badge);
       head.appendChild(up);
       head.appendChild(down);
       head.appendChild(editBtn);
@@ -12820,6 +12842,173 @@
     'line set ALL IN CAPS, as a title or label often is. ' +
     '0123456789 — “Curly quotes,” em-dashes, & ampersands.';
   const TYPO_PREVIEW_HEADING = 'A Page Begins With a Single Line';
+
+  // ---- Slice 3b: cross-page usage audit -----------------------------------
+
+  // Fetch the scan, cache it (drives the per-card badges), refresh the display
+  // so badges appear, then open the report modal. btn is the "Check usage"
+  // button — disabled with a transient label while the request is in flight.
+  async function runTypographyAudit(btn) {
+    const original = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning…'; }
+    try {
+      const res = await fetch('/dev/draw/typography/usage', {
+        headers: { 'Accept': 'application/json' }
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + res.status));
+      typoUsageData = j;
+      renderElementStyleDisplay();   // surface the badges
+      showTypographyUsageReport(j);
+    } catch (err) {
+      alert('Usage scan failed: ' + (err && err.message ? err.message : err));
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = original || 'Check usage'; }
+    }
+  }
+
+  function closeTypographyUsageReport() {
+    const old = document.getElementById('ed-es-report');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    const bd = document.getElementById('ed-es-report-backdrop');
+    if (bd && bd.parentNode) bd.parentNode.removeChild(bd);
+    if (esReportKeyHandler) {
+      document.removeEventListener('keydown', esReportKeyHandler);
+      esReportKeyHandler = null;
+    }
+  }
+
+  // Build the report modal: a problems-first layout — dangling refs (if any)
+  // at the top, then the per-style usage list in state.typography order, then
+  // an orphans summary. Reuses the floating-panel chrome (.ed-es-panel).
+  function showTypographyUsageReport(data) {
+    closeTypographyUsageReport();
+    const tokensById = (data && data.tokens) || {};
+    const dangling   = Array.isArray(data && data.dangling) ? data.dangling : [];
+    const orphans    = Array.isArray(data && data.orphans)  ? data.orphans  : [];
+    const order      = Array.isArray(state.typography) ? state.typography : [];
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'ed-es-panel-backdrop';
+    backdrop.id = 'ed-es-report-backdrop';
+    backdrop.addEventListener('click', closeTypographyUsageReport);
+
+    const panel = document.createElement('div');
+    panel.className = 'ed-es-panel ed-es-report';
+    panel.id = 'ed-es-report';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Element-style usage report');
+
+    const head = document.createElement('header');
+    head.className = 'ed-es-panel-head';
+    const title = document.createElement('h3');
+    title.className = 'ed-es-panel-title';
+    title.textContent = 'Element-style usage';
+    head.appendChild(title);
+
+    const body = document.createElement('div');
+    body.className = 'ed-es-panel-body';
+
+    const summary = document.createElement('p');
+    summary.className = 'ed-es-report-summary';
+    summary.textContent = 'Scanned ' + (data.scannedPages || 0) + ' page' +
+      ((data.scannedPages === 1) ? '' : 's') + ' · ' + (data.textRects || 0) +
+      ' text object' + ((data.textRects === 1) ? '' : 's') + ' · ' +
+      (data.nullRefCount || 0) + ' using the default implicitly.';
+    body.appendChild(summary);
+
+    // Dangling refs first (problems).
+    const dSect = document.createElement('section');
+    dSect.className = 'ed-es-report-sect';
+    const dH = document.createElement('h4');
+    dH.textContent = 'Dangling references';
+    dSect.appendChild(dH);
+    if (!dangling.length) {
+      const ok = document.createElement('div');
+      ok.className = 'ed-es-report-empty ed-es-report-ok';
+      ok.textContent = 'None — every reference resolves to a real style.';
+      dSect.appendChild(ok);
+    } else {
+      dangling.forEach(function (d) {
+        const row = document.createElement('div');
+        row.className = 'ed-es-report-row ed-es-report-warn';
+        const lbl = document.createElement('span');
+        lbl.textContent = d.page + (d.note ? (' — ' + d.note) : (d.rect ? (' — ' + d.rect) : ''));
+        const code = document.createElement('span');
+        code.className = 'ed-es-report-id';
+        code.textContent = '→ ty-' + d.typographyId + ' (missing)';
+        row.appendChild(lbl);
+        row.appendChild(code);
+        dSect.appendChild(row);
+      });
+    }
+    body.appendChild(dSect);
+
+    // Per-style usage list.
+    const uSect = document.createElement('section');
+    uSect.className = 'ed-es-report-sect';
+    const uH = document.createElement('h4');
+    uH.textContent = 'By style';
+    uSect.appendChild(uH);
+    order.forEach(function (t) {
+      const u = tokensById[t.id];
+      if (!u) return;
+      const row = document.createElement('div');
+      row.className = 'ed-es-report-row';
+      const nm = document.createElement('span');
+      nm.className = 'ed-es-report-name';
+      nm.textContent = (t.name || t.id) + (u.isDefault ? ' ★' : '');
+      const id = document.createElement('span');
+      id.className = 'ed-es-report-id';
+      id.textContent = 'ty-' + t.id;
+      const cnt = document.createElement('span');
+      cnt.className = 'ed-es-report-count' + (u.orphan ? ' ed-es-report-warn' : '');
+      let ctext = u.explicit + (u.explicit === 1 ? ' use' : ' uses');
+      if (u.isDefault && u.viaDefault > 0) ctext += ' +' + u.viaDefault + ' via default';
+      if (u.orphan) ctext = 'unused';
+      cnt.textContent = ctext;
+      row.appendChild(nm);
+      row.appendChild(id);
+      row.appendChild(cnt);
+      // Object list (which pages/objects use it).
+      if (u.objects && u.objects.length) {
+        const ul = document.createElement('ul');
+        ul.className = 'ed-es-report-objs';
+        u.objects.forEach(function (o) {
+          const li = document.createElement('li');
+          li.textContent = o.page + (o.note ? (' — ' + o.note) : (o.rect ? (' — ' + o.rect) : ''));
+          ul.appendChild(li);
+        });
+        row.appendChild(ul);
+      }
+      uSect.appendChild(row);
+    });
+    body.appendChild(uSect);
+
+    if (orphans.length) {
+      const oNote = document.createElement('p');
+      oNote.className = 'ed-es-report-summary ed-es-report-warn';
+      oNote.textContent = orphans.length + ' unused style' +
+        ((orphans.length === 1) ? '' : 's') + ' — safe to delete unless reserved for upcoming pages.';
+      body.appendChild(oNote);
+    }
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ed-mini ed-es-panel-save';
+    close.textContent = 'Close';
+    close.addEventListener('click', closeTypographyUsageReport);
+    body.appendChild(close);
+
+    panel.appendChild(head);
+    panel.appendChild(body);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+
+    esReportKeyHandler = function (ev) { if (ev.key === 'Escape') closeTypographyUsageReport(); };
+    document.addEventListener('keydown', esReportKeyHandler);
+  }
 
   function showTypographyPreview(only) {
     rebuildTypographyClientCss();
@@ -16586,6 +16775,10 @@
     // Wrap so the click Event isn't passed as the `only` argument
     // (that would scope the modal to a bogus single "token").
     viewTypoBtn.addEventListener('click', function () { showTypographyPreview(); });
+  }
+  const auditTypoBtn = document.getElementById('audit-typo-btn');
+  if (auditTypoBtn) {
+    auditTypoBtn.addEventListener('click', function () { runTypographyAudit(auditTypoBtn); });
   }
   saveBtn.addEventListener('click', save);
   clearLinesBtn.addEventListener('click', clearAllLines);

@@ -365,6 +365,14 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-es-card-id { font-family: ui-monospace, monospace; font-size: 11px; opacity: .6; }
     .ed-es-card-family { font-size: 12px; opacity: .8; font-style: italic; }
     .ed-es-card-spacer { flex: 1; }
+    /* Slice 3b usage badge: per-card count of objects referencing this style,
+       populated after "Check usage". Neutral by default; orphan (0 uses) goes
+       amber to flag it. The default style shows "+N via default" for null refs. */
+    .ed-es-card-usage {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      background: rgba(127,127,127,.18); color: inherit; white-space: nowrap;
+    }
+    .ed-es-card-usage.is-orphan { background: rgba(245,197,24,.22); color: #f5c518; }
     /* Demo rendered in the style — on a neutral light card so palette-driven
        text colours read faithfully (as on a page). The .ty-<id> class supplies
        size/weight/family/colour, so the demo shows the real, larger style. */
@@ -395,6 +403,30 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-es-panel-close { font-size: 18px; line-height: 1; min-width: 32px; min-height: 32px; }
     .ed-es-panel-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
     .ed-es-panel-save { align-self: flex-end; }
+
+    /* Slice 3b usage-report modal — reuses the floating-panel chrome, wider.
+       Sections: dangling refs (problems first), then per-style usage list. */
+    .ed-es-report { width: min(560px, 94vw); }
+    .ed-es-report-summary { font-size: 12px; opacity: .8; margin: 0 0 4px; }
+    .ed-es-report-sect { margin: 0; padding: 0; border: 0; }
+    .ed-es-report-sect h4 {
+      margin: 14px 0 6px; font-size: 12px; text-transform: uppercase;
+      letter-spacing: .04em; opacity: .7;
+    }
+    .ed-es-report-row {
+      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+      padding: 6px 0; border-top: 1px solid rgba(127,127,127,.18);
+    }
+    .ed-es-report-name { font-weight: 600; }
+    .ed-es-report-id { font-family: ui-monospace, monospace; font-size: 11px; opacity: .55; }
+    .ed-es-report-count { margin-left: auto; font-size: 12px; opacity: .85; }
+    .ed-es-report-objs {
+      flex-basis: 100%; margin: 2px 0 0; padding-left: 14px;
+      font-size: 11px; opacity: .7; list-style: disc;
+    }
+    .ed-es-report-warn { color: #f5c518; }
+    .ed-es-report-ok { color: #6ec06e; }
+    .ed-es-report-empty { font-size: 12px; opacity: .6; padding: 6px 0; }
   </style>
 </head>
 <body class="editor page-editor ed-mode-lines">
@@ -655,6 +687,11 @@ $payload = str_replace('<', '\\u003c', $payload);
       <ul id="typography-list" class="ed-typo-list"></ul>
       <button type="button" id="view-typo-btn" class="ed-mini ed-typo-view-btn"
               title="Preview every style as real paragraphs">View all in panel</button>
+      <!-- Slice 3b: cross-page usage audit. Scans every published page and
+           reports per-style usage counts (also shown as a badge on each
+           canvas card), orphans, and dangling refs. -->
+      <button type="button" id="audit-typo-btn" class="ed-mini ed-typo-view-btn"
+              title="Scan every page: which objects use each style, orphans, dangling refs">Check usage</button>
       <!-- The single Save control. The duplicate sticky save-bar + per-row
            inline saves were removed; this top button is made full-width and
            prominent (it doubles as the dirty indicator via .is-dirty). -->
