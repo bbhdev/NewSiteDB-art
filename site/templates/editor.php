@@ -321,10 +321,12 @@ $payload = str_replace('<', '\\u003c', $payload);
     body:not(.ed-mode-lines)  .ed-lines-only  { display: none !important; }
     body:not(.ed-mode-layout) .ed-layout-only { display: none !important; }
     body:not(.ed-mode-styles) .ed-styles-only { display: none !important; }
+    body:not(.ed-mode-images) .ed-images-only { display: none !important; }
     /* Body panes: same rule shape — exactly one pane visible per mode. */
     body:not(.ed-mode-lines)  .ed-mode-pane--lines  { display: none !important; }
     body:not(.ed-mode-layout) .ed-mode-pane--layout { display: none !important; }
     body:not(.ed-mode-styles) .ed-mode-pane--styles { display: none !important; }
+    body:not(.ed-mode-images) .ed-mode-pane--images { display: none !important; }
 
     /* Styles-mode surface = the canvas area beside the (compact) list panel.
        It hosts the ELEMENT-STYLE DISPLAY: one outlined card per style, in the
@@ -427,6 +429,41 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-es-report-warn { color: #f5c518; }
     .ed-es-report-ok { color: #6ec06e; }
     .ed-es-report-empty { font-size: 12px; opacity: .6; padding: 6px 0; }
+
+    /* ── Images mode (Slice 4) ───────────────────────────────────────────
+       Page-scoped image-library grid. Full-width surface (no side panel yet;
+       the import sub-panel arrives in 4c via progressive disclosure). */
+    .ed-images-surface {
+      flex: 1; min-height: 0; overflow: auto; padding: 14px 22px 40px;
+      display: flex; flex-direction: column;
+    }
+    .ed-images-head {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 4px 0 12px; position: sticky; top: 0; z-index: 2;
+      background: var(--bg, #111);
+    }
+    .ed-images-title { margin: 0; font-size: 15px; }
+    .ed-images-meta { font-size: 12px; opacity: .65; }
+    .ed-images-grid {
+      display: grid; gap: 14px;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    }
+    .ed-images-empty { opacity: .55; font-size: 13px; padding: 8px 0; }
+    .ed-img-card {
+      border: 1px solid rgba(127,127,127,.3); border-radius: 10px;
+      overflow: hidden; background: rgba(127,127,127,.05);
+      display: flex; flex-direction: column;
+    }
+    .ed-img-thumb {
+      width: 100%; aspect-ratio: 4 / 3; object-fit: contain;
+      background: #ffffff; display: block;
+    }
+    .ed-img-info { padding: 8px 10px; font-size: 11px; line-height: 1.45; }
+    .ed-img-name {
+      font-weight: 600; font-size: 12px; word-break: break-all;
+      display: block; margin-bottom: 2px;
+    }
+    .ed-img-dim { opacity: .65; }
   </style>
 </head>
 <body class="editor page-editor ed-mode-lines">
@@ -454,6 +491,7 @@ $payload = str_replace('<', '\\u003c', $payload);
       <button type="button" class="ed-mode-btn is-active" data-mode="lines"   role="tab" aria-selected="true"><span>Lines</span></button>
       <button type="button" class="ed-mode-btn"           data-mode="layout"  role="tab" aria-selected="false"><span>Layout</span></button>
       <button type="button" class="ed-mode-btn"           data-mode="styles"  role="tab" aria-selected="false"><span>Styles</span></button>
+      <button type="button" class="ed-mode-btn"           data-mode="images"  role="tab" aria-selected="false"><span>Images</span></button>
     </div>
     <div class="ed-class-tabs ed-lines-only" role="tablist" aria-label="Screen class">
       <?php foreach ($pageCfg['useClasses'] as $cid): ?>
@@ -710,6 +748,27 @@ $payload = str_replace('<', '\\u003c', $payload);
 </div>
 <!-- ─────────── END STYLES MODE PANE ─────────── -->
 
+<!-- ─────────── IMAGES MODE PANE (Slice 4) ─────────── -->
+<!-- Slice 4a: this page's image library (content/<page>/_drafts/images/),
+     loaded lazily on first entry to Images mode from GET dev/page/images/<id>.
+     4b adds per-image usage badges + audit; 4c adds the import-from-workshop
+     sub-panel. Page-scoped, matching the editor's one-target-page model. -->
+<div class="ed-mode-pane ed-mode-pane--images">
+  <main class="ed-images-surface">
+    <header class="ed-images-head">
+      <h3 class="ed-images-title">Image library</h3>
+      <span class="ed-images-meta" id="ed-images-meta"></span>
+      <span class="ed-es-card-spacer"></span>
+      <button type="button" id="ed-images-refresh" class="ed-mini"
+              title="Reload this page's image library">Refresh</button>
+    </header>
+    <div id="ed-images-grid" class="ed-images-grid">
+      <div class="ed-images-empty">Switch to this tab to load the page’s images…</div>
+    </div>
+  </main>
+</div>
+<!-- ─────────── END IMAGES MODE PANE ─────────── -->
+
 <!-- v0.8.110: floating-panel host (Lines mode). Fixed full-viewport overlay
      that never intercepts pointer events itself; individual floating
      panels (added by PanelManager in dev-draw.js) opt back in via
@@ -724,7 +783,7 @@ $payload = str_replace('<', '\\u003c', $payload);
   // in Slice 6. Persists last mode in localStorage so reloads stay put.
   (function () {
     var KEY = 'dev-editor:mode';
-    var MODES = ['lines', 'layout', 'styles'];
+    var MODES = ['lines', 'layout', 'styles', 'images'];
     var initial = (function () {
       var q = new URLSearchParams(location.search).get('mode');
       if (MODES.indexOf(q) !== -1) return q;
@@ -736,6 +795,7 @@ $payload = str_replace('<', '\\u003c', $payload);
       document.body.classList.toggle('ed-mode-lines',  mode === 'lines');
       document.body.classList.toggle('ed-mode-layout', mode === 'layout');
       document.body.classList.toggle('ed-mode-styles', mode === 'styles');
+      document.body.classList.toggle('ed-mode-images', mode === 'images');
       var btns = document.querySelectorAll('.ed-mode-btn');
       for (var i = 0; i < btns.length; i++) {
         var on = btns[i].getAttribute('data-mode') === mode;
@@ -743,6 +803,9 @@ $payload = str_replace('<', '\\u003c', $payload);
         btns[i].setAttribute('aria-selected', on ? 'true' : 'false');
       }
       try { localStorage.setItem(KEY, mode); } catch (e) {}
+      // Notify mode-specific panes (e.g. Images lazy-loads its library the
+      // first time it's shown — see ed-images-pane-js).
+      try { document.dispatchEvent(new CustomEvent('ed-mode', { detail: { mode: mode } })); } catch (e) {}
     }
     apply(initial);
     document.addEventListener('click', function (ev) {
@@ -751,6 +814,79 @@ $payload = str_replace('<', '\\u003c', $payload);
       var mode = btn.getAttribute('data-mode');
       if (MODES.indexOf(mode) !== -1) apply(mode);
     });
+  })();
+</script>
+<script id="ed-images-pane-js">
+  // Slice 4a: Images mode pane. Loads this page's image library lazily on the
+  // first entry to the mode (the 'ed-mode' CustomEvent fired by the toggle),
+  // and on demand via the Refresh button. Reads pageId from #editor-data.
+  // Standalone for now; folds into dev-editor.js in Slice 6.
+  (function () {
+    var pageId = null;
+    try { pageId = JSON.parse(document.getElementById('editor-data').textContent).pageId; }
+    catch (e) {}
+    var grid    = document.getElementById('ed-images-grid');
+    var metaEl  = document.getElementById('ed-images-meta');
+    var refresh = document.getElementById('ed-images-refresh');
+    var loaded  = false;
+    var loading = false;
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function render(images) {
+      if (!images || !images.length) {
+        grid.innerHTML = '<div class="ed-images-empty">No images in this page’s library yet.</div>';
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < images.length; i++) {
+        var im = images[i];
+        html += '<figure class="ed-img-card" data-filename="' + esc(im.filename) + '">' +
+          '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb || im.url) + '" alt="' + esc(im.alt) + '">' +
+          '<figcaption class="ed-img-info">' +
+            '<span class="ed-img-name">' + esc(im.filename) + '</span>' +
+            '<span class="ed-img-dim">' + (im.width || '?') + '×' + (im.height || '?') +
+            ' · ' + esc(im.size) + '</span>' +
+          '</figcaption>' +
+        '</figure>';
+      }
+      grid.innerHTML = html;
+    }
+
+    function load() {
+      if (loading || !pageId) return;
+      loading = true;
+      grid.innerHTML = '<div class="ed-images-empty">Loading…</div>';
+      fetch('/dev/page/images/' + encodeURIComponent(pageId).replace(/%2F/gi, '/'), {
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || 'load failed');
+          loaded = true;
+          render(j.images || []);
+          if (metaEl) {
+            var n = (j.images || []).length;
+            metaEl.textContent = n + ' image' + (n === 1 ? '' : 's') + ' · ' + (j.page || pageId);
+          }
+        })
+        .catch(function (err) {
+          grid.innerHTML = '<div class="ed-images-empty">Could not load images: ' + esc(err.message || err) + '</div>';
+        })
+        .finally(function () { loading = false; });
+    }
+
+    document.addEventListener('ed-mode', function (ev) {
+      if (ev.detail && ev.detail.mode === 'images' && !loaded) load();
+    });
+    if (refresh) refresh.addEventListener('click', function () { loaded = false; load(); });
+    // If the editor opened directly in Images mode (?mode=images / localStorage),
+    // the toggle's initial apply() fired before this listener attached — catch up.
+    if (document.body.classList.contains('ed-mode-images') && !loaded) load();
   })();
 </script>
 <!-- v<?= $v ?> -->
