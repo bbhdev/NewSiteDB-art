@@ -345,6 +345,12 @@ $payload = str_replace('<', '\\u003c', $payload);
       border: 1px solid rgba(127,127,127,.32); border-radius: 10px;
       overflow: hidden; background: rgba(127,127,127,.04);
     }
+    /* Unsaved-change marker: a style created or edited since the last save.
+       Yellow outline + faint glow so changed cards stand out on the canvas. */
+    .ed-es-card.is-modified {
+      border-color: #f5c518;
+      box-shadow: 0 0 0 1px #f5c518, 0 0 10px rgba(245,197,24,.25);
+    }
     .ed-es-card-head {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       padding: 8px 12px; border-bottom: 1px solid rgba(127,127,127,.22);

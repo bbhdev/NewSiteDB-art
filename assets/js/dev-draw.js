@@ -12259,6 +12259,13 @@
   // `.ty-heading` instead of `.ty-token`); once saved to disk the id locks
   // forever, so existing rect `typographyId` refs never break on rename.
   const newTypoIds = {};
+  // Per-token "modified since last save" set (v0.10.167). Drives the yellow
+  // canvas outline on each changed style card. A card is highlighted if its id
+  // is in EITHER newTypoIds (created this session, not yet saved) OR
+  // modifiedTypoIds (an existing style whose fields were edited). Both are
+  // cleared in saveTypography on a successful write. Keyed by token id; note a
+  // rename remaps the key (see openElementStylePanel name field).
+  const modifiedTypoIds = {};
   // (expandedTypoIds removed in the 3a Step-2 redesign — the sidebar list no
   // longer has a per-row collapsible editor; editing is in the floating panel.)
   let typographyDirty = false;
@@ -12431,6 +12438,7 @@
                  '"? Text using it falls back to the default style.')) return;
     state.typography = (state.typography || []).filter(function (x) { return x.id !== t.id; });
     delete newTypoIds[t.id];
+    delete modifiedTypoIds[t.id];
     rebuildTypographyClientCss();
     markTypographyDirty();
     renderTypographyList();
@@ -12539,7 +12547,10 @@
     }
     tokens.forEach(function (t, idx) {
       const card = document.createElement('section');
-      card.className = 'ed-es-card';
+      // Yellow outline (.is-modified) flags styles changed since the last save:
+      // either newly created (newTypoIds) or edited (modifiedTypoIds). Cleared
+      // on save. Gives at-a-glance feedback of what the sidebar Save will write.
+      card.className = 'ed-es-card' + ((newTypoIds[t.id] || modifiedTypoIds[t.id]) ? ' is-modified' : '');
       card.setAttribute('data-typo-id', t.id);
 
       const head = document.createElement('header');
@@ -12666,6 +12677,7 @@
     body.className = 'ed-es-panel-body';
 
     function afterFieldEdit() {
+      modifiedTypoIds[t.id] = true;  // flag this style for the yellow card outline
       rebuildTypographyClientCss();
       markTypographyDirty();
       renderElementStyleDisplay();   // refresh the demo card live
@@ -12676,12 +12688,15 @@
     // readable; once saved the id locks (newTypoIds cleared in saveTypography).
     body.appendChild(textField('Name', t.name || '', function (v) {
       t.name = v;
+      modifiedTypoIds[t.id] = true;  // flag for the yellow card outline
       if (newTypoIds[t.id]) {
         const newId = uniqueTypoId(slugifyTypoId(t.name), t.id);
         if (newId !== t.id) {
           delete newTypoIds[t.id];
+          delete modifiedTypoIds[t.id];   // remap the modified flag with the id
           t.id = newId;
           newTypoIds[newId] = true;
+          modifiedTypoIds[newId] = true;
           panel.setAttribute('data-typo-id', newId);
           rebuildTypographyClientCss();
         }
@@ -12767,6 +12782,7 @@
         state.typography = j.tokens;   // adopt the server-normalised set
       }
       Object.keys(newTypoIds).forEach(function (k) { delete newTypoIds[k]; });
+      Object.keys(modifiedTypoIds).forEach(function (k) { delete modifiedTypoIds[k]; });
       rebuildTypographyClientCss();
       renderTypographyList();
       clearTypographyDirty();
