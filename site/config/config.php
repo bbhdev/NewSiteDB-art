@@ -2296,10 +2296,18 @@ HTML;
           return $json(['ok' => false, 'error' => 'Unknown image in batch: ' . $filename], 404);
         }
 
-        // Resolve + validate the target. Only canvas-page pages are valid
-        // transfer targets (the dropdown only offers those — enforce here).
+        // Resolve + validate the target. Any real content page is a valid
+        // transfer target (its image library is lazily provisioned below,
+        // exactly as upload-image does) — we only exclude the system pages
+        // (the /dev editor tree and the error page). NOTE: we deliberately
+        // do NOT require the canvas-page template here. Project content uses
+        // the `default` template; gating on canvas-page rejected every real
+        // page and left the workshop's target dropdown empty.
         $target = $kirby->page($targetId);
-        if (!$target || $target->intendedTemplate()->name() !== 'canvas-page') {
+        $tid    = $target ? $target->id() : '';
+        $isSystem = $tid === 'dev' || strpos($tid, 'dev/') === 0
+                 || $tid === 'error' || strpos($tid, 'error/') === 0;
+        if (!$target || $isSystem) {
           return $json(['ok' => false, 'error' => 'Invalid target page: ' . $targetId], 404);
         }
 

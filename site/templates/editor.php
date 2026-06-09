@@ -458,7 +458,13 @@ $payload = str_replace('<', '\\u003c', $payload);
       width: 100%; aspect-ratio: 4 / 3; object-fit: contain;
       background: #ffffff; display: block;
     }
-    .ed-img-info { padding: 8px 10px; font-size: 11px; line-height: 1.45; }
+    /* Flex column + equal-height cards (grid stretches each row) means the
+       badge, pushed down with margin-top:auto, sits on a common baseline
+       across every card in a row regardless of how many lines the name wraps. */
+    .ed-img-info {
+      padding: 8px 10px; font-size: 11px; line-height: 1.45;
+      flex: 1 1 auto; display: flex; flex-direction: column;
+    }
     .ed-img-name {
       font-weight: 600; font-size: 12px; word-break: break-all;
       display: block; margin-bottom: 2px;
@@ -467,8 +473,8 @@ $payload = str_replace('<', '\\u003c', $payload);
     /* Slice 4b usage badge — count of rects on this page referencing the image.
        Orphan (0 uses) goes amber, matching the Styles audit. */
     .ed-img-usage {
-      display: inline-block; margin-top: 4px; font-size: 10px;
-      padding: 1px 7px; border-radius: 999px; background: rgba(127,127,127,.2);
+      align-self: flex-start; margin-top: auto; font-size: 10px;
+      padding: 3px 7px 1px; border-radius: 999px; background: rgba(127,127,127,.2);
     }
     .ed-img-usage.is-orphan { background: rgba(245,197,24,.22); color: #f5c518; }
     /* Amber frame on an orphan image card (parallels .ed-es-card.is-modified). */
@@ -500,8 +506,8 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-import .ed-img-card.is-sent { opacity: .6; }
     .ed-import .ed-img-card.is-busy { pointer-events: none; opacity: .5; }
     .ed-import-badge {
-      display: inline-block; margin-top: 4px; font-size: 10px;
-      padding: 1px 7px; border-radius: 999px; background: rgba(127,127,127,.2);
+      align-self: flex-start; margin-top: auto; font-size: 10px;
+      padding: 3px 7px 1px; border-radius: 999px; background: rgba(127,127,127,.2);
     }
     .ed-import-badge.is-sent  { background: rgba(120,200,120,.22); color: #7ec97e; }
     .ed-import-badge.v-ok     { background: rgba(120,200,120,.18); color: #7ec97e; }

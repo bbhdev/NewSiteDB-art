@@ -80,14 +80,19 @@ if (is_file($sentPath)) {
   }
 }
 
-// Enumerate canvas pages — the transfer targets offered by "Use this".
-// Only canvas-page pages are valid (the route enforces this too); their
-// `images` children use the image-container template and are skipped
-// automatically by the template-name filter.
+// Enumerate transfer targets offered by "Use this". Any real content page is
+// valid (the use-image route lazily provisions its image library); we exclude
+// only the system pages (the /dev editor tree, the error page) and the
+// per-page `images` child libraries (image-container template). NOTE: we do
+// NOT filter on canvas-page — project content uses the `default` template, so
+// that filter left this list empty.
 $canvasPages = [];
 foreach (kirby()->site()->index() as $cp) {
-  if ($cp->intendedTemplate()->name() !== 'canvas-page') { continue; }
-  $canvasPages[] = ['id' => $cp->id(), 'title' => $cp->title()->value()];
+  $cid = $cp->id();
+  if ($cid === 'dev' || strpos($cid, 'dev/') === 0) { continue; }
+  if ($cid === 'error' || strpos($cid, 'error/') === 0) { continue; }
+  if ($cp->intendedTemplate()->name() === 'image-container') { continue; }
+  $canvasPages[] = ['id' => $cid, 'title' => $cp->title()->value()];
 }
 
 // Counts per verdict, for the filter-bar badges.
