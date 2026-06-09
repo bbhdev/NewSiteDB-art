@@ -492,12 +492,12 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-import-field {
       display: flex; flex-direction: column; gap: 3px; font-size: 11px; opacity: .85;
     }
-    .ed-import-select, .ed-import-size {
+    .ed-import-select {
       font: inherit; font-size: 12px; padding: 3px 6px;
       border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
       background: var(--bg, #111); color: inherit;
     }
-    .ed-import-size { width: 88px; }
+    .ed-import-hint { font-size: 11px; opacity: .55; align-self: center; }
     .ed-import-status { font-size: 11px; opacity: .7; }
     .ed-import-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
     /* Import cards are clickable (send on click); show affordance + sent state. */
@@ -826,15 +826,7 @@ $payload = str_replace('<', '\\u003c', $payload);
         <label class="ed-import-field">Batch
           <select id="ed-import-batch" class="ed-import-select"></select>
         </label>
-        <label class="ed-import-field">Long edge (px)
-          <input type="number" id="ed-import-size" class="ed-import-size"
-                 min="200" max="8000" step="10" value="1000" list="ed-import-sizes">
-          <datalist id="ed-import-sizes">
-            <option value="800"></option><option value="1000"></option>
-            <option value="1200"></option><option value="1600"></option>
-            <option value="2400"></option>
-          </datalist>
-        </label>
+        <span class="ed-import-hint">Images come in at original size.</span>
         <span class="ed-es-card-spacer"></span>
         <span class="ed-import-status" id="ed-import-status"></span>
         <button type="button" id="ed-images-import-close" class="ed-mini" title="Close import">×</button>
@@ -1073,7 +1065,6 @@ $payload = str_replace('<', '\\u003c', $payload);
     var importToggle = document.getElementById('ed-images-import-toggle');
     var importClose  = document.getElementById('ed-images-import-close');
     var batchSel     = document.getElementById('ed-import-batch');
-    var sizeInput    = document.getElementById('ed-import-size');
     var importGrid   = document.getElementById('ed-import-grid');
     var importStatus = document.getElementById('ed-import-status');
     var batchesLoaded = false;
@@ -1144,14 +1135,13 @@ $payload = str_replace('<', '\\u003c', $payload);
       var filename = card.getAttribute('data-filename');
       var batchId  = batchSel ? batchSel.value : '';
       if (!filename || !batchId) return;
-      var size = parseInt(sizeInput && sizeInput.value, 10);
-      if (!(size >= 200 && size <= 8000)) size = 1000;
       card.classList.add('is-busy');
       setStatus('Importing ' + filename + '…');
+      // No `size` → the endpoint copies the original (editor pull = originals).
       fetch('/dev/image-workshop/use-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ batch: batchId, filename: filename, size: size, targetPage: pageId })
+        body: JSON.stringify({ batch: batchId, filename: filename, targetPage: pageId })
       })
         .then(function (r) { return r.json(); })
         .then(function (j) {

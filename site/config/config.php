@@ -2278,9 +2278,14 @@ HTML;
           return $json(['ok' => false, 'error' => 'Missing or invalid body fields.'], 400);
         }
 
-        // Long edge — same clamp as the workshop grid (image blueprint bounds).
-        $size = is_numeric($sizeRaw) ? (int) $sizeRaw : 1000;
-        $size = max(200, min(8000, $size));
+        // Long edge. When `size` is omitted / non-numeric the source is copied
+        // at ORIGINAL resolution (the editor's import panel relies on this —
+        // it pulls originals and lets the page runtime resize for display).
+        // A numeric `size` (the workshop's own "Use this", and later its
+        // per-image long edge) resizes to that long edge, clamped to the
+        // image blueprint bounds.
+        $useOriginal = !is_numeric($sizeRaw);
+        $size = $useOriginal ? 0 : max(200, min(8000, (int) $sizeRaw));
 
         // Resolve the batch (drafts included), scoped to the workshop
         // container so an arbitrary page id can't be targeted as a source.
@@ -2311,12 +2316,16 @@ HTML;
           return $json(['ok' => false, 'error' => 'Invalid target page: ' . $targetId], 404);
         }
 
-        // Generate (or cache-hit) the resized derivative — byte-identical
-        // to what the grid renders at this size.
-        $resized = $img->resize($size, $size);
-        $srcPath = $resized->root();
+        // Original → copy the source file as-is. Otherwise generate (or
+        // cache-hit) the resized derivative — byte-identical to the grid.
+        if ($useOriginal) {
+          $srcPath = $img->root();
+        } else {
+          $resized = $img->resize($size, $size);
+          $srcPath = $resized->root();
+        }
         if (!is_string($srcPath) || !is_file($srcPath)) {
-          return $json(['ok' => false, 'error' => 'Could not generate the resized image.'], 500);
+          return $json(['ok' => false, 'error' => 'Could not resolve the source image.'], 500);
         }
 
         // Target image library — lazily provisioned, identical to upload-image.
