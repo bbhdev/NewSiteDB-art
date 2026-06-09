@@ -349,7 +349,11 @@ $payload = str_replace('<', '\\u003c', $payload);
        Yellow outline + faint glow so changed cards stand out on the canvas. */
     .ed-es-card.is-modified {
       border-color: #f5c518;
-      box-shadow: 0 0 0 1px #f5c518, 0 0 10px rgba(245,197,24,.25);
+      /* outline-offset gives a 2px gap so the ring reads as a frame around the
+         card rather than merging into the white demo background; 3px thick. */
+      outline: 3px solid #f5c518;
+      outline-offset: 2px;
+      box-shadow: 0 0 10px rgba(245,197,24,.3);
     }
     .ed-es-card-head {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
