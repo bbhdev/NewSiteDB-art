@@ -1255,6 +1255,116 @@ HTML;
       }
     ],
 
+    /**
+     * Cross-page element-style usage audit (Slice 3b).
+     *
+     *   GET dev/draw/typography/usage → {
+     *     ok, scannedPages, textRects, defaultId, nullRefCount,
+     *     tokens:   { <id>: { name, isDefault, explicit, viaDefault,
+     *                         orphan, objects: [{page,rect,note}] } },
+     *     dangling: [ {page, rect, typographyId, note} ],
+     *     orphans:  [ <id>, … ]
+     *   }
+     *
+     * Walks every PUBLISHED page (kirby()->site()->index() — drafts excluded,
+     * matching the sync manifest) and reads its rects.json. Counts, per token:
+     *   - explicit  : text rects whose typographyId === <id> (resolvable);
+     *   - viaDefault: for the default token only, text rects with a null/empty
+     *                 typographyId (they resolve to the default at render time).
+     * A text rect whose typographyId points at a non-existent token is DANGLING
+     * (degrades to the default at render — see effectiveStyleId in dev-page.js —
+     * but worth surfacing so the author can fix or delete it).
+     * A token is an ORPHAN when explicit === 0 AND it isn't the default
+     * absorbing null refs (default + viaDefault>0 is genuinely in use).
+     *
+     * Read-only; no side effects. Inherits the host-scoped panel-auth gate
+     * like the sibling dev/draw routes.
+     */
+    [
+      'pattern' => 'dev/draw/typography/usage',
+      'method'  => 'GET',
+      'action'  => function () {
+        $hdrs   = ['Content-Type' => 'application/json'];
+        $tokens = deco_load_typography(kirby()->root('content'));
+
+        // Index tokens by id; find the default.
+        $byId      = [];
+        $defaultId = null;
+        foreach ($tokens as $t) {
+          $id = $t['id'] ?? null;
+          if (!is_string($id) || $id === '') continue;
+          $byId[$id] = [
+            'name'       => $t['name'] ?? $id,
+            'isDefault'  => !empty($t['isDefault']),
+            'explicit'   => 0,
+            'viaDefault' => 0,
+            'orphan'     => false,
+            'objects'    => [],
+          ];
+          if (!empty($t['isDefault'])) $defaultId = $id;
+        }
+
+        $scannedPages = 0;
+        $textRects    = 0;
+        $nullRefCount = 0;
+        $dangling     = [];
+
+        foreach (kirby()->site()->index() as $p) {
+          $rectsPath = $p->root() . '/rects.json';
+          if (!is_file($rectsPath)) continue;
+          $data = json_decode(@file_get_contents($rectsPath), true);
+          if (!is_array($data) || !isset($data['rects']) || !is_array($data['rects'])) continue;
+          $scannedPages++;
+          $pageId = $p->id();
+          foreach ($data['rects'] as $r) {
+            if (!is_array($r)) continue;
+            if (($r['kind'] ?? null) !== 'text') continue;   // only text rects carry typography
+            $textRects++;
+            $tid  = $r['typographyId'] ?? null;
+            $note = isset($r['note']) ? (string) $r['note'] : '';
+            $rid  = isset($r['id'])   ? (string) $r['id']   : '';
+            if ($tid === null || $tid === '') {
+              // Resolves to the default style at render time.
+              $nullRefCount++;
+              if ($defaultId !== null) $byId[$defaultId]['viaDefault']++;
+              continue;
+            }
+            $tid = (string) $tid;
+            if (isset($byId[$tid])) {
+              $byId[$tid]['explicit']++;
+              $byId[$tid]['objects'][] = ['page' => $pageId, 'rect' => $rid, 'note' => $note];
+            } else {
+              $dangling[] = ['page' => $pageId, 'rect' => $rid, 'typographyId' => $tid, 'note' => $note];
+            }
+          }
+        }
+
+        // Derive orphans: explicit==0 and not the default absorbing null refs.
+        $orphans = [];
+        foreach ($byId as $id => &$row) {
+          $isOrphan = ($row['explicit'] === 0)
+                    && !($row['isDefault'] && $row['viaDefault'] > 0);
+          $row['orphan'] = $isOrphan;
+          if ($isOrphan) $orphans[] = $id;
+        }
+        unset($row);
+
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'           => true,
+            'scannedPages' => $scannedPages,
+            'textRects'    => $textRects,
+            'defaultId'    => $defaultId,
+            'nullRefCount' => $nullRefCount,
+            'tokens'       => $byId,
+            'dangling'     => $dangling,
+            'orphans'      => $orphans,
+          ]),
+          'application/json', 200, $hdrs
+        );
+      }
+    ],
+
     [
       'pattern' => 'dev/draw/save',
       'method'  => 'POST',
