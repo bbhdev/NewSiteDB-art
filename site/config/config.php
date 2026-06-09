@@ -2389,6 +2389,99 @@ HTML;
     ],
 
     /*
+     * GET dev/image-workshop/list            (Convergence Slice 4c)
+     *   ?batch=<id>      — optional; when omitted, lists batches
+     *   ?target=<pageId> — optional; marks images already sent to that page
+     *
+     * Read-only enumeration backing the editor's "Import images" sub-panel.
+     * Without ?batch it returns the batch index ({id,title,isDraft,count}),
+     * sorted like the workshop landing page. With ?batch it returns that
+     * batch's images with a small (320px long-edge) thumbnail, the recorded
+     * verdict, and — when ?target is given — whether the image has already
+     * been sent to that page (read from the batch's sent.json sidecar).
+     *
+     * The actual transfer still goes through POST dev/image-workshop/use-image
+     * at the user-chosen long-edge size; the thumb here is display-only.
+     */
+    [
+      'pattern' => 'dev/image-workshop/list',
+      'method'  => 'GET',
+      'action'  => function () {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+        $container = $kirby->page('dev/image-workshop');
+        if (!$container) {
+          return $json(['ok' => false, 'error' => 'Image workshop not found.'], 404);
+        }
+        $batchId  = $kirby->request()->get('batch');
+        $targetId = $kirby->request()->get('target');
+
+        // Batch index.
+        if (!is_string($batchId) || $batchId === '') {
+          $batches = [];
+          foreach ($container->childrenAndDrafts()->sortBy('title', 'asc') as $b) {
+            if ($b->intendedTemplate()->name() !== 'image-workshop-batch') continue;
+            $batches[] = [
+              'id'      => $b->id(),
+              'title'   => $b->title()->value(),
+              'isDraft' => $b->isDraft(),
+              'count'   => $b->images()->count(),
+            ];
+          }
+          return $json(['ok' => true, 'batches' => $batches]);
+        }
+
+        // Single batch — its images, with verdicts + sent-to-target flags.
+        $batchPage = $container->childrenAndDrafts()->find($batchId);
+        if (!$batchPage || $batchPage->intendedTemplate()->name() !== 'image-workshop-batch') {
+          return $json(['ok' => false, 'error' => 'Unknown image-workshop batch: ' . $batchId], 404);
+        }
+
+        $verdicts = [];
+        $vPath = $batchPage->root() . '/verdicts.json';
+        if (is_file($vPath)) {
+          $d = json_decode(@file_get_contents($vPath), true);
+          if (is_array($d) && isset($d['verdicts']) && is_array($d['verdicts'])) $verdicts = $d['verdicts'];
+        }
+
+        // sent.json: { sent: { "<filename>": [ {page,title}, ... ] } }
+        $sent = [];
+        $sPath = $batchPage->root() . '/sent.json';
+        if (is_file($sPath)) {
+          $d = json_decode(@file_get_contents($sPath), true);
+          if (is_array($d) && isset($d['sent']) && is_array($d['sent'])) $sent = $d['sent'];
+        }
+        $sentTo = function (string $fn) use ($sent, $targetId): bool {
+          if (!is_string($targetId) || $targetId === '' || !isset($sent[$fn]) || !is_array($sent[$fn])) return false;
+          foreach ($sent[$fn] as $e) { if (is_array($e) && ($e['page'] ?? null) === $targetId) return true; }
+          return false;
+        };
+
+        $images = [];
+        foreach ($batchPage->images()->sortBy('filename', 'asc') as $img) {
+          $fn = $img->filename();
+          $thumb = $img->resize(320, 320);
+          $images[] = [
+            'filename' => $fn,
+            'thumb'    => $thumb->url(),
+            'width'    => $img->width(),
+            'height'   => $img->height(),
+            'verdict'  => is_string($verdicts[$fn] ?? null) ? $verdicts[$fn] : '',
+            'sent'     => $sentTo($fn),
+          ];
+        }
+        return $json([
+          'ok'    => true,
+          'batch' => $batchPage->id(),
+          'title' => $batchPage->title()->value(),
+          'images'=> $images,
+        ]);
+      }
+    ],
+
+    /*
      * Sync layer — node identity probe (v0.10.140, Slice S1).
      *
      *   GET /sync/whoami

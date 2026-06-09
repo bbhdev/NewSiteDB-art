@@ -473,6 +473,40 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-img-usage.is-orphan { background: rgba(245,197,24,.22); color: #f5c518; }
     /* Amber frame on an orphan image card (parallels .ed-es-card.is-modified). */
     .ed-img-card.is-orphan { outline: 2px solid rgba(245,197,24,.55); outline-offset: -1px; }
+
+    /* Slice 4c — import-from-workshop sub-panel (progressive disclosure). */
+    .ed-import {
+      border: 1px solid rgba(127,127,127,.3); border-radius: 10px;
+      background: rgba(127,127,127,.06); padding: 10px 12px 14px; margin-bottom: 16px;
+    }
+    .ed-import-head {
+      display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+    }
+    .ed-import-title { margin: 0 6px 0 0; font-size: 13px; align-self: center; }
+    .ed-import-field {
+      display: flex; flex-direction: column; gap: 3px; font-size: 11px; opacity: .85;
+    }
+    .ed-import-select, .ed-import-size {
+      font: inherit; font-size: 12px; padding: 3px 6px;
+      border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
+      background: var(--bg, #111); color: inherit;
+    }
+    .ed-import-size { width: 88px; }
+    .ed-import-status { font-size: 11px; opacity: .7; }
+    .ed-import-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    /* Import cards are clickable (send on click); show affordance + sent state. */
+    .ed-import .ed-img-card { cursor: pointer; transition: outline-color .12s; }
+    .ed-import .ed-img-card:hover { outline: 2px solid rgba(120,170,255,.7); outline-offset: -1px; }
+    .ed-import .ed-img-card.is-sent { opacity: .6; }
+    .ed-import .ed-img-card.is-busy { pointer-events: none; opacity: .5; }
+    .ed-import-badge {
+      display: inline-block; margin-top: 4px; font-size: 10px;
+      padding: 1px 7px; border-radius: 999px; background: rgba(127,127,127,.2);
+    }
+    .ed-import-badge.is-sent  { background: rgba(120,200,120,.22); color: #7ec97e; }
+    .ed-import-badge.v-ok     { background: rgba(120,200,120,.18); color: #7ec97e; }
+    .ed-import-badge.v-rework { background: rgba(245,197,24,.20);  color: #f5c518; }
+    .ed-import-badge.v-dropped{ background: rgba(220,90,90,.20);   color: #e07070; }
   </style>
 </head>
 <body class="editor page-editor ed-mode-lines">
@@ -768,11 +802,42 @@ $payload = str_replace('<', '\\u003c', $payload);
       <h3 class="ed-images-title">Image library</h3>
       <span class="ed-images-meta" id="ed-images-meta"></span>
       <span class="ed-es-card-spacer"></span>
+      <button type="button" id="ed-images-import-toggle" class="ed-mini"
+              title="Bring a resized image in from an image-workshop batch">+ Import images</button>
       <button type="button" id="ed-images-audit" class="ed-mini"
               title="Which objects use each image, orphans, dangling refs">Check usage</button>
       <button type="button" id="ed-images-refresh" class="ed-mini"
               title="Reload this page's image library">Refresh</button>
     </header>
+
+    <!-- Import-from-workshop sub-panel (progressive disclosure: closed by
+         default, opened by the "+ Import images" button). Pulls a resized
+         derivative from a workshop batch into THIS page's library via
+         POST dev/image-workshop/use-image. -->
+    <section id="ed-images-import" class="ed-import" hidden>
+      <header class="ed-import-head">
+        <h4 class="ed-import-title">Import from workshop</h4>
+        <label class="ed-import-field">Batch
+          <select id="ed-import-batch" class="ed-import-select"></select>
+        </label>
+        <label class="ed-import-field">Long edge (px)
+          <input type="number" id="ed-import-size" class="ed-import-size"
+                 min="200" max="8000" step="10" value="1000" list="ed-import-sizes">
+          <datalist id="ed-import-sizes">
+            <option value="800"></option><option value="1000"></option>
+            <option value="1200"></option><option value="1600"></option>
+            <option value="2400"></option>
+          </datalist>
+        </label>
+        <span class="ed-es-card-spacer"></span>
+        <span class="ed-import-status" id="ed-import-status"></span>
+        <button type="button" id="ed-images-import-close" class="ed-mini" title="Close import">×</button>
+      </header>
+      <div id="ed-import-grid" class="ed-images-grid ed-import-grid">
+        <div class="ed-images-empty">Choose a batch to browse its images…</div>
+      </div>
+    </section>
+
     <div id="ed-images-grid" class="ed-images-grid">
       <div class="ed-images-empty">Switch to this tab to load the page’s images…</div>
     </div>
@@ -996,6 +1061,128 @@ $payload = str_replace('<', '\\u003c', $payload);
       reportKey = function (ev) { if (ev.key === 'Escape') closeReport(); };
       document.addEventListener('keydown', reportKey);
     }
+
+    // ── Import-from-workshop sub-panel (Slice 4c) ──────────────────────
+    var importPanel  = document.getElementById('ed-images-import');
+    var importToggle = document.getElementById('ed-images-import-toggle');
+    var importClose  = document.getElementById('ed-images-import-close');
+    var batchSel     = document.getElementById('ed-import-batch');
+    var sizeInput    = document.getElementById('ed-import-size');
+    var importGrid   = document.getElementById('ed-import-grid');
+    var importStatus = document.getElementById('ed-import-status');
+    var batchesLoaded = false;
+
+    function setStatus(msg) { if (importStatus) importStatus.textContent = msg || ''; }
+
+    function loadBatches() {
+      if (batchesLoaded || !batchSel) return;
+      fetch('/dev/image-workshop/list', { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || 'batch list failed');
+          batchesLoaded = true;
+          var opts = '<option value="">— choose a batch —</option>';
+          (j.batches || []).forEach(function (b) {
+            opts += '<option value="' + esc(b.id) + '">' + esc(b.title) +
+              (b.isDraft ? ' (draft)' : '') + ' · ' + b.count + '</option>';
+          });
+          batchSel.innerHTML = opts;
+          if (!(j.batches || []).length) setStatus('No workshop batches found.');
+        })
+        .catch(function (err) { setStatus('Could not list batches: ' + (err.message || err)); });
+    }
+
+    function renderImport(images) {
+      if (!images || !images.length) {
+        importGrid.innerHTML = '<div class="ed-images-empty">This batch has no images.</div>';
+        return;
+      }
+      var html = '';
+      for (var i = 0; i < images.length; i++) {
+        var im = images[i];
+        var v = im.verdict || '';
+        var badge = im.sent
+          ? '<span class="ed-import-badge is-sent">sent ✓</span>'
+          : (v ? '<span class="ed-import-badge v-' + esc(v) + '">' + esc(v) + '</span>' : '');
+        html += '<figure class="ed-img-card ed-import-card' + (im.sent ? ' is-sent' : '') +
+          '" data-filename="' + esc(im.filename) + '" title="Click to import into this page">' +
+          '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb) + '" alt="' + esc(im.filename) + '">' +
+          '<figcaption class="ed-img-info">' +
+            '<span class="ed-img-name">' + esc(im.filename) + '</span>' +
+            '<span class="ed-img-dim">' + (im.width || '?') + '×' + (im.height || '?') + '</span>' +
+            badge +
+          '</figcaption>' +
+        '</figure>';
+      }
+      importGrid.innerHTML = html;
+    }
+
+    function loadBatchImages(batchId) {
+      if (!batchId) { importGrid.innerHTML = '<div class="ed-images-empty">Choose a batch to browse its images…</div>'; return; }
+      importGrid.innerHTML = '<div class="ed-images-empty">Loading batch…</div>';
+      setStatus('');
+      var url = '/dev/image-workshop/list?batch=' + encodeURIComponent(batchId) +
+        '&target=' + encodeURIComponent(pageId).replace(/%2F/gi, '/');
+      fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || 'batch load failed');
+          renderImport(j.images || []);
+        })
+        .catch(function (err) {
+          importGrid.innerHTML = '<div class="ed-images-empty">Could not load batch: ' + esc(err.message || err) + '</div>';
+        });
+    }
+
+    function sendImage(card) {
+      var filename = card.getAttribute('data-filename');
+      var batchId  = batchSel ? batchSel.value : '';
+      if (!filename || !batchId) return;
+      var size = parseInt(sizeInput && sizeInput.value, 10);
+      if (!(size >= 200 && size <= 8000)) size = 1000;
+      card.classList.add('is-busy');
+      setStatus('Importing ' + filename + '…');
+      fetch('/dev/image-workshop/use-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ batch: batchId, filename: filename, size: size, targetPage: pageId })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          card.classList.remove('is-busy');
+          if (!j || !j.ok) throw new Error((j && j.error) || 'import failed');
+          card.classList.add('is-sent');
+          var fc = card.querySelector('.ed-img-info');
+          if (fc && !fc.querySelector('.is-sent')) {
+            var b = document.createElement('span');
+            b.className = 'ed-import-badge is-sent';
+            b.textContent = 'sent ✓';
+            fc.appendChild(b);
+          }
+          setStatus('Imported as ' + j.filename + (j.warning ? ' (' + j.warning + ')' : ''));
+          // The page library changed — refresh the main grid + usage.
+          loaded = false; usage = null; load();
+        })
+        .catch(function (err) {
+          card.classList.remove('is-busy');
+          setStatus('Import failed: ' + (err.message || err));
+        });
+    }
+
+    if (importToggle) importToggle.addEventListener('click', function () {
+      var open = !importPanel.hasAttribute('hidden');
+      if (open) { importPanel.setAttribute('hidden', ''); return; }
+      importPanel.removeAttribute('hidden');
+      loadBatches();
+    });
+    if (importClose) importClose.addEventListener('click', function () {
+      importPanel.setAttribute('hidden', '');
+    });
+    if (batchSel) batchSel.addEventListener('change', function () { loadBatchImages(batchSel.value); });
+    if (importGrid) importGrid.addEventListener('click', function (ev) {
+      var card = ev.target.closest ? ev.target.closest('.ed-import-card') : null;
+      if (card && !card.classList.contains('is-busy')) sendImage(card);
+    });
 
     document.addEventListener('ed-mode', function (ev) {
       if (ev.detail && ev.detail.mode === 'images' && !loaded) load();
