@@ -464,6 +464,15 @@ $payload = str_replace('<', '\\u003c', $payload);
       display: block; margin-bottom: 2px;
     }
     .ed-img-dim { opacity: .65; }
+    /* Slice 4b usage badge — count of rects on this page referencing the image.
+       Orphan (0 uses) goes amber, matching the Styles audit. */
+    .ed-img-usage {
+      display: inline-block; margin-top: 4px; font-size: 10px;
+      padding: 1px 7px; border-radius: 999px; background: rgba(127,127,127,.2);
+    }
+    .ed-img-usage.is-orphan { background: rgba(245,197,24,.22); color: #f5c518; }
+    /* Amber frame on an orphan image card (parallels .ed-es-card.is-modified). */
+    .ed-img-card.is-orphan { outline: 2px solid rgba(245,197,24,.55); outline-offset: -1px; }
   </style>
 </head>
 <body class="editor page-editor ed-mode-lines">
@@ -759,6 +768,8 @@ $payload = str_replace('<', '\\u003c', $payload);
       <h3 class="ed-images-title">Image library</h3>
       <span class="ed-images-meta" id="ed-images-meta"></span>
       <span class="ed-es-card-spacer"></span>
+      <button type="button" id="ed-images-audit" class="ed-mini"
+              title="Which objects use each image, orphans, dangling refs">Check usage</button>
       <button type="button" id="ed-images-refresh" class="ed-mini"
               title="Reload this page's image library">Refresh</button>
     </header>
@@ -817,10 +828,12 @@ $payload = str_replace('<', '\\u003c', $payload);
   })();
 </script>
 <script id="ed-images-pane-js">
-  // Slice 4a: Images mode pane. Loads this page's image library lazily on the
-  // first entry to the mode (the 'ed-mode' CustomEvent fired by the toggle),
-  // and on demand via the Refresh button. Reads pageId from #editor-data.
-  // Standalone for now; folds into dev-editor.js in Slice 6.
+  // Slice 4a/4b: Images mode pane. On first entry to the mode (the 'ed-mode'
+  // CustomEvent) it loads this page's image library AND its usage audit
+  // (GET dev/page/images/<id> + dev/page/image-usage/<id>) together, so every
+  // card shows a usage badge. "Check usage" opens a detailed report (orphans +
+  // dangling refs + per-image object list). Standalone for now; folds into
+  // dev-editor.js in Slice 6.
   (function () {
     var pageId = null;
     try { pageId = JSON.parse(document.getElementById('editor-data').textContent).pageId; }
@@ -828,13 +841,20 @@ $payload = str_replace('<', '\\u003c', $payload);
     var grid    = document.getElementById('ed-images-grid');
     var metaEl  = document.getElementById('ed-images-meta');
     var refresh = document.getElementById('ed-images-refresh');
-    var loaded  = false;
-    var loading = false;
+    var auditBtn = document.getElementById('ed-images-audit');
+    var loaded   = false;
+    var loading  = false;
+    var lastImages = [];      // library array from the last load
+    var usage      = null;    // usage audit ({images, orphans, dangling, …})
+    var reportKey  = null;
 
     function esc(s) {
       return String(s == null ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+    }
+    function pageUrl(base) {
+      return base + encodeURIComponent(pageId).replace(/%2F/gi, '/');
     }
 
     function render(images) {
@@ -842,15 +862,25 @@ $payload = str_replace('<', '\\u003c', $payload);
         grid.innerHTML = '<div class="ed-images-empty">No images in this page’s library yet.</div>';
         return;
       }
+      var byFile = (usage && usage.images) || null;
       var html = '';
       for (var i = 0; i < images.length; i++) {
         var im = images[i];
-        html += '<figure class="ed-img-card" data-filename="' + esc(im.filename) + '">' +
+        var badge = '';
+        var orphan = false;
+        if (byFile && byFile[im.filename]) {
+          var c = byFile[im.filename].count;
+          orphan = (c === 0);
+          badge = '<span class="ed-img-usage' + (orphan ? ' is-orphan' : '') + '">' +
+            (orphan ? 'unused' : (c + (c === 1 ? ' use' : ' uses'))) + '</span>';
+        }
+        html += '<figure class="ed-img-card' + (orphan ? ' is-orphan' : '') + '" data-filename="' + esc(im.filename) + '">' +
           '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb || im.url) + '" alt="' + esc(im.alt) + '">' +
           '<figcaption class="ed-img-info">' +
             '<span class="ed-img-name">' + esc(im.filename) + '</span>' +
             '<span class="ed-img-dim">' + (im.width || '?') + '×' + (im.height || '?') +
             ' · ' + esc(im.size) + '</span>' +
+            badge +
           '</figcaption>' +
         '</figure>';
       }
@@ -861,29 +891,120 @@ $payload = str_replace('<', '\\u003c', $payload);
       if (loading || !pageId) return;
       loading = true;
       grid.innerHTML = '<div class="ed-images-empty">Loading…</div>';
-      fetch('/dev/page/images/' + encodeURIComponent(pageId).replace(/%2F/gi, '/'), {
-        headers: { 'Accept': 'application/json' }
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j || !j.ok) throw new Error((j && j.error) || 'load failed');
-          loaded = true;
-          render(j.images || []);
-          if (metaEl) {
-            var n = (j.images || []).length;
-            metaEl.textContent = n + ' image' + (n === 1 ? '' : 's') + ' · ' + (j.page || pageId);
-          }
-        })
-        .catch(function (err) {
-          grid.innerHTML = '<div class="ed-images-empty">Could not load images: ' + esc(err.message || err) + '</div>';
-        })
-        .finally(function () { loading = false; });
+      Promise.all([
+        fetch(pageUrl('/dev/page/images/'),      { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); }),
+        fetch(pageUrl('/dev/page/image-usage/'), { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); })
+      ]).then(function (res) {
+        var lib = res[0], use = res[1];
+        if (!lib || !lib.ok) throw new Error((lib && lib.error) || 'library load failed');
+        loaded = true;
+        lastImages = lib.images || [];
+        usage = (use && use.ok) ? use : null;     // badges are best-effort
+        render(lastImages);
+        if (metaEl) {
+          var n = lastImages.length;
+          var dn = usage && usage.dangling ? usage.dangling.length : 0;
+          metaEl.textContent = n + ' image' + (n === 1 ? '' : 's') +
+            (usage ? (' · ' + usage.imageRects + ' bound on page' + (dn ? (' · ' + dn + ' dangling') : '')) : '') +
+            ' · ' + (lib.page || pageId);
+        }
+      }).catch(function (err) {
+        grid.innerHTML = '<div class="ed-images-empty">Could not load images: ' + esc(err.message || err) + '</div>';
+      }).finally(function () { loading = false; });
+    }
+
+    // ── Usage report modal (reuses the .ed-es-report chrome from Styles) ──
+    function closeReport() {
+      var old = document.getElementById('ed-img-report');
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      var bd = document.getElementById('ed-img-report-backdrop');
+      if (bd && bd.parentNode) bd.parentNode.removeChild(bd);
+      if (reportKey) { document.removeEventListener('keydown', reportKey); reportKey = null; }
+    }
+    function objList(objs) {
+      if (!objs || !objs.length) return '';
+      var li = '';
+      for (var i = 0; i < objs.length; i++) {
+        var o = objs[i];
+        li += '<li>' + esc(o.note || o.rect || '(object)') + '</li>';
+      }
+      return '<ul class="ed-es-report-objs">' + li + '</ul>';
+    }
+    function showReport() {
+      closeReport();
+      if (!usage) { return; }
+      var dangling = usage.dangling || [];
+      var html = '<p class="ed-es-report-summary">' +
+        usage.libraryCount + ' image' + (usage.libraryCount === 1 ? '' : 's') +
+        ' in library · ' + usage.imageRects + ' bound on this page.</p>';
+
+      // Dangling first (problems).
+      html += '<section class="ed-es-report-sect"><h4>Dangling references</h4>';
+      if (!dangling.length) {
+        html += '<div class="ed-es-report-empty ed-es-report-ok">None — every bound rect points at a real library image.</div>';
+      } else {
+        for (var i = 0; i < dangling.length; i++) {
+          var d = dangling[i];
+          html += '<div class="ed-es-report-row ed-es-report-warn">' +
+            '<span>' + esc(d.note || d.rect || '(object)') + '</span>' +
+            '<span class="ed-es-report-id">→ ' + esc(d.image) + ' (missing)</span></div>';
+        }
+      }
+      html += '</section>';
+
+      // Per-image, in library order.
+      html += '<section class="ed-es-report-sect"><h4>By image</h4>';
+      var byFile = usage.images || {};
+      for (var k = 0; k < lastImages.length; k++) {
+        var fn = lastImages[k].filename;
+        var row = byFile[fn];
+        if (!row) continue;
+        var orphan = row.count === 0;
+        html += '<div class="ed-es-report-row">' +
+          '<span class="ed-es-report-name">' + esc(fn) + '</span>' +
+          '<span class="ed-es-report-count' + (orphan ? ' ed-es-report-warn' : '') + '">' +
+            (orphan ? 'unused' : (row.count + (row.count === 1 ? ' use' : ' uses'))) + '</span>' +
+          objList(row.objects) +
+        '</div>';
+      }
+      html += '</section>';
+
+      if (usage.orphans && usage.orphans.length) {
+        html += '<p class="ed-es-report-summary ed-es-report-warn">' +
+          usage.orphans.length + ' unused image' + (usage.orphans.length === 1 ? '' : 's') +
+          ' — in the library but not placed on this page.</p>';
+      }
+
+      var backdrop = document.createElement('div');
+      backdrop.className = 'ed-es-panel-backdrop';
+      backdrop.id = 'ed-img-report-backdrop';
+      backdrop.addEventListener('click', closeReport);
+      var panel = document.createElement('div');
+      panel.className = 'ed-es-panel ed-es-report';
+      panel.id = 'ed-img-report';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Image usage report');
+      panel.innerHTML =
+        '<header class="ed-es-panel-head"><h3 class="ed-es-panel-title">Image usage</h3></header>' +
+        '<div class="ed-es-panel-body">' + html +
+          '<button type="button" class="ed-mini ed-es-panel-save" id="ed-img-report-close">Close</button>' +
+        '</div>';
+      document.body.appendChild(backdrop);
+      document.body.appendChild(panel);
+      document.getElementById('ed-img-report-close').addEventListener('click', closeReport);
+      reportKey = function (ev) { if (ev.key === 'Escape') closeReport(); };
+      document.addEventListener('keydown', reportKey);
     }
 
     document.addEventListener('ed-mode', function (ev) {
       if (ev.detail && ev.detail.mode === 'images' && !loaded) load();
     });
-    if (refresh) refresh.addEventListener('click', function () { loaded = false; load(); });
+    if (refresh) refresh.addEventListener('click', function () { loaded = false; usage = null; load(); });
+    if (auditBtn) auditBtn.addEventListener('click', function () {
+      if (!loaded) { load(); }       // first run also populates usage
+      else { showReport(); }
+    });
     // If the editor opened directly in Images mode (?mode=images / localStorage),
     // the toggle's initial apply() fired before this listener attached — catch up.
     if (document.body.classList.contains('ed-mode-images') && !loaded) load();

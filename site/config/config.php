@@ -1940,6 +1940,89 @@ HTML;
     ],
 
     /**
+     * Per-page image-library usage audit (Slice 4b).
+     *
+     *   GET dev/page/image-usage/<pageId> → {
+     *     ok, page, libraryCount, imageRects,
+     *     images:   { <filename>: { count, objects: [{rect,note}] } },
+     *     orphans:  [ <filename>, … ],          // in library, referenced by 0 rects
+     *     dangling: [ {rect, image, note}, … ]  // rect.image not in the library
+     *   }
+     *
+     * Image refs are bare filenames resolved against the rect's OWN page
+     * library (see the rects save route), so usage is page-scoped — unlike the
+     * cross-page typography audit. Reads the latest saved rects.json (disk
+     * truth), so it reflects in-session saves. Read-only.
+     *
+     * Pattern is dev/page/image-usage/… (NOT dev/page/images/usage/…) so it
+     * can't be swallowed by the dev/page/images/(:all) catch-all above.
+     */
+    [
+      'pattern' => 'dev/page/image-usage/(:all)',
+      'method'  => 'GET',
+      'action'  => function (string $pageId) {
+        $json = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+        if (!preg_match('~^[a-z0-9][a-z0-9/_-]*$~i', $pageId)) {
+          return $json(['ok' => false, 'error' => 'Invalid page id.'], 400);
+        }
+        $page = kirby()->page($pageId);
+        if (!$page) {
+          return $json(['ok' => false, 'error' => 'Unknown page: ' . $pageId], 404);
+        }
+
+        // Library filenames (the page's images child, a draft).
+        $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
+        $images  = [];
+        if ($imgPage) {
+          foreach ($imgPage->images() as $f) {
+            $images[$f->filename()] = ['count' => 0, 'objects' => []];
+          }
+        }
+
+        // Rects on this page.
+        $rectsPath = $page->root() . '/rects.json';
+        $imageRects = 0;
+        $dangling   = [];
+        if (is_file($rectsPath)) {
+          $data = json_decode(@file_get_contents($rectsPath), true);
+          if (is_array($data) && isset($data['rects']) && is_array($data['rects'])) {
+            foreach ($data['rects'] as $r) {
+              if (!is_array($r)) continue;
+              $img = isset($r['image']) ? (string) $r['image'] : '';
+              if ($img === '') continue;             // unbound rect — not a reference
+              $imageRects++;
+              $rid  = isset($r['id'])   ? (string) $r['id']   : '';
+              $note = isset($r['note']) ? (string) $r['note'] : '';
+              if (isset($images[$img])) {
+                $images[$img]['count']++;
+                $images[$img]['objects'][] = ['rect' => $rid, 'note' => $note];
+              } else {
+                $dangling[] = ['rect' => $rid, 'image' => $img, 'note' => $note];
+              }
+            }
+          }
+        }
+
+        $orphans = [];
+        foreach ($images as $fn => $row) {
+          if ($row['count'] === 0) $orphans[] = $fn;
+        }
+
+        return $json([
+          'ok'           => true,
+          'page'         => $page->id(),
+          'libraryCount' => count($images),
+          'imageRects'   => $imageRects,
+          'images'       => $images,
+          'orphans'      => $orphans,
+          'dangling'     => $dangling,
+        ]);
+      }
+    ],
+
+    /**
      * v0.10.54 — In-editor image upload (Slice 2, upload step).
      *
      *   POST dev/page/upload-image   (multipart/form-data)
