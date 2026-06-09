@@ -590,12 +590,25 @@ return [
         // snapshot taken before a file existed actually reverts to
         // "no such file". Dotfiles in the live content/ (e.g. .git
         // artifacts in dev setups) are left in place.
-        $wipe = function ($dir) use (&$wipe) {
+        //
+        // EXCEPTION (v0.10.156): the top-level `dev/` and `error/`
+        // subtrees are code-side scaffolding (editor route records +
+        // Kirby's required error page), NOT content data. They live
+        // in git, ride with deploy.sh, and must survive a snapshot
+        // load even if the snapshot pre-dates their existence. Mirror
+        // the same exclusion list that deploy/deploy-exclude-content.txt
+        // uses ('+ /content/dev/' and '+ /content/error/' allow-list)
+        // and sync_manifest_excluded_prefixes (['dev', 'error']). The
+        // exclusion applies ONLY at the content root — a hypothetical
+        // page named 'dev' nested inside another page would still wipe
+        // normally (recursion passes an empty exclude list).
+        $wipe = function ($dir, $excludeNames = []) use (&$wipe) {
           if (!is_dir($dir)) return true;
           $items = scandir($dir);
           if ($items === false) return false;
           foreach ($items as $it) {
             if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+            if (in_array($it, $excludeNames, true)) continue;
             $p = $dir . '/' . $it;
             if (is_dir($p)) {
               if (!$wipe($p)) return false;
@@ -622,7 +635,7 @@ return [
           }
           return true;
         };
-        if (!$wipe($contentRoot) || !$copy($src . '/content', $contentRoot)) {
+        if (!$wipe($contentRoot, ['dev', 'error']) || !$copy($src . '/content', $contentRoot)) {
           return new Kirby\Http\Response(
             json_encode(['ok' => false, 'error' => 'Failed to restore content from snapshot.']),
             'application/json', 500
