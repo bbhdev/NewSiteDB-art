@@ -89,5 +89,4 @@ body.canvas-page-body {
 .rect--text       { background: var(--cp-kind-text); }
 .rect--image      { background: var(--cp-kind-image); }
 .rect--drilldown  { background: var(--cp-kind-drilldown); }
-.rect--deco-mount { background: var(--cp-kind-deco-mount); }
 .rect--unknown    { background: #eeeeee; }

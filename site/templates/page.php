@@ -233,7 +233,6 @@ $payload = str_replace('<', '\\u003c', $payload);
       --pe-kind-text:       #cfe4ff;
       --pe-kind-image:      #ffe7b8;
       --pe-kind-drilldown:  #e6d4ff;
-      --pe-kind-deco-mount: #d4f1d6;
     }
   </style>
 </head>
@@ -275,7 +274,6 @@ $payload = str_replace('<', '\\u003c', $payload);
         <option value="text">+ Text</option>
         <option value="image">+ Image</option>
         <option value="drilldown">+ Drilldown</option>
-        <option value="deco-mount">+ Deco mount</option>
       </select>
     </label>
     <!-- Step 4c-ii: image-first flow. Opens the image picker directly;

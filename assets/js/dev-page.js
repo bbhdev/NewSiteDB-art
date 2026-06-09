@@ -241,7 +241,7 @@
   const panelTextOpen = new Set();
   // Fixed kind order for the 'type' grouping (mirrors the Add-rect menu);
   // any unrecognised kind falls to the end.
-  const KIND_ORDER = ['text', 'image', 'drilldown', 'deco-mount'];
+  const KIND_ORDER = ['text', 'image', 'drilldown'];
 
   // Clamp an image focus coordinate to an integer in [0,100], with a
   // 50 (centred) fallback for missing/garbage input. Used by the
@@ -303,8 +303,7 @@
   const DEFAULT_SIZE = {
     'text':       { w: 400, h: 80 },
     'image':      { w: 300, h: 200 },
-    'drilldown':  { w: 320, h: 100 },
-    'deco-mount': { w: 600, h: 400 }
+    'drilldown':  { w: 320, h: 100 }
   };
 
   // New rect's spawn position. Stacked offsets so successive adds

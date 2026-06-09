@@ -298,7 +298,7 @@ button.pe-save.is-flash {
   box-sizing: border-box;
   border: 1px solid rgba(0, 0, 0, 0.35);
   /* Chrome (kind label + note) flows flush TOP-LEFT so it never sits over
-     the centre of a bound image / deco-mount content. The id stays absolute
+     the centre of a bound image's content. The id stays absolute
      top-right; padding insets only the in-flow chrome — the full-bleed image
      (inset:0), id and resize handles reference the padding box, so they are
      unaffected. */
@@ -1045,7 +1045,6 @@ button.pe-save.is-flash {
 .pe-rect--text       { background: var(--pe-kind-text); }
 .pe-rect--image      { background: var(--pe-kind-image); }
 .pe-rect--drilldown  { background: var(--pe-kind-drilldown); }
-.pe-rect--deco-mount { background: var(--pe-kind-deco-mount); }
 .pe-rect--unknown    { background: #eeeeee; }
 
 /* Resize handles ─────────────────────────────────────────────

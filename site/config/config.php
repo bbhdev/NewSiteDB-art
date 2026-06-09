@@ -1493,7 +1493,13 @@ HTML;
         }
 
         // Validate rects.
-        $allowedKinds = ['text', 'image', 'drilldown', 'deco-mount'];
+        // Convergence Slice 2: 'deco-mount' retired (dead affordance, no
+        // distinct rendering). The editor coerces any stray deco-mount
+        // rect → 'text' at read time, so a saved payload never carries it;
+        // narrowing the validator here closes the back door (a direct POST
+        // of a deco-mount rect is now rejected). Not a schema bump — kind
+        // is a tolerated free string on read, so old data still parses.
+        $allowedKinds = ['text', 'image', 'drilldown'];
         $rectIds      = [];
         foreach ($rects as $r) {
           if (!is_array($r)) return $fail('Rect entry is not an object.');

@@ -171,6 +171,15 @@ $rects              = (isset($rectsData['rects']) && is_array($rectsData['rects'
 
 $rects = array_map(function ($r) {
     if (!is_array($r)) return $r;
+    // Convergence Slice 2: 'deco-mount' kind retired (dead affordance —
+    // it never had distinct rendering, just a stub colour). Coerce any
+    // stray deco-mount rect → 'text' at read time. This is a WITHIN-v3
+    // defensive normalisation (same pattern as note/fit/focusX below),
+    // NOT a schema bump: kind is a tolerated free string on read, so old
+    // data still parses; geometry/position/text survive, only the dead
+    // label changes. A coerced rect re-saves cleanly as 'text' (the save
+    // validator no longer accepts 'deco-mount'). No snapshot carries it.
+    if (($r['kind'] ?? null) === 'deco-mount') $r['kind'] = 'text';
     if (!array_key_exists('note',  $r)) $r['note']  = null;
     if (!array_key_exists('image', $r)) $r['image'] = null;
     $r['fit'] = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
@@ -253,7 +262,6 @@ $payload = str_replace('<', '\\u003c', $payload);
       --pe-kind-text:       #cfe4ff;
       --pe-kind-image:      #ffe7b8;
       --pe-kind-drilldown:  #e6d4ff;
-      --pe-kind-deco-mount: #d4f1d6;
     }
   </style>
   <style id="ed-mode-css">
@@ -374,7 +382,6 @@ $payload = str_replace('<', '\\u003c', $payload);
         <option value="text">+ Text</option>
         <option value="image">+ Image</option>
         <option value="drilldown">+ Drilldown</option>
-        <option value="deco-mount">+ Deco mount</option>
       </select>
     </label>
     <button type="button" id="place-image-btn" class="pe-create-btn"

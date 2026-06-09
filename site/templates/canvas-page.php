@@ -12,8 +12,7 @@
  *
  * Renders each rect as an absolutely-positioned <div> stub matching the
  * editor's visual language (same kind colours, same labels). Slice 1 has
- * no real content surface — Slice 2 attaches real text/image content,
- * Slice 4 wires the Deco bootstrapper into deco-mount rects, etc.
+ * no real content surface — Slice 2 attaches real text/image content.
  *
  * Total page height is derived: max(max(y+h) over rects, pageH) + 80px
  * bottom padding. pageH acts as a visual floor so an empty/shallow page
@@ -123,7 +122,6 @@ foreach ($typography as $t) {
       --cp-kind-text:       #cfe4ff;
       --cp-kind-image:      #ffe7b8;
       --cp-kind-drilldown:  #e6d4ff;
-      --cp-kind-deco-mount: #d4f1d6;
     }
   </style>
 </head>
