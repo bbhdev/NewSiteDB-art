@@ -12259,10 +12259,8 @@
   // `.ty-heading` instead of `.ty-token`); once saved to disk the id locks
   // forever, so existing rect `typographyId` refs never break on rename.
   const newTypoIds = {};
-  // Session set of token ids whose inline field editor is expanded. Not
-  // persisted — re-derived per session. Keyed by id; migrated when an
-  // unsaved token's id changes on rename (see renderTypographyList).
-  const expandedTypoIds = {};
+  // (expandedTypoIds removed in the 3a Step-2 redesign — the sidebar list no
+  // longer has a per-row collapsible editor; editing is in the floating panel.)
   let typographyDirty = false;
   // Esc handler for the standalone element-style Edit panel (v0.10.164).
   // Held so closeElementStylePanel can detach it; only one panel open at once.
@@ -12371,30 +12369,20 @@
   }
   function markTypographyDirty() {
     typographyDirty = true;
-    // Panel-head Save reflects dirtiness when in view; label matches the
-    // in-panel save ("Save styles") for consistency.
+    // The single top "Save styles" button reflects dirtiness (filled amber).
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save styles'; }
+    // The standalone Edit panel's Save button (class ed-typo-edit-save) tracks
+    // dirty/clean too, so saving is reachable right where the author is editing.
+    // (The v0.10.122 sticky save BAR and the per-row inline save were removed in
+    // the 3a Step-2 redesign — one top button + the panel button is enough.)
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
-    // Always-reachable cue: the sticky-bottom save bar appears only while dirty
-    // and stays pinned to the sidebar viewport bottom at any scroll position
-    // (the sticky header it replaced slid out of view when scrolled up).
-    const bar = document.getElementById('typo-save-bar');
-    if (bar) bar.hidden = false;
-    // Reset the bar button label every time the bar reappears: saveTypography()
-    // leaves it reading "Saved." (its 1800ms reset only targets the header
-    // button), and because the bar hides immediately on save that stale label
-    // would resurface — spuriously saying "Saved" — on the next edit.
-    const barBtn = document.getElementById('typo-save-bar-btn');
-    if (barBtn) { barBtn.disabled = false; barBtn.textContent = 'Save styles'; }
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save styles'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
-    const bar = document.getElementById('typo-save-bar');
-    if (bar) bar.hidden = true;
   }
 
   function addTypographyToken() {
@@ -12406,14 +12394,13 @@
       color: null, isDefault: false
     });
     newTypoIds[id] = true;
-    expandedTypoIds[id] = true;   // open the editor so fields are ready
     rebuildTypographyClientCss();
     markTypographyDirty();
     renderTypographyList();
-    // Focus + select the new row's name for immediate renaming.
-    const inp = document.querySelector(
-      '#typography-list .ed-typo-row[data-typo-id="' + id + '"] .ed-typo-name-input');
-    if (inp) { inp.focus(); inp.select(); }
+    // Slice 3a redesign Step 2 (v0.10.165): the sidebar list no longer has an
+    // inline name input to focus — editing lives in the standalone panel. Open
+    // it straight away on the new token so the author can name + configure it.
+    openElementStylePanel(id);
   }
 
   // Promote a style to THE project default (totality, A2). Clears the flag
@@ -12484,45 +12471,28 @@
       listEl.appendChild(empty);
       return;
     }
-    tokens.forEach(function (t, idx) {
+    tokens.forEach(function (t) {
+      // Slice 3a redesign Step 2 (v0.10.165): the side-panel LIST is now a
+      // minimal index — name (READ-ONLY) · ★ default · × delete, nothing more.
+      // All field editing (incl. rename) and reordering moved to the canvas
+      // DISPLAY cards + the standalone floating Edit panel. So this row no
+      // longer carries an Edit toggle, id chip, reorder arrows, sample, spec
+      // line, per-row "View in panel", or the inline field editor.
       const li = document.createElement('li');
       li.className = 'ed-typo-row';
       li.setAttribute('data-typo-id', t.id);
 
-      const head = document.createElement('div');
-      head.className = 'ed-typo-head';
+      // Read-only name (ellipsised; full name on hover). Click Edit on the
+      // canvas card to rename.
+      const name = document.createElement('span');
+      name.className = 'ed-typo-name';
+      name.textContent = t.name || '(unnamed)';
+      name.title = t.name || '';
 
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'ed-mini ed-typo-toggle';
-      toggle.title = 'Edit this token’s font fields';
-
-      const nameInp = document.createElement('input');
-      nameInp.type = 'text';
-      nameInp.className = 'ed-typo-name-input';
-      nameInp.value = t.name || '';
-      nameInp.placeholder = 'Style name';
-
-      const idTag = document.createElement('code');
-      idTag.className = 'ed-typo-id';
-      idTag.textContent = 'ty-' + t.id;
-      idTag.title = newTypoIds[t.id]
-        ? 'Stable id (tracks the name until first saved, then locks)'
-        : 'Stable id — does not change on rename (rects reference it)';
-
-      // Default-style control (totality, A2): exactly one style is the
-      // project default — every text falls back to it, there is no
-      // "undefined style". The default is shown as a filled, disabled badge;
-      // any other row offers "Make default", which moves the flag (and, if
-      // that style was inherit-colour, forces a concrete colour since the
-      // default is the root fallback and can't inherit).
+      // Default-style control (totality, A2): ☆ promote / ★ is-default badge.
       const defBtn = document.createElement('button');
       defBtn.type = 'button';
       defBtn.className = 'ed-mini ed-typo-default' + (t.isDefault ? ' is-default' : '');
-      // Compact star icon (was the wide "Make default" / "★ Default" text
-      // labels, which squeezed the name input to ~0 and pushed × off-edge):
-      // ☆ outline = "not the default, click to promote"; ★ filled-on-yellow =
-      // "this IS the default". aria-label carries the meaning for a11y.
       defBtn.textContent = t.isDefault ? '★' : '☆';
       defBtn.disabled = !!t.isDefault;
       defBtn.setAttribute('aria-label', t.isDefault ? 'Project default style' : 'Make default style');
@@ -12531,177 +12501,17 @@
         : 'Make this the project default style';
       defBtn.addEventListener('click', function () { setDefaultTypo(t); });
 
-      // Order controls (v0.10.121): single-step up/down, flush right on the
-      // second header line. First row's up + last row's down are disabled.
-      const moveUp = document.createElement('button');
-      moveUp.type = 'button';
-      moveUp.className = 'ed-mini ed-typo-move ed-typo-move-up';
-      moveUp.textContent = '↑';
-      moveUp.title = 'Move this style up';
-      moveUp.setAttribute('aria-label', 'Move style up');
-      moveUp.disabled = (idx === 0);
-      moveUp.addEventListener('click', function () { moveTypo(t, -1); });
-
-      const moveDown = document.createElement('button');
-      moveDown.type = 'button';
-      moveDown.className = 'ed-mini ed-typo-move ed-typo-move-down';
-      moveDown.textContent = '↓';
-      moveDown.title = 'Move this style down';
-      moveDown.setAttribute('aria-label', 'Move style down');
-      moveDown.disabled = (idx === tokens.length - 1);
-      moveDown.addEventListener('click', function () { moveTypo(t, 1); });
-
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'ed-mini ed-typo-del';
       del.textContent = '×';
-      del.title = 'Delete token';
+      del.title = 'Delete style';
+      del.setAttribute('aria-label', 'Delete style');
       del.addEventListener('click', function () { deleteTypographyToken(t); });
 
-      const sample = document.createElement('div');
-      sample.className = 'ed-typo-sample ty-' + t.id;
-      sample.textContent = 'Ag — the quick brown fox';
-
-      const spec = document.createElement('div');
-      spec.className = 'ed-typo-spec';
-      spec.textContent = typoSpecLine(t);
-
-      // Per-token preview — opens the big "View in panel" modal scoped to
-      // just this token (the panel-head button shows all tokens).
-      const viewOne = document.createElement('button');
-      viewOne.type = 'button';
-      viewOne.className = 'ed-mini ed-typo-row-view';
-      viewOne.textContent = 'View in panel';
-      viewOne.title = 'Preview this token as real paragraphs';
-      viewOne.addEventListener('click', function () { showTypographyPreview(t); });
-
-      // ---- collapsible field editor (3b-3) -----------------------------
-      // Built for every row but shown only when expanded. Field handlers
-      // mutate the token, rebuild the live CSS (which restyles the .ty-<id>
-      // sample automatically), and refresh the spec line in place — never
-      // re-rendering the list, so the active input keeps focus mid-edit.
-      const edit = document.createElement('div');
-      edit.className = 'ed-typo-edit';
-
-      function afterFieldEdit() {
-        rebuildTypographyClientCss();
-        spec.textContent = typoSpecLine(t);
-        markTypographyDirty();
-      }
-
-      edit.appendChild(fontFamilyField('Family', t.family || '', function (v) {
-        t.family = v || '';
-        injectGoogleFontsLink();   // ensure a newly-picked bundled face is loaded
-        afterFieldEdit();
-      }, 'Pick from bundle or type any name'));
-
-      edit.appendChild(numberField('Size (px)', (t.sizePx != null ? t.sizePx : 16), function (v) {
-        if (Number.isFinite(v)) { t.sizePx = v; afterFieldEdit(); }
-      }));
-
-      edit.appendChild(darkSelectField('Weight', (t.weight != null ? t.weight : 400), TYPO_WEIGHTS, function (v) {
-        t.weight = parseInt(v, 10) || 400;
-        afterFieldEdit();
-      }));
-
-      edit.appendChild(numberField('Line height', (t.lineHeight != null ? t.lineHeight : 1.4), function (v) {
-        if (Number.isFinite(v)) { t.lineHeight = v; afterFieldEdit(); }
-      }));
-
-      edit.appendChild(numberField('Letter spacing (px)', (t.letterSpacingPx != null ? t.letterSpacingPx : 0), function (v) {
-        if (Number.isFinite(v)) { t.letterSpacingPx = v; afterFieldEdit(); }
-      }));
-
-      edit.appendChild(checkboxField('Italic', !!t.italic, function (v) {
-        t.italic = !!v;
-        afterFieldEdit();
-      }));
-
-      // Colour — a palette reference (never free hex). Element styles are
-      // COMPLETE: colour is part of the style, resolved to a CSS value at
-      // emit time via the palette. "— inherit —" (empty) leaves colour unset
-      // so the text inherits whatever the surrounding context provides —
-      // EXCEPT the default style, which is the root fallback and therefore
-      // must carry a concrete colour (no inherit option offered for it).
-      // Inline palette-swatch picker (shows the actual colours, dark UI,
-      // no native <select> white popup). The default style gets no "inherit"
-      // pill (totality — it's the root fallback and must carry a concrete
-      // colour); non-default styles may inherit.
-      edit.appendChild(typoColourField('Colour', (t.color != null ? t.color : null), !t.isDefault, function (v) {
-        t.color = v || null;
-        afterFieldEdit();
-      }));
-
-      // In-panel Save (v0.10.119) — the global Save button is easily scrolled
-      // out of view once styles fill the panel. This button lives at the foot
-      // of the open editor (right where the author is working) and doubles as
-      // the dirty indicator: filled amber + enabled when there are unsaved
-      // changes, greyed "Saved" + disabled when clean. It saves the whole
-      // element-style registry (same route as the global button).
-      const editSave = document.createElement('button');
-      editSave.type = 'button';
-      editSave.className = 'ed-mini ed-typo-edit-save';
-      editSave.title = 'Save all element-style changes';
-      editSave.addEventListener('click', function () { saveTypography(editSave); });
-      applyTypoEditSaveState(editSave);
-      edit.appendChild(editSave);
-
-      function setExpanded(on) {
-        edit.style.display = on ? '' : 'none';
-        toggle.textContent = on ? 'Edit ▾' : 'Edit ▸';
-        toggle.classList.toggle('is-open', on);
-        if (on) expandedTypoIds[t.id] = true; else delete expandedTypoIds[t.id];
-      }
-      setExpanded(!!expandedTypoIds[t.id]);
-      toggle.addEventListener('click', function () {
-        setExpanded(edit.style.display === 'none');
-      });
-
-      nameInp.addEventListener('input', function () {
-        t.name = nameInp.value;
-        // For an unsaved token, keep the id readable by tracking the name.
-        if (newTypoIds[t.id]) {
-          const newId = uniqueTypoId(slugifyTypoId(t.name), t.id);
-          if (newId !== t.id) {
-            const wasExpanded = !!expandedTypoIds[t.id];
-            delete newTypoIds[t.id];
-            delete expandedTypoIds[t.id];
-            t.id = newId;
-            newTypoIds[newId] = true;
-            if (wasExpanded) expandedTypoIds[newId] = true;
-            li.setAttribute('data-typo-id', newId);
-            idTag.textContent = 'ty-' + newId;
-            sample.className = 'ed-typo-sample ty-' + newId;
-            rebuildTypographyClientCss();
-          }
-        }
-        markTypographyDirty();
-      });
-
-      // Two-row head (v0.10.117): the single row crammed 5 controls wider
-      // than the side panel and left the name field short. Row 1 = the name
-      // (full width) + the default star; row 2 = Edit toggle + id chip + ×.
-      const headTop = document.createElement('div');
-      headTop.className = 'ed-typo-head-top';
-      headTop.appendChild(nameInp);
-      headTop.appendChild(defBtn);
-      const headBottom = document.createElement('div');
-      headBottom.className = 'ed-typo-head-bottom';
-      headBottom.appendChild(toggle);
-      headBottom.appendChild(idTag);
-      // Right cluster (margin-left:auto on the first member pushes all three
-      // flush right): order arrows then delete.
-      moveUp.classList.add('ed-typo-right-start');
-      headBottom.appendChild(moveUp);
-      headBottom.appendChild(moveDown);
-      headBottom.appendChild(del);
-      head.appendChild(headTop);
-      head.appendChild(headBottom);
-      li.appendChild(head);
-      li.appendChild(sample);
-      li.appendChild(spec);
-      li.appendChild(viewOne);
-      li.appendChild(edit);
+      li.appendChild(name);
+      li.appendChild(defBtn);
+      li.appendChild(del);
       listEl.appendChild(li);
     });
   }
@@ -12920,9 +12730,12 @@
       afterFieldEdit();
     }));
 
+    // Class ed-typo-edit-save (shared with the old inline save) lets
+    // markTypographyDirty/clearTypographyDirty update this button's dirty/clean
+    // state live while the panel is open.
     const save = document.createElement('button');
     save.type = 'button';
-    save.className = 'ed-mini ed-es-panel-save';
+    save.className = 'ed-mini ed-es-panel-save ed-typo-edit-save';
     save.title = 'Save all element-style changes';
     save.addEventListener('click', function () { saveTypography(save); });
     applyTypoEditSaveState(save);
@@ -16751,10 +16564,8 @@
   if (saveTypographyBtn) {
     saveTypographyBtn.addEventListener('click', function () { saveTypography(saveTypographyBtn); });
   }
-  const typoSaveBarBtn = document.getElementById('typo-save-bar-btn');
-  if (typoSaveBarBtn) {
-    typoSaveBarBtn.addEventListener('click', function () { saveTypography(typoSaveBarBtn); });
-  }
+  // (The sticky save-BAR button was removed in the 3a Step-2 redesign — the
+  // single top "Save styles" button + the panel's Save button cover saving.)
   const viewTypoBtn = document.getElementById('view-typo-btn');
   if (viewTypoBtn) {
     // Wrap so the click Event isn't passed as the `only` argument

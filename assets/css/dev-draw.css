@@ -2675,77 +2675,32 @@ body.editor input[type="range"] {
   color: #8a9099; font-style: italic; font-size: 0.8em;
   padding: 0.3rem 0;
 }
+/* Slice 3a Step 2 (v0.10.165): the side-panel LIST row is now a minimal
+   index — READ-ONLY name · ★ default · × delete, one flush row. Editing,
+   reorder, id, sample, spec and the inline field editor all moved to the
+   canvas DISPLAY cards (.ed-es-card*) + the standalone floating Edit panel
+   (.ed-es-panel*). The dead row sub-element rules (head/name-input/move/
+   toggle/edit-container/sample/spec/row-view) and the sticky save-bar were
+   removed here; .ed-typo-edit-save survives because the panel's Save button
+   reuses it for dirty-state styling. */
 .ed-typo-row {
+  display: flex; align-items: center; gap: 0.4rem;
   padding: 0.4rem 0;
   border-bottom: 1px solid #2a2e35;
 }
 .ed-typo-row:last-child { border-bottom: 0; }
-.ed-typo-head-btns { display: flex; gap: 0.3rem; }
-/* Two-row head (v0.10.117): stacked so the name gets a full-width row and
-   the row no longer overflows the side panel. */
-.ed-typo-head {
-  display: flex; flex-direction: column;
-  gap: 0.3rem; margin-bottom: 0.25rem;
-}
-.ed-typo-head-top,
-.ed-typo-head-bottom {
-  display: flex; align-items: center; gap: 0.4rem;
-  min-width: 0;
-}
 .ed-typo-name {
+  flex: 1 1 auto; min-width: 0;
   color: #f0f0f0; font-size: 0.85em; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ed-typo-name-input {
-  /* flex-basis gives the name field real presence so it reads as an editable
-     name (not a mystery sliver). It still shrinks under pressure but never
-     collapses below min-width — the row stays legible as "Edit | name | id". */
-  flex: 1 1 7rem; min-width: 4.5rem;
-  background: #111; color: #f0f0f0; border: 1px solid #444;
-  padding: 0.15rem 0.35rem; border-radius: 3px; font: inherit;
-  font-size: 0.85em; font-weight: 600; box-sizing: border-box;
 }
 .ed-typo-del {
   flex: none; padding: 0.05rem 0.4rem; font-size: 0.85em;
   border-color: #855; color: #f88;
 }
-/* Order arrows (v0.10.121): single-step up/down, clustered flush right on the
-   second header line. The first member of the right cluster carries
-   margin-left:auto so the arrows + delete sit together at the far edge. Glyph
-   sized well above a micro-arrow (per the icon-sizing rule); disabled ends
-   (top row's ↑, bottom row's ↓) dim and stop responding. */
-.ed-typo-right-start { margin-left: auto; }
-.ed-typo-move {
-  flex: none;
-  width: 1.5rem; height: 1.5rem;
-  padding: 0; display: inline-flex;
-  align-items: center; justify-content: center;
-  font-size: 0.95rem; line-height: 1;
-  color: #cfcfcf; border-color: #5a5a5a;
-}
-.ed-typo-move:hover:not(:disabled) { background: #333; border-color: #888; color: #fff; }
-.ed-typo-move:disabled { opacity: 0.3; cursor: default; }
-/* v0.10.111: the edit affordance was a tiny grey ▸ triangle — authors could
-   not tell rows were editable ("I thought edit is impossible"). Now a clearly
-   bordered, accent "Edit ▸" button: a labelled control, not an icon-only
-   micro-glyph (per the icon-sizing rule). Open state turns amber + filled. */
-.ed-typo-toggle {
-  flex: none;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.78rem;
-  line-height: 1.1;
-  color: var(--accent);
-  border-color: #6a6a6a;
-}
-.ed-typo-toggle:hover { background: #333; border-color: #888; }
-.ed-typo-toggle.is-open {
-  color: #f0c25a; border-color: #c79a3a; background: #2a2410;
-}
-/* A2: project-default control, now a compact STAR icon (was a wide
-   "Make default" text button that crowded out the name field + pushed × off
-   the row). ☆ outline = promotable; ★ filled-on-yellow = is the default.
-   Square-ish, with a star sized well above micro-glyph (~1.05rem) per the
-   icon-sizing rule — the star carries the affordance on its own. */
+/* A2: project-default control, a compact STAR icon. ☆ outline = promotable;
+   ★ filled-on-yellow = is the default. Star sized well above micro-glyph per
+   the icon-sizing rule — it carries the affordance on its own. */
 .ed-typo-default {
   flex: none;
   width: 1.7rem; height: 1.7rem;
@@ -2759,27 +2714,9 @@ body.editor input[type="range"] {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a;
   cursor: default; opacity: 1;
 }
-/* Collapsible per-token field editor (3b-3). Indented + hairline left rule
-   to read as "belongs to this row"; UI font forced so field labels never
-   inherit a token's .ty-<id> styling from an ancestor. */
-.ed-typo-edit {
-  /* Distinctive "you are editing this style" surface: darker inset background
-     (#050505) + a full amber outline matching the open Edit button
-     (#c79a3a) so the expanded editor is unmistakably tied to its row. */
-  margin: 0.4rem 0 0.2rem; padding: 0.5rem 0.6rem 0.4rem;
-  background: #050505;
-  border: 1px solid #c79a3a; border-radius: 5px;
-  display: flex; flex-direction: column; gap: 0.35rem;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-.ed-typo-edit .ed-field { margin: 0; }
-/* In-panel Save (v0.10.119): foot of the open editor, doubles as the dirty
-   indicator. Clean = greyed + disabled "Saved"; dirty = filled amber +
-   enabled (same amber as the default-style badge). */
-.ed-typo-edit-save {
-  align-self: flex-end; margin-top: 0.3rem;
-  padding: 0.3rem 0.9rem; font-size: 0.8rem; line-height: 1.1;
-}
+/* Dirty-state Save button styling — shared by the standalone Edit panel's Save
+   button (class ed-typo-edit-save): clean = greyed + disabled "Saved"; dirty =
+   filled amber + enabled "Save styles". */
 .ed-typo-edit-save:disabled {
   opacity: 1; cursor: default;
   color: #7a7a7a; border-color: #3a3a3a; background: transparent;
@@ -2788,81 +2725,26 @@ body.editor input[type="range"] {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a; font-weight: 600;
 }
 .ed-typo-edit-save.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
-/* Dirty indicator on the panel-head Save button — unsaved create/rename/
-   delete since the last write. Filled amber (same as the in-panel save and the
-   default-style badge) so "active" reads unambiguously, not just a faint
-   border/text tint. */
+/* The single, full-width top Save button for the styles list. Made prominent
+   (full row, larger hit area) per the Step-2 spec — it's the only sidebar save
+   control now (the sticky bar + per-row saves were removed). Doubles as the
+   dirty indicator via .is-dirty (filled amber). */
+.ed-typo-save-main {
+  display: block; width: 100%;
+  margin-top: 0.6rem; padding: 0.55rem 0.9rem;
+  font-size: 0.9rem; font-weight: 600; line-height: 1.1;
+}
 #save-typography-btn.is-dirty {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a; font-weight: 600;
 }
 #save-typography-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
-/* Always-reachable dirty cue (v0.10.122): the sticky HEADER (v0.10.121) only
-   solved the scroll-DOWN case — scrolling up to other sections slid the whole
-   element-styles panel (and its pinned header) below the fold, and the header
-   stayed glued even when clean (strange). Replaced by a save BAR that is
-   position:sticky; bottom:0 and rendered only while dirty: as the sidebar's
-   last child it pins to the bottom of the scroll viewport from ANY position,
-   and is absent entirely when clean (no permanent chrome). */
-.ed-typo-save-bar {
-  position: sticky; bottom: 0; z-index: 6;
-  padding: 0.5rem 0.75rem;
-  background: #1f1f1f;              /* occlude list rows scrolling beneath */
-  border-top: 1px solid #c79a3a;   /* amber rule signals "unsaved" */
-  box-shadow: 0 -6px 12px -6px rgba(0,0,0,0.6);
-}
-.ed-typo-save-bar[hidden] { display: none; }
-#typo-save-bar-btn {
-  display: block; width: 100%;
-  padding: 0.4rem 0.9rem; font-size: 0.85rem; font-weight: 600;
-  color: #1a1407; background: #d8b24a; border-color: #d8b24a;
-}
-#typo-save-bar-btn:hover { background: #e6bf57; border-color: #e6bf57; }
+/* Kept: the id chip still appears in the "View in panel" preview modal. */
 .ed-typo-id {
   color: #8a9099; font-size: 0.68em; flex: none;
   background: #15171c; border: 1px solid #2a2e35;
   border-radius: 3px; padding: 0.02rem 0.3rem;
 }
-.ed-typo-sample {
-  /* v0.10.132: the BASE rule is the touch / no-hover state — a light "paper"
-     specimen surface (#f7f6f3 + dark text, matching the preview modal) so a
-     style's own — usually dark — colour stays readable when there's no hover to
-     reveal it. Pointer devices override this below (@media hover:hover): dark
-     resting box + paper reveal on hover, restoring the dark panel aesthetic. */
-  color: #1b1d21;
-  background: #f7f6f3; border: 1px solid #d4d0c8; border-radius: 4px;
-  padding: 0.35rem 0.5rem;
-  max-height: 3.4em; overflow: hidden;
-  word-break: break-word;
-}
-/* v0.10.132 — POINTER devices (mouse, Apple Pencil hover): dark specimen box at
-   rest (keeps the panel's dark aesthetic), lift to light "paper" on hover so the
-   style's own colour becomes legible. Mirrors the Page floater pill behaviour.
-   Touch / no-hover devices skip this and keep the always-paper base above. */
-@media (hover: hover) {
-  .ed-typo-sample {
-    color: #e5e5e5;
-    background: #1b1e24; border-color: #2a2e35;
-  }
-  .ed-typo-sample:hover {
-    color: #1b1d21;
-    background: #efe9dd; border-color: #d4d0c8;
-  }
-}
-.ed-typo-spec {
-  /* Force the panel UI font here — the row may sit under a .ty-<id>
-     ancestor in the future; keep the spec line readable regardless. */
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
-  font-style: normal !important; letter-spacing: 0 !important;
-  font-size: 0.68rem; line-height: 1.3; font-weight: 400;
-  color: #8a9099; margin-top: 0.25rem;
-}
 .ed-typo-view-btn { margin-top: 0.5rem; width: 100%; }
-/* Per-token "View in panel" — smaller and self-width, sits below the spec
-   line; distinct from the full-width panel-head "View all in panel". */
-.ed-typo-row-view {
-  margin-top: 0.3rem; padding: 0.1rem 0.45rem;
-  font-size: 0.68rem; color: #9aa3ad;
-}
 
 /* ── typography preview modal ("View in panel") ──────────────────────
    Renders each token as a real text column (heading line + paragraph) so

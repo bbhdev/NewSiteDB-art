@@ -638,19 +638,19 @@ $payload = str_replace('<', '\\u003c', $payload);
     <section class="ed-panel" id="element-styles-section">
       <header class="ed-panel-head">
         <h3>Element styles</h3>
-        <span class="ed-typo-head-btns">
-          <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
-          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save styles</button>
-        </span>
+        <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
       </header>
+      <!-- Slice 3a Step 2 (v0.10.165): the list is a minimal index now (name ·
+           ★ · ×). Editing + reorder live on the canvas cards / floating panel. -->
       <ul id="typography-list" class="ed-typo-list"></ul>
       <button type="button" id="view-typo-btn" class="ed-mini ed-typo-view-btn"
               title="Preview every style as real paragraphs">View all in panel</button>
+      <!-- The single Save control. The duplicate sticky save-bar + per-row
+           inline saves were removed; this top button is made full-width and
+           prominent (it doubles as the dirty indicator via .is-dirty). -->
+      <button type="button" id="save-typography-btn" class="ed-mini ed-typo-save-main"
+              title="Write typography-tokens.json">Save styles</button>
     </section>
-
-    <div class="ed-typo-save-bar" id="typo-save-bar" hidden>
-      <button type="button" id="typo-save-bar-btn" class="ed-mini">Save styles</button>
-    </div>
   </aside>
 
   <main class="ed-styles-surface">
