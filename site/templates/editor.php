@@ -1,18 +1,36 @@
 <?php
 /**
- * /dev/editor template — unified editor surface (convergence Slice 1a).
+ * /dev/editor template — unified editor surface.
  *
- * Initial state: verbatim copy of /dev/draw's body. Mode toggle and
- * /dev/page integration arrive in Slice 1b. The old /dev/draw and
- * /dev/page routes still serve their own templates unchanged; this
- * route exists in parallel so we can validate the new shell without
- * disturbing the existing surfaces.
+ * Slice 1a (v0.10.157): skeleton route. Body = verbatim copy of
+ *   /dev/draw.
+ * Slice 1b (v0.10.158): mode toggle + page-editor merged in as a
+ *   second mode.
  *
- * Slice 1a scope:
- * - New route, new template, new content/dev/editor/ page.
- * - Body identical to draw.php; only the <title> and brand label
- *   differ. Same payload, same JS bundle.
- * - No redirect from /dev/draw or /dev/page yet (Slice 1c).
+ * What 1b does:
+ *  - One toolbar. Mode toggle [Lines | Layout] sits next to the
+ *    brand. Toolbar groups are flagged either `ed-lines-only` or
+ *    `ed-layout-only`; a body class (`ed-mode-lines` / `ed-mode-
+ *    layout`) drives which group is visible.
+ *  - Shared #save-btn, #save-status, #page-select live in the
+ *    toolbar (single DOM nodes). Both dev-draw.js and dev-page.js
+ *    bind to them via addEventListener; one click fires BOTH saves.
+ *  - Two body panes (.ed-mode-pane--lines and .ed-mode-pane--
+ *    layout). Mode toggle CSS-hides the inactive pane.
+ *  - Payload is the union of both editors' input keys. Common
+ *    keys (pageId, pages, palette, typography, version) coincide
+ *    by design; new keys from page-editor (canvas, schemaVersion,
+ *    chapters, rects) added alongside.
+ *  - Both dev-draw.css and dev-page.css load. Both editor classes
+ *    on <body> so each stylesheet's body-scoped rules apply.
+ *
+ * Deferred to later slices:
+ *  - 1c: redirect /dev/draw and /dev/page here with ?mode= preselected.
+ *  - 2:  drop deco-mount rect kind.
+ *  - 6:  fold dev-page.js into dev-draw.js (renamed dev-editor.js).
+ *  - True canvas overlay (rects + lines in one frame). Today the
+ *    two canvases (#draw-surface, #page-editor-surface) stay
+ *    separate, swapped by the mode toggle.
  */
 
 $requestedPage = kirby()->request()->get('page');
@@ -28,13 +46,17 @@ if (!$targetPage) {
     $targetPage = kirby()->page('home');
 }
 
+// ─────────────────────────────────────────────────────────────
+// Shared inputs (used by both Lines and Layout modes).
+// ─────────────────────────────────────────────────────────────
+$contentRoot = kirby()->root('content');
+$classes     = deco_load_classes($contentRoot);
+$classIds    = array_map(function ($c) { return $c['id']; }, $classes);
+
 // Build the page-picker options. Skip the /dev tree (the editor
 // itself), the error page, and any "subpage" that's really a
 // class folder our migration created inside each page (Kirby
 // treats every folder as a page).
-$contentRoot = kirby()->root('content');
-$classes     = deco_load_classes($contentRoot);
-$classIds    = array_map(function ($c) { return $c['id']; }, $classes);
 $pageOptions = [];
 foreach (kirby()->site()->index() as $p) {
     $id = $p->id();
@@ -49,40 +71,12 @@ foreach (kirby()->site()->index() as $p) {
     ];
 }
 
-$readJson = function ($path) {
-  if (!file_exists($path)) {
-    $seed = preg_replace('/\.json$/', '.example.json', $path);
-    if (file_exists($seed)) $path = $seed;
-    else return [];
-  }
-  $decoded = json_decode(file_get_contents($path), true);
-  return is_array($decoded) ? $decoded : [];
-};
-
 $pageCfg     = $targetPage ? deco_load_page_config($targetPage->root())
                           : ['useClasses' => ['wide'], 'dims' => ['wide' => deco_default_dims()]];
 $masters     = deco_load_masters($contentRoot);
 
-// Per-class instances + groups (v4 shape: { instances, groups }).
-$byClass = [];
-foreach ($pageCfg['useClasses'] as $cid) {
-    $byClass[$cid] = $targetPage
-        ? deco_load_class_data($targetPage->root(), $cid)
-        : ['instances' => [], 'groups' => []];
-}
-
-// Default initial class for first paint. JS may override from
-// localStorage right after init so the user's last-used class for
-// this session takes effect.
-$initialClassId = in_array('wide', $pageCfg['useClasses'], true)
-    ? 'wide'
-    : ($pageCfg['useClasses'][0] ?? 'wide');
-$initialDims    = $pageCfg['dims'][$initialClassId] ?? deco_default_dims();
-
 $palette   = deco_load_palette($contentRoot);
-
-// Default palette if the file doesn't exist yet — gives the editor
-// something to pick from on first run.
+// Default palette if the file doesn't exist yet.
 if (empty($palette)) {
   $palette = [
     ['id' => 'text',   'name' => 'Text',   'value' => 'var(--text)'],
@@ -90,13 +84,29 @@ if (empty($palette)) {
   ];
 }
 
-// Typography tokens (Slice 3b). deco_load_typography() returns the seed
-// set when the file is absent, so the panel always has something to show.
 $typography = deco_load_typography($contentRoot);
 
-// Scan the target page's template for `id="…"` attributes so the
-// trigger-field combobox can suggest selectors that actually exist
-// (e.g. "#projects" if the home template has <h2 id="projects">).
+$v = option('version', 'dev');
+
+// ─────────────────────────────────────────────────────────────
+// Lines-mode (draw) inputs.
+// ─────────────────────────────────────────────────────────────
+
+// Per-class instances + groups (v4 shape).
+$byClass = [];
+foreach ($pageCfg['useClasses'] as $cid) {
+    $byClass[$cid] = $targetPage
+        ? deco_load_class_data($targetPage->root(), $cid)
+        : ['instances' => [], 'groups' => []];
+}
+
+// Default initial class for first paint.
+$initialClassId = in_array('wide', $pageCfg['useClasses'], true)
+    ? 'wide'
+    : ($pageCfg['useClasses'][0] ?? 'wide');
+$initialDims    = $pageCfg['dims'][$initialClassId] ?? deco_default_dims();
+
+// Trigger-field suggestions (selectors that exist in the target template).
 $triggerSuggestions = [];
 $templatePath = kirby()->root('templates') . '/' . $targetSlug . '.php';
 if (file_exists($templatePath)) {
@@ -105,13 +115,7 @@ if (file_exists($templatePath)) {
   $triggerSuggestions = array_values(array_unique($triggerSuggestions));
 }
 
-// Image source suggestions for the "Image URL" panel field — list
-// of public URLs the user is likely to want, so they can pick from
-// a datalist autocomplete instead of typing a path from memory.
-// Sources: files attached to the target page (Kirby's $page->images())
-// + anything in assets/images/. Free-form URL still works (external
-// CDN, full URL, whatever) — this just removes friction for the
-// common "image already on the server" case.
+// Image source suggestions for the "Image URL" panel field.
 $imageSources = [];
 $pageObj = $targetSlug ? page($targetSlug) : null;
 if ($pageObj) {
@@ -134,22 +138,100 @@ if (is_dir($assetsImgDir)) {
 $imageSources = array_values(array_unique($imageSources));
 sort($imageSources);
 
-$v = option('version', 'dev');
+// ─────────────────────────────────────────────────────────────
+// Layout-mode (page) inputs.
+// ─────────────────────────────────────────────────────────────
+
+// Pick the primary class for Slice-1 page-editor = widest in useClasses.
+$primaryClassId = null;
+$primaryPageW   = -1;
+foreach ($pageCfg['useClasses'] as $cid) {
+    $w = $pageCfg['dims'][$cid]['pageW'] ?? 0;
+    if ($w > $primaryPageW) {
+        $primaryPageW   = $w;
+        $primaryClassId = $cid;
+    }
+}
+if ($primaryClassId === null) {
+    $primaryClassId = 'wide';
+    $pageCfg['dims']['wide'] = deco_default_dims();
+}
+$primaryDims = $pageCfg['dims'][$primaryClassId];
+
+// Load rects.json + chapter list + read-time rect-schema migration.
+$rectsPath = $targetPage ? $targetPage->root() . '/rects.json' : null;
+$rectsData = ($rectsPath && is_file($rectsPath))
+    ? (json_decode(file_get_contents($rectsPath), true) ?: [])
+    : [];
+$rectsSchemaVersion = isset($rectsData['schemaVersion']) ? (int) $rectsData['schemaVersion'] : 2;
+$chapters           = (isset($rectsData['chapters']) && is_array($rectsData['chapters']))
+    ? $rectsData['chapters'] : [];
+$rects              = (isset($rectsData['rects']) && is_array($rectsData['rects']))
+    ? $rectsData['rects'] : [];
+
+$rects = array_map(function ($r) {
+    if (!is_array($r)) return $r;
+    if (!array_key_exists('note',  $r)) $r['note']  = null;
+    if (!array_key_exists('image', $r)) $r['image'] = null;
+    $r['fit'] = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
+    foreach (['focusX', 'focusY'] as $fk) {
+        $fv = $r[$fk] ?? 50;
+        $fv = is_numeric($fv) ? (int) round((float) $fv) : 50;
+        $r[$fk] = max(0, min(100, $fv));
+    }
+    if (!array_key_exists('typographyId', $r)) $r['typographyId'] = null;
+    if (!array_key_exists('marks', $r) || !is_array($r['marks'])) $r['marks'] = [];
+    return $r;
+}, $rects);
+$rectsSchemaVersion = 3;
+
+// Palette validation for inline :root vars (used by dev-page.css).
+$paletteByID = [];
+foreach ($palette as $p) {
+    if (is_array($p) && isset($p['id'])) $paletteByID[$p['id']] = $p['value'] ?? '';
+}
+$paletteSafe = function ($v, $fallback) {
+    if (!is_string($v) || $v === '') return $fallback;
+    $ok = preg_match(
+        '/^(#[0-9a-fA-F]{3,8}|var\(--[a-zA-Z0-9_-]+\)|rgba?\([0-9.,%\s\/-]+\)|hsla?\([0-9.,%\s\/-]+\)|[a-zA-Z]+)$/',
+        $v
+    );
+    return $ok ? $v : $fallback;
+};
+$paletteAccent = $paletteSafe($paletteByID['accent'] ?? null, 'var(--accent)');
+$paletteText   = $paletteSafe($paletteByID['text']   ?? null, 'var(--text)');
+
+// ─────────────────────────────────────────────────────────────
+// Merged payload — union of both editors' input keys.
+// ─────────────────────────────────────────────────────────────
 
 $payload = json_encode([
+  // Shared.
   'pageId'             => $targetSlug,
   'pages'              => $pageOptions,
+  'palette'            => $palette,
+  'typography'         => $typography,
+  'version'            => $v,
+  // Lines mode (draw).
   'classId'            => $initialClassId,
   'classes'            => $classes,
   'masters'            => $masters,
   'byClass'            => $byClass,
-  'palette'            => $palette,
-  'typography'         => $typography,
   'page'               => $pageCfg,
   'triggerSuggestions' => $triggerSuggestions,
   'imageSources'       => $imageSources,
-  'version'            => $v
+  // Layout mode (page).
+  'canvas'             => [
+    'pageW'   => $primaryDims['pageW'],
+    'pageH'   => $primaryDims['pageH'],
+    'classId' => $primaryClassId,
+  ],
+  'schemaVersion'      => $rectsSchemaVersion,
+  'chapters'           => $chapters,
+  'rects'              => $rects,
 ], JSON_UNESCAPED_SLASHES);
+// Harden the inline JSON against </script> breakout (same as page.php).
+$payload = str_replace('<', '\\u003c', $payload);
 ?>
 <!doctype html>
 <html lang="en">
@@ -159,13 +241,63 @@ $payload = json_encode([
   <title>Editor — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/dev-draw.css') ?>?v=<?= $v ?>">
-  <?php /* Slice 3b: load the curated webfonts + emit one .ty-<id> rule per
-           token so the typography panel's per-row previews render with the
-           real family/size — same emitter the page editor & runtime use. */ ?>
+  <link rel="stylesheet" href="<?= url('assets/css/material-icons.css') ?>?v=<?= $v ?>">
+  <link rel="stylesheet" href="<?= url('assets/css/dev-page.css') ?>?v=<?= $v ?>">
   <?= deco_google_fonts_link($contentRoot) ?>
   <style id="ed-typography-css"><?= deco_typography_css($typography, $palette) ?></style>
+  <style id="ed-page-marks-css">
+<?= deco_palette_marks_css($palette) ?>
+    :root {
+      --pe-palette-accent: <?= $paletteAccent ?>;
+      --pe-palette-text:   <?= $paletteText ?>;
+      --pe-kind-text:       #cfe4ff;
+      --pe-kind-image:      #ffe7b8;
+      --pe-kind-drilldown:  #e6d4ff;
+      --pe-kind-deco-mount: #d4f1d6;
+    }
+  </style>
+  <style id="ed-mode-css">
+    /* Slice 1b mode-toggle rules. Inline here for now; will migrate to
+       dev-draw.css (renamed dev-editor.css) in Slice 6. */
+
+    /* Mode-pane = transparent flex pass-through. Both .ed-body (flex:1)
+       and .pe-body (flex:1 1 auto) were authored as DIRECT flex children
+       of body.editor / body.page-editor (display:flex; flex-direction:
+       column; 100vh). Wrapping each in a .ed-mode-pane broke that chain:
+       the wrapper defaulted to display:block / flex:0 1 auto, collapsed
+       to content height, and the inner body's flex:1 no longer resolved
+       — so .ed-canvas-wrap got ~zero height and the canvas couldn't be
+       panned. Restoring flex:1 + min-height:0 + flex-column on the pane
+       re-establishes the chain so the inner body fills the viewport
+       exactly as before. (Inactive pane is display:none !important via
+       the rules below, which override this display:flex.) */
+    .ed-mode-pane {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ed-mode-toggle {
+      display: inline-flex; gap: 2px; margin: 0 8px;
+      border: 1px solid currentColor; border-radius: 4px; opacity: .85;
+    }
+    .ed-mode-btn {
+      background: transparent; color: inherit; border: 0;
+      padding: 4px 10px; font: inherit; cursor: pointer;
+      min-width: 60px; min-height: 32px; /* touch target */
+    }
+    .ed-mode-btn.is-active { background: currentColor; }
+    .ed-mode-btn.is-active > span { color: var(--bg, #111); mix-blend-mode: difference; }
+    /* Toolbar groups visible per mode. */
+    body.ed-mode-layout .ed-lines-only { display: none !important; }
+    body.ed-mode-lines  .ed-layout-only { display: none !important; }
+    /* Body panes. */
+    body.ed-mode-lines  .ed-mode-pane--layout { display: none !important; }
+    body.ed-mode-layout .ed-mode-pane--lines  { display: none !important; }
+  </style>
 </head>
-<body class="editor">
+<body class="editor page-editor ed-mode-lines">
 
 <header class="ed-toolbar">
   <div class="ed-brand">
@@ -186,7 +318,11 @@ $payload = json_encode([
         <?php endforeach; ?>
       </select>
     </label>
-    <div class="ed-class-tabs" role="tablist" aria-label="Screen class">
+    <div class="ed-mode-toggle" role="tablist" aria-label="Editor mode">
+      <button type="button" class="ed-mode-btn is-active" data-mode="lines"   role="tab" aria-selected="true"><span>Lines</span></button>
+      <button type="button" class="ed-mode-btn"           data-mode="layout"  role="tab" aria-selected="false"><span>Layout</span></button>
+    </div>
+    <div class="ed-class-tabs ed-lines-only" role="tablist" aria-label="Screen class">
       <?php foreach ($pageCfg['useClasses'] as $cid): ?>
         <?php
           $label = ucfirst($cid);
@@ -218,44 +354,49 @@ $payload = json_encode([
     </div>
   </div>
 
-  <div class="ed-tools" role="toolbar" aria-label="Selection">
+  <div class="ed-tools ed-lines-only" role="toolbar" aria-label="Selection">
     <button type="button" class="ed-tool" data-tool="select" title="Select (S) — no drawing; click to select, drag to move">↖ Select</button>
     <button type="button" class="ed-tool" id="select-all-btn" title="Select every object on this page — drag any one to move them all together. Cmd/Shift-click objects to build a custom multi-selection.">Select all</button>
   </div>
 
-  <div class="ed-tools" role="toolbar" aria-label="Create">
+  <div class="ed-tools ed-lines-only" role="toolbar" aria-label="Create">
     <button type="button" id="create-object-btn" class="ed-create-btn"
             title="Create a new object — opens a panel to pick the shape type or import an SVG file, and choose which classes it should appear in">+ Create object</button>
-    <!-- v0.8.36: the SVG import affordance moved INTO the Create
-         object modal so the toolbar isn't crowded with two
-         logically-similar "give me a new object" actions. The
-         file input stays at page scope so the change handler bound
-         in dev-draw.js still works — the modal's new Import button
-         just triggers .click() on it. -->
     <input type="file" id="import-svg-input" accept=".svg,image/svg+xml" multiple hidden>
     <button type="button" id="library-btn" class="ed-create-btn"
             title="Project hub: Master library, Overview, Orphans, Snapshots.">▦ Project</button>
   </div>
 
-  <div class="ed-tool-settings" id="tool-settings"></div>
+  <div class="ed-tools ed-layout-only" role="toolbar" aria-label="Layout create">
+    <label class="pe-add-rect">
+      <select id="add-rect-select" class="pe-create-btn">
+        <option value="" disabled selected>+ Add rect</option>
+        <option value="text">+ Text</option>
+        <option value="image">+ Image</option>
+        <option value="drilldown">+ Drilldown</option>
+        <option value="deco-mount">+ Deco mount</option>
+      </select>
+    </label>
+    <button type="button" id="place-image-btn" class="pe-create-btn"
+            title="Pick an image first — creates a rect already bound and sized to it">+ Place image…</button>
+  </div>
+
+  <div class="ed-tool-settings ed-lines-only" id="tool-settings"></div>
 
   <div class="ed-view" role="toolbar" aria-label="Save and settings">
     <button type="button" id="save-btn"     class="ed-save">Save</button>
-    <button type="button" id="settings-btn" class="ed-icon-btn ed-settings" title="Settings — editor preferences and diagnostic toggles" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-    <button type="button" id="help-btn" class="ed-icon-btn ed-help" title="Editor tips — tools, selection, gestures, shortcuts" aria-label="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5" fill="currentColor"/></svg></button>
+    <button type="button" id="settings-btn" class="ed-icon-btn ed-settings ed-lines-only" title="Settings — editor preferences and diagnostic toggles" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    <button type="button" id="help-btn" class="ed-icon-btn ed-help ed-lines-only" title="Editor tips — tools, selection, gestures, shortcuts" aria-label="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5" fill="currentColor"/></svg></button>
     <span id="save-status" class="ed-status" aria-live="polite"></span>
   </div>
 
   <span class="ed-version">v<?= esc($v) ?></span>
 </header>
 
+<!-- ─────────── LINES MODE PANE ─────────── -->
+<div class="ed-mode-pane ed-mode-pane--lines">
 <div class="ed-body">
   <aside class="ed-sidebar">
-    <!-- v0.10.43: zoom + undo/redo relocated here from the top toolbar.
-         They're low-frequency relative to the canvas itself, and the
-         sidebar scrolls, so a control row here costs no layout budget
-         and lets the top toolbar stay a single row. IDs are unchanged
-         so dev-draw.js bindings still resolve. -->
     <section class="ed-panel ed-panel--controls">
       <div class="ed-zoom" role="toolbar" aria-label="Zoom">
         <button type="button" id="zoom-out"   title="Zoom out (−)">−</button>
@@ -268,8 +409,6 @@ $payload = json_encode([
       </div>
     </section>
 
-    <!-- Working panels first: groups list + the contextual selection
-         panel are what the user touches most. -->
     <section class="ed-panel">
       <header class="ed-panel-head">
         <h3>Groups</h3>
@@ -282,10 +421,6 @@ $payload = json_encode([
       <!-- Populated dynamically: group settings or line overrides -->
     </section>
 
-    <!-- Setup panels last: canvas dims + palette are configured once
-         at the start of a page and rarely revisited, so they live at
-         the bottom of the sidebar out of the active-work line of
-         sight. -->
     <section class="ed-panel" id="canvas-panel">
       <header class="ed-panel-head">
         <h3>Canvas</h3>
@@ -302,17 +437,6 @@ $payload = json_encode([
       <ul id="palette-list" class="ed-palette-list"></ul>
     </section>
 
-    <?php /* Element styles (A2): the ONE registry of complete, named text
-             styles (family / size / weight / line-height / letter-spacing /
-             italic / colour). Exactly one is the default — every text falls
-             back to it. Authored here; persisted to typography-tokens.json
-             (file/route/`.ty-` class unchanged — only the user-facing label
-             is "Element styles" now). The former relative "Character styles"
-             panel was retired here (A2-3); its entire subsystem (authoring
-             JS/CSS, the loader/emitter/save-route/`.mk-cs-<id>` plumbing) was
-             removed in Slice D (D1 page editor, D2 Draw editor, D3 backend).
-             Only the now-orphaned content/_shared/char-styles.json may remain
-             on disk — harmless, nothing reads it. */ ?>
     <section class="ed-panel" id="element-styles-section">
       <header class="ed-panel-head">
         <h3>Element styles</h3>
@@ -326,13 +450,6 @@ $payload = json_encode([
               title="Preview every style as real paragraphs">View all in panel</button>
     </section>
 
-    <?php /* Unsaved-changes bar (v0.10.122): shown ONLY while element styles
-             are dirty. position:sticky; bottom:0 inside the scrolling sidebar
-             keeps it pinned to the bottom of the viewport from ANY scroll
-             position (it's the last child), so the Save action is always
-             reachable — unlike the former sticky header, which slid below the
-             fold once the user scrolled up to other sections. Hidden when
-             clean, so there is no permanent chrome. */ ?>
     <div class="ed-typo-save-bar" id="typo-save-bar" hidden>
       <button type="button" id="typo-save-bar-btn" class="ed-mini">Save styles</button>
     </div>
@@ -354,11 +471,6 @@ $payload = json_encode([
   $vb   = deco_viewbox($dims);
 ?>
   <main class="ed-canvas-wrap">
-    <!-- Canvas geometry is driven by the current class's dims (from
-         page.json's dims[<classId>]). The page area is the central
-         pageW×pageH zone at (0, 0); the viewBox extends symmetrically
-         around it to canvasW×canvasH so lines that drift on/off the
-         page have room to live. 1px = 1 viewBox unit at zoom 1.0. -->
     <svg id="draw-surface"
          viewBox="<?= deco_viewbox_attr($dims) ?>"
          width="<?= $dims['canvasW'] ?>" height="<?= $dims['canvasH'] ?>"
@@ -376,17 +488,102 @@ $payload = json_encode([
     </svg>
   </main>
 </div>
+</div>
+<!-- ─────────── END LINES MODE PANE ─────────── -->
 
-<!-- v0.8.110: floating-panel host. Fixed full-viewport overlay that
-     never intercepts pointer events itself; individual floating
+<!-- ─────────── LAYOUT MODE PANE ─────────── -->
+<div class="ed-mode-pane ed-mode-pane--layout">
+<div class="pe-body">
+  <aside class="pe-sidebar">
+    <section class="pe-panel">
+      <header class="pe-panel-head"><h3>Chapters</h3></header>
+      <ul id="chapters-list" class="pe-chapters"></ul>
+      <form id="chapter-add-form" class="pe-chapter-add" autocomplete="off">
+        <input type="text" id="chapter-add-input" class="pe-input"
+               placeholder="New chapter name" maxlength="64">
+        <button type="submit" class="pe-create-btn">+</button>
+      </form>
+    </section>
+
+    <!-- Slice 1b: id="selection-panel" renamed to "pe-selection-panel" so
+         the HTML doesn't have two elements with the same id (draw's
+         selection-panel is the one dev-draw.js queries; dev-page.js
+         queries "selection-body" inside this panel, so the panel's own
+         id can change freely). -->
+    <section class="pe-panel" id="pe-selection-panel">
+      <header class="pe-panel-head"><h3>Selection</h3></header>
+      <div id="selection-body"></div>
+    </section>
+
+    <section class="pe-panel" id="objects-panel">
+      <header class="pe-panel-head pe-objects-head">
+        <h3>Objects</h3>
+        <div class="pe-objects-sort" role="group" aria-label="Sort objects">
+          <button type="button" id="objects-sort-type" class="pe-sort-btn"
+                  title="Group by type">T</button>
+          <button type="button" id="objects-sort-z" class="pe-sort-btn"
+                  title="Sort by layer (Z)">Z</button>
+        </div>
+      </header>
+      <div id="objects-body"></div>
+    </section>
+  </aside>
+
+  <main class="pe-canvas-wrap">
+    <div class="pe-canvas-col">
+      <div class="pe-canvas-dims">Page area: <?= (int)$primaryDims['pageW'] ?>, <?= (int)$primaryDims['pageH'] ?> — Canvas: <?= (int)$primaryDims['canvasW'] ?>, <?= (int)$primaryDims['canvasH'] ?></div>
+      <div id="page-editor-surface"
+           class="pe-canvas-surface"
+           style="width: <?= (int)$primaryDims['pageW'] ?>px; min-height: <?= (int)$primaryDims['pageH'] ?>px;">
+        <!-- rects render here -->
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+<!-- ─────────── END LAYOUT MODE PANE ─────────── -->
+
+<!-- v0.8.110: floating-panel host (Lines mode). Fixed full-viewport overlay
+     that never intercepts pointer events itself; individual floating
      panels (added by PanelManager in dev-draw.js) opt back in via
-     their own pointer-events:auto. Lives outside .ed-body so panels
-     can float over the entire editor (toolbar included if dragged
-     up) without fighting the sidebar/canvas grid. -->
+     their own pointer-events:auto. -->
 <div id="panel-host" class="ed-panel-host" aria-hidden="false"></div>
 
 <script id="editor-data" type="application/json"><?= $payload ?></script>
 <script src="<?= url('assets/js/dev-draw.js') ?>?v=<?= $v ?>"></script>
+<script src="<?= url('assets/js/dev-page.js') ?>?v=<?= $v ?>"></script>
+<script id="ed-mode-toggle-js">
+  // Slice 1b mode toggle. Inline here for now; will move to dev-editor.js
+  // in Slice 6. Persists last mode in localStorage so reloads stay put.
+  (function () {
+    var KEY = 'dev-editor:mode';
+    var initial = (function () {
+      var q = new URLSearchParams(location.search).get('mode');
+      if (q === 'lines' || q === 'layout') return q;
+      var s = null;
+      try { s = localStorage.getItem(KEY); } catch (e) {}
+      return (s === 'layout') ? 'layout' : 'lines';
+    })();
+    function apply(mode) {
+      document.body.classList.toggle('ed-mode-lines',  mode === 'lines');
+      document.body.classList.toggle('ed-mode-layout', mode === 'layout');
+      var btns = document.querySelectorAll('.ed-mode-btn');
+      for (var i = 0; i < btns.length; i++) {
+        var on = btns[i].getAttribute('data-mode') === mode;
+        btns[i].classList.toggle('is-active', on);
+        btns[i].setAttribute('aria-selected', on ? 'true' : 'false');
+      }
+      try { localStorage.setItem(KEY, mode); } catch (e) {}
+    }
+    apply(initial);
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest && ev.target.closest('.ed-mode-btn');
+      if (!btn) return;
+      var mode = btn.getAttribute('data-mode');
+      if (mode === 'lines' || mode === 'layout') apply(mode);
+    });
+  })();
+</script>
 <!-- v<?= $v ?> -->
 <?php snippet('sync-peer-indicator') ?>
 </body>
