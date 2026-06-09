@@ -12264,6 +12264,9 @@
   // unsaved token's id changes on rename (see renderTypographyList).
   const expandedTypoIds = {};
   let typographyDirty = false;
+  // Esc handler for the standalone element-style Edit panel (v0.10.164).
+  // Held so closeElementStylePanel can detach it; only one panel open at once.
+  let esPanelKeyHandler = null;
 
   // Standard CSS font-weight steps, labelled. Values are numbers so they
   // match a numeric t.weight strictly in selectField; onChange parses back.
@@ -12463,6 +12466,13 @@
   }
 
   function renderTypographyList() {
+    // Slice 3a redesign (v0.10.164): keep the canvas DISPLAY in lockstep with
+    // the side-panel LIST. Every mutation path already funnels through this
+    // render (add / setDefault / delete / move / save), so refreshing the
+    // display here means we don't have to touch each call site. The display
+    // reads state.typography directly and is independent of #typography-list,
+    // so it works even when the list early-returns below.
+    renderElementStyleDisplay();
     const listEl = document.getElementById('typography-list');
     if (!listEl) return;
     listEl.innerHTML = '';
@@ -12694,6 +12704,237 @@
       li.appendChild(edit);
       listEl.appendChild(li);
     });
+  }
+
+  // ── Slice 3a redesign (v0.10.164): element-style DISPLAY + standalone EDIT ──
+  // The Styles-mode canvas shows one outlined card per element style, in
+  // state.typography order. Header repeats: name · ty-<id> · font-family name
+  // (PLAIN TEXT, not rendered in that font) · ↑↓ reorder · Edit. Below: the
+  // demo text rendered in the style (the .ty-<id> class is auto-styled by the
+  // injected #ed-typography-css-live, so it shows the real size/weight/colour).
+  // Palette has no canvas display — it stays compact in the side panel.
+  const ES_DEMO_TEXT = 'Ag — The quick brown fox jumps over the lazy dog. 0123456789';
+
+  function renderElementStyleDisplay() {
+    const host = document.getElementById('ed-styles-display');
+    if (!host) return;
+    host.innerHTML = '';
+    const tokens = Array.isArray(state.typography) ? state.typography : [];
+    if (!tokens.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ed-es-empty';
+      empty.textContent = 'No element styles yet — add one with “+ Style” in the panel at left.';
+      host.appendChild(empty);
+      return;
+    }
+    tokens.forEach(function (t, idx) {
+      const card = document.createElement('section');
+      card.className = 'ed-es-card';
+      card.setAttribute('data-typo-id', t.id);
+
+      const head = document.createElement('header');
+      head.className = 'ed-es-card-head';
+
+      const name = document.createElement('span');
+      name.className = 'ed-es-card-name';
+      name.textContent = t.name || '(unnamed)';
+      if (t.isDefault) {
+        const star = document.createElement('span');
+        star.className = 'ed-es-card-default';
+        star.textContent = ' ★';
+        star.title = 'Project default style';
+        name.appendChild(star);
+      }
+
+      const idTag = document.createElement('code');
+      idTag.className = 'ed-es-card-id';
+      idTag.textContent = 'ty-' + t.id;
+
+      // Font family shown as PLAIN TEXT (the surrounding UI font), per the
+      // design spec — the header names the font, the demo below shows it.
+      const fam = document.createElement('span');
+      fam.className = 'ed-es-card-family';
+      fam.textContent = t.family ? t.family : '(inherit family)';
+
+      const spacer = document.createElement('span');
+      spacer.className = 'ed-es-card-spacer';
+
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.className = 'ed-mini ed-es-move';
+      up.textContent = '↑';
+      up.title = 'Move this style up';
+      up.setAttribute('aria-label', 'Move style up');
+      up.disabled = (idx === 0);
+      up.addEventListener('click', function () { moveTypo(t, -1); });
+
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.className = 'ed-mini ed-es-move';
+      down.textContent = '↓';
+      down.title = 'Move this style down';
+      down.setAttribute('aria-label', 'Move style down');
+      down.disabled = (idx === tokens.length - 1);
+      down.addEventListener('click', function () { moveTypo(t, 1); });
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'ed-mini ed-es-edit';
+      editBtn.textContent = 'Edit';
+      editBtn.title = 'Edit this style’s name and properties';
+      editBtn.addEventListener('click', function () { openElementStylePanel(t.id); });
+
+      head.appendChild(name);
+      head.appendChild(idTag);
+      head.appendChild(fam);
+      head.appendChild(spacer);
+      head.appendChild(up);
+      head.appendChild(down);
+      head.appendChild(editBtn);
+
+      const demo = document.createElement('div');
+      demo.className = 'ed-es-card-demo ty-' + t.id;
+      demo.textContent = ES_DEMO_TEXT;
+
+      card.appendChild(head);
+      card.appendChild(demo);
+      host.appendChild(card);
+    });
+  }
+
+  // Standalone floating Edit panel (the user chose standalone over PanelManager
+  // to avoid coupling before the Slice-6 JS consolidation). One open at a time.
+  // Reuses the same field helpers + afterFieldEdit pattern as the (still-present
+  // safety-net) sidebar inline editor; on every field change it rebuilds the
+  // live CSS, marks dirty, and re-renders the display cards so the demo updates
+  // immediately. Closing via × / backdrop / Esc.
+  function closeElementStylePanel() {
+    const old = document.getElementById('ed-es-panel');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    const bd = document.getElementById('ed-es-panel-backdrop');
+    if (bd && bd.parentNode) bd.parentNode.removeChild(bd);
+    if (esPanelKeyHandler) {
+      document.removeEventListener('keydown', esPanelKeyHandler);
+      esPanelKeyHandler = null;
+    }
+  }
+
+  function openElementStylePanel(tokenId) {
+    closeElementStylePanel();
+    const tokens = Array.isArray(state.typography) ? state.typography : [];
+    let t = null;
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i].id === tokenId) { t = tokens[i]; break; }
+    }
+    if (!t) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'ed-es-panel-backdrop';
+    backdrop.id = 'ed-es-panel-backdrop';
+    backdrop.addEventListener('click', closeElementStylePanel);
+
+    const panel = document.createElement('div');
+    panel.className = 'ed-es-panel';
+    panel.id = 'ed-es-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Edit element style');
+    panel.setAttribute('data-typo-id', t.id);
+
+    const head = document.createElement('header');
+    head.className = 'ed-es-panel-head';
+    const title = document.createElement('h3');
+    title.className = 'ed-es-panel-title';
+    title.textContent = 'Edit style — ' + (t.name || t.id);
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'ed-mini ed-es-panel-close';
+    closeBtn.textContent = '×';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.addEventListener('click', closeElementStylePanel);
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'ed-es-panel-body';
+
+    function afterFieldEdit() {
+      rebuildTypographyClientCss();
+      markTypographyDirty();
+      renderElementStyleDisplay();   // refresh the demo card live
+    }
+
+    // Editable name. Mirrors the sidebar list's unsaved-id tracking: while a
+    // token is new (unsaved), its id follows the name so ty-<id> stays
+    // readable; once saved the id locks (newTypoIds cleared in saveTypography).
+    body.appendChild(textField('Name', t.name || '', function (v) {
+      t.name = v;
+      if (newTypoIds[t.id]) {
+        const newId = uniqueTypoId(slugifyTypoId(t.name), t.id);
+        if (newId !== t.id) {
+          delete newTypoIds[t.id];
+          t.id = newId;
+          newTypoIds[newId] = true;
+          panel.setAttribute('data-typo-id', newId);
+          rebuildTypographyClientCss();
+        }
+      }
+      title.textContent = 'Edit style — ' + (t.name || t.id);
+      markTypographyDirty();
+      renderElementStyleDisplay();
+    }, 'Style name'));
+
+    body.appendChild(fontFamilyField('Family', t.family || '', function (v) {
+      t.family = v || '';
+      injectGoogleFontsLink();
+      afterFieldEdit();
+    }, 'Pick from bundle or type any name'));
+
+    body.appendChild(numberField('Size (px)', (t.sizePx != null ? t.sizePx : 16), function (v) {
+      if (Number.isFinite(v)) { t.sizePx = v; afterFieldEdit(); }
+    }));
+
+    body.appendChild(darkSelectField('Weight', (t.weight != null ? t.weight : 400), TYPO_WEIGHTS, function (v) {
+      t.weight = parseInt(v, 10) || 400;
+      afterFieldEdit();
+    }));
+
+    body.appendChild(numberField('Line height', (t.lineHeight != null ? t.lineHeight : 1.4), function (v) {
+      if (Number.isFinite(v)) { t.lineHeight = v; afterFieldEdit(); }
+    }));
+
+    body.appendChild(numberField('Letter spacing (px)', (t.letterSpacingPx != null ? t.letterSpacingPx : 0), function (v) {
+      if (Number.isFinite(v)) { t.letterSpacingPx = v; afterFieldEdit(); }
+    }));
+
+    body.appendChild(checkboxField('Italic', !!t.italic, function (v) {
+      t.italic = !!v;
+      afterFieldEdit();
+    }));
+
+    // Colour — palette reference. The DEFAULT style is the root fallback and
+    // cannot inherit (allowInherit gated on !isDefault), matching the sidebar.
+    body.appendChild(typoColourField('Colour', (t.color != null ? t.color : null), !t.isDefault, function (v) {
+      t.color = v || null;
+      afterFieldEdit();
+    }));
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'ed-mini ed-es-panel-save';
+    save.title = 'Save all element-style changes';
+    save.addEventListener('click', function () { saveTypography(save); });
+    applyTypoEditSaveState(save);
+    body.appendChild(save);
+
+    panel.appendChild(head);
+    panel.appendChild(body);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+
+    esPanelKeyHandler = function (ev) { if (ev.key === 'Escape') closeElementStylePanel(); };
+    document.addEventListener('keydown', esPanelKeyHandler);
   }
 
   // Persist the current tokens to content/_shared/typography-tokens.json

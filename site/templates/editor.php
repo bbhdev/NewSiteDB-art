@@ -6,6 +6,23 @@
  *   /dev/draw.
  * Slice 1b (v0.10.158): mode toggle + page-editor merged in as a
  *   second mode.
+ * Slice 2  (v0.10.161): deco-mount rect kind retired.
+ * Slice 3a (v0.10.162): third mode "Styles". The palette + element-
+ *   styles editors (global, page-independent design tokens) move out of
+ *   the Lines sidebar into a dedicated .ed-mode-pane--styles. Mode
+ *   visibility CSS generalised to a :not(.ed-mode-X) form so it scales
+ *   past two modes.
+ * Slice 3a redesign (v0.10.164): the typography UI is split into three
+ *   distinct affordances. (a) LIST stays in the side panel (name · ★ default
+ *   · × delete). (b) DISPLAY fills the canvas — one outlined card per style in
+ *   list order, header = name · ty-<id> · font-family name (plain text, NOT
+ *   rendered in that font) · ↑↓ reorder · Edit; below, the demo text rendered
+ *   in the style. (c) EDIT opens a standalone floating panel with every
+ *   property. Palette has NO canvas display — it stays compact in the side
+ *   panel (tablet screen space). The display is rendered by dev-draw.js's
+ *   renderElementStyleDisplay() (native access to state + live #ed-typography-
+ *   css-live), superseding the v0.10.163 MutationObserver preview. Slice 3b
+ *   adds the cross-page usage audit alongside.
  *
  * What 1b does:
  *  - One toolbar. Mode toggle [Lines | Layout] sits next to the
@@ -297,12 +314,77 @@ $payload = str_replace('<', '\\u003c', $payload);
     }
     .ed-mode-btn.is-active { background: currentColor; }
     .ed-mode-btn.is-active > span { color: var(--bg, #111); mix-blend-mode: difference; }
-    /* Toolbar groups visible per mode. */
-    body.ed-mode-layout .ed-lines-only { display: none !important; }
-    body.ed-mode-lines  .ed-layout-only { display: none !important; }
-    /* Body panes. */
-    body.ed-mode-lines  .ed-mode-pane--layout { display: none !important; }
-    body.ed-mode-layout .ed-mode-pane--lines  { display: none !important; }
+    /* Toolbar groups: each `ed-<mode>-only` group shows only while body is
+       in that mode. The :not() form scales to three modes (lines / layout /
+       styles) without an N×N matrix of pairwise hide rules — adding a 4th
+       mode later is one more line, not three. */
+    body:not(.ed-mode-lines)  .ed-lines-only  { display: none !important; }
+    body:not(.ed-mode-layout) .ed-layout-only { display: none !important; }
+    body:not(.ed-mode-styles) .ed-styles-only { display: none !important; }
+    /* Body panes: same rule shape — exactly one pane visible per mode. */
+    body:not(.ed-mode-lines)  .ed-mode-pane--lines  { display: none !important; }
+    body:not(.ed-mode-layout) .ed-mode-pane--layout { display: none !important; }
+    body:not(.ed-mode-styles) .ed-mode-pane--styles { display: none !important; }
+
+    /* Styles-mode surface = the canvas area beside the (compact) list panel.
+       It hosts the ELEMENT-STYLE DISPLAY: one outlined card per style, in the
+       same order as the side-panel list. Each card's header repeats the name,
+       the ty-<id>, the font-family name (as PLAIN TEXT — not rendered in that
+       font), reorder arrows and an Edit button; below, the demo text rendered
+       in the style (the .ty-<id> class is auto-styled by dev-draw.js's injected
+       #ed-typography-css-live). Palette has NO canvas display — it stays compact
+       in the side panel (tablet screen space). Rendered by dev-draw.js's
+       renderElementStyleDisplay(); Edit opens a standalone floating panel. */
+    .ed-styles-surface {
+      flex: 1; min-height: 0; overflow: auto; padding: 18px 22px 40px;
+    }
+    .ed-es-display { display: flex; flex-direction: column; gap: 18px; }
+    .ed-es-empty { opacity: .5; font-size: 13px; }
+    /* One outlined card per style — reserved space, not floating. */
+    .ed-es-card {
+      border: 1px solid rgba(127,127,127,.32); border-radius: 10px;
+      overflow: hidden; background: rgba(127,127,127,.04);
+    }
+    .ed-es-card-head {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 12px; border-bottom: 1px solid rgba(127,127,127,.22);
+      font-size: 12px;
+    }
+    .ed-es-card-name { font-weight: 600; font-size: 13px; }
+    .ed-es-card-default { color: #f5c518; }
+    .ed-es-card-id { font-family: ui-monospace, monospace; font-size: 11px; opacity: .6; }
+    .ed-es-card-family { font-size: 12px; opacity: .8; font-style: italic; }
+    .ed-es-card-spacer { flex: 1; }
+    /* Demo rendered in the style — on a neutral light card so palette-driven
+       text colours read faithfully (as on a page). The .ty-<id> class supplies
+       size/weight/family/colour, so the demo shows the real, larger style. */
+    .ed-es-card-demo {
+      background: #ffffff; color: #111; padding: 18px 16px; word-break: break-word;
+    }
+
+    /* Standalone floating Edit panel (user chose standalone, not PanelManager,
+       to keep coupling out before the Slice-6 JS consolidation). One open at a
+       time; backdrop click / × / Esc closes. */
+    .ed-es-panel-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 900;
+    }
+    .ed-es-panel {
+      position: fixed; z-index: 901; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(420px, 92vw); max-height: 86vh; overflow: auto;
+      background: var(--bg, #1a1a1a); color: var(--text, #eee);
+      border: 1px solid rgba(127,127,127,.4); border-radius: 12px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.5);
+    }
+    .ed-es-panel-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; border-bottom: 1px solid rgba(127,127,127,.25);
+      position: sticky; top: 0; background: inherit;
+    }
+    .ed-es-panel-title { margin: 0; font-size: 14px; flex: 1; }
+    .ed-es-panel-close { font-size: 18px; line-height: 1; min-width: 32px; min-height: 32px; }
+    .ed-es-panel-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+    .ed-es-panel-save { align-self: flex-end; }
   </style>
 </head>
 <body class="editor page-editor ed-mode-lines">
@@ -329,6 +411,7 @@ $payload = str_replace('<', '\\u003c', $payload);
     <div class="ed-mode-toggle" role="tablist" aria-label="Editor mode">
       <button type="button" class="ed-mode-btn is-active" data-mode="lines"   role="tab" aria-selected="true"><span>Lines</span></button>
       <button type="button" class="ed-mode-btn"           data-mode="layout"  role="tab" aria-selected="false"><span>Layout</span></button>
+      <button type="button" class="ed-mode-btn"           data-mode="styles"  role="tab" aria-selected="false"><span>Styles</span></button>
     </div>
     <div class="ed-class-tabs ed-lines-only" role="tablist" aria-label="Screen class">
       <?php foreach ($pageCfg['useClasses'] as $cid): ?>
@@ -436,30 +519,9 @@ $payload = str_replace('<', '\\u003c', $payload);
       <div id="canvas-fields" class="ed-canvas-fields"></div>
     </section>
 
-    <section class="ed-panel">
-      <header class="ed-panel-head">
-        <h3>Design colors</h3>
-        <button type="button" id="new-color-btn" class="ed-mini">+ Color</button>
-      </header>
-      <ul id="palette-list" class="ed-palette-list"></ul>
-    </section>
-
-    <section class="ed-panel" id="element-styles-section">
-      <header class="ed-panel-head">
-        <h3>Element styles</h3>
-        <span class="ed-typo-head-btns">
-          <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
-          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save styles</button>
-        </span>
-      </header>
-      <ul id="typography-list" class="ed-typo-list"></ul>
-      <button type="button" id="view-typo-btn" class="ed-mini ed-typo-view-btn"
-              title="Preview every style as real paragraphs">View all in panel</button>
-    </section>
-
-    <div class="ed-typo-save-bar" id="typo-save-bar" hidden>
-      <button type="button" id="typo-save-bar-btn" class="ed-mini">Save styles</button>
-    </div>
+    <!-- Slice 3a: "Design colors" + "Element styles" relocated to the
+         Styles mode pane (below). They are global, page-independent design
+         tokens and never belonged to Lines. -->
 
   </aside>
 
@@ -550,6 +612,57 @@ $payload = str_replace('<', '\\u003c', $payload);
 </div>
 <!-- ─────────── END LAYOUT MODE PANE ─────────── -->
 
+<!-- ─────────── STYLES MODE PANE ─────────── -->
+<!-- Slice 3a (v0.10.162): the palette + element-styles editors, relocated
+     verbatim out of the Lines sidebar. These are GLOBAL design tokens shared
+     across every page, so they get their own mode rather than living inside
+     Lines. Ids are unchanged → dev-draw.js wires them exactly as before
+     (all getElementById, document-wide); save still goes to the existing
+     /dev/draw/palette and /dev/draw/typography routes. The right-hand
+     surface is a placeholder explainer in 3a; Slice 3b fills it with the
+     cross-page usage audit (which objects use each token, orphans, dangling
+     refs). Reuses .ed-body / .ed-sidebar / .ed-panel so styling is identical
+     and free; this pane sits AFTER the Lines pane in document order, so the
+     load-error banner's querySelector('.ed-sidebar') still targets Lines. -->
+<div class="ed-mode-pane ed-mode-pane--styles">
+<div class="ed-body">
+  <aside class="ed-sidebar">
+    <section class="ed-panel">
+      <header class="ed-panel-head">
+        <h3>Design colors</h3>
+        <button type="button" id="new-color-btn" class="ed-mini">+ Color</button>
+      </header>
+      <ul id="palette-list" class="ed-palette-list"></ul>
+    </section>
+
+    <section class="ed-panel" id="element-styles-section">
+      <header class="ed-panel-head">
+        <h3>Element styles</h3>
+        <span class="ed-typo-head-btns">
+          <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
+          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save styles</button>
+        </span>
+      </header>
+      <ul id="typography-list" class="ed-typo-list"></ul>
+      <button type="button" id="view-typo-btn" class="ed-mini ed-typo-view-btn"
+              title="Preview every style as real paragraphs">View all in panel</button>
+    </section>
+
+    <div class="ed-typo-save-bar" id="typo-save-bar" hidden>
+      <button type="button" id="typo-save-bar-btn" class="ed-mini">Save styles</button>
+    </div>
+  </aside>
+
+  <main class="ed-styles-surface">
+    <!-- Element-style DISPLAY cards, rendered by dev-draw.js's
+         renderElementStyleDisplay() in state.typography order. Edit opens a
+         standalone floating panel. Palette is intentionally NOT shown here. -->
+    <div id="ed-styles-display" class="ed-es-display"></div>
+  </main>
+</div>
+</div>
+<!-- ─────────── END STYLES MODE PANE ─────────── -->
+
 <!-- v0.8.110: floating-panel host (Lines mode). Fixed full-viewport overlay
      that never intercepts pointer events itself; individual floating
      panels (added by PanelManager in dev-draw.js) opt back in via
@@ -564,16 +677,18 @@ $payload = str_replace('<', '\\u003c', $payload);
   // in Slice 6. Persists last mode in localStorage so reloads stay put.
   (function () {
     var KEY = 'dev-editor:mode';
+    var MODES = ['lines', 'layout', 'styles'];
     var initial = (function () {
       var q = new URLSearchParams(location.search).get('mode');
-      if (q === 'lines' || q === 'layout') return q;
+      if (MODES.indexOf(q) !== -1) return q;
       var s = null;
       try { s = localStorage.getItem(KEY); } catch (e) {}
-      return (s === 'layout') ? 'layout' : 'lines';
+      return (MODES.indexOf(s) !== -1) ? s : 'lines';
     })();
     function apply(mode) {
       document.body.classList.toggle('ed-mode-lines',  mode === 'lines');
       document.body.classList.toggle('ed-mode-layout', mode === 'layout');
+      document.body.classList.toggle('ed-mode-styles', mode === 'styles');
       var btns = document.querySelectorAll('.ed-mode-btn');
       for (var i = 0; i < btns.length; i++) {
         var on = btns[i].getAttribute('data-mode') === mode;
@@ -587,7 +702,7 @@ $payload = str_replace('<', '\\u003c', $payload);
       var btn = ev.target.closest && ev.target.closest('.ed-mode-btn');
       if (!btn) return;
       var mode = btn.getAttribute('data-mode');
-      if (mode === 'lines' || mode === 'layout') apply(mode);
+      if (MODES.indexOf(mode) !== -1) apply(mode);
     });
   })();
 </script>
