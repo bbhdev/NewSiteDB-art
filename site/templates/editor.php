@@ -463,7 +463,7 @@ $payload = str_replace('<', '\\u003c', $payload);
       font-weight: 600; font-size: 12px; word-break: break-all;
       display: block; margin-bottom: 2px;
     }
-    .ed-img-dim { opacity: .65; }
+    .ed-img-dim { display: block; opacity: .65; }
     /* Slice 4b usage badge — count of rects on this page referencing the image.
        Orphan (0 uses) goes amber, matching the Styles audit. */
     .ed-img-usage {
