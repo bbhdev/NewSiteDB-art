@@ -12651,20 +12651,16 @@
     panel.setAttribute('aria-label', 'Edit element style');
     panel.setAttribute('data-typo-id', t.id);
 
+    // Header is title-only — the top-right [×] was removed (v0.10.166): the
+    // footer "Close" button is the single close affordance (backdrop / Esc
+    // still work too). Two close controls plus a former "Save styles" footer
+    // button read as competing actions; one labelled "Close" is unambiguous.
     const head = document.createElement('header');
     head.className = 'ed-es-panel-head';
     const title = document.createElement('h3');
     title.className = 'ed-es-panel-title';
     title.textContent = 'Edit style — ' + (t.name || t.id);
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'ed-mini ed-es-panel-close';
-    closeBtn.textContent = '×';
-    closeBtn.title = 'Close';
-    closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.addEventListener('click', closeElementStylePanel);
     head.appendChild(title);
-    head.appendChild(closeBtn);
 
     const body = document.createElement('div');
     body.className = 'ed-es-panel-body';
@@ -12730,16 +12726,19 @@
       afterFieldEdit();
     }));
 
-    // Class ed-typo-edit-save (shared with the old inline save) lets
-    // markTypographyDirty/clearTypographyDirty update this button's dirty/clean
-    // state live while the panel is open.
-    const save = document.createElement('button');
-    save.type = 'button';
-    save.className = 'ed-mini ed-es-panel-save ed-typo-edit-save';
-    save.title = 'Save all element-style changes';
-    save.addEventListener('click', function () { saveTypography(save); });
-    applyTypoEditSaveState(save);
-    body.appendChild(save);
+    // Footer is "Close" only (v0.10.166). Field edits already apply live
+    // (rebuildTypographyClientCss + markTypographyDirty + display refresh via
+    // afterFieldEdit), so persistence is owned solely by the sidebar
+    // #save-typography-btn. A footer "Save styles" button competed with that
+    // top button — it didn't clear the top's dirty state, so the user thought
+    // styles weren't saved. One unambiguous "Close" affordance fixes that.
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ed-mini ed-es-panel-save';
+    close.textContent = 'Close';
+    close.title = 'Close — use the sidebar Save styles button to write changes';
+    close.addEventListener('click', closeElementStylePanel);
+    body.appendChild(close);
 
     panel.appendChild(head);
     panel.appendChild(body);
