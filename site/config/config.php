@@ -261,15 +261,15 @@ return [
         'users',
         'system',
         '-',
-        'dev-draw' => [
-          'label' => 'Draw editor',
-          'icon'  => 'brush',
-          'link'  => $base . '/dev/draw',
-        ],
-        'dev-page' => [
-          'label' => 'Page editor',
-          'icon'  => 'template',
-          'link'  => $base . '/dev/page',
+        // Convergence Slice 1c: one unified Editor entry. The former
+        // separate "Draw editor" / "Page editor" links collapsed into
+        // this single entry — /dev/editor opens in the last-used mode
+        // (localStorage) or Lines by default; the in-app toggle switches
+        // Lines/Layout. (Old /dev/draw + /dev/page still 302 here.)
+        'dev-editor' => [
+          'label' => 'Editor',
+          'icon'  => 'edit',
+          'link'  => $base . '/dev/editor',
         ],
         'dev-image-workshop' => [
           'label' => 'Image workshop',
@@ -397,6 +397,45 @@ return [
    *                          }
    */
   'routes' => [
+    /*
+     * Convergence Slice 1c — hard redirect of the old editor surfaces
+     * to the unified /dev/editor. /dev/draw and /dev/page no longer
+     * serve their own templates; they bounce (302) to /dev/editor with
+     * the matching mode preselected, preserving the ?page= target.
+     *
+     * Patterns are EXACT (no trailing wildcard) so only the bare editor
+     * URLs redirect — the sub-routes (dev/draw/save, dev/draw/library/*,
+     * dev/page/save, dev/page/upload-image, …) keep their own handlers
+     * below. Kirby matches routes in array order, but an exact pattern
+     * can't shadow a longer one, so placing these first is safe.
+     *
+     * The draw.php / page.php templates are now dead (nothing routes to
+     * them); they're pending deletion in Slice 6 alongside the JS
+     * consolidation. The content/dev/draw and content/dev/page pages
+     * stay on disk for now — harmless, and removing them is a separate
+     * tidy-up.
+     */
+    [
+      'pattern' => 'dev/draw',
+      'action'  => function () {
+        $p = get('page');
+        $q = (is_string($p) && $p !== '')
+            ? '?mode=lines&page=' . urlencode($p)
+            : '?mode=lines';
+        go('dev/editor' . $q);
+      },
+    ],
+    [
+      'pattern' => 'dev/page',
+      'action'  => function () {
+        $p = get('page');
+        $q = (is_string($p) && $p !== '')
+            ? '?mode=layout&page=' . urlencode($p)
+            : '?mode=layout';
+        go('dev/editor' . $q);
+      },
+    ],
+
     /*
      * Snapshot library — local backup/restore of content/.
      *
