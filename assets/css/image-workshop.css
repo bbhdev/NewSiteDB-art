@@ -237,6 +237,13 @@ body.iw-body {
   border: 1px solid #33363c;
   border-radius: 5px;
   overflow: hidden;
+  /* Flex column so the use-it toggle can pin to the card's bottom. The
+     grid stretches every card in a row to the tallest card's height
+     (align-items: stretch is the grid default), so a bottom-pinned toggle
+     lands at the same y across the whole row — no ragged button heights
+     when images have different aspect ratios. */
+  display: flex;
+  flex-direction: column;
 }
 .iw-card-head {
   padding: 0.5rem 0.7rem;
@@ -454,6 +461,7 @@ body.iw-body {
 .iw-controls {
   display: flex;
   border-top: 1px solid #33363c;
+  margin-top: auto; /* pin the toggle to the card bottom (see .iw-card) */
 }
 .iw-use {
   flex: 1 1 auto;
