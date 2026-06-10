@@ -1015,8 +1015,10 @@ $payload = str_replace('<', '\\u003c', $payload);
 <div id="panel-host" class="ed-panel-host" aria-hidden="false"></div>
 
 <script id="editor-data" type="application/json"><?= $payload ?></script>
-<script src="<?= url('assets/js/dev-draw.js') ?>?v=<?= $v ?>"></script>
-<script src="<?= url('assets/js/dev-page.js') ?>?v=<?= $v ?>"></script>
+<!-- Slice 6a: dev-draw.js + dev-page.js merged into one file (two IIFEs,
+     same behavior). 6b collapses the dual save into one POST + folds in
+     the inline mode-toggle/images-pane scripts below. -->
+<script src="<?= url('assets/js/dev-editor.js') ?>?v=<?= $v ?>"></script>
 <script id="ed-mode-toggle-js">
   // Slice 1b mode toggle. Inline here for now; will move to dev-editor.js
   // in Slice 6. Persists last mode in localStorage so reloads stay put.
