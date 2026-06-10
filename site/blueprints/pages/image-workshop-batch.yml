@@ -15,8 +15,9 @@
 # `{{ page.id }}` resolves to the full path id (e.g.
 # `dev/image-workshop/batch-1`), which the editor reads via
 # URLSearchParams('batch') and matches against the batch <select>'s
-# option values. Opens in a new tab (target: _blank) so the Panel stays
-# put — the user's workflow is multi-tab.
+# option values. v0.10.193 — opens in the SAME tab (no target: _blank):
+# forcing a new tab is wrong (the browser already offers cmd/ctrl-click
+# for that when the user wants it).
 
 title: Batch
 
@@ -28,7 +29,6 @@ buttons:
     text: Open batch in Deco
     icon: edit
     theme: love
-    target: _blank
     link: "/dev/editor?mode=images&batch={{ page.id }}"
 
 columns:

@@ -1272,12 +1272,31 @@ $payload = str_replace('<', '\\u003c', $payload);
       var cur = batchSel.options[batchSel.selectedIndex];
       if (ddLabel) ddLabel.textContent = cur ? cur.textContent : '— choose a batch —';
     }
-    function ddOpen()  { if (ddList) { ddRebuild(); ddList.hidden = false; if (ddBtn) ddBtn.setAttribute('aria-expanded', 'true'); } }
+    // 4g-3d — robust open/close. The previous version relied on
+    // e.stopPropagation() to stop the document handler from instantly
+    // re-closing what the button just opened; that desynced in Opera
+    // (the dropdown would refuse to re-open). Two hardening changes:
+    //   1. The document close-handler tests the click TARGET (is it inside
+    //      #ed-import-dd?) instead of trusting propagation timing — so the
+    //      toggle works no matter what else handles the click.
+    //   2. ddOpen pins the list with position:fixed anchored to the button,
+    //      so the scrollable images surface (.ed-images-surface, overflow:
+    //      auto) can never clip the popup. Closes on scroll/resize since a
+    //      fixed element doesn't track the button once the surface scrolls.
+    function ddOpen()  {
+      if (!ddList || !ddBtn) return;
+      ddRebuild();
+      var r = ddBtn.getBoundingClientRect();
+      ddList.style.position = 'fixed';
+      ddList.style.top  = (r.bottom + 4) + 'px';
+      ddList.style.left = r.left + 'px';
+      ddList.style.minWidth = r.width + 'px';
+      ddList.hidden = false;
+      ddBtn.setAttribute('aria-expanded', 'true');
+    }
     function ddClose() { if (ddList) { ddList.hidden = true; if (ddBtn) ddBtn.setAttribute('aria-expanded', 'false'); } }
-    if (ddBtn) ddBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      if (ddList && ddList.hidden) ddOpen(); else ddClose();
-    });
+    function ddToggle() { if (ddList && ddList.hidden) ddOpen(); else ddClose(); }
+    if (ddBtn) ddBtn.addEventListener('click', function () { ddToggle(); });
     if (ddList) ddList.addEventListener('click', function (e) {
       var li = e.target.closest ? e.target.closest('.ed-dd-opt') : null;
       if (!li) return;
@@ -1286,8 +1305,19 @@ $payload = str_replace('<', '\\u003c', $payload);
       ddClose();
       batchSel.dispatchEvent(new Event('change'));
     });
-    document.addEventListener('click', function () { ddClose(); });
+    // Close only on genuine OUTSIDE clicks. The list stays a DOM child of
+    // #ed-import-dd even when position:fixed, so closest() covers it.
+    document.addEventListener('click', function (e) {
+      if (!ddList || ddList.hidden) return;
+      if (e.target.closest && e.target.closest('#ed-import-dd')) return;
+      ddClose();
+    });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') ddClose(); });
+    (function () {
+      var surf = document.querySelector('.ed-images-surface');
+      if (surf) surf.addEventListener('scroll', function () { if (ddList && !ddList.hidden) ddClose(); });
+      window.addEventListener('resize', function () { if (ddList && !ddList.hidden) ddClose(); });
+    })();
 
     function loadBatches() {
       if (batchesLoaded || !batchSel) return;

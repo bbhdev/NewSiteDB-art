@@ -271,10 +271,16 @@ return [
           'icon'  => 'edit',
           'link'  => $base . '/dev/editor',
         ],
+        // v0.10.193 — point at the Panel page (batches list + "add batch"),
+        // not the front-end template route. Panel encodes the page id's
+        // "/" as "+", so dev/image-workshop → pages/dev+image-workshop. A
+        // Panel-relative link keeps the in-Panel SPA navigation (no full
+        // reload), and from a batch the "Open batch in Deco" button jumps
+        // into the editor's Images mode.
         'dev-image-workshop' => [
           'label' => 'Image workshop',
           'icon'  => 'images',
-          'link'  => $base . '/dev/image-workshop',
+          'link'  => 'pages/dev+image-workshop',
         ],
       ];
     },
