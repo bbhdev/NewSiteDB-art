@@ -33,6 +33,70 @@ if ($role !== 'L') return;
             transition:background-color 0.2s, color 0.2s;">
   <span data-role="label">A: …</span>
 </div>
+
+<?php /* S4b.4 — primary in-app "Push L → A" control + dark confirm modal.
+        L-only (the whole snippet returns early for A/B). Self-contained,
+        no framework deps, matching the indicator pill's style. Flow:
+        click → dry-run preview (what would be replaced on A) → confirm →
+        real push → result. The push OVERWRITES A's content/, but A takes
+        a mandatory pre-propagate snapshot first (see /sync/propagate). */ ?>
+<style>
+  #sync-push-btn{
+    position:fixed; right:8px; bottom:34px; z-index:9999;
+    font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+    background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
+    padding:7px 11px; border-radius:6px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px;
+    transition:background-color .15s, border-color .15s;
+  }
+  #sync-push-btn:hover{ background:#343434; border-color:#4a4a4a; }
+  #sync-push-btn:disabled{ opacity:.55; cursor:default; }
+  #sync-push-btn svg{ width:14px; height:14px; display:block; }
+
+  #sync-push-modal{ position:fixed; inset:0; z-index:10000;
+    display:flex; align-items:center; justify-content:center;
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
+  #sync-push-modal[hidden]{ display:none; }
+  #sync-push-modal .spm-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.6); }
+  #sync-push-modal .spm-panel{ position:relative; width:min(420px,92vw);
+    background:#202020; border:1px solid #3a3a3a; border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.55); color:#ececec; padding:18px 18px 14px; }
+  #sync-push-modal .spm-title{ font-size:15px; font-weight:600; color:#fff; margin-bottom:10px; }
+  #sync-push-modal .spm-title b{ color:#f5c518; }
+  #sync-push-modal .spm-body{ color:#cfcfcf; min-height:42px; }
+  #sync-push-modal .spm-body b{ color:#fff; }
+  #sync-push-modal .spm-body .spm-warn{ color:#ff8d7a; }
+  #sync-push-modal .spm-body .spm-ok{ color:#7ddca0; }
+  #sync-push-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  #sync-push-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+    padding:8px 13px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
+  #sync-push-modal .spm-cancel{ background:#2e2e2e; color:#ddd; border-color:#444; }
+  #sync-push-modal .spm-cancel:hover{ background:#383838; }
+  #sync-push-modal .spm-confirm{ background:#f5c518; color:#1c1c1c; }
+  #sync-push-modal .spm-confirm:hover{ background:#ffd23b; }
+  #sync-push-modal .spm-confirm:disabled{ opacity:.45; cursor:default; }
+</style>
+
+<button id="sync-push-btn" type="button"
+        title="Push L → A — overwrites A's content (A is snapshotted first)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 19V5M5 12l7-7 7 7"/>
+  </svg>
+  <span>Push&nbsp;→&nbsp;A</span>
+</button>
+
+<div id="sync-push-modal" hidden role="dialog" aria-modal="true" aria-label="Push content to A">
+  <div class="spm-backdrop" data-role="backdrop"></div>
+  <div class="spm-panel">
+    <div class="spm-title">Push&nbsp;<b>L → A</b></div>
+    <div class="spm-body" data-role="body">Checking what would change on A…</div>
+    <div class="spm-actions">
+      <button type="button" class="spm-cancel"  data-role="cancel">Cancel</button>
+      <button type="button" class="spm-confirm" data-role="confirm" disabled>Push to A</button>
+    </div>
+  </div>
+</div>
 <script>
 (function () {
   // Self-contained polling — no framework deps so this snippet drops
@@ -118,5 +182,102 @@ if ($role !== 'L') return;
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) poll();
   });
+
+  // ── S4b.4 — "Push L → A" control ──────────────────────────────────
+  // Two-step: a dry-run preview (no snapshot, no swap) populates the
+  // modal with what WOULD change on A; confirm then fires the real push.
+  // Keyboard: Enter = confirm (when armed & visible), Esc = close —
+  // matching the project's dialog key-default convention.
+  var pushBtn   = document.getElementById('sync-push-btn');
+  var modal     = document.getElementById('sync-push-modal');
+  if (pushBtn && modal) {
+    var mBody    = modal.querySelector('[data-role="body"]');
+    var mConfirm = modal.querySelector('[data-role="confirm"]');
+    var mCancel  = modal.querySelector('[data-role="cancel"]');
+    var mBack    = modal.querySelector('[data-role="backdrop"]');
+    var busy     = false;
+
+    function esc(s){ return String(s).replace(/[&<>]/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
+    function fmtBytes(n){
+      if (n == null) return '?';
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+      return (n/1048576).toFixed(2) + ' MB';
+    }
+    function showError(msg){
+      mBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg) + '</span>';
+      mConfirm.disabled = true;
+    }
+    function resetModal(){
+      mConfirm.style.display = '';
+      mConfirm.textContent = 'Push to A';
+      mConfirm.disabled = true;
+      mCancel.textContent = 'Cancel';
+      mCancel.disabled = false;
+    }
+    function closeModal(){ if (busy) return; resetModal(); modal.hidden = true; }
+
+    // Step 1 — dry-run preview.
+    function preview(){
+      busy = true;
+      resetModal();
+      mBody.textContent = 'Checking what would change on A…';
+      modal.hidden = false;
+      fetch('/sync/push/A?dryRun=1', { method:'POST', cache:'no-store' })
+        .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+        .then(function(j){
+          busy = false;
+          if (!j || !j.ok){ showError((j && j.error) || 'dry-run failed'); return; }
+          var w = j.wouldReplace || {};
+          var sent = (j.sent && j.sent.bytes != null) ? fmtBytes(j.sent.bytes) : '?';
+          mBody.innerHTML =
+            'This will <span class="spm-warn">overwrite A’s content</span> with L’s:<br>'
+            + '<b>' + (w.pages||0) + '</b> pages · <b>' + (w.files||0) + '</b> files · '
+            + fmtBytes(w.bytes) + ' <span style="opacity:.8">(' + sent + ' gzipped on the wire)</span>.<br>'
+            + 'A snapshot of A’s current content is taken first.';
+          mConfirm.disabled = false;
+        })
+        .catch(function(){ busy = false; showError('network error'); });
+    }
+
+    // Step 2 — real push.
+    function doPush(){
+      if (busy || mConfirm.disabled) return;
+      busy = true;
+      mConfirm.disabled = true; mCancel.disabled = true;
+      mConfirm.textContent = 'Pushing…';
+      mBody.textContent = 'Pushing content to A…';
+      fetch('/sync/push/A', { method:'POST', cache:'no-store' })
+        .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+        .then(function(j){
+          busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
+          mConfirm.style.display = 'none';
+          if (!j || !j.ok){ showError((j && j.error) || 'push failed'); return; }
+          var r = j.replaced || {};
+          mBody.innerHTML =
+            '<span class="spm-ok">✓ Pushed to A.</span><br>'
+            + 'A now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
+            + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b>';
+          poll();   // refresh the peer-activity pill — A just changed
+        })
+        .catch(function(){
+          busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
+          mConfirm.style.display = 'none'; showError('network error during push');
+        });
+    }
+
+    pushBtn.addEventListener('click', preview);
+    mConfirm.addEventListener('click', doPush);
+    mCancel.addEventListener('click', closeModal);
+    mBack.addEventListener('click', closeModal);
+    document.addEventListener('keydown', function(e){
+      if (modal.hidden) return;
+      if (e.key === 'Escape'){ e.preventDefault(); closeModal(); }
+      else if (e.key === 'Enter' && !mConfirm.disabled && mConfirm.style.display !== 'none'){
+        e.preventDefault(); doPush();
+      }
+    });
+  }
 })();
 </script>
