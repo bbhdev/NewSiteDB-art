@@ -443,6 +443,47 @@ return [
     ],
 
     /*
+     * Convergence Slice 1d (v0.10.212) — serve /dev/editor from a VIRTUAL
+     * page, not a content/dev/editor/ folder.
+     *
+     * WHY: content/dev/* is excluded from BOTH delivery paths to a server.
+     * deploy.sh excludes all content (only --bootstrap carries it), and the
+     * sync propagate excludes the `dev` top-level. So a disk-backed anchor
+     * page only ever reached A via the one-time `deploy.sh --bootstrap`
+     * seed — which PREDATED /dev/editor (created in Slice 1a, v0.10.157).
+     * Result: every post-convergence server showed the opaque error page at
+     * /dev/editor because Kirby couldn't resolve the URL to a page.
+     * (Diagnosed live on A at v0.10.211; a one-off rsync of the anchor page
+     * was the stopgap, this route is the cure.)
+     *
+     * The editor is a TOOL, not content; it must not depend on a content
+     * anchor. Rendering the `editor` template through an in-memory Page makes
+     * /dev/editor behave identically on L, A and B with zero content
+     * dependency — and every future /dev/* tool can follow the same shape.
+     * The template only reads $page->targetPage() (defaulted to 'home') and
+     * the ?page= query override, both supplied here.
+     *
+     * Routes match before page resolution, so this also supersedes any
+     * leftover content/dev/editor/ folder on disk (now vestigial — safe to
+     * delete from content/, but harmless if left).
+     */
+    [
+      'pattern' => 'dev/editor',
+      'method'  => 'GET',
+      'action'  => function () {
+        $virtual = Kirby\Cms\Page::factory([
+          'slug'     => 'editor',
+          'template' => 'editor',
+          'content'  => [
+            'title'      => 'Editor',
+            'targetpage' => 'home',
+          ],
+        ]);
+        return $virtual->render();
+      },
+    ],
+
+    /*
      * Snapshot library — local backup/restore of content/.
      *
      *   GET  dev/draw/library/list   → { ok, schemaVersion, snapshots: [...] }
