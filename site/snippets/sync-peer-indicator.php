@@ -41,43 +41,54 @@ if ($role !== 'L') return;
         real push → result. The push OVERWRITES A's content/, but A takes
         a mandatory pre-propagate snapshot first (see /sync/propagate). */ ?>
 <style>
-  #sync-push-btn{
-    position:fixed; right:8px; bottom:34px; z-index:9999;
+  /* Shared look for the two propagate controls (push + pull). Each
+     button keeps its own id for JS wiring + vertical position; the
+     pull button stacks above the push button and is tinted toward red
+     because it overwrites the machine you're sitting at. */
+  .sync-prop-btn{
+    position:fixed; right:8px; z-index:9999;
     font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
     background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
     padding:7px 11px; border-radius:6px; cursor:pointer;
     display:inline-flex; align-items:center; gap:6px;
     transition:background-color .15s, border-color .15s;
   }
-  #sync-push-btn:hover{ background:#343434; border-color:#4a4a4a; }
-  #sync-push-btn:disabled{ opacity:.55; cursor:default; }
-  #sync-push-btn svg{ width:14px; height:14px; display:block; }
+  .sync-prop-btn:hover{ background:#343434; border-color:#4a4a4a; }
+  .sync-prop-btn:disabled{ opacity:.55; cursor:default; }
+  .sync-prop-btn svg{ width:14px; height:14px; display:block; }
+  #sync-push-btn{ bottom:34px; }
+  #sync-pull-btn{ bottom:68px; border-color:#5a3a3a; }
+  #sync-pull-btn:hover{ background:#3a2a2a; border-color:#7a4a4a; }
 
-  #sync-push-modal{ position:fixed; inset:0; z-index:10000;
+  .sync-prop-modal{ position:fixed; inset:0; z-index:10000;
     display:flex; align-items:center; justify-content:center;
     font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
-  #sync-push-modal[hidden]{ display:none; }
-  #sync-push-modal .spm-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.6); }
-  #sync-push-modal .spm-panel{ position:relative; width:min(420px,92vw);
+  .sync-prop-modal[hidden]{ display:none; }
+  .sync-prop-modal .spm-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.6); }
+  .sync-prop-modal .spm-panel{ position:relative; width:min(420px,92vw);
     background:#202020; border:1px solid #3a3a3a; border-radius:10px;
     box-shadow:0 12px 40px rgba(0,0,0,.55); color:#ececec; padding:18px 18px 14px; }
-  #sync-push-modal .spm-title{ font-size:15px; font-weight:600; color:#fff; margin-bottom:10px; }
-  #sync-push-modal .spm-title b{ color:#f5c518; }
-  #sync-push-modal .spm-body{ color:#cfcfcf; min-height:42px; }
-  #sync-push-modal .spm-body b{ color:#fff; }
-  #sync-push-modal .spm-body .spm-warn{ color:#ff8d7a; }
-  #sync-push-modal .spm-body .spm-ok{ color:#7ddca0; }
-  #sync-push-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
-  #sync-push-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+  .sync-prop-modal .spm-title{ font-size:15px; font-weight:600; color:#fff; margin-bottom:10px; }
+  .sync-prop-modal .spm-title b{ color:#f5c518; }
+  .sync-prop-modal .spm-title b.danger{ color:#ff8d7a; }
+  .sync-prop-modal .spm-body{ color:#cfcfcf; min-height:42px; }
+  .sync-prop-modal .spm-body b{ color:#fff; }
+  .sync-prop-modal .spm-body .spm-warn{ color:#ff8d7a; }
+  .sync-prop-modal .spm-body .spm-ok{ color:#7ddca0; }
+  .sync-prop-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .sync-prop-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
     padding:8px 13px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
-  #sync-push-modal .spm-cancel{ background:#2e2e2e; color:#ddd; border-color:#444; }
-  #sync-push-modal .spm-cancel:hover{ background:#383838; }
-  #sync-push-modal .spm-confirm{ background:#f5c518; color:#1c1c1c; }
-  #sync-push-modal .spm-confirm:hover{ background:#ffd23b; }
-  #sync-push-modal .spm-confirm:disabled{ opacity:.45; cursor:default; }
+  .sync-prop-modal .spm-cancel{ background:#2e2e2e; color:#ddd; border-color:#444; }
+  .sync-prop-modal .spm-cancel:hover{ background:#383838; }
+  .sync-prop-modal .spm-confirm{ background:#f5c518; color:#1c1c1c; }
+  .sync-prop-modal .spm-confirm:hover{ background:#ffd23b; }
+  .sync-prop-modal .spm-confirm:disabled{ opacity:.45; cursor:default; }
+  /* Danger confirm — pull overwrites THIS machine's content. */
+  .sync-prop-modal .spm-confirm.danger{ background:#c0392b; color:#fff; }
+  .sync-prop-modal .spm-confirm.danger:hover{ background:#e04a3a; }
 </style>
 
-<button id="sync-push-btn" type="button"
+<button id="sync-push-btn" class="sync-prop-btn" type="button"
         title="Push L → A — overwrites A's content (A is snapshotted first)">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -86,7 +97,7 @@ if ($role !== 'L') return;
   <span>Push&nbsp;→&nbsp;A</span>
 </button>
 
-<div id="sync-push-modal" hidden role="dialog" aria-modal="true" aria-label="Push content to A">
+<div id="sync-push-modal" class="sync-prop-modal" hidden role="dialog" aria-modal="true" aria-label="Push content to A">
   <div class="spm-backdrop" data-role="backdrop"></div>
   <div class="spm-panel">
     <div class="spm-title">Push&nbsp;<b>L → A</b></div>
@@ -94,6 +105,35 @@ if ($role !== 'L') return;
     <div class="spm-actions">
       <button type="button" class="spm-cancel"  data-role="cancel">Cancel</button>
       <button type="button" class="spm-confirm" data-role="confirm" disabled>Push to A</button>
+    </div>
+  </div>
+</div>
+
+<?php /* S4c.3 — primary in-app "Pull A → L" control + dark confirm modal.
+        The reverse direction of Push: L FETCHES A's content (via the
+        bearer-authed /sync/pull/A → A's /sync/export) and overwrites ITS
+        OWN content/. Destructive to *this* machine, so the confirm is red
+        and the copy says "overwrite THIS machine". L takes a mandatory
+        pre-propagate snapshot of its own content first (the snapshot lands
+        on the destination, which here is L). Flow mirrors Push:
+        click → dry-run preview (what A would send) → confirm → real pull. */ ?>
+<button id="sync-pull-btn" class="sync-prop-btn" type="button"
+        title="Pull A → L — overwrites THIS machine's content (L is snapshotted first)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M19 12H5M11 18l-6-6 6-6"/>
+  </svg>
+  <span>Pull&nbsp;←&nbsp;A</span>
+</button>
+
+<div id="sync-pull-modal" class="sync-prop-modal" hidden role="dialog" aria-modal="true" aria-label="Pull content from A">
+  <div class="spm-backdrop" data-role="backdrop"></div>
+  <div class="spm-panel">
+    <div class="spm-title">Pull&nbsp;<b class="danger">A → L</b></div>
+    <div class="spm-body" data-role="body">Asking A what it would send…</div>
+    <div class="spm-actions">
+      <button type="button" class="spm-cancel"  data-role="cancel">Cancel</button>
+      <button type="button" class="spm-confirm danger" data-role="confirm" disabled>Overwrite L with A</button>
     </div>
   </div>
 </div>
@@ -293,6 +333,110 @@ if ($role !== 'L') return;
       if (e.key === 'Escape'){ e.preventDefault(); closeModal(); }
       else if (e.key === 'Enter' && !mConfirm.disabled && mConfirm.style.display !== 'none'){
         e.preventDefault(); doPush();
+      }
+    });
+  }
+
+  // ── S4c.3 — "Pull A → L" control ──────────────────────────────────
+  // Mirror of Push, reversed: L fetches A's content and overwrites ITS
+  // OWN content/. Reuses esc()/fmtBytes() from the closure above. The
+  // dry-run reports A's `wouldSend` (what L would receive), NOT the push
+  // shape's `wouldReplace`; the real pull returns the same `replaced` +
+  // `snapshot` shape as a push (both go through sync_ingest_content_tarball).
+  var pullBtn   = document.getElementById('sync-pull-btn');
+  var pullModal = document.getElementById('sync-pull-modal');
+  if (pullBtn && pullModal) {
+    var pBody    = pullModal.querySelector('[data-role="body"]');
+    var pConfirm = pullModal.querySelector('[data-role="confirm"]');
+    var pCancel  = pullModal.querySelector('[data-role="cancel"]');
+    var pBack    = pullModal.querySelector('[data-role="backdrop"]');
+    var pBusy    = false;
+
+    // Same diagnostic shape as the push errMsg, but the 404 hint points
+    // at /sync/export (the route A serves for a pull) rather than
+    // /sync/propagate.
+    function pErrMsg(j, fallback){
+      if (!j) return fallback;
+      var m = j.error || fallback;
+      if (j.code){
+        m += ' (HTTP ' + j.code + ')';
+        if (j.code === 404) m += ' — A has no /sync/export route; deploy current code to A.';
+      }
+      if (j.body){
+        var snip = String(j.body).replace(/\s+/g, ' ').trim().slice(0, 120);
+        if (snip) m += '\n' + snip;
+      }
+      return m;
+    }
+    function pShowError(msg){
+      pBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg).replace(/\n/g, '<br>') + '</span>';
+      pConfirm.disabled = true;
+    }
+    function pReset(){
+      pConfirm.style.display = '';
+      pConfirm.textContent = 'Overwrite L with A';
+      pConfirm.disabled = true;
+      pCancel.textContent = 'Cancel';
+      pCancel.disabled = false;
+    }
+    function pClose(){ if (pBusy) return; pReset(); pullModal.hidden = true; }
+
+    // Step 1 — dry-run preview: ask A (via L's pull proxy) what it WOULD send.
+    function pPreview(){
+      pBusy = true;
+      pReset();
+      pBody.textContent = 'Asking A what it would send…';
+      pullModal.hidden = false;
+      fetch('/sync/pull/A?dryRun=1', { method:'POST', cache:'no-store' })
+        .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+        .then(function(j){
+          pBusy = false;
+          if (!j || !j.ok){ pShowError(pErrMsg(j, 'dry-run failed')); return; }
+          var w = j.wouldSend || {};
+          pBody.innerHTML =
+            'This will <span class="spm-warn">overwrite THIS machine’s content</span> with A’s:<br>'
+            + '<b>' + (w.pages||0) + '</b> pages · <b>' + (w.files||0) + '</b> files · ' + fmtBytes(w.bytes) + '.<br>'
+            + 'A snapshot of L’s current content is taken first.';
+          pConfirm.disabled = false;
+        })
+        .catch(function(){ pBusy = false; pShowError('network error'); });
+    }
+
+    // Step 2 — real pull.
+    function pDoPull(){
+      if (pBusy || pConfirm.disabled) return;
+      pBusy = true;
+      pConfirm.disabled = true; pCancel.disabled = true;
+      pConfirm.textContent = 'Pulling…';
+      pBody.textContent = 'Fetching A’s content and applying locally…';
+      fetch('/sync/pull/A', { method:'POST', cache:'no-store' })
+        .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+        .then(function(j){
+          pBusy = false; pCancel.disabled = false; pCancel.textContent = 'Close';
+          pConfirm.style.display = 'none';
+          if (!j || !j.ok){ pShowError(pErrMsg(j, 'pull failed')); return; }
+          var r = j.replaced || {};
+          pBody.innerHTML =
+            '<span class="spm-ok">✓ Pulled A → L.</span><br>'
+            + 'L now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
+            + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b><br>'
+            + '<span style="opacity:.8">Reload the editor to see A’s content.</span>';
+        })
+        .catch(function(){
+          pBusy = false; pCancel.disabled = false; pCancel.textContent = 'Close';
+          pConfirm.style.display = 'none'; pShowError('network error during pull');
+        });
+    }
+
+    pullBtn.addEventListener('click', pPreview);
+    pConfirm.addEventListener('click', pDoPull);
+    pCancel.addEventListener('click', pClose);
+    pBack.addEventListener('click', pClose);
+    document.addEventListener('keydown', function(e){
+      if (pullModal.hidden) return;
+      if (e.key === 'Escape'){ e.preventDefault(); pClose(); }
+      else if (e.key === 'Enter' && !pConfirm.disabled && pConfirm.style.display !== 'none'){
+        e.preventDefault(); pDoPull();
       }
     });
   }
