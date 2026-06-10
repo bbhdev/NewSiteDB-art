@@ -2127,11 +2127,41 @@ HTML;
           $n++;
         }
 
-        if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $filename)) {
+        $dest = $dir . '/' . $filename;
+        if (!move_uploaded_file($file['tmp_name'], $dest)) {
           return $json(['ok' => false, 'error' => 'Could not write the uploaded file.'], 500);
         }
 
-        return $json(['ok' => true, 'filename' => $filename]);
+        // Optional resize-on-the-way-in (Slice 4e). The editor's direct-upload
+        // flow may pass `maxLongEdge`; blank/absent → keep original. We resize
+        // in place via kirby()->thumb on raw paths (no File/Page object needed,
+        // which this no-Panel-user route can't reliably build for a brand-new
+        // file). thumb fits the image inside a max×max box (long edge binds, no
+        // crop, no upscale) — identical geometry to File::resize and the
+        // maxLongEdge hook. On any failure the original stays put.
+        $resizedTo = null;
+        $maxRaw = $_POST['maxLongEdge'] ?? null;
+        if (is_numeric($maxRaw)) {
+          $max = max(200, min(8000, (int) $maxRaw));
+          $info = @getimagesize($dest);
+          $longEdge = $info ? max((int) $info[0], (int) $info[1]) : 0;
+          if ($longEdge > $max) {
+            try {
+              $tmpOut = $dest . '.rsz';
+              kirby()->thumb($dest, $tmpOut, ['width' => $max, 'height' => $max]);
+              if (is_file($tmpOut) && rename($tmpOut, $dest)) {
+                $resizedTo = $max;
+              } else {
+                @unlink($tmpOut);
+              }
+            } catch (\Throwable $e) {
+              @unlink($dest . '.rsz');
+              // Swallow — original remains; the upload still succeeded.
+            }
+          }
+        }
+
+        return $json(['ok' => true, 'filename' => $filename, 'resizedTo' => $resizedTo]);
       }
     ],
 

@@ -513,6 +513,30 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-import-badge.v-ok     { background: rgba(120,200,120,.18); color: #7ec97e; }
     .ed-import-badge.v-rework { background: rgba(245,197,24,.20);  color: #f5c518; }
     .ed-import-badge.v-dropped{ background: rgba(220,90,90,.20);   color: #e07070; }
+
+    /* Slice 4e — direct upload. Primary "Add image" button + drop zone + the
+       resize-confirm modal (reuses the .ed-es-panel chrome). */
+    .ed-mini-primary {
+      background: rgba(120,170,255,.16); border-color: rgba(120,170,255,.5);
+    }
+    .ed-images-grid.is-dragover {
+      outline: 2px dashed rgba(120,170,255,.8); outline-offset: 6px; border-radius: 8px;
+    }
+    .ed-upload-preview {
+      width: 100%; max-height: 240px; object-fit: contain; background: #fff;
+      border-radius: 8px; display: block; margin-bottom: 10px;
+    }
+    .ed-upload-dims { font-size: 12px; opacity: .7; margin: 0 0 10px; }
+    .ed-upload-field {
+      display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin-bottom: 14px;
+    }
+    .ed-upload-field input {
+      font: inherit; font-size: 13px; padding: 5px 8px; width: 140px;
+      border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
+      background: var(--bg, #111); color: inherit;
+    }
+    .ed-upload-field .ed-upload-note { opacity: .55; font-size: 11px; }
+    .ed-upload-actions { display: flex; gap: 8px; justify-content: flex-end; }
   </style>
 </head>
 <body class="editor page-editor ed-mode-lines">
@@ -808,8 +832,11 @@ $payload = str_replace('<', '\\u003c', $payload);
       <h3 class="ed-images-title">Image library</h3>
       <span class="ed-images-meta" id="ed-images-meta"></span>
       <span class="ed-es-card-spacer"></span>
+      <button type="button" id="ed-images-add" class="ed-mini ed-mini-primary"
+              title="Upload an image straight into this page's library">＋ Add image</button>
+      <input type="file" id="ed-images-file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif" hidden>
       <button type="button" id="ed-images-import-toggle" class="ed-mini"
-              title="Bring a resized image in from an image-workshop batch">+ Import images</button>
+              title="Bring an image in from an image-workshop batch">From workshop…</button>
       <button type="button" id="ed-images-audit" class="ed-mini"
               title="Which objects use each image, orphans, dangling refs">Check usage</button>
       <button type="button" id="ed-images-refresh" class="ed-mini"
@@ -1179,6 +1206,128 @@ $payload = str_replace('<', '\\u003c', $payload);
       var card = ev.target.closest ? ev.target.closest('.ed-import-card') : null;
       if (card && !card.classList.contains('is-busy')) sendImage(card);
     });
+
+    // ── Direct upload (Slice 4e) — one image at a time, optional resize ──
+    var addBtn    = document.getElementById('ed-images-add');
+    var fileInput = document.getElementById('ed-images-file');
+    var uploadKey = null;
+
+    function closeUpload() {
+      var p = document.getElementById('ed-upload-panel');
+      if (p && p.parentNode) p.parentNode.removeChild(p);
+      var bd = document.getElementById('ed-upload-backdrop');
+      if (bd && bd.parentNode) {
+        var u = bd.getAttribute('data-objurl'); if (u) URL.revokeObjectURL(u);
+        bd.parentNode.removeChild(bd);
+      }
+      if (uploadKey) { document.removeEventListener('keydown', uploadKey); uploadKey = null; }
+    }
+
+    function doUpload(file, maxLongEdge) {
+      var fd = new FormData();
+      fd.append('page', pageId);
+      fd.append('file', file);
+      if (maxLongEdge) fd.append('maxLongEdge', String(maxLongEdge));
+      var addBody = document.getElementById('ed-upload-add');
+      if (addBody) { addBody.disabled = true; addBody.textContent = 'Uploading…'; }
+      fetch('/dev/page/upload-image', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed');
+          closeUpload();
+          setStatus('Added ' + j.filename + (j.resizedTo ? (' (resized to ' + j.resizedTo + 'px)') : ''));
+          loaded = false; usage = null; load();   // refresh library + usage
+        })
+        .catch(function (err) {
+          if (addBody) { addBody.disabled = false; addBody.textContent = 'Add to page'; }
+          var st = document.getElementById('ed-upload-err');
+          if (st) st.textContent = 'Upload failed: ' + (err.message || err);
+        });
+    }
+
+    // Confirm step: preview + original dims + optional max-long-edge field.
+    function openUpload(file) {
+      if (!file || !pageId) return;
+      closeUpload();
+      var objUrl = URL.createObjectURL(file);
+
+      var backdrop = document.createElement('div');
+      backdrop.className = 'ed-es-panel-backdrop';
+      backdrop.id = 'ed-upload-backdrop';
+      backdrop.setAttribute('data-objurl', objUrl);
+      backdrop.addEventListener('click', closeUpload);
+
+      var panel = document.createElement('div');
+      panel.className = 'ed-es-panel';
+      panel.id = 'ed-upload-panel';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Add image to page');
+      panel.innerHTML =
+        '<header class="ed-es-panel-head"><h3 class="ed-es-panel-title">Add image to page</h3></header>' +
+        '<div class="ed-es-panel-body">' +
+          '<img class="ed-upload-preview" src="' + objUrl + '" alt="preview">' +
+          '<p class="ed-upload-dims" id="ed-upload-dims">' + esc(file.name) + '</p>' +
+          '<label class="ed-upload-field">Max long edge (px)' +
+            '<input type="number" id="ed-upload-max" min="200" max="8000" step="10" placeholder="original">' +
+            '<span class="ed-upload-note">Leave blank to keep the original resolution.</span>' +
+          '</label>' +
+          '<p class="ed-upload-dims ed-es-report-warn" id="ed-upload-err"></p>' +
+          '<div class="ed-upload-actions">' +
+            '<button type="button" class="ed-mini" id="ed-upload-cancel">Cancel</button>' +
+            '<button type="button" class="ed-mini ed-mini-primary" id="ed-upload-add">Add to page</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(backdrop);
+      document.body.appendChild(panel);
+
+      // Fill in real pixel dimensions once the preview decodes.
+      var probe = new Image();
+      probe.onload = function () {
+        var d = document.getElementById('ed-upload-dims');
+        if (d) d.textContent = esc(file.name) + ' · ' + probe.naturalWidth + '×' + probe.naturalHeight;
+      };
+      probe.src = objUrl;
+
+      document.getElementById('ed-upload-cancel').addEventListener('click', closeUpload);
+      document.getElementById('ed-upload-add').addEventListener('click', function () {
+        var mv = parseInt(document.getElementById('ed-upload-max').value, 10);
+        doUpload(file, (mv >= 200 && mv <= 8000) ? mv : 0);
+      });
+      uploadKey = function (ev) { if (ev.key === 'Escape') closeUpload(); };
+      document.addEventListener('keydown', uploadKey);
+    }
+
+    if (addBtn && fileInput) {
+      addBtn.addEventListener('click', function () { fileInput.value = ''; fileInput.click(); });
+      fileInput.addEventListener('change', function () {
+        if (fileInput.files && fileInput.files[0]) openUpload(fileInput.files[0]);
+      });
+    }
+    // Drag-drop onto the library grid (one image at a time → take the first).
+    if (grid) {
+      ['dragenter', 'dragover'].forEach(function (evt) {
+        grid.addEventListener(evt, function (e) {
+          if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1) {
+            e.preventDefault(); grid.classList.add('is-dragover');
+          }
+        });
+      });
+      ['dragleave', 'dragend'].forEach(function (evt) {
+        grid.addEventListener(evt, function (e) {
+          if (e.target === grid) grid.classList.remove('is-dragover');
+        });
+      });
+      grid.addEventListener('drop', function (e) {
+        grid.classList.remove('is-dragover');
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        e.preventDefault();
+        var img = null;
+        for (var i = 0; i < files.length; i++) { if (/^image\//.test(files[i].type)) { img = files[i]; break; } }
+        if (img) openUpload(img);
+      });
+    }
 
     document.addEventListener('ed-mode', function (ev) {
       if (ev.detail && ev.detail.mode === 'images' && !loaded) load();
