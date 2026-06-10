@@ -600,3 +600,11 @@ body.iw-body {
 }
 .iw-lightbox-close:hover { background: #34363c; color: #fff; }
 .iw-thumblink { cursor: zoom-in; }
+/* The last-clicked thumb keeps focus after the lightbox closes. The card has
+   overflow:hidden, so the default outline drawn OUTSIDE the link was clipped
+   at the card/cell edge (partially hidden). Draw it INSET so the full ring is
+   always visible. (4g-2b) */
+.iw-thumblink:focus {
+  outline: 2px solid #6ea8ff;
+  outline-offset: -3px;
+}

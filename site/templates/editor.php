@@ -471,6 +471,23 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-img-del:focus-visible { opacity: 1; }
     .ed-img-del:hover { background: rgba(200,60,60,.92); }
     @media (hover: none) { .ed-img-del { opacity: 1; background: rgba(20,20,24,.5); } }
+    /* 4g-2b — page-library zoom: view full image in the shared lightbox.
+       Top-LEFT so it never overlaps the top-right delete affordance. Same
+       hover/touch visibility policy as delete (tablet-first). */
+    .ed-img-zoom {
+      position: absolute; top: 6px; left: 6px; z-index: 2;
+      width: 32px; height: 32px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: none; border-radius: 8px; cursor: zoom-in;
+      color: #fff; background: rgba(20,20,24,.62);
+      opacity: 0; transition: opacity .12s, background .12s;
+    }
+    .ed-img-zoom svg { width: 22px; height: 22px; display: block; }
+    .ed-img-card:hover .ed-img-zoom,
+    .ed-img-card:focus-within .ed-img-zoom,
+    .ed-img-zoom:focus-visible { opacity: 1; }
+    .ed-img-zoom:hover { background: rgba(40,90,170,.92); }
+    @media (hover: none) { .ed-img-zoom { opacity: 1; background: rgba(20,20,24,.5); } }
     .ed-img-thumb {
       width: 100%; aspect-ratio: 4 / 3; object-fit: contain;
       background: #ffffff; display: block;
@@ -506,14 +523,21 @@ $payload = str_replace('<', '\\u003c', $payload);
       display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
     }
     .ed-import-title { margin: 0 6px 0 0; font-size: 13px; align-self: center; }
+    /* 4g-2b — label LEFT of the select (was stacked above). */
     .ed-import-field {
-      display: flex; flex-direction: column; gap: 3px; font-size: 11px; opacity: .85;
+      display: flex; flex-direction: row; align-items: center; gap: 6px;
+      font-size: 11px; opacity: .85;
     }
     .ed-import-select {
       font: inherit; font-size: 12px; padding: 3px 6px;
       border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
       background: var(--bg, #111); color: inherit;
+      /* 4g-2b — render the native dropdown popup dark, not the OS-default
+         light. color-scheme themes the popup + scrollbars; the explicit
+         option colours are the fallback where color-scheme is ignored. */
+      color-scheme: dark;
     }
+    .ed-import-select option { background: #1a1c20; color: #e8e8e8; }
     .ed-import-hint { font-size: 11px; opacity: .55; align-self: center; }
     .ed-import-status { font-size: 11px; opacity: .7; }
     .ed-import-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -1047,6 +1071,9 @@ $payload = str_replace('<', '\\u003c', $payload);
             '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
               '<path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
               'd="M5 7h14M10 7V5h4v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>' +
+          '</button>' +
+          '<button type="button" class="ed-img-zoom" data-full="' + esc(im.url) + '" title="View full image" aria-label="View full image">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>' +
           '</button>' +
           '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb || im.url) + '" alt="' + esc(im.alt) + '">' +
           '<figcaption class="ed-img-info">' +
@@ -1660,6 +1687,8 @@ $payload = str_replace('<', '\\u003c', $payload);
     }
     if (grid) {
       grid.addEventListener('click', function (ev) {
+        var zoom = ev.target.closest ? ev.target.closest('.ed-img-zoom') : null;
+        if (zoom) { ev.preventDefault(); ev.stopPropagation(); openLightbox(zoom.getAttribute('data-full')); return; }
         var btn = ev.target.closest ? ev.target.closest('.ed-img-del') : null;
         if (!btn) return;
         var card = btn.closest('.ed-img-card');
