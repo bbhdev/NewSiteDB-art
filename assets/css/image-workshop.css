@@ -150,7 +150,16 @@ body.iw-body {
   font-weight: 600;
   cursor: pointer;
 }
-.iw-apply:hover { background: #f5b277; }
+.iw-apply:hover:not(:disabled) { background: #f5b277; }
+.iw-apply:disabled { opacity: 0.6; cursor: default; }
+/* Secondary "Copy to all" — seeds the per-card fields only (no render), so
+   it reads as the quieter of the two global actions. */
+.iw-apply--ghost {
+  background: #34373d;
+  color: #e8e8e8;
+  border: 1px solid #3a3d44;
+}
+.iw-apply--ghost:hover:not(:disabled) { background: #3d4046; border-color: #f0a060; color: #fff; }
 
 /* Index (container) ────────────────────────────────────────────── */
 

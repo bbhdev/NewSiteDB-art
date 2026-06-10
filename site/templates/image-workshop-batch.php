@@ -25,9 +25,14 @@
  * which re-renders only that image's derivative, persists the size to a new
  * per-batch sizes.json sidecar ({ schemaVersion, sizes: { "<file>": px } }),
  * and returns the fresh url/dims/niceSize/pct so the card swaps its preview
- * WYSIWYG with no page reload. The global "Test long edge" form remains the
- * DEFAULT for files without their own size entry. (4g-3b adds the global
- * "Copy to all" / "Apply to all" bulk helpers.)
+ * WYSIWYG with no page reload. The global long-edge input is the DEFAULT for
+ * files without their own size entry.
+ *
+ * v0.10.190 (Convergence Slice 4g-3b) — GLOBAL BULK HELPERS. The old
+ * page-reload "Apply" form is replaced by two buttons beside the global
+ * long-edge input: "Copy to all" seeds every card's long-edge field with the
+ * global value (pure DOM, no render); "Apply to all" then re-renders +
+ * persists every card sequentially (busy overlay with N-of-M progress).
  *
  * Deferred to later 4g slices: in-workshop file rename (4g-5), editable
  * batch names (4g-6).
@@ -126,8 +131,13 @@ $offCount = $images->count() - $onCount;
        in the top toolbar, so its preset popup opens into the grid below
        rather than behind the sticky opaque bar. -->
   <div class="iw-subbar">
-    <form method="get" class="iw-sizeform" action="<?= $page->url() ?>">
-      <label class="iw-sizelabel" for="iw-size">Test long edge (px)</label>
+    <!-- Global long edge (4g-3b): a seeder for the per-card inputs, NOT a
+         page-reload form. "Copy to all" fills every card's long-edge field
+         with this value (no render); "Apply to all" then re-renders +
+         persists every card. The combo input still defaults the size for
+         brand-new cards on load. -->
+    <div class="iw-sizeform">
+      <label class="iw-sizelabel" for="iw-size">Long edge — all (px)</label>
       <div class="iw-sizecombo">
         <input type="number" id="iw-size" name="size" class="iw-sizeinput"
                min="200" max="8000" step="10" value="<?= $size ?>"
@@ -141,8 +151,13 @@ $offCount = $images->count() - $onCount;
           <?php endforeach; ?>
         </ul>
       </div>
-      <button type="submit" class="iw-apply">Apply</button>
-    </form>
+      <?php if ($images->count() > 0): ?>
+        <button type="button" class="iw-apply iw-apply--ghost" id="iw-copy-all"
+                title="Fill every card's long-edge field with this value (no re-render)">Copy to all</button>
+        <button type="button" class="iw-apply" id="iw-apply-all"
+                title="Re-render + save every card at its current long-edge value">Apply to all</button>
+      <?php endif; ?>
+    </div>
 
     <?php if ($images->count() > 0): ?>
     <span class="iw-subbar-sep" aria-hidden="true"></span>
@@ -558,27 +573,38 @@ $offCount = $images->count() - $onCount;
         saveState.classList.toggle('is-error', !!isErr);
       }
 
-      function applyCard(card, btn) {
+      function clampSize(v) {
+        var s = parseInt(v, 10);
+        if (!s || s < 200) s = 200;
+        if (s > 8000) s = 8000;
+        return s;
+      }
+
+      // Resize one card. Returns a Promise resolving true/false (applied ok).
+      // `quiet` suppresses the per-card flash (the bulk handler shows its own
+      // progress) — the button spinner still runs so each card gives feedback.
+      function applyCard(card, btn, quiet) {
         var fname = card.getAttribute('data-filename');
         var input = card.querySelector('.iw-edge');
-        if (!input) return;
-        var size = parseInt(input.value, 10);
-        if (!size || size < 200) size = 200;
-        if (size > 8000) size = 8000;
+        if (!input) return Promise.resolve(false);
+        var size = clampSize(input.value);
         input.value = size;
 
         var oldLabel = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = '…'; }
-        flash('Resizing “' + fname + '”…', false);
+        if (!quiet) flash('Resizing “' + fname + '”…', false);
 
-        fetch(RESIZE_URL, {
+        return fetch(RESIZE_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ batch: BATCH_ID, filename: fname, size: size })
         }).then(function (r) { return r.json(); })
           .then(function (j) {
             if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
-            if (!j || !j.ok) { flash('Resize failed: ' + ((j && j.error) || 'unknown'), true); return; }
+            if (!j || !j.ok) {
+              if (!quiet) flash('Resize failed: ' + ((j && j.error) || 'unknown'), true);
+              return false;
+            }
             var img  = card.querySelector('[data-role="rimg"]');
             var link = card.querySelector('.iw-pair .iw-cell:last-child .iw-thumblink');
             var dims = card.querySelector('[data-role="rdims"]');
@@ -598,11 +624,13 @@ $offCount = $images->count() - $onCount;
               }
             }
             input.value = j.size;
-            flash('Resized “' + fname + '” → ' + j.size + ' px ✓' + (j.sidecar ? '' : ' (size not saved)'), !j.sidecar);
+            if (!quiet) flash('Resized “' + fname + '” → ' + j.size + ' px ✓' + (j.sidecar ? '' : ' (size not saved)'), !j.sidecar);
+            return true;
           })
           .catch(function () {
             if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
-            flash('Resize failed (network)', true);
+            if (!quiet) flash('Resize failed (network)', true);
+            return false;
           });
       }
 
@@ -610,7 +638,7 @@ $offCount = $images->count() - $onCount;
         var btn = e.target.closest ? e.target.closest('.iw-edge-apply') : null;
         if (!btn) return;
         var card = btn.closest('.iw-card');
-        if (card) applyCard(card, btn);
+        if (card) applyCard(card, btn, false);
       });
       // Enter inside a long-edge input applies that card.
       grid.addEventListener('keydown', function (e) {
@@ -619,8 +647,69 @@ $offCount = $images->count() - $onCount;
         if (!input) return;
         e.preventDefault();
         var card = input.closest('.iw-card');
-        if (card) applyCard(card, card.querySelector('.iw-edge-apply'));
+        if (card) applyCard(card, card.querySelector('.iw-edge-apply'), false);
       });
+
+      // ── Global helpers (4g-3b) ───────────────────────────────────
+      var globalInput = document.getElementById('iw-size');
+      var copyAllBtn  = document.getElementById('iw-copy-all');
+      var applyAllBtn = document.getElementById('iw-apply-all');
+      var busy        = document.getElementById('iw-busy');
+      var busyMsg     = document.getElementById('iw-busy-msg');
+
+      function allCards() {
+        return Array.prototype.slice.call(grid.querySelectorAll('.iw-card'));
+      }
+
+      // Copy to all — pure DOM seed: fill every card's long-edge field with
+      // the global value. No render, no server. Apply still has to be hit.
+      if (copyAllBtn && globalInput) {
+        copyAllBtn.addEventListener('click', function () {
+          var size = clampSize(globalInput.value);
+          globalInput.value = size;
+          var cards = allCards();
+          cards.forEach(function (c) {
+            var input = c.querySelector('.iw-edge');
+            if (input) input.value = size;
+          });
+          flash('Set ' + cards.length + ' field' + (cards.length === 1 ? '' : 's') + ' to ' + size + ' px — hit “Apply to all” to render', false);
+        });
+      }
+
+      // Apply to all — re-render + persist every card at its current input
+      // value, sequentially (one GD pass at a time), with a busy overlay.
+      if (applyAllBtn) {
+        applyAllBtn.addEventListener('click', function () {
+          var cards = allCards();
+          if (!cards.length) { flash('No images to resize', false); return; }
+          applyAllBtn.disabled = true;
+          if (copyAllBtn) copyAllBtn.disabled = true;
+          var done = 0, failed = 0;
+          function setBusy() {
+            if (busyMsg) busyMsg.textContent = 'Resizing ' + (done + 1) + ' of ' + cards.length + '…';
+            if (busy) busy.hidden = false;
+          }
+          setBusy();
+          var chain = Promise.resolve();
+          cards.forEach(function (card) {
+            chain = chain.then(function () {
+              var b = card.querySelector('.iw-edge-apply');
+              return applyCard(card, b, true).then(function (ok) {
+                if (!ok) failed++;
+                done++;
+                setBusy();
+              });
+            });
+          });
+          chain.then(function () {
+            if (busy) busy.hidden = true;
+            applyAllBtn.disabled = false;
+            if (copyAllBtn) copyAllBtn.disabled = false;
+            if (failed) flash('Applied to ' + (done - failed) + ' / ' + done + ' — ' + failed + ' failed', true);
+            else flash('Applied to all ' + done + ' image' + (done === 1 ? '' : 's') + ' ✓', false);
+          });
+        });
+      }
     })();
 
     // Click-to-view lightbox (4g-2b). Both thumb cells (original + resized)
