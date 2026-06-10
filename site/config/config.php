@@ -2677,17 +2677,19 @@ HTML;
      * Server steps:
      *   1. authorize + validate ?from=<role>
      *   2. buffer the raw body to a temp .tar.gz under the project root
-     *      (same filesystem as content/ so S4b.2b's atomic rename works)
+     *      (same filesystem as content/ so the atomic rename works)
      *   3. extract with PharData to a temp dir; reject empty/unreadable
-     *   4. take the MANDATORY pre-propagate snapshot of this node's
-     *      current content/ → library/auto-pre-propagate-<UTC>-from-<src>
+     *   4. ?dryRun=1 → report what WOULD be replaced, clean up, STOP
+     *      (no snapshot, no swap — for the UI confirm/preview + S5).
+     *   5. else → take the MANDATORY pre-propagate snapshot of this
+     *      node's current content/ (library/auto-pre-propagate-<UTC>-
+     *      from-<src>), then atomically swap content/ to the incoming
+     *      tree (preserving this node's dev/, error/ and _drafts/), then
+     *      bump state.json so the dest no longer looks behind.
      *
-     * ── S4b.2a SCOPE (this slice) ──────────────────────────────────────
-     * DRY-RUN: steps 1–4 only. The content/ swap is deliberately NOT
-     * performed yet — that lands in S4b.2b. The response reports the
-     * snapshot taken and what WOULD be replaced, then cleans up the
-     * staged upload. This lets the transport + snapshot + extraction be
-     * validated end-to-end (incl. loopback) with zero destructive action.
+     * On a post-snapshot failure the response carries the snapshot name
+     * so the user can restore. The swap itself rolls back its move-aside
+     * if the second rename fails, so a failed swap leaves content/ intact.
      */
     [
       'pattern' => 'sync/propagate',
@@ -2758,7 +2760,29 @@ HTML;
           );
         }
 
-        // Mandatory pre-propagate snapshot of THIS node's content/.
+        $received = strlen($raw);
+
+        // ?dryRun=1 — report only, no snapshot, no swap. (UI confirm /
+        // preview, and S5 direction detection.)
+        if (get('dryRun')) {
+          $cleanup();
+          return new Kirby\Http\Response(
+            json_encode([
+              'ok'       => true,
+              'dryRun'   => true,
+              'from'     => $from,
+              'received' => ['bytes' => $received],
+              'wouldReplace' => [
+                'pages' => $measure['topPages'],
+                'files' => $measure['files'],
+                'bytes' => $measure['bytes'],
+              ],
+            ], JSON_UNESCAPED_SLASHES),
+            'application/json'
+          );
+        }
+
+        // Real propagate. Mandatory pre-propagate snapshot FIRST.
         $snap = sync_pre_propagate_snapshot($from);
         if (!$snap['ok']) {
           $cleanup();
@@ -2768,23 +2792,39 @@ HTML;
           );
         }
 
-        // S4b.2a: DRY-RUN — no swap. Drop the staged upload.
-        $received = strlen($raw);
+        // Atomic swap content/ → incoming (preserving dev/, error/,
+        // _drafts/). On failure the swap rolls back its move-aside, so
+        // content/ is left intact; the snapshot exists regardless.
+        $applied = sync_apply_propagate($extractDir);
+        if (!$applied['ok']) {
+          $cleanup();
+          return new Kirby\Http\Response(
+            json_encode([
+              'ok'       => false,
+              'error'    => 'propagate failed: ' . $applied['error'],
+              'snapshot' => $snap['name'],   // restore point
+            ], JSON_UNESCAPED_SLASHES),
+            'application/json', 500
+          );
+        }
+
+        // Destination is now up to date — bump state so it doesn't read
+        // as behind in direction detection.
+        $at = sync_record_propagate_receipt($from);
         $cleanup();
 
         return new Kirby\Http\Response(
           json_encode([
-            'ok'       => true,
-            'dryRun'   => true,
-            'note'     => 'S4b.2a: snapshot taken + upload validated; content/ NOT swapped (S4b.2b adds the swap).',
-            'from'     => $from,
-            'snapshot' => $snap['name'],
-            'received' => ['bytes' => $received],
-            'wouldReplace' => [
-              'pages' => $measure['topPages'],
-              'files' => $measure['files'],
-              'bytes' => $measure['bytes'],
+            'ok'         => true,
+            'from'       => $from,
+            'snapshot'   => $snap['name'],
+            'received'   => ['bytes' => $received],
+            'replaced'   => [
+              'pages' => $applied['pages'],
+              'files' => $applied['files'],
+              'bytes' => $applied['bytes'],
             ],
+            'stateBumpedAt' => $at,
           ], JSON_UNESCAPED_SLASHES),
           'application/json'
         );

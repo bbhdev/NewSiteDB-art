@@ -722,3 +722,148 @@ function sync_pre_propagate_snapshot(string $fromRole): array
 
     return ['ok' => true, 'name' => $name, 'files' => $counts['files'], 'bytes' => $counts['bytes']];
 }
+
+/** Verbatim recursive copy (keeps dotfiles; no exclusions). Used to
+ *  preserve this node's own dev/ and error/ staging across a swap.
+ *  Returns true/false. */
+function sync_copy_verbatim(string $src, string $dst): bool
+{
+    if (!is_dir($dst) && !@mkdir($dst, 0755, true)) return false;
+    $items = @scandir($src);
+    if ($items === false) return false;
+    foreach ($items as $it) {
+        if ($it === '.' || $it === '..') continue;
+        $s = $src . '/' . $it;
+        $d = $dst . '/' . $it;
+        if (is_dir($s)) {
+            if (!sync_copy_verbatim($s, $d)) return false;
+        } elseif (is_file($s)) {
+            if (@copy($s, $d) === false) return false;
+        }
+    }
+    return true;
+}
+
+/** Walk $dir (rooted at $contentRoot) and copy every `_drafts/` subtree
+ *  it finds into $finalRoot at the same relative path — preserving
+ *  Kirby draft holding dirs at any depth across a swap (they are
+ *  excluded from the propagated tree, like rsync --exclude=_drafts/).
+ *  Does not descend into a _drafts/ once copied. Returns true/false. */
+function sync_preserve_drafts(string $dir, string $contentRoot, string $finalRoot): bool
+{
+    $items = @scandir($dir);
+    if ($items === false) return false;
+    foreach ($items as $it) {
+        if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+        $p = $dir . '/' . $it;
+        if (!is_dir($p)) continue;
+        if ($it === '_drafts') {
+            $rel  = ltrim(substr($p, strlen($contentRoot)), '/');
+            $dest = $finalRoot . '/' . $rel;
+            if (!sync_copy_verbatim($p, $dest)) return false;
+            continue;   // don't descend into a _drafts subtree
+        }
+        if (!sync_preserve_drafts($p, $contentRoot, $finalRoot)) return false;
+    }
+    return true;
+}
+
+/** Count top-level page directories under a content tree. */
+function sync_count_top_pages(string $root): int
+{
+    $n = 0;
+    $items = @scandir($root);
+    if ($items === false) return 0;
+    foreach ($items as $it) {
+        if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+        if (is_dir($root . '/' . $it)) $n++;
+    }
+    return $n;
+}
+
+/**
+ * Apply an extracted incoming content tree over THIS node's content/,
+ * with rsync---delete-mirror semantics and the propagation exclusions
+ * PRESERVED on the destination:
+ *   - top-level dev/ and error/ are kept from the current content/
+ *     (per-node staging; on A this includes the editor's own dev/ pages)
+ *   - _drafts/ dirs at any depth are kept from the current content/
+ *   - everything else is replaced wholesale by the incoming tree
+ *     (pages absent from incoming therefore disappear — the --delete)
+ *
+ * Strategy: assemble the final tree in a temp dir (incoming, excludes
+ * re-applied defensively, + the preserved dirs), then two atomic
+ * renames to swap it into place. Same filesystem (project root) makes
+ * rename() atomic and the move-aside reversible on failure.
+ *
+ * Returns ['ok'=>true,'pages'=>int,'files'=>int,'bytes'=>int] or
+ *         ['ok'=>false,'error'=>…].
+ */
+function sync_apply_propagate(string $extractDir): array
+{
+    $content  = kirby()->root('content');
+    $root     = sync_project_root();
+    $tag      = gmdate('Ymd\THis\Z') . '-' . bin2hex(random_bytes(3));
+    $finalDir = $root . '/.sync-final-' . $tag;
+
+    // 1. Incoming → final (excludes re-applied; strips any dev/error/
+    //    _drafts that slipped into the archive).
+    $counts = sync_copy_content_tree($extractDir, $finalDir, true);
+    if ($counts === null) {
+        sync_rrmdir($finalDir);
+        return ['ok' => false, 'error' => 'failed assembling new content tree'];
+    }
+
+    // 2. Preserve this node's top-level dev/ and error/.
+    foreach (sync_propagate_excluded_top() as $top) {
+        $s = $content . '/' . $top;
+        if (is_dir($s) && !sync_copy_verbatim($s, $finalDir . '/' . $top)) {
+            sync_rrmdir($finalDir);
+            return ['ok' => false, 'error' => "failed preserving {$top}/"];
+        }
+    }
+
+    // 3. Preserve _drafts/ at any depth.
+    if (!sync_preserve_drafts($content, $content, $finalDir)) {
+        sync_rrmdir($finalDir);
+        return ['ok' => false, 'error' => 'failed preserving _drafts/'];
+    }
+
+    // 4. Atomic swap: move current aside, move final into place; roll
+    //    back the move-aside if the second rename fails.
+    $aside = $root . '/.sync-old-' . $tag;
+    if (!@rename($content, $aside)) {
+        sync_rrmdir($finalDir);
+        return ['ok' => false, 'error' => 'could not move current content/ aside'];
+    }
+    if (!@rename($finalDir, $content)) {
+        @rename($aside, $content);          // rollback
+        sync_rrmdir($finalDir);
+        return ['ok' => false, 'error' => 'could not move new content/ into place (rolled back)'];
+    }
+    sync_rrmdir($aside);
+
+    return [
+        'ok'    => true,
+        'pages' => sync_count_top_pages($content),
+        'files' => $counts['files'],
+        'bytes' => $counts['bytes'],
+    ];
+}
+
+/**
+ * Record that this node's content/ was just overwritten by a propagate
+ * from $fromRole. Sets lastActivityAt = now and lastActivityBy =
+ * "<role>-propagate" so direction-detection (S5) sees the destination
+ * as freshly-updated (not stale/behind). Mirrors propagate.sh's
+ * state-bump step. Best-effort; never throws.
+ */
+function sync_record_propagate_receipt(string $fromRole): string
+{
+    $now   = date('c');
+    $state = sync_state_read();
+    $state['lastActivityAt'] = $now;
+    $state['lastActivityBy'] = $fromRole . '-propagate';
+    sync_state_write($state);
+    return $now;
+}
