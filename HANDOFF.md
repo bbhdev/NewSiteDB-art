@@ -37,6 +37,19 @@ Read this top-to-bottom once; reference back as needed.
 > from a phone. So design the tablet UI layer with a further reduction step in mind,
 > not as a hard floor.
 >
+> **The Apple Pencil 2 is a primary reason — not just convenience (v0.10.210).**
+> The earlier framing leaned on "tablet = working away from the Mac." That
+> undersells it. The Pencil 2's capabilities are *genuinely superior to a mouse
+> for most graphical work*: freehand strokes, loops, Bézier curves, SVG path
+> authoring — anything that isn't a plain geometric primitive is better with the
+> stylus (pressure, tilt, direct hand-on-surface precision). Geometric shapes
+> (rects, aligned lines) gain less. **So the tablet is first-class for very
+> significant work even when the user is sitting at the office with the Mac in
+> front of them** — it's the *preferred* surface for a whole class of authoring,
+> not a fallback for when L is unreachable. Any editor capability touching
+> freehand / curve / path drawing should assume the stylus is the best input and
+> design the interaction around it, not retrofit it onto mouse semantics.
+
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
