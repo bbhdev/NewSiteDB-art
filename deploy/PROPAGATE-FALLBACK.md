@@ -285,8 +285,11 @@ editor to bump naturally, OR ssh in and edit
 - `deploy/propagate.sh` — the script itself.
 - `deploy/PROPAGATE-FALLBACK.md` — this file.
 - `site/plugins/sync/index.php` + routes in `site/config/config.php` —
-  the in-app primary path (`/sync/propagate/*`, implemented across
-  S4b.2 / S4b.3 / S4b.4).
+  the in-app primary path (`/sync/propagate/*`). **NOT YET IMPLEMENTED**
+  as of v0.10.198 — only whoami/state/ping/manifest/peer routes exist;
+  S4b transport was validated (single-POST tarball, see commit 765c864)
+  but the endpoint itself is still pending S4b.2 / S4b.3 / S4b.4. Until
+  then, THIS fallback script is the only working propagate path.
 - `library/auto-pre-propagate-*/` — auto-snapshots written by both
   the primary path AND this fallback. Retention policy (S7) will
   eventually trim these to the last N per destination.
