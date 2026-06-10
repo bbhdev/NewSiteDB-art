@@ -510,6 +510,10 @@ $payload = str_replace('<', '\\u003c', $payload);
       display: block; margin-bottom: 2px;
     }
     .ed-img-dim { display: block; opacity: .65; }
+    /* 4g-3f: the long edge this image will import at (workshop size, or
+       "original"). Meaningful info → readable accent, not low-opacity grey. */
+    .ed-img-size { display: block; color: #7fd0c8; font-weight: 600; font-size: 11px; margin-top: 1px; }
+    .ed-img-size.is-orig { color: #b8babd; font-weight: 500; }
     /* Slice 4b usage badge — count of rects on this page referencing the image.
        Orphan (0 uses) goes amber, matching the Styles audit. */
     .ed-img-usage {
@@ -980,7 +984,7 @@ $payload = str_replace('<', '\\u003c', $payload);
             <ul class="ed-dd-list" id="ed-import-batch-list" role="listbox" hidden></ul>
           </span>
         </span>
-        <span class="ed-import-hint">Images come in at original size.</span>
+        <span class="ed-import-hint">Each image comes in at its workshop size (→ Npx), or original if none was set.</span>
         <span class="ed-es-card-spacer"></span>
         <span class="ed-import-status" id="ed-import-status"></span>
         <button type="button" id="ed-images-import-close" class="ed-mini" title="Close import">×</button>
@@ -1358,8 +1362,17 @@ $payload = str_replace('<', '\\u003c', $payload);
         var badge = im.sent
           ? '<span class="ed-import-badge is-sent">sent ✓</span>'
           : '';
+        // 4g-3f: the editor pulls at the workshop's per-image long edge when
+        // one was set (sizes.json), else the original. Carry it on the card
+        // and show it so the import size is WYSIWYG-clear.
+        var hasSize = (typeof im.size === 'number' && im.size > 0);
+        var sizeNote = hasSize
+          ? '<span class="ed-img-size" title="Imports at this long edge (set in the workshop)">→ ' + im.size + 'px</span>'
+          : '<span class="ed-img-size is-orig" title="No workshop size set — imports at original">→ original</span>';
         html += '<figure class="ed-img-card ed-import-card' + (im.sent ? ' is-sent' : '') +
-          '" data-filename="' + esc(im.filename) + '" title="Click to import into this page">' +
+          '" data-filename="' + esc(im.filename) + '"' +
+          (hasSize ? ' data-size="' + im.size + '"' : '') +
+          ' title="Click to import into this page">' +
           '<button type="button" class="ed-import-zoom" data-full="' + esc(im.full || im.thumb) + '" aria-label="View full image" title="View full image">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>' +
           '</button>' +
@@ -1367,6 +1380,7 @@ $payload = str_replace('<', '\\u003c', $payload);
           '<figcaption class="ed-img-info">' +
             '<span class="ed-img-name">' + esc(im.filename) + '</span>' +
             '<span class="ed-img-dim">' + (im.width || '?') + '×' + (im.height || '?') + '</span>' +
+            sizeNote +
             badge +
           '</figcaption>' +
         '</figure>';
@@ -1397,11 +1411,16 @@ $payload = str_replace('<', '\\u003c', $payload);
       if (!filename || !batchId) return;
       card.classList.add('is-busy');
       setStatus('Importing ' + filename + '…');
-      // No `size` → the endpoint copies the original (editor pull = originals).
+      // 4g-3f: honour the workshop's per-image long edge. A `data-size` (set
+      // from sizes.json) → import at that size; absent → omit `size` so the
+      // endpoint copies the original.
+      var sizeAttr = card.getAttribute('data-size');
+      var payload = { batch: batchId, filename: filename, targetPage: pageId };
+      if (sizeAttr && +sizeAttr > 0) payload.size = +sizeAttr;
       fetch('/dev/image-workshop/use-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ batch: batchId, filename: filename, targetPage: pageId })
+        body: JSON.stringify(payload)
       })
         .then(function (r) { return r.json(); })
         .then(function (j) {

@@ -2609,6 +2609,7 @@ HTML;
         };
         $rekey($batchPage->root() . '/useit.json', 'useIt');
         $rekey($batchPage->root() . '/sent.json',  'sent');
+        $rekey($batchPage->root() . '/sizes.json', 'sizes'); // 4g-3f: drop stale per-image size too
 
         // Sync S3: bump the batch _sync sidecar (draft page → pass root()).
         sync_bump_page($batchPage->id(), $batchPage->root());
@@ -2800,6 +2801,20 @@ HTML;
           return false;
         };
 
+        // sizes.json (4g-3a): { sizes: { "<filename>": px } }. The per-image
+        // workshop long edge. 4g-3f surfaces it so the editor's pull imports
+        // at the user's chosen (WYSIWYG) size, not the original.
+        $sizes = [];
+        $szPath = $batchPage->root() . '/sizes.json';
+        if (is_file($szPath)) {
+          $d = json_decode(@file_get_contents($szPath), true);
+          if (is_array($d) && isset($d['sizes']) && is_array($d['sizes'])) {
+            foreach ($d['sizes'] as $fn => $px) {
+              if (is_numeric($px)) $sizes[$fn] = max(200, min(8000, (int) $px));
+            }
+          }
+        }
+
         $images = [];
         foreach ($batchPage->images()->sortBy('filename', 'asc') as $img) {
           $fn = $img->filename();
@@ -2812,6 +2827,7 @@ HTML;
             'height'   => $img->height(),
             'useIt'    => !empty($useIt[$fn]),
             'sent'     => $sentTo($fn),
+            'size'     => $sizes[$fn] ?? null, // 4g-3f: workshop long edge, null = pull original
           ];
         }
         return $json([
