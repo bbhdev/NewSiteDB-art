@@ -4702,6 +4702,54 @@ Worth revisiting if (a) an attacker is observed probing the
 Panel, or (b) the user wants to relax some other security
 constraint and needs the network-layer fence as a tradeoff.
 
+### Parked: PHP shell-out for ops affordances (L-side only)
+
+Floated during the S4b sync work, **parked, not building now** — but
+worth doing before any wrap-up of the sync layer so the reasoning isn't
+lost.
+
+The capability is real: PHP can shell out (`exec`, `shell_exec`,
+`system`, `passthru`, `proc_open`, `popen`), so a Deco/Kirby route can
+launch shell scripts. That would unlock git operations, deploys,
+invoking `deploy/propagate.sh` from a button, image/video tooling
+(ImageMagick/ffmpeg), etc.
+
+**Why the sync transport deliberately does NOT shell out:** the
+propagate path uses `PharData` + `curl`, both native PHP, zero shell.
+That's portable to locked-down shared hosts (Infomaniak often *disables*
+`exec()`) and carries no shell/SSH dependency on the public servers.
+`deploy/propagate.sh` (shell + SSH + rsync) exists only as the **L-driven
+CLI fallback**, never as something A/B run on a request.
+
+**The boundary.** Shell-out is fine on **L** (local Mac, single-user,
+behind the user's login). It is a remote-code-execution surface on **A
+and B** (public servers): any untrusted input reaching the shell =
+command injection, and a leaked secret stops being "can overwrite
+content" and becomes "can run arbitrary commands." So: shell-out lives
+on L only, ideally for L-only ops, never on the request path A/B serve.
+If ever used, never interpolate input into a shell string — use
+`proc_open` with an argument **array** (no shell parsing) or
+`escapeshellarg`.
+
+**The genuine tension the user raised (record this — it's the crux).**
+For **dev**, a terminal is no problem: the work is continuous, the
+commands are in muscle memory. For **production**, activity is sporadic
+(not every day, not all-day), so *human memory of the right CLI
+incantation is unreliable* — which is exactly the case where an in-app
+button would help most. That argues *for* an affordance on production…
+but production is also where shell-out is most dangerous. The
+resolution already in hand: **the S4b.4 HTTP "Push → A" button solves
+the production-memory problem WITHOUT shell-out** — native PHP
+(`PharData`+`curl`), no shell, safe on a public host, and there's a
+button so nothing has to be remembered. So the production memory concern
+is already addressed by the safe path; shell-out remains a pure L-side
+convenience (e.g. wiring `propagate.sh`, `git`, or a deploy to an L-only
+editor button) with no reason to ever cross onto A/B.
+
+If revisited: build an L-only "ops" affordance gated on `role === 'L'`
+(same gate the peer indicator uses), shelling out only to vetted local
+scripts with arg arrays — and stop there.
+
 ### On-server editing pre-requisites (small running list)
 
 Things that need building when Phase 3 happens — captured here so
