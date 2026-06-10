@@ -3202,6 +3202,30 @@ body.ed-seq-order-editing #lines-layer { pointer-events: none; }
 .ed-snapshots-name { color: #f0f0f0; font-weight: 600; font-size: 0.95em; }
 .ed-snapshots-sub  { color: #999; font-size: 0.78em; margin-top: 0.1em; }
 
+/* v0.10.214: per-row select checkbox + "Delete checked" action bar.
+   The button stays deliberately muted (low weight, grey) until at
+   least one row is checked; then .is-armed makes it clearly visible,
+   and hover-while-armed turns it red — destructive intent only shows
+   once an actual deletion is staged. */
+.ed-snapshots-check {
+  flex: 0 0 auto; width: 1.05rem; height: 1.05rem; margin: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
+.ed-snapshots-delbar { display: flex; justify-content: flex-end; }
+.ed-snapshots-delete {
+  background: transparent; color: #888;
+  border: 1px solid #3a3a3a; border-radius: 3px;
+  padding: 0.25rem 0.7rem; font-size: 0.85em; cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ed-snapshots-delete:disabled { opacity: 0.55; cursor: default; }
+.ed-snapshots-delete.is-armed {
+  color: #f0d0d0; border-color: #a04040; background: #3a2424;
+}
+.ed-snapshots-delete.is-armed:hover {
+  background: #7a2828; border-color: #a04040; color: #fff;
+}
+
 /* v0.8.43: orphan badges in the Master library row + the
    Find-orphans maintenance dialog. */
 .ed-library-row.is-orphan { opacity: 0.65; }

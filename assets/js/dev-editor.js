@@ -7311,6 +7311,19 @@
     list.className = 'ed-snapshots-list';
     body.appendChild(list);
 
+    // v0.10.214: delete-action bar. Muted until ≥1 row is checked, then
+    // it arms (more visible) and turns red on hover — the user's spec.
+    const delBar = document.createElement('div');
+    delBar.className = 'ed-snapshots-delbar';
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'ed-snapshots-delete';
+    delBtn.textContent = 'Delete checked';
+    delBtn.disabled = true;
+    delBtn.addEventListener('click', doDelete);
+    delBar.appendChild(delBtn);
+    body.appendChild(delBar);
+
     modal.appendChild(body);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
@@ -7332,6 +7345,7 @@
 
     async function refresh() {
       list.innerHTML = '';
+      updateDelBar();
       setStatus('Loading…');
       try {
         const res = await fetch('/dev/draw/library/list');
@@ -7355,6 +7369,16 @@
     function buildRow(snap, currentSchema) {
       const row = document.createElement('div');
       row.className = 'ed-snapshots-row';
+      // v0.10.214: per-row checkbox feeding the "Delete checked" bar.
+      // Lets the user clear accumulated auto-pre-propagate snapshots (or
+      // any snapshot) without FTP/SSH — the first useful slice of S7.
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'ed-snapshots-check';
+      check.dataset.name = snap.name;
+      check.setAttribute('aria-label', 'Select "' + snap.name + '" for deletion');
+      check.addEventListener('change', updateDelBar);
+      row.appendChild(check);
       const loadBtn = document.createElement('button');
       loadBtn.type = 'button';
       loadBtn.className = 'ed-snapshots-load';
@@ -7430,6 +7454,53 @@
         setTimeout(function () { location.reload(); }, 400);
       } catch (err) {
         setStatus('Load failed: ' + err.message, true);
+      }
+    }
+
+    function checkedNames() {
+      return Array.prototype.map.call(
+        list.querySelectorAll('.ed-snapshots-check:checked'),
+        function (c) { return c.dataset.name; }
+      );
+    }
+
+    function updateDelBar() {
+      const n = list.querySelectorAll('.ed-snapshots-check:checked').length;
+      delBtn.disabled = (n === 0);
+      delBtn.classList.toggle('is-armed', n > 0);
+      delBtn.textContent = n > 0 ? ('Delete checked (' + n + ')') : 'Delete checked';
+    }
+
+    async function doDelete() {
+      const names = checkedNames();
+      if (!names.length) return;
+      const plural = names.length === 1 ? 'snapshot' : 'snapshots';
+      const list5  = names.slice(0, 5).map(function (n) { return '  • ' + n; }).join('\n')
+        + (names.length > 5 ? '\n  …and ' + (names.length - 5) + ' more' : '');
+      if (!window.confirm('Permanently delete ' + names.length + ' ' + plural + '?\n\n'
+        + list5 + '\n\nThis cannot be undone.')) return;
+      setStatus('Deleting ' + names.length + ' ' + plural + '…');
+      delBtn.disabled = true;
+      try {
+        const res = await fetch('/dev/draw/library/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ names: names })
+        });
+        const body = await res.json().catch(function () { return {}; });
+        if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
+        const ok   = (body.deleted || []).length;
+        const errs = body.errors || [];
+        await refresh();
+        if (errs.length) {
+          setStatus('Deleted ' + ok + '; ' + errs.length + ' failed ('
+            + errs.map(function (e) { return e.name + ': ' + e.error; }).join(', ') + ').', true);
+        } else {
+          setStatus('Deleted ' + ok + ' ' + (ok === 1 ? 'snapshot' : 'snapshots') + '.');
+        }
+      } catch (err) {
+        setStatus('Delete failed: ' + err.message, true);
+        delBtn.disabled = false;
       }
     }
 
