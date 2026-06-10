@@ -51,6 +51,10 @@ if ($role !== 'L') return;
     background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
     padding:7px 11px; border-radius:6px; cursor:pointer;
     display:inline-flex; align-items:center; gap:6px;
+    /* Push and Pull carry different labels ("→ A" vs "← A"); a shared
+       min-width keeps the two stacked pills the same size, and the
+       icon+label stay flush-left so they line up vertically. */
+    min-width:6.5rem; justify-content:flex-start; box-sizing:border-box;
     transition:background-color .15s, border-color .15s;
   }
   .sync-prop-btn:hover{ background:#343434; border-color:#4a4a4a; }
