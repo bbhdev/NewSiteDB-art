@@ -1374,160 +1374,25 @@ HTML;
     [
       'pattern' => 'dev/draw/save',
       'method'  => 'POST',
+      // Convergence Slice 5a-1: thin wrapper. The lines-layer save logic
+      // now lives in deco_save_lines() (site/plugins/deco/index.php) so
+      // the unified dev/editor/save route can dispatch to the same code.
+      // Request/response contract is unchanged from the pre-5a handler.
       'action'  => function () {
-        $kirby = kirby();
-        $body  = $kirby->request()->body()->toArray();
-
         // Sync S2: record local authoring activity + fire-and-forget
         // ping to upstream peer (L→A in the current topology). Best-
         // effort — see sync plugin for the no-throw contract. Done at
         // entry rather than gated on success: a clicked Save IS author
-        // activity even when validation fails, and gating would require
-        // threading the call through every return path in this handler.
+        // activity even when validation fails.
         sync_record_activity_and_notify();
 
-        $pageId  = $body['page']    ?? null;
-        $byClass = $body['byClass'] ?? null;  // map of classId → { instances, groups }
-        $masters = $body['masters'] ?? null;  // optional — site-wide visual definitions
-        $palette = $body['palette'] ?? null;  // optional — site-wide
-        $pageCfg = $body['pageCfg'] ?? null;  // optional — nested page config
-
-        if (!is_string($pageId) || !is_array($byClass) || !$byClass) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Missing or invalid body fields.']),
-            'application/json',
-            400
-          );
-        }
-
-        $page = $kirby->page($pageId);
-        if (!$page) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Unknown page: ' . $pageId]),
-            'application/json',
-            404
-          );
-        }
-
-        $root = $page->root();
-        $opts = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES;
-
-        // Per-class files: instances + groups for every class in the
-        // payload. Each classId is validated against [a-z0-9_-]+ so a
-        // malicious payload can't escape into parent directories.
-        $writeOk = true;
-        foreach ($byClass as $classId => $cls) {
-          if (!is_string($classId) || !preg_match('/^[a-z0-9_-]+$/i', $classId)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid classId: ' . $classId]),
-              'application/json', 400
-            );
-          }
-          if (!is_array($cls) || !isset($cls['instances']) || !isset($cls['groups'])
-              || !is_array($cls['instances']) || !is_array($cls['groups'])) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Class ' . $classId . ' missing instances/groups arrays']),
-              'application/json', 400
-            );
-          }
-          $classDir = $root . '/' . $classId;
-          if (!is_dir($classDir) && !mkdir($classDir, 0755, true)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Could not create class dir: ' . $classId]),
-              'application/json', 500
-            );
-          }
-          $writeOk = $writeOk
-            && file_put_contents($classDir . '/groups.json',    json_encode($cls['groups'],    $opts) . "\n") !== false
-            && file_put_contents($classDir . '/instances.json', json_encode($cls['instances'], $opts) . "\n") !== false;
-          if (!$writeOk) break;
-        }
-
-        // Site-wide masters (visual definitions). The editor sends
-        // the full list every save so deletions propagate; we
-        // overwrite atomically. Skipped silently when the body omits
-        // it (older clients / probe requests).
-        if (is_array($masters)) {
-          $sharedDir = $kirby->root('content') . '/_shared';
-          if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
-              'application/json', 500
-            );
-          }
-          $writeOk = $writeOk && (
-            file_put_contents($sharedDir . '/masters.json',
-              json_encode($masters, $opts) . "\n") !== false
-          );
-        }
-
-        // Per-page nested config (v3+): { useClasses, dims:{<classId>:{...}} }.
-        // Merge into existing page.json so unknown fields (like
-        // _schemaVersion, future per-page settings) survive untouched.
-        if (is_array($pageCfg)) {
-          $existing = is_file($root . '/page.json')
-            ? (json_decode(file_get_contents($root . '/page.json'), true) ?: [])
-            : [];
-          $merged = $existing;
-          if (isset($pageCfg['useClasses']) && is_array($pageCfg['useClasses'])) {
-            $merged['useClasses'] = array_values(array_filter(
-              $pageCfg['useClasses'], 'is_string'
-            ));
-          }
-          if (isset($pageCfg['dims']) && is_array($pageCfg['dims'])) {
-            $merged['dims'] = isset($merged['dims']) && is_array($merged['dims'])
-              ? $merged['dims'] : [];
-            foreach ($pageCfg['dims'] as $cid => $dims) {
-              if (!is_string($cid) || !is_array($dims)) continue;
-              $clean = isset($merged['dims'][$cid]) && is_array($merged['dims'][$cid])
-                ? $merged['dims'][$cid] : [];
-              foreach (['pageW', 'pageH', 'canvasW', 'canvasH'] as $k) {
-                if (isset($dims[$k]) && is_numeric($dims[$k]) && $dims[$k] > 0) {
-                  $clean[$k] = (float) $dims[$k];
-                }
-              }
-              $merged['dims'][$cid] = $clean;
-            }
-          }
-          $writeOk = $writeOk && (
-            file_put_contents($root . '/page.json',
-              json_encode($merged, $opts) . "\n") !== false
-          );
-        }
-
-        // Site-wide palette (v4 canonical location).
-        if (is_array($palette)) {
-          $sharedDir = $kirby->root('content') . '/_shared';
-          if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
-              'application/json', 500
-            );
-          }
-          $writeOk = $writeOk && (
-            file_put_contents($sharedDir . '/palette.json',
-              json_encode($palette, $opts) . "\n") !== false
-          );
-        }
-
-        if (!$writeOk) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Failed to write files.']),
-            'application/json',
-            500
-          );
-        }
-
-        // Sync S3: bump this page's _sync sidecar. Reached only on
-        // the success path — failed validation / write returns above
-        // don't get here, so the sidecar timestamp reliably means
-        // "this page WAS modified at this time" rather than "someone
-        // tried to save and failed."
-        sync_bump_page($pageId);
+        $body = kirby()->request()->body()->toArray();
+        $r    = deco_save_lines($body);
 
         return new Kirby\Http\Response(
-          json_encode(['ok' => true]),
-          'application/json'
+          json_encode($r['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $r['error']]),
+          'application/json',
+          $r['ok'] ? 200 : ($r['code'] ?? 400)
         );
       }
     ],
@@ -1557,305 +1422,103 @@ HTML;
     [
       'pattern' => 'dev/page/save',
       'method'  => 'POST',
+      // Convergence Slice 5a-1: thin wrapper. The layout-layer save logic
+      // (chapter/rect validation + atomic rects.json write) now lives in
+      // deco_save_layout() (site/plugins/deco/index.php) so the unified
+      // dev/editor/save route can dispatch to the same code. Request/
+      // response contract is unchanged from the pre-5a handler.
       'action'  => function () {
-        $kirby = kirby();
-        $body  = $kirby->request()->body()->toArray();
-
         // Sync S2: see dev/draw/save for rationale on placement at entry.
         sync_record_activity_and_notify();
 
-        $pageId        = $body['page']          ?? null;
-        $schemaVersion = $body['schemaVersion'] ?? null;
-        $chapters      = $body['chapters']      ?? null;
-        $rects         = $body['rects']         ?? null;
-
-        $fail = function (string $msg, int $code = 400) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => $msg]),
-            'application/json',
-            $code
-          );
-        };
-
-        if (!is_string($pageId) || $pageId === ''
-            || !is_int($schemaVersion)
-            || ($schemaVersion !== 1 && $schemaVersion !== 2 && $schemaVersion !== 3)
-            || !is_array($chapters) || !is_array($rects)) {
-          return $fail('Missing or invalid body fields.');
-        }
-
-        $targetPage = $kirby->page($pageId);
-        if (!$targetPage) {
-          return $fail('Unknown page: ' . $pageId, 404);
-        }
-
-        // Validate chapters. id is a lowercase slug; name is the
-        // same Unicode-tolerant pattern dev/draw/save uses for
-        // snapshot names so apostrophes / accents / parens all
-        // work for chapter labels.
-        $chapterIds = [];
-        foreach ($chapters as $ch) {
-          if (!is_array($ch)
-              || !isset($ch['id'])   || !is_string($ch['id'])
-              || !preg_match('/^[a-z0-9_-]+$/i', $ch['id'])
-              || !isset($ch['name']) || !is_string($ch['name'])
-              || !preg_match('/^[\p{L}\p{N} _.,\'()\[\]\-]+$/u', $ch['name'])) {
-            return $fail('Invalid chapter entry.');
-          }
-          if (isset($chapterIds[$ch['id']])) {
-            return $fail('Duplicate chapter id: ' . $ch['id']);
-          }
-          $chapterIds[$ch['id']] = true;
-        }
-
-        // Validate rects.
-        // Convergence Slice 2: 'deco-mount' retired (dead affordance, no
-        // distinct rendering). The editor coerces any stray deco-mount
-        // rect → 'text' at read time, so a saved payload never carries it;
-        // narrowing the validator here closes the back door (a direct POST
-        // of a deco-mount rect is now rejected). Not a schema bump — kind
-        // is a tolerated free string on read, so old data still parses.
-        $allowedKinds = ['text', 'image', 'drilldown'];
-        $rectIds      = [];
-        foreach ($rects as $r) {
-          if (!is_array($r)) return $fail('Rect entry is not an object.');
-          if (!isset($r['id']) || !is_string($r['id'])
-              || !preg_match('/^r-[a-z0-9]+$/', $r['id'])) {
-            return $fail('Invalid rect id.');
-          }
-          if (isset($rectIds[$r['id']])) {
-            return $fail('Duplicate rect id: ' . $r['id']);
-          }
-          $rectIds[$r['id']] = true;
-          if (!isset($r['kind']) || !in_array($r['kind'], $allowedKinds, true)) {
-            return $fail('Invalid rect kind: ' . ($r['kind'] ?? 'null'));
-          }
-          foreach (['x', 'y', 'w', 'h'] as $k) {
-            if (!isset($r[$k]) || !is_numeric($r[$k])) {
-              return $fail('Rect ' . $r['id'] . ' missing/invalid ' . $k);
-            }
-          }
-          if (isset($r['chapterId']) && $r['chapterId'] !== null) {
-            if (!is_string($r['chapterId']) || !isset($chapterIds[$r['chapterId']])) {
-              return $fail('Rect references unknown chapter: ' . $r['chapterId']);
-            }
-          }
-          // v0.10.24: optional `note` field — short author-only label
-          // surfaced in the editor for navigability. Plain string, no
-          // markup, capped at 120 chars. Null/missing both fine.
-          if (isset($r['note']) && $r['note'] !== null) {
-            if (!is_string($r['note'])) {
-              return $fail('Rect note must be a string or null.');
-            }
-            if (mb_strlen($r['note']) > 120) {
-              return $fail('Rect note exceeds 120 characters.');
-            }
-          }
-          // v0.10.46 (schema 3): optional `image` field — the bound
-          // image's bare filename, resolved at runtime against the
-          // page's `images/` child. Format-only validation: must be a
-          // filename (no path separators, no `..`), ≤255 chars, so the
-          // runtime resolver can never be steered outside the library
-          // dir. Existence is NOT checked — a binding may legitimately
-          // dangle if the file is later renamed/removed (the runtime
-          // degrades gracefully); the editor's library refresh surfaces
-          // the mismatch. Allowed on any kind for forward-compat (the
-          // editor only sets it on image rects).
-          if (isset($r['image']) && $r['image'] !== null) {
-            if (!is_string($r['image'])) {
-              return $fail('Rect image must be a string or null.');
-            }
-            if (mb_strlen($r['image']) > 255
-                || strpos($r['image'], '/')  !== false
-                || strpos($r['image'], '\\') !== false
-                || strpos($r['image'], '..') !== false) {
-              return $fail('Rect image must be a bare filename.');
-            }
-          }
-          // v0.10.47: optional `fit` field — how a bound image fills
-          // its rect when their aspect ratios differ. 'cover' (default,
-          // fill+crop) or 'contain' (fit+letterbox). Additive with a
-          // behaviour-preserving default, so NOT a schema bump: a v3
-          // file without `fit` renders exactly as before. Anything other
-          // than the two allowed values is rejected (rather than
-          // silently coerced) so a typo surfaces instead of masking.
-          if (isset($r['fit']) && $r['fit'] !== null) {
-            if ($r['fit'] !== 'cover' && $r['fit'] !== 'contain') {
-              return $fail("Rect fit must be 'cover' or 'contain'.");
-            }
-          }
-          // v0.10.50: optional `focusX`/`focusY` (image object-position,
-          // 0–100). Additive within schema v3 with a behaviour-preserving
-          // default of 50 (centred), so NOT a schema bump. Reject out-of-
-          // range / non-numeric values so a bug surfaces rather than
-          // silently clamping to an unexpected crop.
-          foreach (['focusX', 'focusY'] as $fk) {
-            if (isset($r[$fk]) && $r[$fk] !== null) {
-              if (!is_numeric($r[$fk]) || $r[$fk] < 0 || $r[$fk] > 100) {
-                return $fail("Rect $fk must be a number in 0..100.");
-              }
-            }
-          }
-          // v0.10.75 (Slice 3a): optional `typographyId` — the id of a
-          // typography token (content/_shared/typography-tokens.json) a
-          // text rect renders with. Additive within schema v3 with a
-          // null default, so NOT a schema bump. FORMAT-only validation
-          // (slug chars, ≤64): existence is intentionally NOT checked so
-          // a ref may dangle if a token is later deleted — the runtime
-          // degrades to inherited defaults, exactly like a dangling image
-          // binding. Allowed on any kind for forward-compat (the editor
-          // only sets it on text rects).
-          if (isset($r['typographyId']) && $r['typographyId'] !== null) {
-            if (!is_string($r['typographyId'])
-                || !preg_match('/^[a-z0-9_-]+$/i', $r['typographyId'])
-                || mb_strlen($r['typographyId']) > 64) {
-              return $fail('Rect typographyId must be a token slug or null.');
-            }
-          }
-          // v0.10.82 (Slice T1): optional `text` field — plain-text body
-          // content for a text rect (textarea-authored, multiline). Stored
-          // verbatim (whitespace/newlines preserved); the runtime renders
-          // it with white-space:pre-wrap and HTML-escapes it. No markup is
-          // interpreted at this slice — rich/styled runs are a separately-
-          // parked discussion. FORMAT-only validation: must be a string,
-          // capped at 5000 chars so a runaway paste can't bloat rects.json.
-          // Additive within schema v3 with a null default (typographyId
-          // precedent), so NOT a schema bump. Allowed on any kind for
-          // forward-compat (the editor only sets it on text rects).
-          if (isset($r['text']) && $r['text'] !== null) {
-            if (!is_string($r['text'])) {
-              return $fail('Rect text must be a string or null.');
-            }
-            if (mb_strlen($r['text']) > 5000) {
-              return $fail('Rect text exceeds 5000 characters.');
-            }
-          }
-          // v0.10.91 (Slice TS1): optional `marks` field — atomic text-style
-          // ranges over the rect's `text`. Shape per element:
-          //   { start:int, end:int, attr:string, value:(true|string) }
-          // over the half-open interval [start,end). The editor's mark
-          // engine always emits NORMALIZED, in-bounds marks; this is a
-          // defensive SHAPE-only gate (a hand-edited or stale rects.json
-          // can't inject garbage). Like `typographyId`, attr-registry
-          // membership is intentionally NOT enforced — an unknown attr
-          // simply maps to no CSS class at render and degrades gracefully.
-          // Additive within schema v3 with a [] default → NOT a schema bump.
-          // Bounds use mb_strlen on the (already validated) text; a marks
-          // array on a rect with no/empty text is rejected since there are
-          // no valid offsets to anchor to.
-          if (isset($r['marks']) && $r['marks'] !== null && $r['marks'] !== []) {
-            if (!is_array($r['marks']) || array_keys($r['marks']) !== range(0, count($r['marks']) - 1)) {
-              return $fail('Rect marks must be a JSON array.');
-            }
-            $textLen = (isset($r['text']) && is_string($r['text'])) ? mb_strlen($r['text']) : 0;
-            if (count($r['marks']) > 1000) {
-              return $fail('Rect marks exceeds 1000 entries.');
-            }
-            foreach ($r['marks'] as $m) {
-              if (!is_array($m)
-                  || !isset($m['start'], $m['end'], $m['attr'])
-                  || !array_key_exists('value', $m)) {
-                return $fail('Rect mark must have start, end, attr, value.');
-              }
-              if (!is_int($m['start']) || !is_int($m['end'])
-                  || $m['start'] < 0 || $m['start'] >= $m['end'] || $m['end'] > $textLen) {
-                return $fail('Rect mark range must satisfy 0 <= start < end <= text length.');
-              }
-              // Attr is a code-controlled axis identifier, not user
-              // content. Most are lowercase slugs (strong/em/underline/
-              // color/link); `elementStyle` is camelCase — so the body
-              // allows [a-zA-Z0-9_-]. First char stays lowercase. DO NOT
-              // narrow this back to strictly-lowercase: the camelCase
-              // `elementStyle` mark axis depends on it (this same pattern
-              // originally landed for the retired TS4 `charStyle` axis,
-              // removed in Slice D — but elementStyle now relies on it).
-              if (!is_string($m['attr'])
-                  || !preg_match('/^[a-z][a-zA-Z0-9_-]{0,31}$/', $m['attr'])) {
-                return $fail('Rect mark attr must be a slug starting lowercase (1..32 chars).');
-              }
-              $mv = $m['value'];
-              if ($mv !== true && !(is_string($mv) && mb_strlen($mv) <= 256)) {
-                return $fail('Rect mark value must be true or a string (<=256 chars).');
-              }
-              // v0.10.99 (TS3-b-2): link href governance at SAVE time. The
-              // runtime renderer already applies the same allowlist via
-              // deco_safe_href (render-time defence-in-depth), but enforcing
-              // it here too means a forged save body can never persist a
-              // javascript:/data:/etc. link into rects.json in the first
-              // place. The editor only ever emits string hrefs for `link`.
-              if ($m['attr'] === 'link') {
-                $safe = function_exists('deco_safe_href') ? deco_safe_href($mv) : null;
-                if (!is_string($mv) || $safe === null) {
-                  return $fail('Rect link mark value must be a safe URL '
-                    . '(relative, #anchor, or http(s)/mailto/tel).');
-                }
-              }
-            }
-          }
-        }
-
-        // Normalise on write: ensure each rect carries an explicit
-        // `note` key (null when unset) and a `chapterId` key (null
-        // when unset). Editor and runtime both tolerate missing keys
-        // — explicit nulls just make grepping a saved rects.json
-        // unambiguous.
-        $normRects = array_map(function ($r) {
-          $r['chapterId'] = $r['chapterId'] ?? null;
-          $r['note']      = (isset($r['note']) && $r['note'] !== '') ? $r['note'] : null;
-          $r['image']     = (isset($r['image']) && $r['image'] !== '') ? $r['image'] : null;
-          $r['fit']       = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
-          // v0.10.50: image focus — clamp to int 0..100, default 50.
-          foreach (['focusX', 'focusY'] as $fk) {
-            $fv = $r[$fk] ?? 50;
-            $fv = is_numeric($fv) ? (int) round((float) $fv) : 50;
-            $r[$fk] = max(0, min(100, $fv));
-          }
-          // v0.10.75: typography token ref — empty string normalises to
-          // null so the on-disk shape is unambiguous (null vs "").
-          $r['typographyId'] = (isset($r['typographyId']) && $r['typographyId'] !== '')
-            ? $r['typographyId'] : null;
-          // v0.10.82 (Slice T1): text body — empty/whitespace-only string
-          // normalises to null so an "empty" text rect stores no key value
-          // (and the runtime falls back to its stub). Whitespace WITHIN
-          // non-empty content is preserved verbatim; only a wholly-blank
-          // value collapses to null.
-          $r['text'] = (isset($r['text']) && is_string($r['text']) && trim($r['text']) !== '')
-            ? $r['text'] : null;
-          // v0.10.91 (Slice TS1): marks — re-index to a clean JSON array
-          // (array_values strips any non-sequential keys), and force [] when
-          // the rect ended up with no text (no offsets to anchor to). The
-          // engine already normalizes/sorts client-side; this only fixes the
-          // on-disk shape to an unambiguous list.
-          $r['marks'] = ($r['text'] !== null && isset($r['marks']) && is_array($r['marks']))
-            ? array_values($r['marks']) : [];
-          return $r;
-        }, $rects);
-
-        // Persist. Atomic write so a half-written file can never be
-        // read by the next editor load. schemaVersion always written
-        // as 3 (current); v1/v2 inputs are accepted but upgraded on
-        // first save (v2→3 adds the optional per-rect `image` binding).
-        $payload = [
-          'schemaVersion' => 3,
-          'chapters'      => $chapters,
-          'rects'         => $normRects,
-        ];
-        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
-
-        $root   = $targetPage->root();
-        $target = $root . '/rects.json';
-        $tmp    = $target . '.tmp';
-        if (file_put_contents($tmp, $json) === false || !rename($tmp, $target)) {
-          @unlink($tmp);
-          return $fail('Failed to write rects.json.', 500);
-        }
-
-        // Sync S3: bump this page's _sync sidecar on success path.
-        sync_bump_page($pageId);
+        $body = kirby()->request()->body()->toArray();
+        $r    = deco_save_layout($body);
 
         return new Kirby\Http\Response(
-          json_encode(['ok' => true]),
-          'application/json'
+          json_encode($r['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $r['error']]),
+          'application/json',
+          $r['ok'] ? 200 : ($r['code'] ?? 400)
+        );
+      }
+    ],
+
+    /*
+     * Convergence Slice 5a-1 (v0.10.197) — unified editor save seam.
+     *
+     *   POST dev/editor/save
+     *   body: {
+     *     page:   "<pageId>",                  // shared target page
+     *     lines?:  { byClass, masters?, palette?, pageCfg? },
+     *     layout?: { schemaVersion, chapters, rects }
+     *   }
+     *
+     * Dispatches to the SAME deco_save_lines() / deco_save_layout()
+     * helpers the legacy dev/draw/save and dev/page/save routes now wrap.
+     * The on-disk data shape is unchanged — this only collapses the two
+     * client POSTs into one. Either section is optional; at least one
+     * must be present. The shared `page` is injected into each section's
+     * body so the client needn't repeat it.
+     *
+     * Response: { ok, lines?: {ok, error?}, layout?: {ok, error?} }.
+     * Overall ok = every present section ok. HTTP code = the first
+     * failing section's code (else 200). sync_record_activity_and_notify()
+     * fires once per request (a save click is one author action regardless
+     * of how many layers it touches); sync_bump_page() fires per
+     * succeeding section inside the helpers (idempotent — a double bump on
+     * the same page just rewrites the same sidecar timestamp).
+     *
+     * 5b (data-shape alignment) is explicitly deferred — this slice does
+     * NOT touch rects.json / lines schema.
+     */
+    [
+      'pattern' => 'dev/editor/save',
+      'method'  => 'POST',
+      'action'  => function () {
+        sync_record_activity_and_notify();
+
+        $body = kirby()->request()->body()->toArray();
+        $page = $body['page'] ?? null;
+
+        $hasLines  = isset($body['lines'])  && is_array($body['lines']);
+        $hasLayout = isset($body['layout']) && is_array($body['layout']);
+
+        if (!$hasLines && !$hasLayout) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Nothing to save: provide a lines and/or layout section.']),
+            'application/json',
+            400
+          );
+        }
+
+        $out  = ['ok' => true];
+        $code = 200;
+
+        if ($hasLines) {
+          $lb = $body['lines'];
+          $lb['page'] = $page;          // inject shared target page
+          $res = deco_save_lines($lb);
+          $out['lines'] = $res['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $res['error']];
+          if (!$res['ok']) {
+            $out['ok'] = false;
+            $code = $res['code'] ?? 400;
+          }
+        }
+
+        if ($hasLayout) {
+          $yb = $body['layout'];
+          $yb['page'] = $page;          // inject shared target page
+          $res = deco_save_layout($yb);
+          $out['layout'] = $res['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $res['error']];
+          if (!$res['ok']) {
+            $out['ok'] = false;
+            if ($code === 200) $code = $res['code'] ?? 400;  // first failure wins
+          }
+        }
+
+        return new Kirby\Http\Response(
+          json_encode($out),
+          'application/json',
+          $code
         );
       }
     ],
