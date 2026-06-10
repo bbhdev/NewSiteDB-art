@@ -206,8 +206,25 @@ if ($role !== 'L') return;
       return (n/1048576).toFixed(2) + ' MB';
     }
     function showError(msg){
-      mBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg) + '</span>';
+      mBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg).replace(/\n/g, '<br>') + '</span>';
       mConfirm.disabled = true;
+    }
+    // Build a diagnostic message from a failed push/dry-run response.
+    // Surfaces the peer's HTTP status + a body snippet so "non-JSON
+    // response" reveals e.g. a 404 error page (peer missing the
+    // /sync/propagate route — usually an out-of-date deploy on A).
+    function errMsg(j, fallback){
+      if (!j) return fallback;
+      var m = j.error || fallback;
+      if (j.code) {
+        m += ' (HTTP ' + j.code + ')';
+        if (j.code === 404) m += ' — A has no /sync/propagate route; deploy current code to A.';
+      }
+      if (j.body) {
+        var snip = String(j.body).replace(/\s+/g, ' ').trim().slice(0, 120);
+        if (snip) m += '\n' + snip;
+      }
+      return m;
     }
     function resetModal(){
       mConfirm.style.display = '';
@@ -228,7 +245,7 @@ if ($role !== 'L') return;
         .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
         .then(function(j){
           busy = false;
-          if (!j || !j.ok){ showError((j && j.error) || 'dry-run failed'); return; }
+          if (!j || !j.ok){ showError(errMsg(j, 'dry-run failed')); return; }
           var w = j.wouldReplace || {};
           var sent = (j.sent && j.sent.bytes != null) ? fmtBytes(j.sent.bytes) : '?';
           mBody.innerHTML =
@@ -253,7 +270,7 @@ if ($role !== 'L') return;
         .then(function(j){
           busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
           mConfirm.style.display = 'none';
-          if (!j || !j.ok){ showError((j && j.error) || 'push failed'); return; }
+          if (!j || !j.ok){ showError(errMsg(j, 'push failed')); return; }
           var r = j.replaced || {};
           mBody.innerHTML =
             '<span class="spm-ok">✓ Pushed to A.</span><br>'
