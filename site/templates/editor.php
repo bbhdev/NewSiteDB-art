@@ -1233,8 +1233,24 @@ $payload = str_replace('<', '\\u003c', $payload);
     var importGrid   = document.getElementById('ed-import-grid');
     var importStatus = document.getElementById('ed-import-status');
     var batchesLoaded = false;
+    // Deep-link from the Panel's "Open batch in Deco" button (4g-3c):
+    // ?batch=<id> opens the import panel and preselects that batch once the
+    // batch list has loaded. Cleared after the first successful selection.
+    var pendingBatch = new URLSearchParams(location.search).get('batch');
 
     function setStatus(msg) { if (importStatus) importStatus.textContent = msg || ''; }
+
+    // Select the deep-linked batch once options exist (called from
+    // loadBatches' resolve). No-op if the batch isn't in the list.
+    function selectPendingBatch() {
+      if (!pendingBatch || !batchSel) return;
+      var found = Array.prototype.some.call(batchSel.options, function (o) { return o.value === pendingBatch; });
+      if (!found) { setStatus('Batch not found: ' + pendingBatch); pendingBatch = null; return; }
+      batchSel.value = pendingBatch;
+      ddRebuild();
+      loadBatchImages(pendingBatch);
+      pendingBatch = null;
+    }
 
     // Custom dark dropdown over the hidden native <select> (4g-2d). Native
     // popups can't be themed on macOS/Opera, so we render our own list and
@@ -1287,6 +1303,7 @@ $payload = str_replace('<', '\\u003c', $payload);
           });
           batchSel.innerHTML = opts;
           ddRebuild();
+          selectPendingBatch();
           if (!(j.batches || []).length) setStatus('No workshop batches found.');
         })
         .catch(function (err) { setStatus('Could not list batches: ' + (err.message || err)); });
@@ -1783,6 +1800,14 @@ $payload = str_replace('<', '\\u003c', $payload);
     // If the editor opened directly in Images mode (?mode=images / localStorage),
     // the toggle's initial apply() fired before this listener attached — catch up.
     if (document.body.classList.contains('ed-mode-images') && !loaded) load();
+
+    // Deep-link (4g-3c): ?batch=<id> auto-opens the import panel and preselects
+    // the batch (selectPendingBatch runs once the list loads). The Panel's
+    // "Open batch in Deco" button uses /dev/editor?mode=images&batch=<id>.
+    if (pendingBatch && importPanel && document.body.classList.contains('ed-mode-images')) {
+      importPanel.removeAttribute('hidden');
+      loadBatches();
+    }
   })();
 </script>
 <!-- v<?= $v ?> -->

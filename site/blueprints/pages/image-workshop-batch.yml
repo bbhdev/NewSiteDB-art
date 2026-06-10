@@ -7,8 +7,29 @@
 # into a canvas-page's library unchanged. The visual grid (original vs.
 # resized at a chosen long edge) is rendered by the
 # image-workshop-batch.php template at /dev/image-workshop/<slug>.
+#
+# v0.10.192 (4g-3c) — Panel navigation affordance. The page-header
+# button bar keeps the Panel defaults (settings/preview/status) and adds
+# "Open batch in Deco", a deep link straight into the editor's Images
+# mode with this batch pre-selected: /dev/editor?mode=images&batch=<id>.
+# `{{ page.id }}` resolves to the full path id (e.g.
+# `dev/image-workshop/batch-1`), which the editor reads via
+# URLSearchParams('batch') and matches against the batch <select>'s
+# option values. Opens in a new tab (target: _blank) so the Panel stays
+# put — the user's workflow is multi-tab.
 
 title: Batch
+
+buttons:
+  settings: true
+  preview: true
+  status: true
+  deco:
+    text: Open batch in Deco
+    icon: edit
+    theme: love
+    target: _blank
+    link: "/dev/editor?mode=images&batch={{ page.id }}"
 
 columns:
   main:
