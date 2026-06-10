@@ -3211,7 +3211,9 @@ body.ed-seq-order-editing #lines-layer { pointer-events: none; }
   flex: 0 0 auto; width: 1.05rem; height: 1.05rem; margin: 0;
   accent-color: var(--accent); cursor: pointer;
 }
-.ed-snapshots-delbar { display: flex; justify-content: flex-end; }
+/* Left-aligned, under the row checkboxes — that's where the eye looks
+   for it (the action operates on the checkboxes above it). */
+.ed-snapshots-delbar { display: flex; justify-content: flex-start; }
 .ed-snapshots-delete {
   background: transparent; color: #888;
   border: 1px solid #3a3a3a; border-radius: 3px;
