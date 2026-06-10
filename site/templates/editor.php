@@ -1444,7 +1444,15 @@ $payload = str_replace('<', '\\u003c', $payload);
     }
 
     document.addEventListener('ed-mode', function (ev) {
-      if (ev.detail && ev.detail.mode === 'images' && !loaded) load();
+      if (!(ev.detail && ev.detail.mode === 'images')) return;
+      // Re-entering Images always refreshes: a Layout edit since we last
+      // looked may have changed which images are used (or freed). First
+      // flush any pending Layout save so usage reflects just-placed images
+      // (Layout uses manual save — edFlushLayoutSave persists if dirty),
+      // then reload the library + usage fresh.
+      var flush = (typeof window.edFlushLayoutSave === 'function')
+        ? window.edFlushLayoutSave() : null;
+      Promise.resolve(flush).then(function () { loaded = false; usage = null; load(); });
     });
     if (refresh) refresh.addEventListener('click', function () { loaded = false; usage = null; load(); });
     if (auditBtn) auditBtn.addEventListener('click', function () {

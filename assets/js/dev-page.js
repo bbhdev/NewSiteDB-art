@@ -3734,6 +3734,31 @@
   if (saveBtn) {
     saveBtn.addEventListener('click', function () { doSave(); });
   }
+
+  // ────────────────────────────────────────────────────────────────
+  // Cross-mode image freshness (v0.10.179). Layout shares the per-page
+  // image library with the editor's Images pane, so each must see the
+  // other's mutations when the user switches modes:
+  //   (1) Entering Layout → reload the library so images uploaded in
+  //       Images mode appear in the picker (it otherwise reuses the
+  //       init-time cache; only the picker's "Refresh" updated it).
+  //   (2) edFlushLayoutSave() lets the Images pane persist pending
+  //       layout edits (Layout uses manual save) before it recomputes
+  //       image usage — otherwise just-placed images read as unused.
+  // ────────────────────────────────────────────────────────────────
+  let peLastMode = null;
+  document.addEventListener('ed-mode', function (ev) {
+    const mode = ev.detail && ev.detail.mode;
+    if (mode === 'layout' && peLastMode !== null && peLastMode !== 'layout') {
+      imageLibrary = null;
+      loadImageLibrary();   // re-indexes + re-renders on completion
+    }
+    peLastMode = mode;
+  });
+  window.edFlushLayoutSave = function () {
+    try { return Promise.resolve(doSave()); } catch (e) { return Promise.resolve(); }
+  };
+
   // Chapter add form. Submit on Enter or the [+] button. Empty input
   // is a no-op (addChapter trims + bails).
   const chForm  = document.getElementById('chapter-add-form');
