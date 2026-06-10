@@ -211,7 +211,10 @@ $payload = str_replace('<', '\\u003c', $payload);
   <title>Page editor — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/material-icons.css') ?>?v=<?= $v ?>">
-  <link rel="stylesheet" href="<?= url('assets/css/dev-page.css') ?>?v=<?= $v ?>">
+  <!-- 6b-2a: dev-page.css merged into dev-editor.css. NB: this template
+       is dead — /dev/page redirects to /dev/editor (Slice 1c) — kept only
+       to avoid a dangling stylesheet ref; remove with the template. -->
+  <link rel="stylesheet" href="<?= url('assets/css/dev-editor.css') ?>?v=<?= $v ?>">
   <?= deco_google_fonts_link($contentRoot) ?>
   <style>
     /* Typography tokens (Slice 3a) — one .ty-<id> rule per token, the

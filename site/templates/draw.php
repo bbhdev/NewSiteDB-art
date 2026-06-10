@@ -151,7 +151,10 @@ $payload = json_encode([
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Draw — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
-  <link rel="stylesheet" href="<?= url('assets/css/dev-draw.css') ?>?v=<?= $v ?>">
+  <!-- 6b-2a: dev-draw.css merged into dev-editor.css. NB: this template
+       is dead — /dev/draw redirects to /dev/editor (Slice 1c) — kept only
+       to avoid a dangling stylesheet ref; remove with the template. -->
+  <link rel="stylesheet" href="<?= url('assets/css/dev-editor.css') ?>?v=<?= $v ?>">
   <?php /* Slice 3b: load the curated webfonts + emit one .ty-<id> rule per
            token so the typography panel's per-row previews render with the
            real family/size — same emitter the page editor & runtime use. */ ?>

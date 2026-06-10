@@ -38,8 +38,9 @@
  *    keys (pageId, pages, palette, typography, version) coincide
  *    by design; new keys from page-editor (canvas, schemaVersion,
  *    chapters, rects) added alongside.
- *  - Both dev-draw.css and dev-page.css load. Both editor classes
- *    on <body> so each stylesheet's body-scoped rules apply.
+ *  - One stylesheet, dev-editor.css (6b-2a merge of the former
+ *    dev-draw.css + dev-page.css). Both editor classes on <body> so
+ *    each section's body-scoped rules apply.
  *
  * Deferred to later slices:
  *  - 1c: redirect /dev/draw and /dev/page here with ?mode= preselected.
@@ -211,7 +212,7 @@ $rects = array_map(function ($r) {
 }, $rects);
 $rectsSchemaVersion = 3;
 
-// Palette validation for inline :root vars (used by dev-page.css).
+// Palette validation for inline :root vars (used by dev-editor.css, Section B).
 $paletteByID = [];
 foreach ($palette as $p) {
     if (is_array($p) && isset($p['id'])) $paletteByID[$p['id']] = $p['value'] ?? '';
@@ -266,9 +267,10 @@ $payload = str_replace('<', '\\u003c', $payload);
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Editor — <?= $site->title() ?></title>
   <link rel="stylesheet" href="<?= url('assets/css/style.css') ?>?v=<?= $v ?>">
-  <link rel="stylesheet" href="<?= url('assets/css/dev-draw.css') ?>?v=<?= $v ?>">
+  <!-- Slice 6b-2a: dev-draw.css + dev-page.css merged → dev-editor.css
+       (Sections A + B). material-icons.css still loads separately. -->
+  <link rel="stylesheet" href="<?= url('assets/css/dev-editor.css') ?>?v=<?= $v ?>">
   <link rel="stylesheet" href="<?= url('assets/css/material-icons.css') ?>?v=<?= $v ?>">
-  <link rel="stylesheet" href="<?= url('assets/css/dev-page.css') ?>?v=<?= $v ?>">
   <?= deco_google_fonts_link($contentRoot) ?>
   <style id="ed-typography-css"><?= deco_typography_css($typography, $palette) ?></style>
   <style id="ed-page-marks-css">
@@ -282,8 +284,9 @@ $payload = str_replace('<', '\\u003c', $payload);
     }
   </style>
   <style id="ed-mode-css">
-    /* Slice 1b mode-toggle rules. Inline here for now; will migrate to
-       dev-draw.css (renamed dev-editor.css) in Slice 6. */
+    /* Slice 1b mode-toggle rules. Still inline here; could migrate into
+       dev-editor.css later — kept inline for now since they're small and
+       co-located with the mode markup. */
 
     /* Mode-pane = transparent flex pass-through. Both .ed-body (flex:1)
        and .pe-body (flex:1 1 auto) were authored as DIRECT flex children

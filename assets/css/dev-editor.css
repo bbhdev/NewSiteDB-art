@@ -1,3 +1,20 @@
+/* ════════════════════════════════════════════════════════════════════
+ * dev-editor.css — the unified editor stylesheet (Convergence Slice 6b-2a)
+ *
+ * Concatenation of the two former editor stylesheets, in load order:
+ *   SECTION A — Lines editor  (was assets/css/dev-draw.css)
+ *   SECTION B — Layout editor (was assets/css/dev-page.css)
+ *
+ * Verified collision-free before merging: the two files shared zero
+ * top-level selectors, and neither shares a selector with
+ * material-icons.css (which still loads separately, after this file).
+ * The only url() below is an inline data: cursor — no path dependency,
+ * so the merge needed no rewriting.
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ──────────────────────────────────────────────────────────────────────
+ * SECTION A — Lines editor (former dev-draw.css)
+ * ────────────────────────────────────────────────────────────────────── */
 /* Editor-specific styles. Loaded after style.css so it can override
    the global .layout/typography rules with editor chrome. */
 
@@ -3539,4 +3556,1735 @@ body.ed-seq-order-editing #lines-layer { pointer-events: none; }
     box-shadow: none;
   }
   .ed-floating-panel-resize { display: none; }
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────
+ * SECTION B — Layout editor (former dev-page.css)
+ * ────────────────────────────────────────────────────────────────────── */
+/*
+ * /dev/page editor — Phase 2 Slice 1 styling.
+ *
+ * Visual language deliberately mirrors /dev/draw (dev-draw.css) so
+ * authors moving between the two editors don't suffer chrome whiplash.
+ * Toolbar at top, sidebar on the left, canvas surface centered to the
+ * right. Kind-coloured rect stubs.
+ *
+ * Single source of truth would be nicer; for Slice 1 the kind-colour
+ * block is duplicated in canvas-page.css (runtime). Refactor when
+ * patterns recur (Slice 7 polish).
+ */
+
+/* Dark scrollbars editor-wide — default OS chrome is too bright against
+   the #1f2024 backdrop. Mirrors the dev-draw treatment (body.editor) so
+   the two editors share scrollbar chrome. Firefox honors scrollbar-color;
+   WebKit/Blink uses the pseudo-elements. (v0.10.71) */
+body.page-editor,
+body.page-editor * {
+  scrollbar-width: thin;
+  scrollbar-color: #444 #1a1b1f;
+}
+body.page-editor *::-webkit-scrollbar              { width: 10px; height: 10px; }
+body.page-editor *::-webkit-scrollbar-track        { background: #1a1b1f; }
+body.page-editor *::-webkit-scrollbar-thumb        { background: #444; border-radius: 5px; border: 2px solid #1a1b1f; }
+body.page-editor *::-webkit-scrollbar-thumb:hover  { background: #5a5a5a; }
+body.page-editor *::-webkit-scrollbar-corner       { background: #1a1b1f; }
+
+/* Layout primitives ───────────────────────────────────────────── */
+
+body.page-editor {
+  margin: 0;
+  background: #1f2024;
+  color: #f0f0f0;
+  font: 13px/1.4 var(--pe-ui-font);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Editor UI font stack, named so rect chrome (kind/z/note/id) can RESET
+   to it. A text rect wears its .ty-<id> typography token on .pe-rect, and
+   font properties inherit — so without an explicit reset the chrome would
+   render in the content's face (e.g. an unreadable handwriting token) and
+   become illegible. Chrome is editor UI, not content; it must always be
+   the UI font regardless of the rect's typography. */
+:root { --pe-ui-font: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+
+.pe-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.5rem 1rem;
+  background: #16171a;
+  border-bottom: 1px solid #2c2e33;
+  flex: 0 0 auto;
+}
+
+.pe-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pe-brand-mark {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f0a060;
+}
+
+.pe-version {
+  color: #b0b0b0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-back {
+  color: #cfcfcf;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9em;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #3a3d44;
+  border-radius: 4px;
+  background: #2a2c31;
+  white-space: nowrap;
+}
+.pe-back:hover { color: #fff; border-color: #555a63; background: #33363d; }
+
+.pe-page-picker select {
+  background: #2a2c31;
+  color: #f0f0f0;
+  border: 1px solid #3a3d44;
+  border-radius: 3px;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+}
+
+.pe-class-label {
+  color: #c0c0c0;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #2c2e33;
+  border-radius: 3px;
+  background: #1b1c20;
+}
+.pe-class-label strong { color: #f0a060; font-weight: 600; }
+.pe-dims { color: #909090; }
+
+.pe-tools, .pe-view {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+/* The create cluster keeps its natural width and never shrinks — its
+   buttons must stay one-line (see white-space:nowrap below). The view
+   cluster yields width (shrinks) but never grows, so the spacer alone
+   pushes the version to the right; when the bar gets crowded the status
+   text (and only the status text) shrinks and wraps. */
+.pe-tools { flex: 0 0 auto; }
+.pe-view  { flex: 0 1 auto; min-width: 0; }
+
+.pe-spacer { flex: 1; }
+
+button.pe-create-btn,
+button.pe-save {
+  background: #2a2c31;
+  color: #f0f0f0;
+  border: 1px solid #3a3d44;
+  border-radius: 3px;
+  padding: 0.3rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+  /* A button label must never wrap, and the button must not be squeezed
+     by a greedy neighbour (the status text) — keep it rigid. */
+  white-space: nowrap;
+  flex: 0 0 auto;
+  transition: background 0.15s ease, border-color 0.15s ease,
+              box-shadow 0.15s ease;
+}
+button.pe-create-btn:hover:not([disabled]),
+button.pe-save:hover:not([disabled]) {
+  background: #353740;
+}
+button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Save button reflects dirty state via colour, not just the status
+   text. Dark (default) = clean / nothing to save. Accent = unsaved
+   changes pending. The brief .is-flash class applied on a successful
+   save pulses the button green so the user sees the moment-of-save
+   even when the status line is glanced past. */
+button.pe-save.is-dirty:not([disabled]) {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+button.pe-save.is-dirty:not([disabled]):hover {
+  /* slightly brighter on hover — overlay a subtle white wash */
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.08);
+}
+button.pe-save.is-flash {
+  animation: pe-save-flash 0.6s ease-out;
+}
+@keyframes pe-save-flash {
+  0%   { background: #4caf6a; border-color: #4caf6a; color: #fff;
+         box-shadow: 0 0 0 0 rgba(76, 175, 106, 0.6); }
+  60%  { background: #4caf6a; border-color: #4caf6a; color: #fff;
+         box-shadow: 0 0 0 10px rgba(76, 175, 106, 0); }
+  100% { background: #2a2c31; border-color: #3a3d44; color: #f0f0f0;
+         box-shadow: 0 0 0 0 rgba(76, 175, 106, 0); }
+}
+
+.pe-status {
+  color: #b0b0b0;
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.5rem;
+  /* Shrinkable (not growable): it keeps its natural width when there's
+     room and only wraps when the bar gets crowded, so the rigid buttons
+     never have to. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Save-failure state. The steady status line is deliberately low-key
+   (grey, glanced-past) — but a SAVE FAILURE must not be. It gets a red
+   pill, bold weight, and (in JS) stays sticky until the next save attempt
+   instead of auto-clearing. Author complaint that triggered this: the
+   error was so discreet it went unnoticed, and then vanished. */
+.pe-status.is-error {
+  color: #fff;
+  font-weight: 700;
+  background: #c4283b;
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  flex: 0 1 auto;
+}
+
+/* Body grid: sidebar + canvas. ──────────────────────────────── */
+
+.pe-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pe-sidebar {
+  background: #1a1b1f;
+  border-right: 1px solid #2c2e33;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+.pe-panel {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #2c2e33;
+}
+.pe-panel:last-child { border-bottom: none; }
+
+.pe-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.pe-panel-head h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #b8b8b8;
+}
+
+.pe-chapters { list-style: none; margin: 0; padding: 0; }
+.pe-empty {
+  padding: 0.4rem 0.2rem;
+  color: #909090;
+  font-style: italic;
+  font-size: 0.85em;
+}
+
+/* Canvas surface ─────────────────────────────────────────────── */
+
+.pe-canvas-wrap {
+  padding: 1.5rem;
+  overflow: auto;
+  /* Stripes were originally #1a1b1f / #1f2024 — both darker than the
+     body backdrop (#1f2024) and one identical to it, so the small
+     visible band around the canvas surface read as flat dark.
+     Bumped to clearly lighter shades so the wrap region pops against
+     the body and the alternation is obvious. */
+  background:
+    repeating-linear-gradient(
+      45deg,
+      #2a2d35 0 8px,
+      #353944 8px 16px
+    );
+}
+
+/* Column hugging the surface so the dims caption aligns to its
+   top-left while the whole block stays centred in the scroll wrap. */
+.pe-canvas-col {
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+/* Page-area + canvas dimensions caption (v0.10.63). Medium white, no
+   background — the striped wrap behind it is dark enough for contrast. */
+.pe-canvas-dims {
+  margin: 0 0 0.5rem;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45); /* legibility over the busy stripe */
+}
+
+.pe-canvas-surface {
+  position: relative;
+  background: #fafafa;
+  color: #222;
+  margin: 0 auto;
+  box-shadow:
+    0 0 0 1px #3a3d44,
+    0 8px 24px rgba(0, 0, 0, 0.4);
+  /* Width + min-height are set inline by the template from the
+     primary class's pageW × pageH. */
+}
+
+/* Rect stubs ─────────────────────────────────────────────────── */
+
+.pe-rect {
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  /* Chrome (kind label + note) flows flush TOP-LEFT so it never sits over
+     the centre of a bound image's content. The id stays absolute
+     top-right; padding insets only the in-flow chrome — the full-bleed image
+     (inset:0), id and resize handles reference the padding box, so they are
+     unaffected. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 0.25rem 0.4rem;
+  /* Each rect is its OWN stacking context, so its z-indexed chrome (kind
+     label z:4, focal dot z:3, panning rings z:2) is bounded to this rect —
+     a child can stack above its own rect's image but never above a SIBLING
+     rect ("rect Z + 1"). Without isolation a label at z:4 escaped into the
+     surface's root context and floated over every other block. */
+  isolation: isolate;
+  font-size: 0.85rem;
+  /* Rect body color inherits the palette text token so real content
+     (Slice 2) tracks the project palette. The kind-stub label below
+     overrides to a fixed high-contrast dark — it's editor chrome,
+     not content, and needs to read on every kind background even if
+     the palette text token is mid-toned. */
+  color: var(--pe-palette-text, rgba(0, 0, 0, 0.82));
+  user-select: none;
+  cursor: grab;
+  touch-action: none; /* let pointermove drive the drag without
+                         the browser stealing it for a pan/scroll. */
+}
+
+.pe-rect.is-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+
+/* Lift ONLY while the rect is actively manipulated (v0.10.65). `is-
+   dragging` covers both move and resize (added on the first pointer
+   move past the 3px threshold); `is-panning` is the focal-dot pan. A
+   statically-selected rect deliberately does NOT lift — it stays in its
+   true layer order so the author can see the effect of the Z controls.
+   (Step 2 of the Z work will move the selection chrome into an always-
+   on-top overlay so handles stay grabbable even when the rect is buried;
+   until then a buried selected rect's handles can be occluded — the
+   accepted trade for honest overlap preview.) */
+.pe-rect.is-dragging,
+.pe-rect.is-panning {
+  z-index: 999;
+}
+
+/* The selection outline + resize handles no longer live on the rect — they
+   moved to the always-on-top overlay (v0.10.67) so they stay visible and
+   grabbable when the selected rect is buried under a higher-Z rect. The
+   .is-selected class is kept as a state hook (e.g. JS focal-dot logic) but
+   carries no outline of its own anymore. */
+
+/* Selection overlay — a click-through layer above every rect. ──────── */
+.pe-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* clicks fall through to the rects below */
+  /* Max 32-bit signed int — the conventional "always on top" ceiling. The
+     chrome must win over any rect no matter how the stacking evolves (rects
+     use DOM order + a 999 manipulation lift today, but author-managed Z could
+     grow that later); parking the overlay at the ceiling makes it unconditional
+     rather than a magic number a future rect z-index could overtake. */
+  z-index: 2147483647;
+}
+.pe-overlay-box {
+  position: absolute;
+  outline: 2px solid var(--pe-palette-accent, #ff5500);
+  outline-offset: 2px;
+  pointer-events: none; /* the ring is purely visual; handles opt back in */
+}
+
+.pe-rect-label {
+  /* Reset to the UI font: a text rect's .ty-<id> token is on the parent
+     and would otherwise be inherited here, rendering the kind chrome in
+     the content face (v0.10.83). The z badge is a child of this element,
+     so it inherits the reset for free. */
+  font-family: var(--pe-ui-font);
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.82); /* editor chrome, not palette-bound */
+  pointer-events: none;       /* clicks pass through to the rect body */
+}
+
+/* Layer (Z) badge after the kind on the canvas (v0.10.65) — the rect's
+   position in the stacking order, readable without selecting. Lighter
+   weight + dimmer than the kind so it reads as secondary meta. */
+.pe-rect-z {
+  margin-left: 0.4em;
+  font-weight: 600;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-rect-id {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.4rem;
+  /* Reset to UI font (v0.10.83) — see .pe-rect-label. letter-spacing reset
+     too: the token may set tracking that would otherwise leak into the id. */
+  font-family: var(--pe-ui-font);
+  font-style: normal;
+  letter-spacing: normal;
+  font-size: 0.65rem;
+  color: rgba(0, 0, 0, 0.72); /* editor chrome, not palette-bound */
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Author note (v0.10.24) — rendered inside the rect just under the
+   kind label when the rect carries a non-empty `note`. Editor-only;
+   never emitted by the runtime. Style intentionally light-weight
+   (italic, medium-gray, single line ellipsis) so it reads as
+   meta-information about the rect rather than content. The rect's
+   own height is the cap — a very short rect that can't fit the note
+   simply hides what doesn't fit. */
+.pe-rect-note {
+  /* Reset to UI font (v0.10.83) — see .pe-rect-label. Keeps the intended
+     italic (legible in the UI face); resets the token's tracking. */
+  font-family: var(--pe-ui-font);
+  letter-spacing: normal;
+  margin-top: 0.15rem;
+  max-width: 90%;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: rgba(0, 0, 0, 0.78);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Slice T1: real text content for a text rect, rendered in-flow under the
+   chrome. Inherits the rect's font — including any .ty-<id> typography
+   token (the class is on the parent .pe-rect, and font properties inherit).
+   DO NOT set font-size/family here or the token face is lost. pre-wrap
+   preserves authored newlines + runs of spaces; the node clips to the
+   rect so long copy can't escape. pointer-events:none so a click still
+   selects/drags the rect body. */
+.pe-rect-text {
+  width: 100%;
+  margin-top: 0.15rem;
+  white-space: pre-wrap;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+  /* Editor-only legibility default (v0.10.93). The rect body inherits the
+     palette `text` token (--pe-palette-text) from .pe-rect; an uncoloured
+     text run therefore renders in the palette text colour. When that colour
+     is light (e.g. the yellow #FFDD00 token) it's unreadable on the pale
+     pastel kind backgrounds. Override to a neutral high-contrast dark HERE,
+     editor only. NOTE — this is LOAD-BEARING, not a quick temporary (the
+     original "remove once TS3" note was wrong): TS3 colour marks only
+     colour SOME runs; uncoloured runs still inherit the light token. A
+     coloured run's direct .mk-color-<id> class beats this inherited colour,
+     so this only affects UNcoloured text. The REAL retirement path is the
+     general page background (see HANDOFF "DECISION — general page
+     background"): once text rects render transparent over a real page
+     background, the author's text/background pairing is legible and this
+     override is deleted. Until then it stays. The runtime (canvas-page.css)
+     does NOT carry this override — it shows the (currently also placeholder)
+     kind fill, which the general-background work will replace too. */
+  color: rgba(0, 0, 0, 0.85);
+}
+
+/* Slice T2: inline edit mode. The node becomes contenteditable, so it must
+   opt BACK IN to pointer events (base is none) and text selection (the
+   parent .pe-rect is user-select:none) — otherwise clicks won't place a
+   caret and the caret can't be dragged to select. cursor:text signals
+   editability; the dashed accent ring + caret-color make the active editor
+   obvious over the rect's kind background. min-height gives an empty rect a
+   clickable caret target. overflow:auto so the author can reach text taller
+   than the rect while editing (the static node clips). z above the chrome. */
+.pe-rect-text.is-editing {
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  overflow: auto;
+  min-height: 1.4em;
+  z-index: 5;
+  outline: 1.5px dashed var(--pe-palette-accent, #ff5500);
+  outline-offset: 2px;
+  caret-color: var(--pe-palette-accent, #ff5500);
+}
+
+/* Slice TS1: atomic text-style marks. A direct class on the run's <span>
+   beats the .ty-<id> typography token inherited from the parent .pe-rect
+   (direct child rule > inherited value) — so an author override always
+   wins over the base face. Static rules for now; valued/prepared styles
+   (color/token/link) get a dynamic emitter in a later slice (TS3). */
+.pe-rect-text .mk-strong    { font-weight: 700; }
+.pe-rect-text .mk-em        { font-style: italic; }
+.pe-rect-text .mk-underline { text-decoration: underline; }
+/* TS3-b: link runs carry ONLY the underline affordance — colour is the
+   separate `color` mark axis, so a link inherits the text/typography colour
+   (or its own colour mark) with no cascade fight. In the editor the <a> is
+   inside contenteditable, so a plain click places the caret, not navigates. */
+.pe-rect-text .mk-link { text-decoration: underline; cursor: text; }
+
+/* Slice TS1: floating B/I toolbar shown while a text rect is inline-edited.
+   position:fixed (set in JS) above the editable. Above all canvas chrome. */
+/* v0.10.130: vertical stack of rows (title bar · pills · link read-out · link
+   input · overrides). Width is set inline by layoutToolbarPills so the pills
+   tile on the fewest rows that fit the viewport; children stretch to it. */
+.pe-text-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  z-index: 9999;
+}
+/* (1) title bar — drag handle. Grip left, first-class actions right. */
+.pe-tt-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  cursor: grab;
+  touch-action: none;        /* let pointer-drag own the gesture (tablet) */
+}
+.pe-tt-titlebar:active { cursor: grabbing; }
+.pe-tt-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+/* (2) pills row — element-style buttons; width set inline. Centred so a short
+   final row sits under the others rather than hugging the left edge. */
+.pe-tt-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+.pe-tt-btn {
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.45rem;
+  font-size: 1.05rem;
+  line-height: 1;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pe-tt-btn:hover { background: #3a3a3c; }
+.pe-tt-strong { font-weight: 800; }
+.pe-tt-em     { font-style: italic; font-family: Georgia, 'Times New Roman', serif; }
+.pe-tt-btn.is-active {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+/* TS2: indeterminate / "mixed" state — the selection is partially styled
+   (some chars carry the attr, some don't). Visually distinct from the solid
+   active fill: a faint accent tint behind a dashed accent border, so the
+   author can tell at a glance that one more click will make the whole
+   selection uniform (→ active) rather than toggling it off. is-active wins
+   if both somehow apply. */
+.pe-tt-btn.is-mixed {
+  background: color-mix(in srgb, var(--pe-palette-accent, #ff5500) 22%, transparent);
+  border-style: dashed;
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+
+/* TS3-a colour swatches — divider + colour chips appended after B/I. Each
+   chip is filled with its real palette colour so it previews exactly what a
+   styled run becomes. Sized as a clearly-tappable square (~1.6rem, close to
+   the 2rem button height) per the icon-sizing rule — not a microscopic dot,
+   so it also works as a touch target for the future tablet editor. */
+.pe-tt-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.1rem 0.15rem;
+  background: rgba(255, 255, 255, 0.18);
+}
+.pe-tt-swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.pe-tt-swatch:hover { border-color: rgba(255, 255, 255, 0.6); }
+/* "Clear colour" chip: a neutral field with a diagonal red slash (the
+   conventional "none" affordance). */
+.pe-tt-swatch-clear {
+  background:
+    linear-gradient(to top left,
+      transparent calc(50% - 1px), #ff3b30 calc(50% - 1px),
+      #ff3b30 calc(50% + 1px), transparent calc(50% + 1px)),
+    #3a3a3c;
+}
+/* Selected swatch: an accent ring so the author sees which colour the
+   current selection/caret carries. */
+.pe-tt-swatch.is-active {
+  outline: 2px solid var(--pe-palette-accent, #ff5500);
+  outline-offset: 1px;
+  border-color: #fff;
+}
+
+/* Slice B3-1: element-style buttons — the GOVERNED primary picker. Visually a
+   shade heavier than the colour swatches to read as the primary authoring
+   action. (Replaced the retired TS4 char-style chips, removed in Slice D.) */
+.pe-tt-es {
+  height: 2rem;
+  padding: 0 0.55rem;
+  max-width: 10rem;
+  font-size: 0.82rem;
+  line-height: 1;
+  /* v0.10.132: the BASE rule is the touch / no-hover state — a light "paper"
+     specimen surface (same tone as the Draw preview modal, #f7f6f3) so a
+     style's own — usually dark — colour stays readable when there's no hover
+     to reveal it. Pointer devices override this below (@media hover:hover):
+     dark resting chip + paper reveal on hover, which keeps the toolbar's dark
+     UI feel intact. (hover:hover also covers Apple Pencil hover on iPad.) */
+  color: #1b1d21;
+  background: #f7f6f3;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The preview span shows the style's FAMILY / WEIGHT / ITALIC / COLOUR but is
+   pinned to the chip's own size — an element style's absolute sizePx (e.g. 48px)
+   would otherwise blow up the toolbar. (0,1,1) beats the .ty-<id> (0,1,0) size. */
+.pe-tt-es > span {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 0.82rem !important;
+  line-height: 1 !important;
+  letter-spacing: normal !important;
+}
+/* "Clear" chip: revert selection to the rect default. It's a UI ACTION, not a
+   style specimen — keep it on the dark toolbar palette (a paper chip would
+   wrongly imply it previews a style). */
+.pe-tt-es-clear {
+  min-width: 2rem;
+  padding: 0;
+  font-size: 1.05rem;
+  color: #c8c8ca;
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.pe-tt-es-clear:hover { background: #3a3a3c; border-color: rgba(255, 255, 255, 0.18); }
+.pe-tt-es.is-active {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+/* Keep the preview span legible against the active accent fill (don't let the
+   style's own palette colour vanish into the orange). */
+.pe-tt-es.is-active > span { color: inherit !important; }
+
+/* v0.10.132 — POINTER devices (mouse, and Apple Pencil hover on iPad): restore
+   the dark toolbar aesthetic at rest, and REVEAL the specimen on hover. The
+   always-paper chip (v0.10.131) read perfectly but broke the dark UI feel; here
+   the resting chip is dark again and the author lifts a single chip to a light
+   "paper" surface by hovering, where the style's own (often dark) colour becomes
+   legible. Touch / no-hover devices skip this block entirely and keep the
+   always-paper base rule above (their only way to read a dark specimen). */
+@media (hover: hover) {
+  .pe-tt-es {
+    color: #e8e8ea;
+    background: #2c2c2e;
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  .pe-tt-es:hover {
+    color: #1b1d21;
+    background: #efe9dd;          /* light paper-tinted reveal (lifted variant of the old #3a3a3c hover) */
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+  /* The clear × is a UI action, not a specimen — it must NOT lift to paper on
+     hover (the generic .pe-tt-es:hover above would otherwise catch it). */
+  .pe-tt-es-clear,
+  .pe-tt-es-clear:hover {
+    color: #c8c8ca;
+    background: #2c2c2e;
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  .pe-tt-es-clear:hover { background: #3a3a3c; }
+  /* Active chip keeps its accent fill even under the cursor (don't let the
+     paper reveal override the selected state). */
+  .pe-tt-es.is-active,
+  .pe-tt-es.is-active:hover {
+    background: var(--pe-palette-accent, #ff5500);
+    border-color: var(--pe-palette-accent, #ff5500);
+    color: #fff;
+  }
+}
+
+/* Slice B3-2: the atomic OVERRIDES (B/I/U, colour) are the escape hatch, not
+   the default — they live in a collapsible row, disclosed by the fx toggle.
+   Progressive-disclosure rule: governed element styles are primary and always
+   visible; raw overrides are one tap away. As a column child it stretches to
+   the bar's computed width, so the colour swatches get room to wrap nicely. */
+.pe-tt-overrides { display: none; }
+.pe-text-toolbar.pe-tt-show-ovr .pe-tt-overrides {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+/* fx toggle — a sliders glyph (icon-sizing rule: ~1.2rem in the 2rem button,
+   thick stroke, clear touch target for the tablet editor). is-active = the
+   overrides row is open. */
+.pe-tt-fx svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  display: block;
+  margin: 0 auto;
+}
+
+/* Slice B3-3: drag grip — grab to move the whole toolbar, double-tap to reset.
+   Flush-left, a touch quieter than the action buttons (it's chrome, not an
+   action), but a real grab target: cursor:grab + a clear six-dot glyph sized
+   per the icon rule, touch-friendly for the tablet editor. */
+.pe-tt-grip {
+  min-width: 1.5rem;
+  height: 2rem;
+  padding: 0 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: none;
+  border-radius: 0.35rem;
+  cursor: grab;
+  touch-action: none;            /* let pointer-drag own the gesture (no scroll) */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pe-tt-grip:hover { color: rgba(255, 255, 255, 0.9); background: #2c2c2e; }
+.pe-tt-grip:active { cursor: grabbing; }
+.pe-tt-grip svg { width: 1.15rem; height: 1.15rem; display: block; }
+/* Once moved, tint the grip so the reset affordance (dbl-tap) is discoverable. */
+.pe-tt-grip-moved { color: var(--pe-palette-accent, #ff5500); }
+
+/* TS3-b-2 link control. The chain-link button matches the B/I buttons; its
+   icon fills a clear share of the button (icon-sizing rule — no microscopic
+   glyph, also a usable touch target for the tablet editor). The inline URL
+   editor wraps to its own full-width row under the buttons (the toolbar is
+   flex-wrap). The <input> is the one control that takes focus on purpose. */
+.pe-tt-link svg,
+.pe-tt-link-ok svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+  margin: 0 auto;
+}
+.pe-tt-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+}
+.pe-tt-link-input {
+  flex: 1 1 auto;
+  min-width: 6rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  font-size: 0.85rem;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.35rem;
+}
+.pe-tt-link-input::placeholder { color: rgba(232, 232, 234, 0.4); }
+.pe-tt-link-input:focus {
+  outline: none;
+  border-color: var(--pe-palette-accent, #ff5500);
+}
+.pe-tt-link-cancel { font-size: 1.2rem; }
+/* Inline rejection notice (unsafe/unsupported scheme). Hidden when empty so
+   it doesn't reserve a blank line on the common success path. */
+.pe-tt-link-err {
+  flex: 1 1 100%;
+  font-size: 0.72rem;
+  color: #ff453a;
+}
+.pe-tt-link-err:empty { display: none; }
+
+/* v0.10.102: live link read-out — appears (full-width, wraps under the button
+   row) when the selection is a single uniform link, so the entered URL is
+   always visible / verifiable / editable. URL text (click → edit), an "open in
+   new tab" verify anchor, and a pencil edit button. */
+.pe-tt-linkinfo {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  font-size: 0.78rem;
+  color: rgba(232, 232, 234, 0.85);
+}
+.pe-tt-linkinfo-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(232, 232, 234, 0.4);
+  text-underline-offset: 2px;
+}
+.pe-tt-linkinfo-url:hover { color: #fff; text-decoration-color: #fff; }
+.pe-tt-linkinfo-open,
+.pe-tt-linkinfo-edit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.pe-tt-linkinfo-open:hover,
+.pe-tt-linkinfo-edit:hover { background: #3a3a3c; }
+.pe-tt-linkinfo-open svg,
+.pe-tt-linkinfo-edit svg { width: 1rem; height: 1rem; display: block; }
+
+/* Slice T2: small helper hint under a panel field (e.g. "double-click to
+   edit on canvas"). Dim, italic, UI font — clearly secondary to the field. */
+.pe-field-hint {
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  font-style: italic;
+  line-height: 1.35;
+  color: #9aa3ad;
+}
+
+/* Slice T1: the side-panel text editor. A comfortable fixed-size editing
+   field (deliberately NOT the rect's typography face — see the JS note);
+   vertical resize only so the author can grow it without breaking the
+   panel width. Monospace-ish line-height for legible multi-line editing. */
+.pe-rect-textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+/* Bound-image preview (step 4b) ───────────────────────────────
+   For an image-kind rect with a bound filename, the real image is
+   painted as an absolutely-positioned child filling the rect, behind
+   the editor chrome (kind label, id, note). object-fit:cover is the
+   Slice-2 default; step 4c makes the fit strategy author-selectable.
+   The chrome labels get a translucent dark pill when over an image so
+   they stay legible on any photo. */
+.pe-rect-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0; /* above the kind-colour background, below the chrome */
+}
+/* v0.10.47: fit mode driven by the rect's data-fit attribute. 'contain'
+   fits the whole image inside, letterboxing the remainder — the bands
+   show a neutral dark backdrop rather than the kind colour so the image
+   reads as a framed photo, not a tinted one. */
+.pe-rect[data-fit="contain"] .pe-rect-img { object-fit: contain; }
+.pe-rect[data-fit="contain"].has-image    { background: #14171c; }
+/* Lift the chrome above the image (a z-index:0 positioned image would
+   otherwise paint over non-positioned in-flow labels). */
+.pe-rect-label,
+.pe-rect-note { position: relative; z-index: 1; }
+.pe-rect.has-image .pe-rect-label {
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+.pe-rect.has-image .pe-rect-id {
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+}
+.pe-rect.has-image .pe-rect-note {
+  background: rgba(0, 0, 0, 0.45);
+  color: #f0f0f0;
+  border-radius: 3px;
+}
+/* v0.10.53: keep the kind label + id legible ABOVE the focal dot (z:3)
+   when they overlap. The type is information; the dot is just a handle —
+   and since both labels are pointer-events:none, the dot underneath stays
+   fully grabbable through them. (z:4 matches the lifted tiny-rect chrome.) */
+.pe-rect.has-image > .pe-rect-label,
+.pe-rect.has-image > .pe-rect-id { z-index: 4; }
+/* Focal-dot pan control (step 4d, v0.10.50) — a draggable handle that
+   sets the bound image's object-position so the author chooses which
+   part of a cover-cropped image is visible. Rendered only on a
+   selected, cover-mode image rect whose aspect ratio differs from the
+   image's (i.e. the crop actually hides something). The dot slides
+   along the single overflow axis; on a small rect it detaches just
+   outside the top-left so it doesn't collide with the resize handles. */
+.pe-focus-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  border: 2px solid var(--pe-palette-accent, #ff5500);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
+  z-index: 3; /* above the image (0) and the chrome labels (1) */
+  cursor: grab;
+  touch-action: none;
+  /* The dot now lives in the click-through overlay box (v0.10.68), so it must
+     opt back into pointer events — same as the resize handles — to stay
+     grabbable. Without this the box's pointer-events:none would swallow it. */
+  pointer-events: auto;
+}
+.pe-focus-dot:active { cursor: grabbing; }
+/* Axis hint: a short bar through the dot showing the drag direction. */
+.pe-focus-dot::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--pe-palette-accent, #ff5500);
+  border-radius: 2px;
+}
+.pe-focus-dot--x::after { width: 10px; height: 2px; }
+.pe-focus-dot--y::after { width: 2px;  height: 10px; }
+.pe-focus-dot.is-detached {
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55), 0 1px 5px rgba(0, 0, 0, 0.65);
+}
+
+/* Active pan (v0.10.52, rings v0.10.55). The dot is only a grab handle;
+   once the drag starts it's hidden and the live image crop becomes the
+   sole feedback, so the dot can never get stranded outside the rect.
+   The rect keeps its usual solid selected outline (the inner line — we
+   deliberately do NOT override it); on top, two concentric dotted rings
+   are added just outside it, each 3px larger than the last, to read as
+   "you're panning / this is moving". Everything returns to normal when
+   the drag ends and the .is-panning class is removed. */
+/* The dot + its panning rings live in the overlay box now (v0.10.68) so the
+   pan chrome is also always-on-top when the image rect is buried. The rect
+   itself still gets .is-panning purely for the z-lift (line ~307) so the live
+   image crop — the sole pan feedback — rises above neighbouring rects. */
+.pe-overlay-box.is-panning .pe-focus-dot { opacity: 0; }
+.pe-overlay-box.is-panning { cursor: grabbing; }
+.pe-overlay-box.is-panning::before,
+.pe-overlay-box.is-panning::after {
+  content: "";
+  position: absolute;
+  border: 2px dotted var(--pe-palette-accent, #ff5500);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+}
+/* Both rings clear the solid selected outline (which ends ~4px out) so the
+   inner one isn't swallowed by it, and the two dotted bands are spaced a
+   visible 5px apart (v0.10.56). Band = [inset−2px … inset] out from the
+   box edge: ::before 5–7px, ::after 12–14px → 5px gap between them. */
+.pe-overlay-box.is-panning::before { inset: -7px; }
+.pe-overlay-box.is-panning::after  { inset: -14px; }
+
+/* Tiny rects (v0.10.51) — a rect under 100px in either dimension can't
+   hold its kind label + id inside without them overlapping/mangling, so
+   lift them OUT: stacked just above the rect, left-aligned, each on its
+   own pill (kind directly above the top edge, id one line higher). The
+   optional note is suppressed (secondary meta, would add a cramped third
+   line). Same "detach when small" idea as the focal dot. Pills carry
+   their own dark background so they read on any canvas colour or photo.
+   Specificity (0,3,0) matches the .has-image label/id rules; this block
+   is later in the file so it wins for tiny image rects too. */
+.pe-rect.is-tiny > .pe-rect-label,
+.pe-rect.is-tiny > .pe-rect-id {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: auto;
+  bottom: 100%;
+  max-width: none;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
+}
+/* kind sits directly above the top edge; id one fixed line higher.
+   The id step is a fixed px (not em — the id's font is smaller, so an
+   em step wouldn't clear the taller kind pill above it). line-height is
+   pinned so both pills have a predictable height for the stack math. */
+.pe-rect.is-tiny > .pe-rect-label,
+.pe-rect.is-tiny > .pe-rect-id    { line-height: 1.5; }
+.pe-rect.is-tiny > .pe-rect-label { margin-bottom: 2px; }
+.pe-rect.is-tiny > .pe-rect-id    { margin-bottom: 22px; }
+.pe-rect.is-tiny > .pe-rect-note  { display: none; }
+
+/* Dangling binding: filename set but not present in the loaded
+   library (renamed / removed). Dashed red ring as the canvas cue;
+   the selection panel spells out "not found in library". */
+.pe-rect.is-img-missing {
+  outline: 2px dashed #d23b3b;
+  outline-offset: -2px;
+  /* Diagonal warning hatch so a bound-but-missing image rect can't be
+     mistaken for a freshly-created empty one (the image was deleted/renamed
+     out from under the binding). */
+  background-image: repeating-linear-gradient(
+    45deg, rgba(210, 59, 59, 0.16) 0 11px, rgba(210, 59, 59, 0) 11px 22px);
+}
+/* Centred "image missing: <filename>" plaque inside the dangling rect. */
+.pe-rect-missing {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;               /* above the kind background + chrome labels */
+  max-width: 92%;
+  font-size: 11px; font-weight: 600; line-height: 1.3;
+  color: #ffc4c4;
+  background: rgba(42, 12, 12, 0.86);
+  border: 1px solid rgba(210, 59, 59, 0.65);
+  border-radius: 6px;
+  padding: 4px 8px;
+  text-align: center;
+  word-break: break-all;
+  pointer-events: none;
+}
+
+/* While the image picker modal is open, suppress the selected rect's
+   selection chrome (outline ring + resize handles + focal dot). That layer
+   parks at the max z-index ceiling on purpose, so it would otherwise paint
+   over the picker; hiding it is cleaner than fighting the stacking order. */
+body.pe-picker-open .pe-overlay { display: none; }
+
+/* Kind colours — backed by custom properties emitted from PHP
+   (template <style>). Duplicated to canvas-page.css runtime when
+   that lands in step 5. Once palette gains a kindColors map the
+   defaults move out of CSS entirely. */
+.pe-rect--text       { background: var(--pe-kind-text); }
+.pe-rect--image      { background: var(--pe-kind-image); }
+.pe-rect--drilldown  { background: var(--pe-kind-drilldown); }
+.pe-rect--unknown    { background: #eeeeee; }
+
+/* Resize handles ─────────────────────────────────────────────
+   Eight handles on the selected rect: four corners + four edge
+   mid-points. Square nubs sized so they're easy to grab without
+   stealing too much of the rect's clickable interior. Cursor per
+   direction. Handles are children of .pe-rect (absolutely
+   positioned) and only visible when the rect is .is-selected. */
+.pe-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--pe-palette-accent, #ff5500);
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+  display: none;
+  z-index: 2;
+}
+/* Handles live in the overlay box now (v0.10.67) and are always shown when
+   a rect is selected; the overlay is click-through so they must opt back
+   into pointer events to remain grabbable. */
+.pe-overlay-box > .pe-resize-handle {
+  display: block;
+  pointer-events: auto;
+}
+.pe-resize-handle--nw { top: -6px;    left: -6px;    cursor: nwse-resize; }
+.pe-resize-handle--n  { top: -6px;    left: 50%;     cursor: ns-resize;
+                        transform: translateX(-50%); }
+.pe-resize-handle--ne { top: -6px;    right: -6px;   cursor: nesw-resize; }
+.pe-resize-handle--e  { top: 50%;     right: -6px;   cursor: ew-resize;
+                        transform: translateY(-50%); }
+.pe-resize-handle--se { bottom: -6px; right: -6px;   cursor: nwse-resize; }
+.pe-resize-handle--s  { bottom: -6px; left: 50%;     cursor: ns-resize;
+                        transform: translateX(-50%); }
+.pe-resize-handle--sw { bottom: -6px; left: -6px;    cursor: nesw-resize; }
+.pe-resize-handle--w  { top: 50%;     left: -6px;    cursor: ew-resize;
+                        transform: translateY(-50%); }
+
+/* Move grip (v0.10.69) — always-on-top drag handle for MOVING the selected
+   rect, including when it's buried. A tab centred just above the box top edge
+   so it never overlaps content; the inner icon carries the affordance, so it
+   fills most of the tab height per the icon-sizing rule. Parked 10px above the
+   edge to clear the 'n' resize handle (which reaches 6px above). z above the
+   handles(2)/dot(3) within the box. The surface has no overflow:hidden, so a
+   rect at the very top simply floats its grip onto the striped wrap — visible,
+   not clipped. */
+.pe-overlay-box > .pe-move-grip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.5rem;
+  min-width: 2rem;
+  padding: 0 0.35rem;
+  border-radius: 6px;
+  background: var(--pe-palette-accent, #ff5500);
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: move;
+  z-index: 4;
+}
+.pe-move-grip .material-icons {
+  font-size: 1.25rem;   /* ~83% of the 1.5rem tab — clearly readable affordance */
+  line-height: 1;
+  color: #ffffff;
+  pointer-events: none; /* the grip div is the hit target */
+}
+
+/* Sidebar panel rows ─────────────────────────────────────────
+   Chapter rows + selection-panel rows share a compact info-row
+   visual: name on the left, small affordances on the right. */
+.pe-chapters li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.2rem;
+  border-bottom: 1px solid #232529;
+}
+.pe-chapters li:last-child { border-bottom: none; }
+/* Highlight the chapter the currently-selected rect belongs to.
+   Subtle accent-tinted background + an inset accent bar on the
+   leading edge — enough to draw the eye when scanning the chapter
+   list, not enough to compete with the rename input's focus ring
+   if the author starts editing the same row. (v0.10.25) */
+.pe-chapters li.is-current {
+  background: color-mix(in srgb, var(--pe-palette-accent, #ff5500) 14%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--pe-palette-accent, #ff5500);
+  border-radius: 0 3px 3px 0;
+}
+.pe-chapter-name {
+  flex: 1;
+  background: transparent;
+  color: #f0f0f0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  min-width: 0;
+}
+.pe-chapter-name:hover  { border-color: #2c2e33; }
+.pe-chapter-name:focus  { border-color: var(--pe-palette-accent, #ff5500);
+                          outline: none; background: #1b1c20; }
+.pe-chapter-count {
+  color: #a8a8a8;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8em;
+  padding: 0 0.2rem;
+}
+.pe-chapter-del,
+.pe-rect-del {
+  background: transparent;
+  color: #b0b0b0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1;
+}
+.pe-chapter-del:hover,
+.pe-rect-del:hover { color: #ff7766; border-color: #5a2c2c; background: #2a1d1d; }
+
+.pe-chapter-add {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+.pe-input {
+  flex: 1;
+  background: #1b1c20;
+  color: #f0f0f0;
+  border: 1px solid #2c2e33;
+  border-radius: 3px;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  min-width: 0;
+}
+.pe-input:focus { border-color: var(--pe-palette-accent, #ff5500); outline: none; }
+
+/* OBJECTS panel (v0.10.70) ───────────────────────────────────────
+   A navigation/help list so a rect hidden behind another (or simply
+   forgotten) stays reachable: click a row → select that rect, then the
+   selection chrome (move grip + handles) acts on it even when buried.
+   Two display modes toggled by the T/Z header buttons. Intentionally
+   the LAST sidebar section — a help affordance, not a primary verb. */
+.pe-objects-sort {
+  display: flex;
+  gap: 0.25rem;
+}
+.pe-sort-btn {
+  background: #1b1c20;
+  color: #b0b0b0;
+  border: 1px solid #2c2e33;
+  border-radius: 3px;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.pe-sort-btn:hover { border-color: #3a3d44; color: #d8d8d8; }
+.pe-sort-btn.is-active {
+  background: var(--pe-palette-accent, #ff5500);
+  border-color: var(--pe-palette-accent, #ff5500);
+  color: #fff;
+}
+
+.pe-objects-group { margin-bottom: 0.5rem; }
+.pe-objects-group:last-child { margin-bottom: 0; }
+.pe-objects-subhead {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a8a8a;
+  padding: 0.25rem 0.35rem 0.2rem;
+  /* Lighter than the sidebar so each type title reads as a banded section
+     header rather than blending into the list. Sidebar #1a1b1f + 070707
+     (two +030303 steps then one more +010101 nudge). (v0.10.74) */
+  background: #212226;
+  border-radius: 3px;
+}
+
+.pe-objects { list-style: none; margin: 0; padding: 0; }
+.pe-object {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.pe-object:hover { background: #232529; }
+.pe-object.is-current {
+  background: color-mix(in srgb, var(--pe-palette-accent, #ff5500) 14%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--pe-palette-accent, #ff5500);
+}
+.pe-object-name {
+  flex: 1;
+  min-width: 0;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-object-name.is-unnamed { color: #888; font-style: italic; }
+.pe-object-z {
+  color: #a8a8a8;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8em;
+  flex-shrink: 0;
+}
+
+.pe-selection-row {
+  display: flex;
+  /* flush-top, not centred: a row whose value grows taller on demand
+     (e.g. FIT gaining the "Match rect to image" button, or the bound-
+     image card) must not push its label down — the label stays pinned
+     at the top so it never moves between renders. */
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+/* Discreet separators between rows (mirrors the draw sidebar). The line
+   sits above every row but the first, so each property reads as its own
+   little section without heavy chrome. */
+.pe-selection-row + .pe-selection-row {
+  border-top: 1px solid #26282d;
+  padding-top: 0.4rem;
+}
+/* The geom block (x/y/w/h) is a .pe-geom-fields, not a .pe-selection-row, so
+   it fell outside the adjacency chain above: no hairline rendered BEFORE it
+   (the row above it had nothing after to pair with) and it also suppressed
+   the hairline AFTER it (the row below it follows a .pe-geom-fields, not a
+   .pe-selection-row). Bridge the block back into the chain so the coords read
+   as their own little section like every other property row. (v0.10.72) */
+.pe-selection-row + .pe-geom-fields,
+.pe-geom-fields + .pe-selection-row {
+  border-top: 1px solid #26282d;
+  padding-top: 0.4rem;
+}
+.pe-selection-row label {
+  color: #b8b8b8;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  width: 5.5rem;
+  flex: 0 0 auto;
+}
+/* v0.10.98: full-width row variant — label stacks ABOVE the content, which
+   then spans the whole panel. Used only by the TYPE row, whose 48px type
+   preview needs the full width (the fixed label gutter was wasted space). */
+.pe-selection-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+.pe-selection-row--stack > label { width: auto; }
+/* v0.10.100: the open text-editor stack carries its own "Text" header, so
+   the row()'s own (empty) label is suppressed to avoid a blank gutter line. */
+.pe-selection-row--nolabel > label { display: none; }
+
+/* v0.10.100 side-panel TEXT disclosure. Closed = a full-width "Edit text
+   here" button (the rect's text is already on the canvas, so the panel keeps
+   it collapsed to save space). The icon is sized per the icon rule — a clear
+   ~1.1rem pencil, not a microscopic glyph — and doubles as a tablet-friendly
+   touch target. */
+/* v0.10.101: compact, sits inline in the TEXT row's content column next to
+   the label (no longer full-width / stacked) — the closed affordance is small. */
+.pe-text-disclose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.3rem;
+  width: auto;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+.pe-text-disclose:hover { background: #3a3a3c; }
+.pe-text-disclose svg { width: 0.95rem; height: 0.95rem; flex: none; }
+/* Open state: the editor stack (header + textarea + hint) fills the panel. */
+.pe-text-edit-stack { display: flex; flex-direction: column; gap: 0.3rem; }
+.pe-text-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pe-text-edit-head > span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(232, 232, 234, 0.65);
+}
+/* v0.10.101: a small "Done" text button (was a bare 1.5rem × that read as a
+   delete/cancel). Only hides the editor — the text already committed on blur. */
+.pe-text-collapse {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+  color: #e8e8ea;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.pe-text-collapse:hover { background: #3a3a3c; }
+.pe-selection-row select.pe-input {
+  flex: 1;
+  padding: 0.2rem 0.3rem;
+}
+.pe-selection-row .pe-dim {
+  font-variant-numeric: tabular-nums;
+  color: #c8c8c8;
+  flex: 1;
+}
+
+/* Layer (Z) controls (v0.10.65) — "z N / M" readout + four reorder
+   buttons (to back · backward · forward · to front), each a Material
+   Icon. Icon-only buttons, so per the icon-sizing rule the glyph fills
+   a clear share of the button (20px in a 1.9rem box ≈ 70%+ of content
+   height) — never microscopic. */
+.pe-layer-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  /* Four icon buttons fit the selection-row value column on one line —
+     do NOT wrap. The "z N / M" readout moved to the Kind row to free the
+     width (see .pe-kind-z), so this row carries the buttons only. */
+}
+/* "z N / M" readout, shown trailing the kind on the Kind row. */
+.pe-kind-z {
+  font-variant-numeric: tabular-nums;
+  color: #9a9a9a;
+  margin-left: 0.5em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pe-layer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  background: #1b1c20;
+  color: #cfcfcf;
+  border: 1px solid #2c2e33;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.pe-layer-btn .material-icons { font-size: 20px; }
+.pe-layer-btn:hover:not(:disabled) {
+  border-color: var(--pe-palette-accent, #ff5500);
+  background: #232428;
+  color: #fff;
+}
+.pe-layer-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* Geometry numeric inputs (v0.10.27). Four small fields in one
+   row inside the selection panel; each has a single-letter key
+   (x / y / w / h) sitting above-left of the input so the eye
+   reads "this is the y value" without a longer label crowding
+   the row. Tab walks through them in DOM order. */
+.pe-geom-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  flex: 1;
+}
+/* v0.10.28 — when rendered without a left-side row label, take the
+   full panel width and add a little bottom margin so it doesn't
+   abut the next row. */
+.pe-geom-fields--standalone {
+  width: 100%;
+  margin-bottom: 0.4rem;
+}
+.pe-geom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.pe-geom-key {
+  font-size: 0.7em;
+  color: #909090;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-left: 0.15rem;
+}
+input.pe-geom-input {
+  width: 100%;
+  padding: 0.2rem 0.3rem;
+  font-variant-numeric: tabular-nums;
+  /* Hide the spinner buttons — keyboard editing is the primary
+     gesture and the spinners eat horizontal room in a narrow row. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input.pe-geom-input::-webkit-outer-spin-button,
+input.pe-geom-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.pe-selection-actions {
+  margin-top: 0.6rem;
+  display: flex;
+  gap: 0.4rem;
+}
+.pe-selection-actions .pe-rect-del {
+  border: 1px solid #5a2c2c;
+  background: #2a1d1d;
+  color: #ff7766;
+  padding: 0.25rem 0.6rem;
+}
+
+/* Add-rect dropdown styled as a button. The <select> approach
+   compacts the 4 kinds into one toolbar slot without a custom
+   menu component — fine until step 4 needs richer affordances. */
+.pe-add-rect select.pe-create-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 1.5rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #aaa 50%),
+    linear-gradient(135deg, #aaa 50%, transparent 50%);
+  background-position:
+    calc(100% - 12px) 50%,
+    calc(100% - 7px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* ── Image binding (step 4b) — selection-panel "Image" row ──────── */
+.pe-image-bind {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+.pe-image-bound {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0.35rem;
+  min-width: 0;
+}
+.pe-image-bound.is-missing { border-color: #5a2c2c; background: #241b1b; }
+.pe-image-bound-thumb {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #111;
+}
+.pe-image-bound-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pe-image-bound-name {
+  font-size: 0.8rem;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-image-bound-sub { font-size: 0.7rem; color: #9a9a9a; }
+.pe-image-bound.is-missing .pe-image-bound-sub { color: #ff7766; }
+.pe-image-bind-actions { display: flex; gap: 0.4rem; }
+.pe-image-unbind {
+  background: #241b1b;
+  color: #ff8a7a;
+  border: 1px solid #5a2c2c;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.pe-image-unbind:hover { background: #2a1d1d; color: #ff7766; }
+
+/* ── Image fit controls (step 4c) ───────────────────────────────── */
+.pe-fit { display: flex; flex-direction: column; gap: 0.4rem; }
+/* Segmented Cover / Contain toggle. */
+.pe-fit-seg {
+  display: inline-flex;
+  border: 1px solid #3a3f47;
+  border-radius: 5px;
+  overflow: hidden;
+  align-self: flex-start;
+}
+.pe-fit-opt {
+  background: #1b1e24;
+  color: #b9c0c9;
+  border: 0;
+  border-right: 1px solid #3a3f47;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.pe-fit-opt:last-child { border-right: 0; }
+.pe-fit-opt:hover { background: #242931; }
+.pe-fit-opt.is-active {
+  background: var(--pe-palette-accent, #3b82f6);
+  color: #fff;
+}
+.pe-fit-mismatch {
+  font-size: 0.72rem;
+  color: #e0a96d;
+}
+.pe-fit-match { align-self: flex-start; }
+
+/* ── Typography token control (Slice 3a) ────────────────────────── */
+.pe-typo { display: flex; flex-direction: column; gap: 0.45rem; flex: 1; min-width: 0; }
+/* Live preview of the chosen token, rendered in its actual face via the
+   template-emitted .ty-<id> rule. Clipped so a large token can't blow
+   out the panel; reset overrides so editor chrome doesn't bleed in. */
+.pe-typo-preview {
+  background: #1b1e24;
+  border: 1px solid #3a3f47;
+  border-radius: 5px;
+  padding: 0.5rem 0.6rem;
+  overflow: hidden;
+}
+.pe-typo-sample {
+  color: var(--pe-palette-text, #f0f0f0);
+  margin: 0;
+  /* v0.10.98: single line — never wrap the preview. A 48px token shows on
+     one line and is clipped horizontally (the leading glyphs "Ag — the…"
+     carry the face); the parent .pe-typo-preview also clips. This keeps the
+     TYPE section short so the TEXT field + tip below stay in view. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.pe-typo-meta {
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  color: #8a9099;
+  font-family: inherit;       /* never inherit the token's face */
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+.pe-typo-preview.is-empty,
+.pe-typo-preview.is-missing { font-size: 0.74rem; line-height: 1.35; }
+.pe-typo-preview.is-empty   { color: #8a9099; font-style: italic; }
+.pe-typo-preview.is-missing { color: #ff7766; border-color: #5a2c2c; background: #241b1b; }
+
+/* ── Image picker overlay (step 4b) ─────────────────────────────── */
+.pe-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+.pe-picker {
+  background: #151515;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  width: min(900px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+.pe-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #2c2c2c;
+}
+.pe-picker-title { margin: 0; font-size: 1rem; color: #f0f0f0; flex: 1; }
+.pe-picker-close {
+  background: transparent;
+  border: none;
+  color: #bbb;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
+.pe-picker-close:hover { color: #fff; }
+.pe-picker-body { padding: 1rem; overflow: auto; }
+.pe-picker-error { color: #ff7766; margin-bottom: 0.75rem; font-size: 0.85rem; }
+.pe-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+.pe-picker-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 5px;
+  padding: 0.4rem;
+  cursor: pointer;
+  text-align: left;
+  color: #ddd;
+  font: inherit;
+}
+.pe-picker-cell:hover { border-color: var(--pe-palette-accent, #ff5500); background: #262626; }
+.pe-picker-cell.is-current {
+  border-color: var(--pe-palette-accent, #ff5500);
+  box-shadow: 0 0 0 1px var(--pe-palette-accent, #ff5500) inset;
+}
+.pe-picker-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #111;
+  display: block;
+}
+.pe-picker-cap {
+  font-size: 0.72rem;
+  color: #bbb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
