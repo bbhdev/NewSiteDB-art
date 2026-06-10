@@ -2257,21 +2257,23 @@ HTML;
     ],
 
     /**
-     * v0.10.35 — Image-workshop verdict persistence (Slice 2 step B).
+     * v0.10.35 — Image-workshop triage persistence.
+     * v0.10.182 (Convergence Slice 4g-1) — MODEL PIVOT: the 3-state verdict
+     * (ok/rework/dropped) collapses to a single "use it" boolean, persisted
+     * to useit.json (was verdicts.json).
      *
      *   POST dev/image-workshop/save
-     *   body: { batch: "<batch page id>", verdicts: { "<filename>": "ok|rework|dropped", ... } }
+     *   body: { batch: "<batch page id>", useIt: { "<filename>": true, ... } }
      *
-     * Stores triage verdicts for a workshop batch in a per-batch sidecar
-     * content/<batch>/verdicts.json. Mirrors dev/page/save: full-shape
-     * validation, atomic tmp+rename write. Batches are Panel DRAFTS, so
-     * the page is resolved via the container's childrenAndDrafts() (a
-     * plain kirby()->page() would miss drafts).
+     * Stores the use-it flags for a workshop batch in a per-batch sidecar
+     * content/<batch>/useit.json. Mirrors dev/page/save: full-shape
+     * validation, atomic tmp+rename write. Batches are Panel DRAFTS, so the
+     * page is resolved via the container's childrenAndDrafts() (a plain
+     * kirby()->page() would miss drafts).
      *
-     * The verdict map is authoritative-by-replacement: the client always
-     * sends the complete current map, and entries cleared in the UI are
-     * simply absent (or null) and dropped on write — so a verdicts.json
-     * only ever holds files that currently carry a verdict.
+     * The map is authoritative-by-replacement: the client always sends the
+     * complete current map, and off images are simply absent (or falsy) and
+     * dropped on write — so useit.json only ever holds files that are ON.
      */
     [
       'pattern' => 'dev/image-workshop/save',
@@ -2283,8 +2285,8 @@ HTML;
         // Sync S2: see dev/draw/save for rationale on placement at entry.
         sync_record_activity_and_notify();
 
-        $batchId  = $body['batch']    ?? null;
-        $verdicts = $body['verdicts'] ?? null;
+        $batchId = $body['batch'] ?? null;
+        $useIt   = $body['useIt'] ?? null;
 
         $fail = function (string $msg, int $code = 400) {
           return new Kirby\Http\Response(
@@ -2294,7 +2296,7 @@ HTML;
           );
         };
 
-        if (!is_string($batchId) || $batchId === '' || !is_array($verdicts)) {
+        if (!is_string($batchId) || $batchId === '' || !is_array($useIt)) {
           return $fail('Missing or invalid body fields.');
         }
 
@@ -2307,38 +2309,34 @@ HTML;
           return $fail('Unknown image-workshop batch: ' . $batchId, 404);
         }
 
-        // Validate against the batch's actual files + the 3-value enum.
-        // Drop empty/null verdicts (an "unset" in the UI).
-        $allowed   = ['ok', 'rework', 'dropped'];
+        // Validate against the batch's actual files. Off images (falsy) are
+        // dropped; only ON files survive into the saved map.
         $fileNames = $batchPage->files()->pluck('filename');
         $clean     = [];
-        foreach ($verdicts as $fname => $verdict) {
+        foreach ($useIt as $fname => $on) {
           if (!is_string($fname)) {
-            return $fail('Verdict key is not a filename string.');
+            return $fail('Use-it key is not a filename string.');
           }
-          if ($verdict === null || $verdict === '') {
-            continue; // cleared — omit from the saved map
-          }
-          if (!is_string($verdict) || !in_array($verdict, $allowed, true)) {
-            return $fail('Invalid verdict for ' . $fname . ': ' . (is_string($verdict) ? $verdict : gettype($verdict)));
+          if (!$on) {
+            continue; // off — omit from the saved map
           }
           if (!in_array($fname, $fileNames, true)) {
             return $fail('Unknown file in batch: ' . $fname);
           }
-          $clean[$fname] = $verdict;
+          $clean[$fname] = true;
         }
 
         $payload = [
           'schemaVersion' => 1,
-          'verdicts'      => (object) $clean, // {} not [] when empty
+          'useIt'         => (object) $clean, // {} not [] when empty
         ];
         $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 
-        $target = $batchPage->root() . '/verdicts.json';
+        $target = $batchPage->root() . '/useit.json';
         $tmp    = $target . '.tmp';
         if (file_put_contents($tmp, $json) === false || !rename($tmp, $target)) {
           @unlink($tmp);
-          return $fail('Failed to write verdicts.json.', 500);
+          return $fail('Failed to write useit.json.', 500);
         }
 
         // Sync S3: bump the batch page's _sync sidecar. $batchPage
@@ -2534,9 +2532,10 @@ HTML;
      * Read-only enumeration backing the editor's "Import images" sub-panel.
      * Without ?batch it returns the batch index ({id,title,isDraft,count}),
      * sorted like the workshop landing page. With ?batch it returns that
-     * batch's images with a small (320px long-edge) thumbnail, the recorded
-     * verdict, and — when ?target is given — whether the image has already
-     * been sent to that page (read from the batch's sent.json sidecar).
+     * batch's images with a small (320px long-edge) thumbnail, the use-it
+     * flag (4g-1; the editor pulls only use-it=on images), and — when
+     * ?target is given — whether the image has already been sent to that
+     * page (read from the batch's sent.json sidecar).
      *
      * The actual transfer still goes through POST dev/image-workshop/use-image
      * at the user-chosen long-edge size; the thumb here is display-only.
@@ -2577,11 +2576,23 @@ HTML;
           return $json(['ok' => false, 'error' => 'Unknown image-workshop batch: ' . $batchId], 404);
         }
 
-        $verdicts = [];
-        $vPath = $batchPage->root() . '/verdicts.json';
-        if (is_file($vPath)) {
-          $d = json_decode(@file_get_contents($vPath), true);
-          if (is_array($d) && isset($d['verdicts']) && is_array($d['verdicts'])) $verdicts = $d['verdicts'];
+        // Use-it flags (4g-1). Read useit.json; migrate on read from the
+        // legacy verdicts.json (verdict 'ok' → use it = on).
+        $useIt = [];
+        $uPath = $batchPage->root() . '/useit.json';
+        if (is_file($uPath)) {
+          $d = json_decode(@file_get_contents($uPath), true);
+          if (is_array($d) && isset($d['useIt']) && is_array($d['useIt'])) {
+            foreach ($d['useIt'] as $fn => $on) { if ($on) $useIt[$fn] = true; }
+          }
+        } else {
+          $vPath = $batchPage->root() . '/verdicts.json';
+          if (is_file($vPath)) {
+            $d = json_decode(@file_get_contents($vPath), true);
+            if (is_array($d) && isset($d['verdicts']) && is_array($d['verdicts'])) {
+              foreach ($d['verdicts'] as $fn => $verd) { if ($verd === 'ok') $useIt[$fn] = true; }
+            }
+          }
         }
 
         // sent.json: { sent: { "<filename>": [ {page,title}, ... ] } }
@@ -2606,7 +2617,7 @@ HTML;
             'thumb'    => $thumb->url(),
             'width'    => $img->width(),
             'height'   => $img->height(),
-            'verdict'  => is_string($verdicts[$fn] ?? null) ? $verdicts[$fn] : '',
+            'useIt'    => !empty($useIt[$fn]),
             'sent'     => $sentTo($fn),
           ];
         }

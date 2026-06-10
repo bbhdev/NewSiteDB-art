@@ -317,13 +317,13 @@ body.iw-body {
   margin-left: auto;
 }
 
-/* Verdict triage bar (Step B) ──────────────────────────────────── */
+/* Use-it triage bar (4g-1) ──────────────────────────────────────── */
 
-/* Verdict accents, reused by filter chips, toggle buttons, card tints. */
+/* Use-it accents, reused by filter chips, toggle button, card tint.
+   on = green (will be pulled by the editor); off = neutral grey. */
 :root {
-  --iw-ok:      #5cb874;
-  --iw-rework:  #e0a83e;
-  --iw-dropped: #d06a6a;
+  --iw-on:  #5cb874;
+  --iw-off: #6b7079;
 }
 
 .iw-subbar {
@@ -391,20 +391,18 @@ body.iw-body {
   text-align: center;
 }
 .iw-filter.is-active .iw-filter-n { background: rgba(0, 0, 0, 0.18); }
-/* Dot before the verdict-specific chips so the colour reads even when
+/* Dot before the state-specific chips so the colour reads even when
    inactive. */
-.iw-filter--ok::before,
-.iw-filter--rework::before,
-.iw-filter--dropped::before {
+.iw-filter--on::before,
+.iw-filter--off::before {
   content: "";
   width: 0.55em;
   height: 0.55em;
   border-radius: 50%;
   display: inline-block;
 }
-.iw-filter--ok::before      { background: var(--iw-ok); }
-.iw-filter--rework::before  { background: var(--iw-rework); }
-.iw-filter--dropped::before { background: var(--iw-dropped); }
+.iw-filter--on::before  { background: var(--iw-on); }
+.iw-filter--off::before { background: var(--iw-off); }
 
 .iw-subbar-actions {
   display: flex;
@@ -432,12 +430,12 @@ body.iw-body {
   font-size: 0.85em;
   cursor: pointer;
 }
-.iw-copy:hover:not(:disabled) { background: #33363c; border-color: var(--iw-rework); }
+.iw-copy:hover:not(:disabled) { background: #33363c; border-color: var(--iw-off); }
 .iw-copy:disabled { opacity: 0.4; cursor: default; }
 .iw-copy-n {
   font-variant-numeric: tabular-nums;
-  background: var(--iw-rework);
-  color: #1f2024;
+  background: var(--iw-off);
+  color: #f0f0f0;
   border-radius: 999px;
   padding: 0 0.45em;
   font-weight: 600;
@@ -445,130 +443,51 @@ body.iw-body {
   text-align: center;
 }
 
-/* Card verdict tint — a left accent stripe keyed to the verdict, so
-   the grid reads at a glance even before filtering. */
-.iw-card[data-verdict="ok"]      { border-left: 3px solid var(--iw-ok); }
-.iw-card[data-verdict="rework"]  { border-left: 3px solid var(--iw-rework); }
-.iw-card[data-verdict="dropped"] { border-left: 3px solid var(--iw-dropped); }
-.iw-card[data-verdict="dropped"] { opacity: 0.72; } /* dropped reads as de-emphasised */
+/* Card use-it tint — a left accent stripe keyed to the use-it state, so
+   the grid reads at a glance even before filtering. Off carries no stripe
+   (the absence of green is itself the signal). */
+.iw-card[data-useit="1"] { border-left: 3px solid var(--iw-on); }
 .iw-card[hidden] { display: none; }
 
-/* Verdict toggle (per card) ───────────────────────────────────── */
+/* Use-it toggle (per card) ─────────────────────────────────────── */
 
-.iw-verdict {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  background: #33363c;
+.iw-controls {
+  display: flex;
   border-top: 1px solid #33363c;
 }
-.iw-vbtn {
-  background: #202227;
-  color: #b0b0b0;
-  border: none;
-  padding: 0.4rem 0.3rem;
-  font: inherit;
-  font-size: 0.8em;
-  font-weight: 600;
-  cursor: pointer;
-}
-.iw-vbtn:hover { background: #2a2c31; color: #e8e8e8; }
-.iw-vbtn[aria-pressed="true"] { color: #16171a; }
-.iw-vbtn--ok[aria-pressed="true"]      { background: var(--iw-ok); }
-.iw-vbtn--rework[aria-pressed="true"]  { background: var(--iw-rework); }
-.iw-vbtn--dropped[aria-pressed="true"] { background: var(--iw-dropped); }
-
-/* "Use this" transfer affordance (Slice 2) ──────────────────────── */
-
-/* The button is the 2nd grid child (after OK). It is hidden until the
-   card is marked OK, at which point the verdict row widens from 3 to 4
-   columns so the row reads: OK | Use this | Rework | Dropped. */
 .iw-use {
-  display: none;
-  background: #f0a060;
-  color: #16171a;
-  border: none;
-  padding: 0.4rem 0.3rem;
-  font: inherit;
-  font-size: 0.8em;
-  font-weight: 700;
-  cursor: pointer;
-}
-.iw-use:hover { background: #f5b074; }
-.iw-card[data-verdict="ok"] .iw-verdict { grid-template-columns: repeat(4, 1fr); }
-.iw-card[data-verdict="ok"] .iw-use { display: block; }
-
-/* Send picker + sent-list live in a thin footer under the verdict row. */
-.iw-send {
-  border-top: 1px solid #2c2e33;
-  background: #1b1c20;
-}
-.iw-send-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.55rem;
-}
-.iw-send-picker[hidden] { display: none; }
-.iw-send-select {
   flex: 1 1 auto;
-  min-width: 0;
-  background: #202227;
-  color: #e8e8e8;
-  border: 1px solid #3a3d44;
-  border-radius: 4px;
-  padding: 0.3rem 0.4rem;
-  font: inherit;
-  font-size: 0.82em;
-}
-.iw-send-go {
-  background: #f0a060;
-  color: #16171a;
-  border: none;
-  border-radius: 4px;
-  padding: 0.3rem 0.7rem;
-  font: inherit;
-  font-size: 0.82em;
-  font-weight: 700;
-  cursor: pointer;
-}
-.iw-send-go:disabled { opacity: 0.5; cursor: default; }
-.iw-send-cancel {
-  background: #2a2c31;
-  color: #c0c0c0;
-  border: 1px solid #3a3d44;
-  border-radius: 4px;
-  padding: 0.3rem 0.5rem;
-  font: inherit;
-  font-size: 0.82em;
-  cursor: pointer;
-  line-height: 1;
-}
-.iw-send-cancel:hover { background: #33363c; color: #e8e8e8; }
-
-/* Per-image "Sent to: …" badges, shown once an image has been sent. */
-.iw-sent-list {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  padding: 0.4rem 0.55rem;
+  justify-content: center;
+  gap: 0.5rem;
+  background: #202227;
+  color: #c0c0c0;
+  border: none;
+  padding: 0.55rem 0.6rem;
+  font: inherit;
+  font-size: 0.9em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
 }
-.iw-sent-list[hidden] { display: none; }
-.iw-sent-label {
-  color: #80c890;
-  font-size: 0.74em;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+/* Leading dot doubles as the on/off indicator: hollow grey when off,
+   filled dark-on-green when on. */
+.iw-use::before {
+  content: "";
+  width: 0.72em;
+  height: 0.72em;
+  border-radius: 50%;
+  border: 2px solid var(--iw-off);
+  background: transparent;
+  box-sizing: border-box;
 }
-.iw-sent-label::before { content: "✓ "; }
-.iw-sent-chip {
-  background: rgba(92, 184, 116, 0.16);
-  color: #b6e4c2;
-  border: 1px solid rgba(92, 184, 116, 0.4);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
-  font-size: 0.78em;
+.iw-use:hover { background: #2a2c31; color: #e8e8e8; }
+.iw-use[aria-pressed="true"] {
+  background: var(--iw-on);
+  color: #11210f;
 }
-/* A sent card carries a green right stripe mirroring the verdict stripe. */
-.iw-card.is-sent { border-right: 3px solid var(--iw-ok); }
+.iw-use[aria-pressed="true"]::before {
+  border-color: #11210f;
+  background: #11210f;
+}

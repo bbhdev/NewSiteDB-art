@@ -1,107 +1,83 @@
 <?php
 /**
- * /dev/image-workshop/<batch> grid view — Phase 2 Slice 2 workshop
- * Steps A + B (v0.10.35).
+ * /dev/image-workshop/<batch> grid view — Phase 2 workshop.
  *
- * v0.10.36 — fix: size picker moved from the top toolbar into the
- * single control bar, so its dropdown is no longer hidden behind the
- * sticky verdict subbar.
- * v0.10.37 — fix: replaced the type=number + datalist combobox (which a
- * browser filters down to options matching the pre-filled value, hiding
- * all other presets) with an explicit <select> of presets that all show,
- * beside the number field for custom entry.
- * v0.10.38 — UX: standard type-or-pick combo. Number field + disclosure
- * caret opening a preset menu; choosing a preset only FILLS the field
- * (no auto-submit), then the user clicks Apply. Replaces the <select>
- * (which showed its own value and executed immediately — confusing).
+ * v0.10.35 — Step B introduced a per-image VERDICT triage (ok / rework /
+ * dropped) persisted to verdicts.json, plus a verdict filter bar and a
+ * per-card "Use this" push-to-page transfer.
  *
- * Triage grid. For every image in the batch, renders the original
- * alongside a resized derivative at a chosen long-edge size, with
- * dimensions + file size + open-in-new-tab links for both.
+ * v0.10.182 (Convergence Slice 4g-1) — MODEL PIVOT. The 3-state verdict
+ * collapses to a single "Use it" boolean per image:
+ *   - One toggle per card (on/off), persisted to a new useit.json sidecar
+ *     ({ schemaVersion, useIt: { "<filename>": true } } — only ON files
+ *     are listed; absence = off). Migrated on read from the legacy
+ *     verdicts.json (verdict 'ok' → use it = on); the first save writes
+ *     useit.json and the legacy file is thereafter ignored.
+ *   - Filter pills become All / Use it = on / Use it = off.
+ *   - "ok" and "rework" buttons are gone (rework is now implicit in off).
+ *   - "Copy filenames" now copies the OFF set (the rejection list).
+ *   - The push-to-page transfer (target picker + sent-list) is REMOVED:
+ *     transfer ownership moves to the editor, which pulls only the
+ *     use-it=on images via /dev/image-workshop/list (consumer-side filter).
+ *
+ * Deferred to later 4g slices: Dropped=delete (4g-2), per-image long edge
+ * (4g-3), in-workshop file rename (4g-5), editable batch names (4g-6).
  *
  * Resize semantics mirror the canvas-page runtime and the maxLongEdge
- * commit hook exactly: $file->resize($size, $size) fits the image
- * inside a $size-square box (long edge binds, aspect preserved, no
- * crop — verified against Kirby Dimensions::fitWidthAndHeight). So the
+ * commit hook exactly: $file->resize($size, $size) fits the image inside a
+ * $size-square box (long edge binds, aspect preserved, no crop). The
  * derivative shown here is byte-identical to what a commit at the same
  * value would produce.
  *
- * NOTE (perf): resize() is eager — loading this page generates a thumb
- * for every image at the chosen size on first visit, then serves from
- * the /media cache thereafter. For a 20-image batch that's 20 one-time
- * generations. Intended: the whole point is to materialise and inspect
- * the batch. Changing the size regenerates at the new size (the old
- * size stays cached).
- *
- * Step B (v0.10.35) — per-image VERDICT triage: each card carries an
- * ok / rework / dropped toggle, persisted to a per-batch sidecar
- * (verdicts.json) via POST dev/image-workshop/save. A filter bar narrows
- * the grid by verdict, and "Copy rework filenames" yields the bulk
- * Photoshop-handoff list. Verdicts are author judgement, never touch the
- * source files.
+ * NOTE (perf): resize() is eager — first visit at a size generates a thumb
+ * per image, then serves from /media cache. Changing the size regenerates
+ * at the new size (the old size stays cached).
  */
 $v = option('version', 'dev');
 
 // Test long edge: ?size=NNNN, default 1000, clamped to [200, 8000] to
-// match the image blueprint's maxLongEdge bounds.
+// match the image blueprint's maxLongEdge bounds. (Still global in 4g-1;
+// per-image long edge arrives in 4g-3.)
 $sizeRaw = kirby()->request()->get('size');
 $size    = is_numeric($sizeRaw) ? (int) $sizeRaw : 1000;
 $size    = max(200, min(8000, $size));
 
 $images = $page->images()->sortBy('filename', 'asc');
 
-// Preset sizes offered in the datalist (author can still type any
-// value in the number input).
+// Preset sizes offered in the type-or-pick combo.
 $presets = [800, 1000, 1200, 1600, 2400];
 
-// Load existing verdicts sidecar (written by dev/image-workshop/save).
-// Shape: { schemaVersion, verdicts: { "<filename>": "ok|rework|dropped" } }.
-$verdictsPath = $page->root() . '/verdicts.json';
-$verdicts     = [];
-if (is_file($verdictsPath)) {
-  $decoded = json_decode(file_get_contents($verdictsPath), true);
-  if (is_array($decoded) && isset($decoded['verdicts']) && is_array($decoded['verdicts'])) {
-    $verdicts = $decoded['verdicts'];
+// Load the "use it" sidecar. Shape: { schemaVersion, useIt: { "<filename>": true } }.
+// Only ON files are listed; absence means off. Migration: when useit.json
+// is absent, derive from the legacy verdicts.json (verdict 'ok' → on). The
+// first save writes useit.json and the legacy file is thereafter ignored.
+$useItPath = $page->root() . '/useit.json';
+$useIt     = [];
+if (is_file($useItPath)) {
+  $decoded = json_decode(file_get_contents($useItPath), true);
+  if (is_array($decoded) && isset($decoded['useIt']) && is_array($decoded['useIt'])) {
+    foreach ($decoded['useIt'] as $fn => $on) {
+      if ($on) { $useIt[$fn] = true; }
+    }
+  }
+} else {
+  $vPath = $page->root() . '/verdicts.json';
+  if (is_file($vPath)) {
+    $d = json_decode(file_get_contents($vPath), true);
+    if (is_array($d) && isset($d['verdicts']) && is_array($d['verdicts'])) {
+      foreach ($d['verdicts'] as $fn => $verdict) {
+        if ($verdict === 'ok') { $useIt[$fn] = true; }
+      }
+    }
   }
 }
 
-$verdictKinds = ['ok', 'rework', 'dropped'];
-
-// Load the "sent" sidecar (written by dev/image-workshop/use-image).
-// Shape: { schemaVersion, sent: { "<filename>": [ {page,title}, ... ] } }.
-// Drives the per-card "Sent to …" badges and disables already-sent pages
-// in that card's target dropdown.
-$sentPath = $page->root() . '/sent.json';
-$sentMap  = [];
-if (is_file($sentPath)) {
-  $decodedSent = json_decode(file_get_contents($sentPath), true);
-  if (is_array($decodedSent) && isset($decodedSent['sent']) && is_array($decodedSent['sent'])) {
-    $sentMap = $decodedSent['sent'];
-  }
-}
-
-// Enumerate transfer targets offered by "Use this". Any real content page is
-// valid (the use-image route lazily provisions its image library); we exclude
-// only the system pages (the /dev editor tree, the error page) and the
-// per-page `images` child libraries (image-container template). NOTE: we do
-// NOT filter on canvas-page — project content uses the `default` template, so
-// that filter left this list empty.
-$canvasPages = [];
-foreach (kirby()->site()->index() as $cp) {
-  $cid = $cp->id();
-  if ($cid === 'dev' || strpos($cid, 'dev/') === 0) { continue; }
-  if ($cid === 'error' || strpos($cid, 'error/') === 0) { continue; }
-  if ($cp->intendedTemplate()->name() === 'image-container') { continue; }
-  $canvasPages[] = ['id' => $cid, 'title' => $cp->title()->value()];
-}
-
-// Counts per verdict, for the filter-bar badges.
-$counts = ['ok' => 0, 'rework' => 0, 'dropped' => 0, 'unrated' => 0];
+// Counts for the filter pills.
+$onCount = 0;
 foreach ($images as $img) {
-  $vv = $verdicts[$img->filename()] ?? '';
-  if (in_array($vv, $verdictKinds, true)) { $counts[$vv]++; }
-  else                                    { $counts['unrated']++; }
+  if (!empty($useIt[$img->filename()])) { $onCount++; }
 }
+$offCount = $images->count() - $onCount;
 ?>
 <!doctype html>
 <html lang="en">
@@ -119,18 +95,13 @@ foreach ($images as $img) {
     <span class="iw-version">v<?= esc($v) ?></span>
   </header>
 
-  <!-- Single control bar: size picker (always) + verdict filter/copy
+  <!-- Single control bar: size picker (always) + use-it filter/copy
        (only when the batch has images). The size picker lives HERE, not
-       in the top toolbar: when it was in the toolbar its datalist popup
-       opened downward straight into this sticky opaque bar, which hid
-       the dropdown (v0.10.35 regression). With the input inside the bar,
-       the popup opens into the grid below — nothing opaque covers it. -->
+       in the top toolbar, so its preset popup opens into the grid below
+       rather than behind the sticky opaque bar. -->
   <div class="iw-subbar">
     <form method="get" class="iw-sizeform" action="<?= $page->url() ?>">
       <label class="iw-sizelabel" for="iw-size">Test long edge (px)</label>
-      <!-- Type-or-pick combo: the number field holds the value; the
-           disclosure caret opens a preset list whose choice only FILLS
-           the field (no submit). Apply commits. -->
       <div class="iw-sizecombo">
         <input type="number" id="iw-size" name="size" class="iw-sizeinput"
                min="200" max="8000" step="10" value="<?= $size ?>"
@@ -149,31 +120,23 @@ foreach ($images as $img) {
 
     <?php if ($images->count() > 0): ?>
     <span class="iw-subbar-sep" aria-hidden="true"></span>
-    <div class="iw-filterbar" role="group" aria-label="Filter by verdict">
+    <div class="iw-filterbar" role="group" aria-label="Filter by use-it state">
       <span class="iw-filter-label">Show</span>
       <button type="button" class="iw-filter is-active" data-filter="all">All <span class="iw-filter-n"><?= $images->count() ?></span></button>
-      <button type="button" class="iw-filter" data-filter="unrated">Unrated <span class="iw-filter-n" data-count="unrated"><?= $counts['unrated'] ?></span></button>
-      <button type="button" class="iw-filter iw-filter--ok"      data-filter="ok">OK <span class="iw-filter-n" data-count="ok"><?= $counts['ok'] ?></span></button>
-      <button type="button" class="iw-filter iw-filter--rework"  data-filter="rework">Rework <span class="iw-filter-n" data-count="rework"><?= $counts['rework'] ?></span></button>
-      <button type="button" class="iw-filter iw-filter--dropped" data-filter="dropped">Dropped <span class="iw-filter-n" data-count="dropped"><?= $counts['dropped'] ?></span></button>
+      <button type="button" class="iw-filter iw-filter--on"  data-filter="on">Use it = on <span class="iw-filter-n" data-count="on"><?= $onCount ?></span></button>
+      <button type="button" class="iw-filter iw-filter--off" data-filter="off">Use it = off <span class="iw-filter-n" data-count="off"><?= $offCount ?></span></button>
     </div>
     <div class="iw-subbar-actions">
       <span class="iw-savestate" id="iw-savestate" aria-live="polite"></span>
-      <button type="button" class="iw-copy" id="iw-copy" title="Copy newline-separated filenames of every image marked Rework">
-        Copy rework filenames <span class="iw-copy-n" id="iw-copy-n"><?= $counts['rework'] ?></span>
+      <button type="button" class="iw-copy" id="iw-copy" title="Copy newline-separated filenames of every image with Use it = off">
+        Copy filenames (off) <span class="iw-copy-n" id="iw-copy-n"><?= $offCount ?></span>
       </button>
     </div>
     <?php endif; ?>
   </div>
 
-  <!-- Long-operation feedback. Changing the test size regenerates a
-       derivative for every image at the new size; on first request
-       that's a synchronous GD/Imagick pass per image and can take a
-       few seconds for a large batch. The form submit is a normal GET
-       navigation, so without this the page would just sit blank with
-       only the browser's own tab spinner. This overlay appears the
-       instant Apply (or Enter) fires and stays until the regenerated
-       page replaces it. -->
+  <!-- Long-operation feedback for size regeneration (synchronous GD/Imagick
+       pass per image on first visit at a given size). -->
   <div id="iw-busy" class="iw-busy" hidden aria-live="polite">
     <div class="iw-busy-box">
       <div class="iw-spinner" aria-hidden="true"></div>
@@ -198,23 +161,12 @@ foreach ($images as $img) {
             $resized = $img->resize($size, $size);
             $rw = $resized->width();
             $rh = $resized->height();
-            // Percentage of the original long edge the derivative keeps.
             $origLong = max($ow, $oh);
             $pct = $origLong > 0 ? round(($size <= $origLong ? $size : $origLong) / $origLong * 100) : 100;
             $noShrink = $size >= $origLong;
-            // Current verdict for this file ('' when unrated).
-            $verdict = $verdicts[$img->filename()] ?? '';
-            if (!in_array($verdict, $verdictKinds, true)) { $verdict = ''; }
-            // Pages this image has already been sent to (for badges + to
-            // disable those options in this card's dropdown).
-            $sentEntries = (isset($sentMap[$img->filename()]) && is_array($sentMap[$img->filename()]))
-              ? $sentMap[$img->filename()] : [];
-            $sentIds = [];
-            foreach ($sentEntries as $se) {
-              if (is_array($se) && !empty($se['page'])) { $sentIds[] = $se['page']; }
-            }
+            $on = !empty($useIt[$img->filename()]);
           ?>
-          <article class="iw-card<?= !empty($sentEntries) ? ' is-sent' : '' ?>" data-filename="<?= esc($img->filename()) ?>" data-verdict="<?= esc($verdict) ?>">
+          <article class="iw-card" data-filename="<?= esc($img->filename()) ?>" data-useit="<?= $on ? '1' : '0' ?>">
             <div class="iw-card-head">
               <span class="iw-fname" title="<?= esc($img->filename()) ?>"><?= esc($img->filename()) ?></span>
             </div>
@@ -248,38 +200,10 @@ foreach ($images as $img) {
               </figure>
             </div>
 
-            <!-- Verdict toggle (Step B). Click the active one again to
-                 clear back to unrated. The "Use this" button (Slice 2)
-                 appears only when the verdict is OK (CSS-gated on the
-                 card's data-verdict) and sits immediately right of OK. -->
-            <div class="iw-verdict" role="group" aria-label="Verdict for <?= esc($img->filename()) ?>">
-              <button type="button" class="iw-vbtn iw-vbtn--ok"      data-verdict="ok"<?=      $verdict === 'ok'      ? ' aria-pressed="true"' : '' ?>>OK</button>
-              <button type="button" class="iw-use" aria-haspopup="true" aria-expanded="false" title="Send the resized image to a page">Use it</button>
-              <button type="button" class="iw-vbtn iw-vbtn--rework"  data-verdict="rework"<?=  $verdict === 'rework'  ? ' aria-pressed="true"' : '' ?>>Rework</button>
-              <button type="button" class="iw-vbtn iw-vbtn--dropped" data-verdict="dropped"<?= $verdict === 'dropped' ? ' aria-pressed="true"' : '' ?>>Dropped</button>
-            </div>
-
-            <!-- Transfer affordance (Slice 2). The picker stays hidden
-                 until "Use this" is clicked. The sent-list shows which
-                 page(s) this resized image has already been sent to;
-                 those pages are pre-disabled in the dropdown. -->
-            <div class="iw-send">
-              <div class="iw-send-picker" hidden>
-                <select class="iw-send-select" aria-label="Choose target page">
-                  <option value="">Choose a page…</option>
-                  <?php foreach ($canvasPages as $cpi): $isSent = in_array($cpi['id'], $sentIds, true); ?>
-                    <option value="<?= esc($cpi['id']) ?>"<?= $isSent ? ' disabled' : '' ?>><?= esc($cpi['title']) ?><?= $isSent ? ' (sent)' : '' ?></option>
-                  <?php endforeach; ?>
-                </select>
-                <button type="button" class="iw-send-go">Send</button>
-                <button type="button" class="iw-send-cancel" aria-label="Cancel">✕</button>
-              </div>
-              <div class="iw-sent-list"<?= empty($sentEntries) ? ' hidden' : '' ?>>
-                <span class="iw-sent-label">Sent to:</span>
-                <?php foreach ($sentEntries as $se): if (!is_array($se)) continue; ?>
-                  <span class="iw-sent-chip" data-page="<?= esc($se['page'] ?? '') ?>"><?= esc($se['title'] ?? ($se['page'] ?? '?')) ?></span>
-                <?php endforeach; ?>
-              </div>
+            <!-- Use-it toggle (4g-1). On = the editor will pull this image;
+                 off = it stays in the workshop (implicit "rework"). -->
+            <div class="iw-controls">
+              <button type="button" class="iw-use" aria-pressed="<?= $on ? 'true' : 'false' ?>" aria-label="Toggle Use it for <?= esc($img->filename()) ?>">Use it</button>
             </div>
           </article>
         <?php endforeach; ?>
@@ -288,8 +212,7 @@ foreach ($images as $img) {
   </main>
 
   <script>
-    // Size picker (type-or-pick combo) + busy overlay. Vanilla, no build
-    // step.
+    // Size picker (type-or-pick combo) + busy overlay. Vanilla, no build step.
     (function () {
       var form  = document.querySelector('.iw-sizeform');
       var busy  = document.getElementById('iw-busy');
@@ -300,9 +223,6 @@ foreach ($images as $img) {
       var count = <?= (int) $images->count() ?>;
       if (!form) return;
 
-      // Disclosure combo: caret toggles the preset list; choosing an
-      // option only fills the input (the standard pattern — no auto-
-      // submit). The user then clicks Apply.
       if (caret && menu && input) {
         var opts = Array.prototype.slice.call(menu.querySelectorAll('.iw-sizeopt'));
 
@@ -347,46 +267,45 @@ foreach ($images as $img) {
       }
     })();
 
-    // Verdict triage (Step B): per-card toggle, client-side filter,
-    // copy-rework, debounced persistence.
+    // Use-it triage (4g-1): per-card toggle, client-side filter,
+    // copy-off-filenames, debounced persistence to useit.json.
     (function () {
       var grid = document.getElementById('iw-grid');
       if (!grid) return;
 
       var SAVE_URL = <?= json_encode(url('dev/image-workshop/save')) ?>;
       var BATCH_ID = <?= json_encode($page->id()) ?>;
-      var KINDS    = ['ok', 'rework', 'dropped'];
 
-      var cards     = Array.prototype.slice.call(grid.querySelectorAll('.iw-card'));
-      var filterBtns= Array.prototype.slice.call(document.querySelectorAll('.iw-filter'));
-      var saveState = document.getElementById('iw-savestate');
-      var copyBtn   = document.getElementById('iw-copy');
-      var copyN     = document.getElementById('iw-copy-n');
+      var cards      = Array.prototype.slice.call(grid.querySelectorAll('.iw-card'));
+      var filterBtns = Array.prototype.slice.call(document.querySelectorAll('.iw-filter'));
+      var saveState  = document.getElementById('iw-savestate');
+      var copyBtn    = document.getElementById('iw-copy');
+      var copyN      = document.getElementById('iw-copy-n');
 
-      // Seed in-memory verdict map from the rendered DOM (source of truth
-      // on load is what the server wrote).
-      var verdicts = {};
+      function isOn(card) { return card.getAttribute('data-useit') === '1'; }
+
+      // In-memory use-it map, seeded from the rendered DOM (server is the
+      // source of truth on load).
+      var useIt = {};
       cards.forEach(function (card) {
-        var v = card.getAttribute('data-verdict') || '';
-        if (KINDS.indexOf(v) !== -1) verdicts[card.getAttribute('data-filename')] = v;
+        if (isOn(card)) useIt[card.getAttribute('data-filename')] = true;
       });
 
       // ── Counts + copy-button badge ───────────────────────────────
       function recount() {
-        var c = { ok: 0, rework: 0, dropped: 0, unrated: 0 };
-        cards.forEach(function (card) {
-          var v = card.getAttribute('data-verdict') || '';
-          if (KINDS.indexOf(v) !== -1) c[v]++; else c.unrated++;
-        });
+        var on = 0;
+        cards.forEach(function (c) { if (isOn(c)) on++; });
+        var off = cards.length - on;
         filterBtns.forEach(function (b) {
           var key = b.getAttribute('data-filter');
           var n   = b.querySelector('.iw-filter-n');
           if (!n) return;
-          if (key === 'all') n.textContent = cards.length;
-          else if (c.hasOwnProperty(key)) n.textContent = c[key];
+          if (key === 'all')      n.textContent = cards.length;
+          else if (key === 'on')  n.textContent = on;
+          else if (key === 'off') n.textContent = off;
         });
-        if (copyN) copyN.textContent = c.rework;
-        if (copyBtn) copyBtn.disabled = c.rework === 0;
+        if (copyN) copyN.textContent = off;
+        if (copyBtn) copyBtn.disabled = off === 0;
       }
 
       // ── Persistence (debounced; sends the whole map) ─────────────
@@ -405,7 +324,7 @@ foreach ($images as $img) {
         fetch(SAVE_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batch: BATCH_ID, verdicts: verdicts })
+          body: JSON.stringify({ batch: BATCH_ID, useIt: useIt })
         }).then(function (r) { return r.json(); })
           .then(function (j) {
             if (j && j.ok) { flash('Saved ✓', false); }
@@ -414,25 +333,18 @@ foreach ($images as $img) {
           .catch(function () { flash('Save failed (network)', true); });
       }
 
-      // ── Verdict toggle ───────────────────────────────────────────
+      // ── Use-it toggle ────────────────────────────────────────────
       grid.addEventListener('click', function (e) {
-        var btn = e.target.closest('.iw-vbtn');
+        var btn = e.target.closest('.iw-use');
         if (!btn) return;
         var card = btn.closest('.iw-card');
         if (!card) return;
-        var fname   = card.getAttribute('data-filename');
-        var picked  = btn.getAttribute('data-verdict');
-        var current = card.getAttribute('data-verdict') || '';
-        var next    = (current === picked) ? '' : picked; // re-click clears
+        var fname = card.getAttribute('data-filename');
+        var next  = !isOn(card);
 
-        card.setAttribute('data-verdict', next);
-        // Reflect aria-pressed on the three buttons in this card.
-        card.querySelectorAll('.iw-vbtn').forEach(function (b) {
-          if (b.getAttribute('data-verdict') === next) b.setAttribute('aria-pressed', 'true');
-          else b.removeAttribute('aria-pressed');
-        });
-
-        if (next) verdicts[fname] = next; else delete verdicts[fname];
+        card.setAttribute('data-useit', next ? '1' : '0');
+        btn.setAttribute('aria-pressed', next ? 'true' : 'false');
+        if (next) useIt[fname] = true; else delete useIt[fname];
 
         recount();
         applyFilter(); // a now-filtered-out card hides immediately
@@ -443,11 +355,10 @@ foreach ($images as $img) {
       var activeFilter = 'all';
       function applyFilter() {
         cards.forEach(function (card) {
-          var v = card.getAttribute('data-verdict') || '';
           var show;
-          if (activeFilter === 'all')          show = true;
-          else if (activeFilter === 'unrated') show = (KINDS.indexOf(v) === -1);
-          else                                 show = (v === activeFilter);
+          if (activeFilter === 'all')     show = true;
+          else if (activeFilter === 'on') show = isOn(card);
+          else                            show = !isOn(card);
           card.hidden = !show;
         });
       }
@@ -459,13 +370,13 @@ foreach ($images as $img) {
         });
       });
 
-      // ── Copy rework filenames ────────────────────────────────────
+      // ── Copy off-set filenames (the rejection / handoff list) ────
       if (copyBtn) {
         copyBtn.addEventListener('click', function () {
           var names = cards
-            .filter(function (c) { return c.getAttribute('data-verdict') === 'rework'; })
+            .filter(function (c) { return !isOn(c); })
             .map(function (c) { return c.getAttribute('data-filename'); });
-          if (!names.length) { flash('No images marked Rework', false); return; }
+          if (!names.length) { flash('No images with Use it = off', false); return; }
           var text = names.join('\n');
           var done = function () { flash('Copied ' + names.length + ' filename' + (names.length === 1 ? '' : 's') + ' ✓', false); };
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -482,92 +393,6 @@ foreach ($images as $img) {
       }
 
       recount();
-    })();
-
-    // "Use this" transfer (Slice 2): per-card, send the RESIZED image (at
-    // the current test long edge) to a chosen canvas page. The button is
-    // CSS-gated to appear only when the card's verdict is OK. A second
-    // grid-level click listener — disjoint from the verdict one above
-    // (.iw-use / .iw-send-* selectors never match .iw-vbtn).
-    (function () {
-      var grid = document.getElementById('iw-grid');
-      if (!grid) return;
-
-      var USE_URL  = <?= json_encode(url('dev/image-workshop/use-image')) ?>;
-      var BATCH_ID = <?= json_encode($page->id()) ?>;
-      var SIZE     = <?= (int) $size ?>;
-
-      function setOpen(card, on) {
-        var picker = card.querySelector('.iw-send-picker');
-        var useBtn = card.querySelector('.iw-use');
-        if (picker) picker.hidden = !on;
-        if (useBtn) useBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
-        if (on) { var sel = card.querySelector('.iw-send-select'); if (sel) sel.focus(); }
-      }
-
-      grid.addEventListener('click', function (e) {
-        var card = e.target.closest('.iw-card');
-        if (!card) return;
-
-        if (e.target.closest('.iw-use')) {
-          var picker = card.querySelector('.iw-send-picker');
-          setOpen(card, picker ? picker.hidden : true);
-          return;
-        }
-        if (e.target.closest('.iw-send-cancel')) { setOpen(card, false); return; }
-
-        var goBtn = e.target.closest('.iw-send-go');
-        if (!goBtn) return;
-
-        var sel    = card.querySelector('.iw-send-select');
-        var pageId = sel ? sel.value : '';
-        if (!pageId) { if (sel) sel.focus(); return; }
-        var fname = card.getAttribute('data-filename');
-
-        goBtn.disabled = true; goBtn.textContent = 'Sending…';
-        fetch(USE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batch: BATCH_ID, filename: fname, size: SIZE, targetPage: pageId })
-        }).then(function (r) { return r.json(); })
-          .then(function (j) {
-            goBtn.disabled = false; goBtn.textContent = 'Send';
-            if (!j || !j.ok) { alert('Send failed: ' + ((j && j.error) || 'unknown')); return; }
-            markSent(card, j.page, j.title);
-            setOpen(card, false);
-          })
-          .catch(function () {
-            goBtn.disabled = false; goBtn.textContent = 'Send';
-            alert('Send failed (network).');
-          });
-      });
-
-      function markSent(card, pageId, title) {
-        card.classList.add('is-sent');
-        var list = card.querySelector('.iw-sent-list');
-        if (list) {
-          list.hidden = false;
-          var esc = String(pageId).replace(/["\\]/g, '\\$&');
-          if (!list.querySelector('.iw-sent-chip[data-page="' + esc + '"]')) {
-            var chip = document.createElement('span');
-            chip.className = 'iw-sent-chip';
-            chip.setAttribute('data-page', pageId);
-            chip.textContent = title || pageId;
-            list.appendChild(chip);
-          }
-        }
-        // Disable that page in this card's dropdown (avoids a duplicate copy).
-        var sel = card.querySelector('.iw-send-select');
-        if (sel) {
-          Array.prototype.forEach.call(sel.options, function (o) {
-            if (o.value === pageId) {
-              o.disabled = true;
-              if (o.textContent.indexOf('(sent)') === -1) o.textContent += ' (sent)';
-            }
-          });
-          sel.value = '';
-        }
-      }
     })();
   </script>
   <!-- v<?= $v ?> -->

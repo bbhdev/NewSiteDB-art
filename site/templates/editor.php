@@ -1156,17 +1156,18 @@ $payload = str_replace('<', '\\u003c', $payload);
     }
 
     function renderImport(images) {
-      if (!images || !images.length) {
-        importGrid.innerHTML = '<div class="ed-images-empty">This batch has no images.</div>';
+      // 4g-1: the editor pulls only the workshop images flagged use-it=on.
+      var list = (images || []).filter(function (im) { return im.useIt; });
+      if (!list.length) {
+        importGrid.innerHTML = '<div class="ed-images-empty">No images flagged “Use it = on” in this batch.</div>';
         return;
       }
       var html = '';
-      for (var i = 0; i < images.length; i++) {
-        var im = images[i];
-        var v = im.verdict || '';
+      for (var i = 0; i < list.length; i++) {
+        var im = list[i];
         var badge = im.sent
           ? '<span class="ed-import-badge is-sent">sent ✓</span>'
-          : (v ? '<span class="ed-import-badge v-' + esc(v) + '">' + esc(v) + '</span>' : '');
+          : '';
         html += '<figure class="ed-img-card ed-import-card' + (im.sent ? ' is-sent' : '') +
           '" data-filename="' + esc(im.filename) + '" title="Click to import into this page">' +
           '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb) + '" alt="' + esc(im.filename) + '">' +
