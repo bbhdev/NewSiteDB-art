@@ -1371,76 +1371,19 @@ HTML;
       }
     ],
 
-    [
-      'pattern' => 'dev/draw/save',
-      'method'  => 'POST',
-      // Convergence Slice 5a-1: thin wrapper. The lines-layer save logic
-      // now lives in deco_save_lines() (site/plugins/deco/index.php) so
-      // the unified dev/editor/save route can dispatch to the same code.
-      // Request/response contract is unchanged from the pre-5a handler.
-      'action'  => function () {
-        // Sync S2: record local authoring activity + fire-and-forget
-        // ping to upstream peer (L→A in the current topology). Best-
-        // effort — see sync plugin for the no-throw contract. Done at
-        // entry rather than gated on success: a clicked Save IS author
-        // activity even when validation fails.
-        sync_record_activity_and_notify();
-
-        $body = kirby()->request()->body()->toArray();
-        $r    = deco_save_lines($body);
-
-        return new Kirby\Http\Response(
-          json_encode($r['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $r['error']]),
-          'application/json',
-          $r['ok'] ? 200 : ($r['code'] ?? 400)
-        );
-      }
-    ],
-
     /*
-     * Phase 2 / Slice 1 / step 3 (v0.10.18) — persist a target page's
-     * rect-block layout.
-     *
-     *   POST dev/page/save
-     *   body: { page, schemaVersion, chapters, rects }
-     *
-     * Validates the full shape before writing. Atomic write to
-     * content/<pageId>/rects.json via tmp + rename so a torn save
-     * never leaves a half-JSON file on disk. The page itself is
-     * resolved via kirby()->page() — same affordance as dev/draw/save.
-     *
-     * Canvas dimensions are NOT in this payload (see HANDOFF Slice 1
-     * step 1: dims come from Deco's existing per-page config).
-     *
-     * v0.10.24 — Slice 2 step 1: schemaVersion bumped 1 → 2 to add
-     * an optional `note` field per rect (editor-only author note,
-     * never rendered at runtime). Inbound schemaVersion may be 1 OR
-     * 2 — v1 payloads from older editor sessions are accepted and
-     * normalised on write (note defaults to null). Output is always
-     * written as v2.
+     * Convergence Slice 6b (v0.10.200) — the two legacy save routes
+     * `dev/draw/save` (lines layer) and `dev/page/save` (layout layer)
+     * were DELETED here. They had been reduced to thin wrappers in 5a-1;
+     * now that dev-draw.js + dev-page.js are a single dev-editor.js with
+     * one save coordinator (Section 3) that POSTs once to dev/editor/save,
+     * nothing calls them anymore. The save LOGIC still lives untouched in
+     * deco_save_lines() / deco_save_layout() (site/plugins/deco/index.php)
+     * — only the per-layer HTTP entry points are gone. The validation +
+     * atomic rects.json/lines write semantics they documented (e.g.
+     * schemaVersion 1→2 note normalisation) are unchanged inside those
+     * helpers and exercised via dev/editor/save below.
      */
-    [
-      'pattern' => 'dev/page/save',
-      'method'  => 'POST',
-      // Convergence Slice 5a-1: thin wrapper. The layout-layer save logic
-      // (chapter/rect validation + atomic rects.json write) now lives in
-      // deco_save_layout() (site/plugins/deco/index.php) so the unified
-      // dev/editor/save route can dispatch to the same code. Request/
-      // response contract is unchanged from the pre-5a handler.
-      'action'  => function () {
-        // Sync S2: see dev/draw/save for rationale on placement at entry.
-        sync_record_activity_and_notify();
-
-        $body = kirby()->request()->body()->toArray();
-        $r    = deco_save_layout($body);
-
-        return new Kirby\Http\Response(
-          json_encode($r['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $r['error']]),
-          'application/json',
-          $r['ok'] ? 200 : ($r['code'] ?? 400)
-        );
-      }
-    ],
 
     /*
      * Convergence Slice 5a-1 (v0.10.197) — unified editor save seam.

@@ -16702,25 +16702,29 @@
   loadFontBundle();
   loadLocalFonts();
 
-  // ── Save ──────────────────────────────────────────────────────────
-  async function save() {
-    _saving = true; reflectSaveButton();
-    saveStatus.classList.remove('is-error');
-    saveStatus.textContent = 'Saving…';
-    try {
+  // ── Save participant (Slice 6b) ───────────────────────────────────
+  // The Lines engine no longer POSTs on its own. It registers a "save
+  // participant" on a shared bus; the unified coordinator (appended
+  // after the Layout engine, Section 3) gathers every participant's
+  // payload and POSTs ONCE to /dev/editor/save, then routes each
+  // section's result back here. Until 6c merges the two engines into one
+  // scope, the bus is a window bridge (cf. the older edFlushLayoutSave).
+  const _saveBus = (window.__edSaveBus = window.__edSaveBus || { participants: {} });
+  _saveBus.participants.lines = {
+    // Lines has no dirty-gate on save today — it always writes.
+    wants: function () { return true; },
+    // Gather the `lines` section of the unified payload (page is injected
+    // server-side). May throw { edCancel: true } to abort the WHOLE save
+    // — the v0.8.46 skeleton-line guard: lines that reference missing
+    // master data would be silently dropped, so confirm first.
+    gather: function () {
+      _saving = true; reflectSaveButton();
+      saveStatus.classList.remove('is-error');
+      saveStatus.textContent = 'Saving…';
       // Decompose flat per-class lines back into the v4 on-disk shape:
       //   masters[]                — site-wide visual definitions
       //   byClass[cid].instances[] — per-class refs + overrides
-      // state.masters is refreshed too so the next save sees the
-      // current values (e.g., after renaming or restyling in canonical
-      // class).
       const decomposed = decomposeForSave();
-      // v0.8.46: skeleton-line guard — if decomposeForSave had to
-      // drop lines with no master content, confirm before writing
-      // so the user can't silently lose data. The dropped lines
-      // wouldn't have rendered anyway, but acknowledging the drop
-      // is what stops the silent-corruption pattern that produced
-      // them in the first place.
       if (decomposed.droppedLines && decomposed.droppedLines.length) {
         const summary = decomposed.droppedLines.slice(0, 8).map(function (d) {
           return '  • ' + d.id + ' (' + d.cid + ')'
@@ -16737,40 +16741,42 @@
         if (!ok) {
           saveStatus.textContent = 'Save canceled.';
           _saving = false; reflectSaveButton();
-          return;
+          throw { edCancel: true };   // abort the whole unified save
         }
       }
+      // Refresh state.masters so the next save sees current values
+      // (e.g. after renaming / restyling in the canonical class).
       state.masters = decomposed.masters;
-
-      const res = await fetch('/dev/draw/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page:    state.pageId,
-          masters: decomposed.masters,
-          byClass: decomposed.byClass,
-          palette: state.palette.map(reorderIdNameFirst),
-          pageCfg: state.pageConfig
-        })
-      });
-      const body = await res.json().catch(function () { return {}; });
-      if (!res.ok || !body.ok) {
-        throw new Error(body.error || ('HTTP ' + res.status));
+      return {
+        masters: decomposed.masters,
+        byClass: decomposed.byClass,
+        palette: state.palette.map(reorderIdNameFirst),
+        pageCfg: state.pageConfig
+      };
+    },
+    // Route this section's result ({ ok, error? }) into the Lines UI.
+    apply: function (r) {
+      if (r && r.ok) {
+        state.dirty = false;
+        // Flash the Save button itself (where the user's eyes already
+        // are) instead of relying on the status text aside.
+        saveBtn.classList.add('is-flash-success');
+        setTimeout(function () { saveBtn.classList.remove('is-flash-success'); }, 900);
+        saveStatus.textContent = 'Saved.';
+        setTimeout(function () { saveStatus.textContent = ''; }, 2500);
+      } else {
+        saveStatus.classList.add('is-error');
+        saveStatus.textContent = 'Save failed: ' + ((r && r.error) || 'unknown error');
       }
-      state.dirty = false;
-      // Flash the Save button itself (where the user's eyes already
-      // are) instead of relying on the status text aside.
-      saveBtn.classList.add('is-flash-success');
-      setTimeout(function () { saveBtn.classList.remove('is-flash-success'); }, 900);
-      saveStatus.textContent = 'Saved.';
-      setTimeout(function () { saveStatus.textContent = ''; }, 2500);
-    } catch (err) {
+      _saving = false; reflectSaveButton();
+    },
+    // Transport-level failure (no per-section result came back).
+    fail: function (msg) {
       saveStatus.classList.add('is-error');
-      saveStatus.textContent = 'Save failed: ' + err.message;
-    } finally {
+      saveStatus.textContent = 'Save failed: ' + msg;
       _saving = false; reflectSaveButton();
     }
-  }
+  };
 
   // ── Wire-up ───────────────────────────────────────────────────────
   toolButtons.forEach(function (b) {
@@ -16803,7 +16809,8 @@
   if (auditTypoBtn) {
     auditTypoBtn.addEventListener('click', function () { runTypographyAudit(auditTypoBtn); });
   }
-  saveBtn.addEventListener('click', save);
+  // #save-btn click is bound once by the unified save coordinator
+  // (Section 3, Slice 6b) — not here, so it doesn't double-fire.
   clearLinesBtn.addEventListener('click', clearAllLines);
   helpBtn.addEventListener('click', function () { showHelp('general'); });
   zoomInBtn.addEventListener('click',  function () { zoomIn();  });
@@ -17954,19 +17961,11 @@
       redo();
       return;
     }
-    // Save — Cmd/Ctrl+S works everywhere (overrides the browser's
-    // save-page-as), plain S works outside text inputs.
-    if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
-      e.preventDefault();
-      save();
-      return;
-    }
+    // Save shortcuts (Cmd/Ctrl+S and bare "s") are handled once by the
+    // unified save coordinator (Section 3, Slice 6b) — removed here so
+    // they don't double-fire. The input-focus guard below STAYS: it
+    // gates the nudge/Arrow handlers, not save.
     if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
-    if (e.key === 's' || e.key === 'S') {
-      e.preventDefault();
-      save();
-      return;
-    }
     // v0.8.99: Arrow keys nudge the current selection by state.nudgeStepMM
     // (Shift = ×10). Honored even with Shift held (modifier check below
     // would otherwise swallow Shift+Arrow). Cmd/Ctrl/Alt+Arrow stay free
@@ -22735,47 +22734,52 @@
   // Deco's per-page config (decision #2 of the slice plan).
   // ────────────────────────────────────────────────────────────────
   const saveBtn = document.getElementById('save-btn');
-  async function doSave() {
-    if (!dirty || saving) return;
-    saving = true;
-    // Clear any sticky error from a previous failed attempt so the
-    // "saving…" state shows cleanly and a fixed error doesn't linger.
-    transientStatus = null;
-    syncSaveButton();
-    writeStatus();
-    try {
-      const res = await fetch('/dev/page/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page:          state.pageId,
-          schemaVersion: state.schemaVersion,
-          chapters:      state.chapters,
-          rects:         state.rects
-        })
-      });
-      let json = null;
-      try { json = await res.json(); } catch (_) {}
-      if (!res.ok || !json || json.ok !== true) {
-        const msg = (json && json.error) ? json.error : ('HTTP ' + res.status);
-        setTransient('⚠ save failed · ' + msg, 0, true); // sticky error
-        console.error('[dev-page] save failed', res.status, json);
-      } else {
+  // ── Save participant (Slice 6b) ───────────────────────────────────
+  // Layout no longer POSTs on its own; it registers on the shared save
+  // bus and the unified coordinator (Section 3) POSTs once to
+  // /dev/editor/save. wants() reproduces the old `if (!dirty) return`
+  // gate; block() reproduces the "image picker open ⇒ shortcuts no-op"
+  // guard so Cmd-S during image-picking stays a no-op as before.
+  const _saveBus = (window.__edSaveBus = window.__edSaveBus || { participants: {} });
+  _saveBus.participants.layout = {
+    wants: function () { return dirty; },
+    block: function () { return !!pickerEl; },
+    // Returns the `layout` section of the unified payload. Canvas
+    // dimensions are intentionally NOT sent — they come from Deco's
+    // per-page config (decision #2 of the slice plan).
+    gather: function () {
+      saving = true;
+      // Clear any sticky error from a previous failed attempt so the
+      // "saving…" state shows cleanly and a fixed error doesn't linger.
+      transientStatus = null;
+      syncSaveButton();
+      writeStatus();
+      return {
+        schemaVersion: state.schemaVersion,
+        chapters:      state.chapters,
+        rects:         state.rects
+      };
+    },
+    apply: function (r) {
+      if (r && r.ok) {
         markClean();
         flashSaveButton();
         setTransient('saved ✓', 2000);
+      } else {
+        const msg = (r && r.error) ? r.error : 'unknown error';
+        setTransient('⚠ save failed · ' + msg, 0, true); // sticky error
+        console.error('[dev-page] save failed', r);
       }
-    } catch (err) {
-      console.error('[dev-page] save error', err);
-      setTransient('⚠ save error · ' + (err && err.message ? err.message : 'network'), 0, true); // sticky
-    } finally {
+      saving = false;
+      syncSaveButton();
+    },
+    fail: function (msg) {
+      console.error('[dev-page] save error', msg);
+      setTransient('⚠ save error · ' + msg, 0, true); // sticky
       saving = false;
       syncSaveButton();
     }
-  }
-  if (saveBtn) {
-    saveBtn.addEventListener('click', function () { doSave(); });
-  }
+  };
 
   // ────────────────────────────────────────────────────────────────
   // Cross-mode image freshness (v0.10.179). Layout shares the per-page
@@ -22797,9 +22801,10 @@
     }
     peLastMode = mode;
   });
-  window.edFlushLayoutSave = function () {
-    try { return Promise.resolve(doSave()); } catch (e) { return Promise.resolve(); }
-  };
+  // window.edFlushLayoutSave is defined by the unified save coordinator
+  // (Section 3, Slice 6b) — it now persists the layout layer via the
+  // single /dev/editor/save endpoint. Defined there (not here) so it
+  // routes through the same bus the Images pane relies on.
 
   // Chapter add form. Submit on Enter or the [+] button. Empty input
   // is a no-op (addChapter trims + bails).
@@ -22824,24 +22829,16 @@
     // capture-phase handler deals with Escape; everything else is a
     // no-op until it closes.
     if (pickerEl) return;
-    if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) {
-      ev.preventDefault();
-      doSave();
-      return;
-    }
+    // Save shortcuts (Cmd/Ctrl+S and bare "s") are handled once by the
+    // unified save coordinator (Section 3, Slice 6b) — removed here so
+    // they don't double-fire. The input-focus guard below STAYS: it
+    // gates the Delete/Escape rect shortcuts.
     const t = ev.target;
     const inField = t && (
       t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
       t.tagName === 'SELECT' || (t.isContentEditable === true)
     );
     if (inField) return;
-    // Plain "s" saves (outside text fields), mirroring the draw editor.
-    // Cmd/Ctrl+S above works everywhere; this is the quick bare-key form.
-    if (ev.key === 's' || ev.key === 'S') {
-      ev.preventDefault();
-      doSave();
-      return;
-    }
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
       if (selectedId) {
         ev.preventDefault();
@@ -22870,4 +22867,172 @@
   // Expose for console-poking during early-stage debugging only.
   // Removed once step 4 surfaces this through real UI.
   window.__pageEditor = { state: state, render: render };
+})();
+
+
+/* ════════════════════════════════════════════════════════════════════
+ * SECTION 3 — Unified save coordinator (Slice 6b)
+ *
+ * Both engines above now register a "save participant" on
+ * window.__edSaveBus.participants ({ lines, layout }). Neither POSTs on
+ * its own anymore. This coordinator is the SINGLE writer: it gathers the
+ * wanted sections, POSTs them ONCE to /dev/editor/save (the seam added in
+ * 5a-1), and routes each section's result back to its participant.
+ *
+ * Why one POST and not two (the pre-6 behaviour): the unified endpoint
+ * writes lines + layout in one request and reports per-section ok/error,
+ * so a single Save / Cmd-S / "s" is now atomic from the client's view —
+ * no window where lines saved but layout didn't because the second fetch
+ * failed.
+ *
+ * Participant contract (see the two registrations above):
+ *   wants()        → bool   should this section be included? (layout gates on dirty)
+ *   block?()       → bool   if true, the whole save is a no-op (image picker open)
+ *   gather()       → object the section payload; may throw { edCancel:true } to abort
+ *   apply(result)  → void   route { ok, error? } back into the engine's UI
+ *   fail(msg)      → void   transport-level failure (no per-section result)
+ *
+ * This is a window bridge until 6c merges both engines into one scope.
+ * ════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  const saveBtn = document.getElementById('save-btn');
+  // pageId travels in the editor-data JSON blob, same source both engines
+  // read at init. The server injects `page` into each section, so the
+  // client only needs to send it once at the top level.
+  let pageId = null;
+  try {
+    pageId = JSON.parse(document.getElementById('editor-data').textContent).pageId;
+  } catch (e) {
+    console.error('[ed-save] could not read pageId from #editor-data', e);
+  }
+
+  // Re-entrancy guard: a save in flight blocks another from starting.
+  let busy = false;
+
+  // Order matters: 'lines' first because it is the only participant that
+  // can CANCEL the save (skeleton-line confirm). Gathering it first means
+  // a cancel aborts before we touch layout's saving/transient state.
+  const ORDER = ['lines', 'layout'];
+
+  /**
+   * Gather → POST once → route results.
+   * @param {string[]=} only  restrict to these participant keys
+   *                          (e.g. ['layout'] from edFlushLayoutSave).
+   * @returns {Promise<void>}
+   */
+  async function unifiedSave(only) {
+    if (busy) return;
+    const bus = window.__edSaveBus;
+    if (!bus || !bus.participants) return;
+    const parts = bus.participants;
+
+    // Resolve which participants take part this round.
+    const keys = ORDER.filter(function (k) {
+      if (!parts[k]) return false;
+      if (only && only.indexOf(k) === -1) return false;
+      return true;
+    });
+
+    // A blocking participant (image picker open) makes the whole save a
+    // no-op — mirrors the old per-engine `if (pickerEl) return` guards.
+    for (let i = 0; i < keys.length; i++) {
+      const p = parts[keys[i]];
+      if (typeof p.block === 'function' && p.block()) return;
+    }
+
+    // Gather the sections that want saving. gather() may set per-engine
+    // "saving…" UI and may throw { edCancel:true } to abort everything.
+    const sections = {};       // payload key → section object
+    const taking = [];         // keys we actually gathered (for routing)
+    try {
+      for (let i = 0; i < keys.length; i++) {
+        const k = parts[keys[i]] && keys[i];
+        const p = parts[k];
+        if (typeof p.wants === 'function' && !p.wants()) continue;
+        sections[k] = p.gather();
+        taking.push(k);
+      }
+    } catch (err) {
+      if (err && err.edCancel) return;   // user canceled (skeleton confirm)
+      throw err;
+    }
+
+    if (!taking.length) return;   // nothing to save (e.g. layout not dirty,
+                                  // lines excluded by `only`)
+
+    busy = true;
+    let res = null, json = null;
+    try {
+      res = await fetch('/dev/editor/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({ page: pageId }, sections))
+      });
+      try { json = await res.json(); } catch (e) { json = null; }
+
+      if (!res.ok && !json) {
+        // Transport-level failure: no usable body to route per-section.
+        const msg = 'HTTP ' + res.status;
+        taking.forEach(function (k) {
+          const p = parts[k];
+          if (typeof p.fail === 'function') p.fail(msg);
+        });
+        return;
+      }
+
+      // Route each gathered section's result back to its participant.
+      // The endpoint echoes { ok, lines?:{ok,error?}, layout?:{ok,error?} }.
+      taking.forEach(function (k) {
+        const p = parts[k];
+        const sectionResult = (json && json[k]) ? json[k]
+          // Server didn't echo this section: synthesise a failure from the
+          // top-level status so the engine clears its "saving…" state.
+          : { ok: false, error: (json && json.error) || ('HTTP ' + res.status) };
+        if (typeof p.apply === 'function') p.apply(sectionResult);
+      });
+    } catch (netErr) {
+      const msg = (netErr && netErr.message) ? netErr.message : String(netErr);
+      taking.forEach(function (k) {
+        const p = parts[k];
+        if (typeof p.fail === 'function') p.fail(msg);
+      });
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Public hooks.
+  window.__edUnifiedSave = unifiedSave;
+  // The Images pane calls edFlushLayoutSave() before recomputing image
+  // usage, so just-placed layout images aren't read as unused. Scope it to
+  // the layout section only — it must not trigger the lines skeleton-confirm.
+  window.edFlushLayoutSave = function () {
+    return Promise.resolve(unifiedSave(['layout']));
+  };
+
+  // The shared #save-btn: one click saves everything.
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function () { unifiedSave(); });
+  }
+
+  // Cmd/Ctrl+S and bare "s" save everything — once, here, instead of each
+  // engine binding its own (which would double-fire now they share a file).
+  // inField guard is the UNION of both engines' guards (incl.
+  // isContentEditable) so the shortcut never fires while typing.
+  window.addEventListener('keydown', function (ev) {
+    const isCmdS = (ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S');
+    const isBareS = !ev.metaKey && !ev.ctrlKey && !ev.altKey
+      && (ev.key === 's' || ev.key === 'S');
+    if (!isCmdS && !isBareS) return;
+    const t = ev.target;
+    const inField = t && (
+      t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+      t.tagName === 'SELECT' || (t.isContentEditable === true)
+    );
+    if (inField) return;
+    ev.preventDefault();
+    unifiedSave();
+  });
 })();
