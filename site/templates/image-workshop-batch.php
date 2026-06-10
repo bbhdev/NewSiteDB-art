@@ -34,6 +34,12 @@
  * global value (pure DOM, no render); "Apply to all" then re-renders +
  * persists every card sequentially (busy overlay with N-of-M progress).
  *
+ * v0.10.191 — Display polish: both preview cells share a fixed-height box
+ * (the original is a 900px thumb, not 420, so it matches the resized
+ * derivative at the same scale); the use-it=on card gets a FULL green ring
+ * (was a left-only stripe); the global bulk button reads "Reapply all sizes"
+ * (was "Apply to all", which read as referring to the left input).
+ *
  * Deferred to later 4g slices: in-workshop file rename (4g-5), editable
  * batch names (4g-6).
  *
@@ -155,7 +161,7 @@ $offCount = $images->count() - $onCount;
         <button type="button" class="iw-apply iw-apply--ghost" id="iw-copy-all"
                 title="Fill every card's long-edge field with this value (no re-render)">Copy to all</button>
         <button type="button" class="iw-apply" id="iw-apply-all"
-                title="Re-render + save every card at its current long-edge value">Apply to all</button>
+                title="Re-render + save every card at its current long-edge value">Reapply all sizes</button>
       <?php endif; ?>
     </div>
 
@@ -240,7 +246,7 @@ $offCount = $images->count() - $onCount;
             <div class="iw-pair">
               <figure class="iw-cell">
                 <a class="iw-thumblink" href="<?= $img->url() ?>" target="_blank" rel="noopener">
-                  <img class="iw-thumb" src="<?= $img->resize(420, 420)->url() ?>" alt="" loading="lazy">
+                  <img class="iw-thumb" src="<?= $img->resize(900, 900)->url() ?>" alt="" loading="lazy">
                 </a>
                 <figcaption class="iw-cap">
                   <span class="iw-cap-tag">original</span>
