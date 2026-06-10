@@ -2702,6 +2702,7 @@ HTML;
           $images[] = [
             'filename' => $fn,
             'thumb'    => $thumb->url(),
+            'full'     => $img->url(), // 4g-2b: original, for click-to-view lightbox
             'width'    => $img->width(),
             'height'   => $img->height(),
             'useIt'    => !empty($useIt[$fn]),

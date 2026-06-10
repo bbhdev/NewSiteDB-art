@@ -160,6 +160,13 @@ $offCount = $images->count() - $onCount;
     </div>
   </div>
 
+  <!-- Click-to-view lightbox (4g-2b). Click a thumb → full image in an
+       overlay (no new tab). Click anywhere / Esc closes. -->
+  <div id="iw-lightbox" class="iw-lightbox" hidden role="dialog" aria-modal="true" aria-label="Image preview">
+    <button type="button" class="iw-lightbox-close" id="iw-lightbox-close" aria-label="Close preview">×</button>
+    <img class="iw-lightbox-img" id="iw-lightbox-img" src="" alt="">
+  </div>
+
   <main class="iw-grid-wrap">
     <?php if ($images->count() === 0): ?>
       <p class="iw-empty">
@@ -221,7 +228,7 @@ $offCount = $images->count() - $onCount;
                  resized derivative. -->
             <div class="iw-controls">
               <button type="button" class="iw-use" aria-pressed="<?= $on ? 'true' : 'false' ?>" aria-label="Toggle Use it for <?= esc($img->filename()) ?>">Use it</button>
-              <button type="button" class="iw-drop" aria-label="Delete <?= esc($img->filename()) ?> (original and resized)">Dropped</button>
+              <button type="button" class="iw-drop" aria-label="Delete <?= esc($img->filename()) ?> (original and resized)">Delete</button>
             </div>
           </article>
         <?php endforeach; ?>
@@ -496,6 +503,35 @@ $offCount = $images->count() - $onCount;
       }
 
       recount();
+    })();
+
+    // Click-to-view lightbox (4g-2b). Both thumb cells (original + resized)
+    // are <a href="<full url>">; intercept the click and show that image in
+    // an overlay instead of opening a new tab. The href stays as a no-JS
+    // fallback.
+    (function () {
+      var grid  = document.getElementById('iw-grid');
+      var box   = document.getElementById('iw-lightbox');
+      var imgEl = document.getElementById('iw-lightbox-img');
+      var close = document.getElementById('iw-lightbox-close');
+      if (!grid || !box || !imgEl) return;
+
+      function open(href) { imgEl.src = href; box.hidden = false; }
+      function shut() { box.hidden = true; imgEl.src = ''; }
+
+      grid.addEventListener('click', function (e) {
+        var a = e.target.closest('.iw-thumblink');
+        if (!a) return;
+        e.preventDefault();
+        open(a.getAttribute('href'));
+      });
+      if (close) close.addEventListener('click', shut);
+      box.addEventListener('click', function (e) {
+        if (e.target === box) shut(); // click on backdrop (not the image)
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !box.hidden) shut();
+      });
     })();
   </script>
   <!-- v<?= $v ?> -->

@@ -559,3 +559,44 @@ body.iw-body {
 .iw-confirm-del { background: #b53a3a; color: #fff; border-color: #b53a3a; }
 .iw-confirm-del:hover { background: #cf4646; }
 .iw-confirm-del:disabled { opacity: 0.6; cursor: default; }
+
+/* Click-to-view lightbox (4g-2b). */
+.iw-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(10, 11, 13, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  cursor: zoom-out;
+  backdrop-filter: blur(2px);
+}
+.iw-lightbox[hidden] { display: none; }
+.iw-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  cursor: default;
+}
+.iw-lightbox-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  line-height: 1;
+  color: #e8e8e8;
+  background: rgba(40, 42, 47, 0.85);
+  border: 1px solid #3a3d44;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.iw-lightbox-close:hover { background: #34363c; color: #fff; }
+.iw-thumblink { cursor: zoom-in; }

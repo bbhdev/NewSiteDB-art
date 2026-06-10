@@ -522,6 +522,43 @@ $payload = str_replace('<', '\\u003c', $payload);
     .ed-import .ed-img-card:hover { outline: 2px solid rgba(120,170,255,.7); outline-offset: -1px; }
     .ed-import .ed-img-card.is-sent { opacity: .6; }
     .ed-import .ed-img-card.is-busy { pointer-events: none; opacity: .5; }
+    /* 4g-2b — per-card zoom: view full image in a lightbox (NOT import).
+       Hidden until hover/focus on fine pointers; always shown on touch,
+       since the tablet editor is a first-class target. */
+    .ed-import-zoom {
+      position: absolute; top: 6px; right: 6px; z-index: 2;
+      width: 32px; height: 32px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: none; border-radius: 8px; cursor: zoom-in;
+      color: #fff; background: rgba(20,20,24,.62);
+      opacity: 0; transition: opacity .12s, background .12s;
+    }
+    .ed-import-zoom svg { width: 22px; height: 22px; display: block; }
+    .ed-import .ed-img-card:hover .ed-import-zoom,
+    .ed-import .ed-img-card:focus-within .ed-import-zoom,
+    .ed-import-zoom:focus-visible { opacity: 1; }
+    .ed-import-zoom:hover { background: rgba(40,90,170,.92); }
+    @media (hover: none) { .ed-import-zoom { opacity: 1; background: rgba(20,20,24,.5); } }
+
+    /* Lightbox overlay (4g-2b). */
+    .ed-img-lightbox {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      padding: 40px; cursor: zoom-out;
+      background: rgba(10,11,13,.9); backdrop-filter: blur(2px);
+    }
+    .ed-img-lightbox[hidden] { display: none; }
+    .ed-img-lightbox-img {
+      max-width: 100%; max-height: 100%; object-fit: contain; cursor: default;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6);
+    }
+    .ed-img-lightbox-close {
+      position: absolute; top: 12px; right: 16px;
+      width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+      font-size: 28px; line-height: 1; color: #e8e8e8; cursor: pointer;
+      background: rgba(40,42,47,.85); border: 1px solid rgba(127,127,127,.4); border-radius: 50%;
+    }
+    .ed-img-lightbox-close:hover { background: rgba(60,62,68,.95); color: #fff; }
     .ed-import-badge {
       align-self: flex-start; margin-top: auto; font-size: 10px;
       padding: 3px 7px 1px; border-radius: 999px; background: rgba(127,127,127,.2);
@@ -900,6 +937,13 @@ $payload = str_replace('<', '\\u003c', $payload);
     </div>
   </main>
 </div>
+
+<!-- Click-to-view lightbox (4g-2b). Import cards import on click, so a
+     dedicated zoom button (not card-click) opens this overlay. -->
+<div id="ed-img-lightbox" class="ed-img-lightbox" hidden role="dialog" aria-modal="true" aria-label="Image preview">
+  <button type="button" class="ed-img-lightbox-close" id="ed-img-lightbox-close" aria-label="Close preview">×</button>
+  <img class="ed-img-lightbox-img" id="ed-img-lightbox-img" src="" alt="">
+</div>
 <!-- ─────────── END IMAGES MODE PANE ─────────── -->
 
 <!-- v0.8.110: floating-panel host (Lines mode). Fixed full-viewport overlay
@@ -1170,6 +1214,9 @@ $payload = str_replace('<', '\\u003c', $payload);
           : '';
         html += '<figure class="ed-img-card ed-import-card' + (im.sent ? ' is-sent' : '') +
           '" data-filename="' + esc(im.filename) + '" title="Click to import into this page">' +
+          '<button type="button" class="ed-import-zoom" data-full="' + esc(im.full || im.thumb) + '" aria-label="View full image" title="View full image">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>' +
+          '</button>' +
           '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb) + '" alt="' + esc(im.filename) + '">' +
           '<figcaption class="ed-img-info">' +
             '<span class="ed-img-name">' + esc(im.filename) + '</span>' +
@@ -1242,7 +1289,24 @@ $payload = str_replace('<', '\\u003c', $payload);
       importPanel.setAttribute('hidden', '');
     });
     if (batchSel) batchSel.addEventListener('change', function () { loadBatchImages(batchSel.value); });
+    // Click-to-view lightbox (4g-2b). The zoom button is checked BEFORE the
+    // import path so viewing full never triggers an import.
+    var lightbox      = document.getElementById('ed-img-lightbox');
+    var lightboxImg   = document.getElementById('ed-img-lightbox-img');
+    var lightboxClose = document.getElementById('ed-img-lightbox-close');
+    function openLightbox(full) { if (!lightbox) return; lightboxImg.src = full; lightbox.hidden = false; }
+    function shutLightbox() { if (!lightbox) return; lightbox.hidden = true; lightboxImg.src = ''; }
+    if (lightboxClose) lightboxClose.addEventListener('click', shutLightbox);
+    if (lightbox) lightbox.addEventListener('click', function (ev) {
+      if (ev.target === lightbox) shutLightbox(); // backdrop
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && lightbox && !lightbox.hidden) shutLightbox();
+    });
+
     if (importGrid) importGrid.addEventListener('click', function (ev) {
+      var zoom = ev.target.closest ? ev.target.closest('.ed-import-zoom') : null;
+      if (zoom) { ev.stopPropagation(); openLightbox(zoom.getAttribute('data-full')); return; }
       var card = ev.target.closest ? ev.target.closest('.ed-import-card') : null;
       if (card && !card.classList.contains('is-busy')) sendImage(card);
     });
