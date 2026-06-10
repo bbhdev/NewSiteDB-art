@@ -17,7 +17,11 @@
 # URLSearchParams('batch') and matches against the batch <select>'s
 # option values. v0.10.193 — opens in the SAME tab (no target: _blank):
 # forcing a new tab is wrong (the browser already offers cmd/ctrl-click
-# for that when the user wants it).
+# for that when the user wants it). v0.10.194 — the link MUST be an
+# ABSOLUTE url ({{ site.url }}/…). A leading-slash path ("/dev/editor")
+# was parsed by the Panel SPA router as an internal Panel view, giving
+# "Could not find Panel view for route: dev/editor". A full http(s) URL
+# is treated as an external link → real navigation to the front-end route.
 
 title: Batch
 
@@ -29,7 +33,7 @@ buttons:
     text: Open batch in Deco
     icon: edit
     theme: love
-    link: "/dev/editor?mode=images&batch={{ page.id }}"
+    link: "{{ site.url }}/dev/editor?mode=images&batch={{ page.id }}"
 
 columns:
   main:

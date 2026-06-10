@@ -448,7 +448,13 @@ $payload = str_replace('<', '\\u003c', $payload);
       display: grid; gap: 14px;
       grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     }
-    .ed-images-empty { opacity: .55; font-size: 13px; padding: 8px 0; }
+    /* v0.10.194 — empty/hint text was opacity:.55 (≈#949496 on #242528):
+       too low contrast, the negative "no use-it" hint was nearly invisible.
+       Raise the neutral baseline (still dimmer than headings → hierarchy
+       kept) and give meaningful states real colour. */
+    .ed-images-empty { opacity: .82; font-size: 13px; padding: 8px 0; }
+    .ed-images-empty.is-warn  { opacity: 1; color: #f5c518; font-weight: 600; } /* negative-but-not-error (amber, matches orphan/modified) */
+    .ed-images-empty.is-error { opacity: 1; color: #ff8d7a; font-weight: 600; } /* load failure */
     .ed-img-card {
       position: relative;
       border: 1px solid rgba(127,127,127,.3); border-radius: 10px;
@@ -1137,7 +1143,7 @@ $payload = str_replace('<', '\\u003c', $payload);
             ' · ' + (lib.page || pageId);
         }
       }).catch(function (err) {
-        grid.innerHTML = '<div class="ed-images-empty">Could not load images: ' + esc(err.message || err) + '</div>';
+        grid.innerHTML = '<div class="ed-images-empty is-error">Could not load images: ' + esc(err.message || err) + '</div>';
       }).finally(function () { loading = false; });
     }
 
@@ -1343,7 +1349,7 @@ $payload = str_replace('<', '\\u003c', $payload);
       // 4g-1: the editor pulls only the workshop images flagged use-it=on.
       var list = (images || []).filter(function (im) { return im.useIt; });
       if (!list.length) {
-        importGrid.innerHTML = '<div class="ed-images-empty">No images flagged “Use it = on” in this batch.</div>';
+        importGrid.innerHTML = '<div class="ed-images-empty is-warn">No images flagged “Use it = on” in this batch.</div>';
         return;
       }
       var html = '';
@@ -1381,7 +1387,7 @@ $payload = str_replace('<', '\\u003c', $payload);
           renderImport(j.images || []);
         })
         .catch(function (err) {
-          importGrid.innerHTML = '<div class="ed-images-empty">Could not load batch: ' + esc(err.message || err) + '</div>';
+          importGrid.innerHTML = '<div class="ed-images-empty is-error">Could not load batch: ' + esc(err.message || err) + '</div>';
         });
     }
 
