@@ -1685,8 +1685,19 @@ $payload = str_replace('<', '\\u003c', $payload);
           doUpload(r.blob, r.filename, r.serverMax || 0);
         });
       });
-      uploadKey = function (ev) { if (ev.key === 'Escape') closeUpload(); };
+      // Key defaults: the user already initiated "add image", so the DEFAULT
+      // (Enter) executes — it does NOT cancel. Enter confirms (Add to page,
+      // once the probe has enabled the button); Escape cancels.
+      uploadKey = function (ev) {
+        if (ev.key === 'Escape') { ev.preventDefault(); closeUpload(); }
+        else if (ev.key === 'Enter') {
+          if (addBtn2 && !addBtn2.disabled) { ev.preventDefault(); addBtn2.click(); }
+        }
+      };
       document.addEventListener('keydown', uploadKey);
+      // Land the cursor in the one editable field so Enter confirms straight
+      // away (blank = keep original) and a size can be typed without a click.
+      if (maxInput) maxInput.focus();
     }
 
     function doUpload(blob, filename, serverMax) {
