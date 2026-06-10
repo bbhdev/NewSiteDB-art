@@ -1997,6 +1997,10 @@
     if (pickerEl && pickerEl.parentNode) pickerEl.parentNode.removeChild(pickerEl);
     pickerEl = null;
     uploadError = null; // don't carry a stale upload error into the next open
+    // The selection overlay parks at the max z-index ceiling, so it can't be
+    // out-numbered by the picker; instead we hide it via a body class while
+    // the picker is open (set in openImagePicker) and restore it here.
+    document.body.classList.remove('pe-picker-open');
     document.removeEventListener('keydown', pickerKeydown, true);
   }
   function pickerKeydown(ev) {
@@ -2171,6 +2175,9 @@
 
     document.body.appendChild(overlay);
     pickerEl = overlay;
+    // Hide the selected rect's outline + handles (which sit at the z-index
+    // ceiling) so they don't bleed over the picker modal. Restored on close.
+    document.body.classList.add('pe-picker-open');
     document.addEventListener('keydown', pickerKeydown, true);
 
     renderPickerBody();
@@ -2742,7 +2749,14 @@
         // is buried under a higher-Z sibling — same motivation as the resize
         // handles relocating in v0.10.67.
       } else if (imageLibrary !== null) {
+        // The rect is bound to a filename that's no longer in the library
+        // (deleted or renamed). Make that unmistakable — without a clear
+        // marker the rect reads like a freshly-created empty image rect.
         el.classList.add('is-img-missing');
+        const miss = document.createElement('span');
+        miss.className = 'pe-rect-missing';
+        miss.textContent = '⚠ image missing: ' + rect.image;
+        el.appendChild(miss);
       }
     }
 
