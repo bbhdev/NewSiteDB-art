@@ -2979,6 +2979,83 @@ HTML;
     ],
 
     /*
+     * GET /sync/export[?dryRun=1] — hand THIS node's content/ to a puller
+     * (S4c, the A→L back-propagate SEND side).
+     *
+     * Strict-direction model recap: L has no public URL, so A→L cannot be
+     * a push (A can't POST to L). Instead L PULLS — it fetches this
+     * endpoint on the source (A) and applies the bytes locally. This is
+     * the read-only SEND counterpart to the POST /sync/propagate receive
+     * route: it never mutates the node it runs on.
+     *
+     * Bearer-gated (same shared secret as every /sync/* route) — it
+     * exposes content/, so it must not be open. The tarball is the exact
+     * wire format /sync/propagate consumes: a gzip tar with page dirs at
+     * the archive root and the propagation exclusions already applied
+     * (built by sync_build_propagate_tarball()).
+     *
+     *   ?dryRun=1 → JSON measure of what WOULD be sent (pages/files/bytes,
+     *               no tarball) — lets the puller preview the overwrite.
+     *   else      → raw gzip body, Content-Type application/gzip.
+     */
+    [
+      'pattern' => 'sync/export',
+      'method'  => 'GET',
+      'action'  => function () {
+        if ($resp = sync_authorize_request()) return $resp;
+
+        $sync = option('sync');
+        $role = is_array($sync) ? (string)($sync['role'] ?? '') : '';
+
+        // Build the tarball once (applies exclusions, returns counts).
+        // For dryRun we read the counts and discard it; for a real export
+        // we stream its bytes. Reusing the push builder keeps the wire
+        // format and the exclusion logic identical on both directions.
+        $built = sync_build_propagate_tarball();
+        if (!$built['ok']) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => $built['error']]),
+            'application/json', 500
+          );
+        }
+
+        if (get('dryRun')) {
+          @unlink($built['path']);
+          return new Kirby\Http\Response(
+            json_encode([
+              'ok'     => true,
+              'dryRun' => true,
+              'role'   => $role,
+              'wouldSend' => [
+                'pages' => $built['pages'],
+                'files' => $built['files'],
+                'bytes' => $built['bytes'],
+              ],
+            ], JSON_UNESCAPED_SLASHES),
+            'application/json'
+          );
+        }
+
+        $body = @file_get_contents($built['path']);
+        @unlink($built['path']);
+        if ($body === false) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'could not read built tarball']),
+            'application/json', 500
+          );
+        }
+        // Raw binary body — the puller reads it whole and feeds it to the
+        // shared ingest path (Slice 2). Advertise the counts in headers so
+        // a transport-level client can sanity-check without unpacking.
+        return new Kirby\Http\Response($body, 'application/gzip', 200, [
+          'X-Sync-Role'  => $role,
+          'X-Sync-Pages' => (string) $built['pages'],
+          'X-Sync-Files' => (string) $built['files'],
+        ]);
+      }
+    ],
+
+    /*
      * POST /sync/push/<toRole>[?dryRun=1] — SEND side trigger (S4b.3).
      *
      * Runs ON the source node (L). Tars this node's content/ and POSTs it

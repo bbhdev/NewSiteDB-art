@@ -926,12 +926,18 @@ function sync_build_propagate_tarball(): array
         return ['ok' => false, 'error' => 'tar build failed: ' . $e->getMessage()];
     }
 
+    // Count top-level page dirs from the STAGE (excludes already applied)
+    // before we remove it — pull's dry-run preview reports this so the
+    // user sees "would replace N pages" symmetric with the push side.
+    $pages = sync_count_top_pages($stage);
+
     @unlink($tarPath);     // keep only the compressed archive
     sync_rrmdir($stage);
     if (!is_file($gzPath)) {
         return ['ok' => false, 'error' => 'compressed tarball not produced'];
     }
-    return ['ok' => true, 'path' => $gzPath, 'files' => $counts['files'], 'bytes' => $counts['bytes']];
+    return ['ok' => true, 'path' => $gzPath, 'pages' => $pages,
+            'files' => $counts['files'], 'bytes' => $counts['bytes']];
 }
 
 /**
