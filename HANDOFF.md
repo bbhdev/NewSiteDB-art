@@ -4872,6 +4872,38 @@ Past examples where clarifying first was correct:
   element disappears, pointer capture releases, and subsequent
   pointermoves are dropped silently. Mutate the live attributes in
   place during the gesture; re-render only on pointerup. See v0.8.108.
+- **A single-process `php -S` dev server self-deadlocks on a
+  self-referential request.** The sync push trigger (`POST /sync/push/A`,
+  S4b.3) runs ON L and then makes an OUTBOUND HTTP call to the peer. If
+  the peer URL is pointed at the *same* dev server (e.g. localhost
+  loopback testing), that inbound request can never be served — the
+  single PHP worker is still busy handling the push — so it hangs until
+  the curl timeout (observed: a 120s stall, mistaken at first for a code
+  bug). In production L and A are distinct hosts so this never happens.
+  **To loopback-test the push, drive it from a SEPARATE process** (a
+  `php -r` CLI script that bootstraps Kirby and calls
+  `sync_propagate_to_peer()`), so the dev server is free to handle the
+  inbound `/sync/propagate`. A dry-run (`?dryRun=1`) is the safe form —
+  no snapshot, no swap. See the S4b.3 commit (v0.10.205).
+- **`php -S` picks up PHP changes per-request, but the BROWSER DOM is
+  stale until you reload.** Editing a `.php` template/snippet/route takes
+  effect on the next *server* request with no rebuild — but a page
+  already open in the preview keeps its old DOM (and old inline JS/CSS)
+  until `location.reload()`. Symptom: a freshly-added element "isn't
+  there" via `preview_eval` even though the source is correct (this bit
+  the S4b.4 "Push → A" button check — the snippet's older peer-pill was
+  present, the new button wasn't, purely because the tab predated the
+  edit). Reload before concluding a PHP-side change didn't render. (JS/CSS
+  asset files likewise need a reload — there's no HMR here.)
+- **iCloud conflict-copy dirs (`dev 2`, `home 2`, …) can appear under
+  `content/`.** The project lives in iCloud Drive; a sync conflict
+  spawns a `<name> 2` duplicate. The propagation excludes
+  (`sync_propagate_excluded_top` = `dev`, `error`) are **literal-match**,
+  so `dev 2`/`home 2` are NOT excluded and a live L→A push *would* carry
+  a non-empty conflict copy to A as a bogus page. They're usually empty
+  (only `.DS_Store`, which is dropped), so the round-trip silently
+  discards them — but keep `content/` free of `* 2` artifacts before a
+  real push, or teach the excludes to skip the conflict-copy pattern.
 
 ## Vocabulary
 
