@@ -1247,6 +1247,40 @@ $payload = str_replace('<', '\\u003c', $payload);
       if (card && !card.classList.contains('is-busy')) sendImage(card);
     });
 
+    // ── Cross-tab freshness (4g-1b) ──────────────────────────────────
+    // Common workflow: the workshop is open in one tab and this editor's
+    // import panel in another. Toggling "Use it" in the workshop must
+    // reflect here WITHOUT a reload. Two mechanisms, belt-and-braces:
+    //   1) BroadcastChannel — instant: the workshop posts after each
+    //      successful save; if the changed batch is the one open here, we
+    //      re-pull it. Works even if this tab stays in the background
+    //      (side-by-side windows).
+    //   2) visibilitychange / focus refetch — the reliable fallback: when
+    //      the user switches back to this tab, re-pull the open batch.
+    //      Covers browsers without BroadcastChannel and any missed message.
+    // (The save signal is what makes (2) safe despite (1)'s timing: the
+    // workshop flushes its debounced save on tab-hide, so by the time its
+    // post-save broadcast fires the server is already current.)
+    function refetchOpenBatch() {
+      if (!importPanel || importPanel.hasAttribute('hidden')) return;
+      var b = batchSel ? batchSel.value : '';
+      if (b) loadBatchImages(b);
+    }
+    var useitChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('iw-useit') : null;
+    if (useitChannel) {
+      useitChannel.addEventListener('message', function (ev) {
+        var d = ev.data;
+        if (!d || d.type !== 'useit-changed') return;
+        if (!importPanel || importPanel.hasAttribute('hidden')) return;
+        var b = batchSel ? batchSel.value : '';
+        if (b && d.batch === b) loadBatchImages(b);
+      });
+    }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') refetchOpenBatch();
+    });
+    window.addEventListener('focus', refetchOpenBatch);
+
     // ── Direct upload (Slice 4e) — one image at a time, optional resize ──
     var addBtn    = document.getElementById('ed-images-add');
     var fileInput = document.getElementById('ed-images-file');

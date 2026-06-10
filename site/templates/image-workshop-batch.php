@@ -276,6 +276,11 @@ $offCount = $images->count() - $onCount;
       var SAVE_URL = <?= json_encode(url('dev/image-workshop/save')) ?>;
       var BATCH_ID = <?= json_encode($page->id()) ?>;
 
+      // Cross-tab freshness (4g-1b): announce use-it changes so an editor
+      // import panel open in another tab can re-pull this batch without a
+      // reload. The editor also refetches on tab-focus as a fallback.
+      var useitChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('iw-useit') : null;
+
       var cards      = Array.prototype.slice.call(grid.querySelectorAll('.iw-card'));
       var filterBtns = Array.prototype.slice.call(document.querySelectorAll('.iw-filter'));
       var saveState  = document.getElementById('iw-savestate');
@@ -327,11 +332,25 @@ $offCount = $images->count() - $onCount;
           body: JSON.stringify({ batch: BATCH_ID, useIt: useIt })
         }).then(function (r) { return r.json(); })
           .then(function (j) {
-            if (j && j.ok) { flash('Saved ✓', false); }
+            if (j && j.ok) {
+              flash('Saved ✓', false);
+              // Server is now current → tell any editor tab to re-pull.
+              if (useitChannel) useitChannel.postMessage({ type: 'useit-changed', batch: BATCH_ID });
+            }
             else { flash('Save failed: ' + ((j && j.error) || 'unknown'), true); }
           })
           .catch(function () { flash('Save failed (network)', true); });
       }
+      // Flush any pending debounced save the instant this tab is hidden, so
+      // the server is current before the user lands on the editor tab. The
+      // post-save broadcast then nudges the editor to refetch.
+      function flushSave() {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; doSave(); }
+      }
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') flushSave();
+      });
+      window.addEventListener('pagehide', flushSave);
 
       // ── Use-it toggle ────────────────────────────────────────────
       grid.addEventListener('click', function (e) {
