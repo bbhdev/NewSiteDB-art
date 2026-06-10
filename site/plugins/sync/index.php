@@ -548,3 +548,177 @@ function sync_record_activity_and_notify(): string
     sync_notify_peers_of_local_activity($at);
     return $at;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * S4b — content propagation (strict-direction push, primary in-app path)
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * The pivoted model (sync-layer-topology-and-operations.md) is
+ * PROPAGATE-only, never bidirectional: L → A (push), A → L (back), and
+ * A → B (publish). Each propagate OVERWRITES the destination's content/
+ * with the source's, after a MANDATORY pre-propagate snapshot of the
+ * destination so the overwrite is always undoable.
+ *
+ * Transport (chosen in S4b.0's validation pass): a single POST carrying
+ * a gzip-compressed tar of the SOURCE's content/ as the raw request
+ * body. The source builds the archive with the same exclusions applied
+ * (see below), so the archive root holds page directories directly
+ * (NOT nested under a content/ folder).
+ *
+ * Exclusions — mirror deploy/propagate.sh's RSYNC_EXCLUDES exactly:
+ *   --exclude=/dev/      → top-level `dev/`   only   (per-node staging)
+ *   --exclude=/error/    → top-level `error/` only   (per-node staging)
+ *   --exclude=_drafts/   → `_drafts/` at ANY depth   (Kirby draft dirs)
+ * Dotfiles (.DS_Store, …) are always skipped. `_sync.json` sidecars are
+ * NOT dotfiles and DO propagate (copied verbatim — refreshing them is a
+ * later concern, same as the CLI fallback).
+ *
+ * This is the PRIMARY path the CLI fallback (propagate.sh) backs up.
+ * Same destination-snapshot + overwrite semantics, driven by HTTP
+ * instead of rsync-over-SSH.
+ */
+
+/** Top-level-only propagation excludes (anchored at content/ root). */
+function sync_propagate_excluded_top(): array { return ['dev', 'error']; }
+
+/** Propagation excludes matched at ANY depth in the tree. */
+function sync_propagate_excluded_anywhere(): array { return ['_drafts']; }
+
+/**
+ * Recursively copy a content tree from $src into $dst, applying the
+ * propagation exclusions. $topLevel marks the content/ root, where the
+ * top-only excludes (dev/, error/) apply; the any-depth excludes
+ * (_drafts/) apply at every level. Dotfiles are skipped.
+ *
+ * Returns ['files'=>int, 'bytes'=>int] copied, or null on I/O failure.
+ */
+function sync_copy_content_tree(string $src, string $dst, bool $topLevel = true): ?array
+{
+    if (!is_dir($dst) && !@mkdir($dst, 0755, true)) return null;
+    $items = @scandir($src);
+    if ($items === false) return null;
+
+    $exclTop = sync_propagate_excluded_top();
+    $exclAny = sync_propagate_excluded_anywhere();
+    $files = 0; $bytes = 0;
+
+    foreach ($items as $it) {
+        if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+        if (in_array($it, $exclAny, true)) continue;                  // _drafts/ anywhere
+        if ($topLevel && in_array($it, $exclTop, true)) continue;     // dev/ error/ top-level
+
+        $s = $src . '/' . $it;
+        $d = $dst . '/' . $it;
+        if (is_dir($s)) {
+            $sub = sync_copy_content_tree($s, $d, false);
+            if ($sub === null) return null;
+            $files += $sub['files']; $bytes += $sub['bytes'];
+        } elseif (is_file($s)) {
+            if (@copy($s, $d) === false) return null;
+            $files++; $bytes += (int) @filesize($s);
+        }
+    }
+    return ['files' => $files, 'bytes' => $bytes];
+}
+
+/**
+ * Measure an already-extracted content tree (the incoming upload):
+ * total files, total bytes, and top-level page-directory count. Used to
+ * report "what would be replaced" without mutating anything.
+ */
+function sync_measure_content_tree(string $root): array
+{
+    $files = 0; $bytes = 0; $topPages = 0;
+    $top = @scandir($root);
+    if ($top !== false) {
+        foreach ($top as $it) {
+            if ($it === '.' || $it === '..' || $it[0] === '.') continue;
+            if (is_dir($root . '/' . $it)) $topPages++;
+        }
+    }
+    if (is_dir($root)) {
+        $rii = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($rii as $f) {
+            if ($f->isFile()) { $files++; $bytes += (int) $f->getSize(); }
+        }
+    }
+    return ['files' => $files, 'bytes' => $bytes, 'topPages' => $topPages];
+}
+
+/** Recursive rmdir (best-effort; never throws). */
+function sync_rrmdir(string $dir): void
+{
+    if (!is_dir($dir)) return;
+    $items = @scandir($dir);
+    if ($items === false) { @rmdir($dir); return; }
+    foreach ($items as $it) {
+        if ($it === '.' || $it === '..') continue;
+        $p = $dir . '/' . $it;
+        if (is_dir($p)) sync_rrmdir($p);
+        else @unlink($p);
+    }
+    @rmdir($dir);
+}
+
+/** Project root (parent of content/) — where library/ lives and where
+ *  temp staging dirs must go so a later atomic rename into content/
+ *  stays on one filesystem. */
+function sync_project_root(): string
+{
+    return dirname(kirby()->root('content'));
+}
+
+/**
+ * Take the MANDATORY pre-propagate snapshot of THIS node's current
+ * content/ before it is overwritten. Snapshot format matches the manual
+ * draw-library snapshots (library/<name>/{meta.json, content/}) so S7
+ * retention sees both kinds uniformly. The propagation exclusions are
+ * applied to the snapshot too (we only snapshot what gets replaced).
+ *
+ * Name: auto-pre-propagate-<UTC-iso>-from-<sourceRole> (with a short
+ * random suffix if that collides within the same second).
+ *
+ * Returns ['ok'=>true, 'name'=>…, 'files'=>…, 'bytes'=>…] or
+ *         ['ok'=>false, 'error'=>…].
+ */
+function sync_pre_propagate_snapshot(string $fromRole): array
+{
+    $contentSrc = kirby()->root('content');
+    $libRoot    = sync_project_root() . '/library';
+    if (!is_dir($libRoot) && !@mkdir($libRoot, 0755, true)) {
+        return ['ok' => false, 'error' => 'cannot create library/'];
+    }
+
+    $name = 'auto-pre-propagate-' . gmdate('Ymd\THis\Z') . '-from-' . $fromRole;
+    $dest = $libRoot . '/' . $name;
+    if (is_dir($dest)) {
+        $name .= '-' . bin2hex(random_bytes(2));
+        $dest  = $libRoot . '/' . $name;
+    }
+    $contentDest = $dest . '/content';
+    if (!@mkdir($contentDest, 0755, true)) {
+        return ['ok' => false, 'error' => 'cannot create snapshot directory'];
+    }
+
+    $counts = sync_copy_content_tree($contentSrc, $contentDest, true);
+    if ($counts === null) {
+        return ['ok' => false, 'error' => 'snapshot content copy failed'];
+    }
+
+    $meta = [
+        'name'          => $name,
+        'savedAt'       => date('c'),
+        'appVersion'    => option('version'),
+        'schemaVersion' => option('schemaVersion'),
+        'kind'          => 'auto-pre-propagate',
+        'fromRole'      => $fromRole,
+    ];
+    @file_put_contents(
+        $dest . '/meta.json',
+        json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
+    );
+
+    return ['ok' => true, 'name' => $name, 'files' => $counts['files'], 'bytes' => $counts['bytes']];
+}

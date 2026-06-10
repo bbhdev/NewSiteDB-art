@@ -2662,6 +2662,133 @@ HTML;
           $status
         );
       }
+    ],
+
+    /*
+     * POST /sync/propagate?from=<role> — receive a content/ push (S4b).
+     *
+     * The PRIMARY in-app propagate path (the CLI deploy/propagate.sh is
+     * the fallback). Strict-direction-only model: this endpoint is the
+     * RECEIVE side that the source POSTs to. Body = a gzip tar of the
+     * source's content/ (page dirs at the archive root), built with the
+     * propagation exclusions already applied. Auth = shared-secret
+     * bearer, same as every other /sync/* route.
+     *
+     * Server steps:
+     *   1. authorize + validate ?from=<role>
+     *   2. buffer the raw body to a temp .tar.gz under the project root
+     *      (same filesystem as content/ so S4b.2b's atomic rename works)
+     *   3. extract with PharData to a temp dir; reject empty/unreadable
+     *   4. take the MANDATORY pre-propagate snapshot of this node's
+     *      current content/ → library/auto-pre-propagate-<UTC>-from-<src>
+     *
+     * ── S4b.2a SCOPE (this slice) ──────────────────────────────────────
+     * DRY-RUN: steps 1–4 only. The content/ swap is deliberately NOT
+     * performed yet — that lands in S4b.2b. The response reports the
+     * snapshot taken and what WOULD be replaced, then cleans up the
+     * staged upload. This lets the transport + snapshot + extraction be
+     * validated end-to-end (incl. loopback) with zero destructive action.
+     */
+    [
+      'pattern' => 'sync/propagate',
+      'method'  => 'POST',
+      'action'  => function () {
+        if ($resp = sync_authorize_request()) return $resp;
+
+        $from = (string) (get('from') ?? '');
+        if (!in_array($from, sync_known_roles(), true)) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'missing or invalid ?from=<role> (L|A|B)']),
+            'application/json', 400
+          );
+        }
+
+        // Single-POST transport (S4b.0 verdict): the tar.gz is the raw
+        // request body. The client MUST send a binary Content-Type
+        // (application/gzip or application/octet-stream) — NOT
+        // form-urlencoded/multipart, under which PHP consumes the input
+        // stream into $_POST and php://input reads empty (→ a safe but
+        // wrong "empty body" 400). S4b.3's L-side push sets it correctly.
+        $raw = @file_get_contents('php://input');
+        if ($raw === false || strlen($raw) === 0) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'empty request body (expected a content/ tar.gz)']),
+            'application/json', 400
+          );
+        }
+
+        $root       = sync_project_root();
+        $tag        = gmdate('Ymd\THis\Z') . '-' . bin2hex(random_bytes(3));
+        $tarPath    = $root . '/.sync-incoming-' . $tag . '.tar.gz';
+        $extractDir = $root . '/.sync-extract-' . $tag;
+
+        $cleanup = function () use ($tarPath, $extractDir) {
+          @unlink($tarPath);
+          sync_rrmdir($extractDir);
+        };
+
+        if (@file_put_contents($tarPath, $raw) === false) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'could not buffer upload to disk']),
+            'application/json', 500
+          );
+        }
+
+        // Extract. PharData reads/extracts data tar archives even under
+        // phar.readonly=1 (that ini only gates executable .phar).
+        try {
+          $phar = new PharData($tarPath);
+          @mkdir($extractDir, 0755, true);
+          $phar->extractTo($extractDir, null, true);
+          $phar = null;   // release handle before cleanup unlinks $tarPath
+        } catch (\Throwable $e) {
+          $cleanup();
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'tarball extract failed: ' . $e->getMessage()]),
+            'application/json', 400
+          );
+        }
+
+        $measure = sync_measure_content_tree($extractDir);
+        if ($measure['files'] === 0) {
+          $cleanup();
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'uploaded archive contained no files']),
+            'application/json', 400
+          );
+        }
+
+        // Mandatory pre-propagate snapshot of THIS node's content/.
+        $snap = sync_pre_propagate_snapshot($from);
+        if (!$snap['ok']) {
+          $cleanup();
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'pre-propagate snapshot failed: ' . $snap['error']]),
+            'application/json', 500
+          );
+        }
+
+        // S4b.2a: DRY-RUN — no swap. Drop the staged upload.
+        $received = strlen($raw);
+        $cleanup();
+
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'       => true,
+            'dryRun'   => true,
+            'note'     => 'S4b.2a: snapshot taken + upload validated; content/ NOT swapped (S4b.2b adds the swap).',
+            'from'     => $from,
+            'snapshot' => $snap['name'],
+            'received' => ['bytes' => $received],
+            'wouldReplace' => [
+              'pages' => $measure['topPages'],
+              'files' => $measure['files'],
+              'bytes' => $measure['bytes'],
+            ],
+          ], JSON_UNESCAPED_SLASHES),
+          'application/json'
+        );
+      }
     ]
   ]
 ];
