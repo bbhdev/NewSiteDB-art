@@ -450,10 +450,27 @@ $payload = str_replace('<', '\\u003c', $payload);
     }
     .ed-images-empty { opacity: .55; font-size: 13px; padding: 8px 0; }
     .ed-img-card {
+      position: relative;
       border: 1px solid rgba(127,127,127,.3); border-radius: 10px;
       overflow: hidden; background: rgba(127,127,127,.05);
       display: flex; flex-direction: column;
     }
+    /* Slice 4f — per-card delete affordance. Hidden until card hover/focus
+       so the grid stays calm; always visible on touch (no hover) via the
+       coarse-pointer query, since the tablet editor is a first-class target. */
+    .ed-img-del {
+      position: absolute; top: 6px; right: 6px; z-index: 2;
+      width: 30px; height: 30px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: none; border-radius: 8px; cursor: pointer;
+      color: #fff; background: rgba(20,20,24,.62);
+      opacity: 0; transition: opacity .12s, background .12s;
+    }
+    .ed-img-card:hover .ed-img-del,
+    .ed-img-card:focus-within .ed-img-del,
+    .ed-img-del:focus-visible { opacity: 1; }
+    .ed-img-del:hover { background: rgba(200,60,60,.92); }
+    @media (hover: none) { .ed-img-del { opacity: 1; background: rgba(20,20,24,.5); } }
     .ed-img-thumb {
       width: 100%; aspect-ratio: 4 / 3; object-fit: contain;
       background: #ffffff; display: block;
@@ -532,6 +549,16 @@ $payload = str_replace('<', '\\u003c', $payload);
       color: rgba(120,200,140,.95);
     }
     .ed-upload-result.is-warn { color: #f5c518; }
+    /* Slice 4f — delete-confirm modal. */
+    .ed-del-warn { font-size: 13px; color: #f5c518; margin: 0 0 8px; }
+    .ed-del-ok   { font-size: 13px; opacity: .8; margin: 0 0 8px; }
+    .ed-del-uses {
+      margin: 0 0 6px; padding: 8px 10px 8px 26px; font-size: 12px; opacity: .85;
+      background: rgba(127,127,127,.12); border-radius: 8px; max-height: 160px; overflow: auto;
+    }
+    .ed-del-uses li { margin: 2px 0; }
+    .ed-del-confirm { border-color: rgba(200,60,60,.6); background: rgba(200,60,60,.18); color: #ff9b9b; }
+    .ed-del-confirm:hover { background: rgba(200,60,60,.32); }
     .ed-upload-field {
       display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin-bottom: 14px;
     }
@@ -969,7 +996,14 @@ $payload = str_replace('<', '\\u003c', $payload);
           badge = '<span class="ed-img-usage' + (orphan ? ' is-orphan' : '') + '">' +
             (orphan ? 'unused' : (c + (c === 1 ? ' use' : ' uses'))) + '</span>';
         }
-        html += '<figure class="ed-img-card' + (orphan ? ' is-orphan' : '') + '" data-filename="' + esc(im.filename) + '">' +
+        var useCount = (byFile && byFile[im.filename]) ? byFile[im.filename].count : null;
+        html += '<figure class="ed-img-card' + (orphan ? ' is-orphan' : '') + '" data-filename="' + esc(im.filename) + '"' +
+            (useCount != null ? ' data-uses="' + useCount + '"' : '') + '>' +
+          '<button type="button" class="ed-img-del" title="Delete this image" aria-label="Delete ' + esc(im.filename) + '">' +
+            '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
+              '<path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" ' +
+              'd="M5 7h14M10 7V5h4v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>' +
+          '</button>' +
           '<img class="ed-img-thumb" loading="lazy" src="' + esc(im.thumb || im.url) + '" alt="' + esc(im.alt) + '">' +
           '<figcaption class="ed-img-info">' +
             '<span class="ed-img-name">' + esc(im.filename) + '</span>' +
@@ -1440,6 +1474,99 @@ $payload = str_replace('<', '\\u003c', $payload);
         var img = null;
         for (var i = 0; i < files.length; i++) { if (/^image\//.test(files[i].type)) { img = files[i]; break; } }
         if (img) openUpload(img);
+      });
+    }
+
+    // ── Delete an image (Slice 4f), with an in-use warning ──
+    var delKey = null;
+    function closeDelete() {
+      var p = document.getElementById('ed-del-panel');
+      if (p && p.parentNode) p.parentNode.removeChild(p);
+      var bd = document.getElementById('ed-del-backdrop');
+      if (bd && bd.parentNode) bd.parentNode.removeChild(bd);
+      if (delKey) { document.removeEventListener('keydown', delKey); delKey = null; }
+    }
+    function confirmDelete(filename) {
+      if (!filename || !pageId) return;
+      closeDelete();
+      var byFile = usage && usage.images;
+      var info   = byFile && byFile[filename];
+      var count  = info ? (info.count || 0) : 0;
+      var objs   = (info && info.objects) ? info.objects : [];
+
+      var warnHtml = '';
+      if (count > 0) {
+        var rows = objs.slice(0, 12).map(function (o) {
+          var where = o.rect ? ('rect ' + esc(String(o.rect))) : 'a layout object';
+          return '<li>' + where + (o.note ? ' — ' + esc(o.note) : '') + '</li>';
+        }).join('');
+        if (objs.length > 12) rows += '<li>… and ' + (objs.length - 12) + ' more</li>';
+        warnHtml =
+          '<p class="ed-del-warn">⚠ This image is used by ' + count + ' layout object'
+            + (count === 1 ? '' : 's') + '. Deleting it will leave '
+            + (count === 1 ? 'that object' : 'those objects')
+            + ' bound to a missing file (shown as “not found in library”).</p>'
+          + (rows ? '<ul class="ed-del-uses">' + rows + '</ul>' : '');
+      } else {
+        warnHtml = '<p class="ed-del-ok">This image isn’t used by any layout object.</p>';
+      }
+
+      var backdrop = document.createElement('div');
+      backdrop.className = 'ed-es-panel-backdrop';
+      backdrop.id = 'ed-del-backdrop';
+      backdrop.addEventListener('click', closeDelete);
+
+      var panel = document.createElement('div');
+      panel.className = 'ed-es-panel';
+      panel.id = 'ed-del-panel';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', 'Delete image');
+      panel.innerHTML =
+        '<header class="ed-es-panel-head"><h3 class="ed-es-panel-title">Delete image</h3></header>' +
+        '<div class="ed-es-panel-body">' +
+          '<p class="ed-upload-dims" style="opacity:.9">' + esc(filename) + '</p>' +
+          warnHtml +
+          '<p class="ed-upload-dims ed-es-report-warn" id="ed-del-err"></p>' +
+          '<div class="ed-upload-actions">' +
+            '<button type="button" class="ed-mini" id="ed-del-cancel">Cancel</button>' +
+            '<button type="button" class="ed-mini ed-del-confirm" id="ed-del-go">' +
+              (count > 0 ? 'Delete anyway' : 'Delete') + '</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(backdrop);
+      document.body.appendChild(panel);
+
+      document.getElementById('ed-del-cancel').addEventListener('click', closeDelete);
+      var goBtn = document.getElementById('ed-del-go');
+      goBtn.addEventListener('click', function () {
+        goBtn.disabled = true; goBtn.textContent = 'Deleting…';
+        fetch('/dev/page/delete-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ page: pageId, filename: filename })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || 'delete failed');
+          closeDelete();
+          setStatus('Deleted ' + j.filename);
+          loaded = false; usage = null; load();
+        }).catch(function (err) {
+          goBtn.disabled = false; goBtn.textContent = (count > 0 ? 'Delete anyway' : 'Delete');
+          var st = document.getElementById('ed-del-err');
+          if (st) st.textContent = 'Delete failed: ' + (err.message || err);
+        });
+      });
+      delKey = function (ev) { if (ev.key === 'Escape') closeDelete(); };
+      document.addEventListener('keydown', delKey);
+    }
+    if (grid) {
+      grid.addEventListener('click', function (ev) {
+        var btn = ev.target.closest ? ev.target.closest('.ed-img-del') : null;
+        if (!btn) return;
+        var card = btn.closest('.ed-img-card');
+        if (!card) return;
+        ev.preventDefault(); ev.stopPropagation();
+        confirmDelete(card.getAttribute('data-filename'));
       });
     }
 

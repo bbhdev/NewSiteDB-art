@@ -2194,6 +2194,69 @@ HTML;
     ],
 
     /**
+     * Slice 4f — delete one image from a page's library.
+     *
+     *   POST dev/page/delete-image
+     *   body: { page: "<pageId>", filename: "<name.ext>" }
+     *
+     * Removes the binary plus its Kirby meta sidecar (<name.ext>.txt) from
+     * content/<page>/_drafts/images/. Runs with NO Panel user (same reason
+     * as upload-image / use-image), so we unlink at the filesystem level
+     * rather than via $file->delete(). The caller (editor Images mode) is
+     * responsible for warning the user when the image is still in use; this
+     * endpoint just performs the deletion and reports success. Any rects
+     * still bound to the filename become dangling and render as "not found
+     * in library" — that's the warned-about consequence, not an error here.
+     */
+    [
+      'pattern' => 'dev/page/delete-image',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+        $body = $kirby->request()->body()->toArray();
+
+        $pageId   = $body['page'] ?? null;
+        $filename = $body['filename'] ?? null;
+        if (!is_string($pageId) || !preg_match('~^[a-z0-9][a-z0-9/_-]*$~i', $pageId)) {
+          return $json(['ok' => false, 'error' => 'Invalid or missing page id.'], 400);
+        }
+        // Filename must be a bare basename (no traversal) of an allowed type.
+        if (!is_string($filename) || $filename === '' || basename($filename) !== $filename
+            || strpos($filename, "\0") !== false) {
+          return $json(['ok' => false, 'error' => 'Invalid filename.'], 400);
+        }
+        $allowedExt = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'];
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowedExt, true)) {
+          return $json(['ok' => false, 'error' => 'Refusing to delete a non-image file.'], 400);
+        }
+
+        $page = $kirby->page($pageId);
+        if (!$page) {
+          return $json(['ok' => false, 'error' => 'Unknown page: ' . $pageId], 404);
+        }
+        $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
+        $dir = $imgPage ? $imgPage->root() : ($page->root() . '/_drafts/images');
+        $path = $dir . '/' . $filename;
+
+        if (!is_file($path)) {
+          return $json(['ok' => false, 'error' => 'Image not found in this page’s library.'], 404);
+        }
+        if (!@unlink($path)) {
+          return $json(['ok' => false, 'error' => 'Could not delete the image file.'], 500);
+        }
+        // Kirby stores file metadata in a sibling "<filename>.txt" content
+        // file — remove it too so no orphan meta lingers.
+        if (is_file($path . '.txt')) { @unlink($path . '.txt'); }
+
+        return $json(['ok' => true, 'filename' => $filename]);
+      }
+    ],
+
+    /**
      * v0.10.35 — Image-workshop verdict persistence (Slice 2 step B).
      *
      *   POST dev/image-workshop/save
