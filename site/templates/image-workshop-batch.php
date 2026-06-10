@@ -145,6 +145,21 @@ $offCount = $images->count() - $onCount;
     </div>
   </div>
 
+  <!-- Destructive-delete confirmation (4g-2). Named per-file at open time. -->
+  <div id="iw-confirm" class="iw-confirm" hidden role="dialog" aria-modal="true" aria-labelledby="iw-confirm-title">
+    <div class="iw-confirm-box">
+      <h2 class="iw-confirm-title" id="iw-confirm-title">Delete this image?</h2>
+      <p class="iw-confirm-msg">
+        <strong id="iw-confirm-name"></strong> and any resized derivative will be
+        <strong>permanently deleted</strong>. This cannot be undone.
+      </p>
+      <div class="iw-confirm-actions">
+        <button type="button" class="iw-confirm-cancel" id="iw-confirm-cancel">Cancel</button>
+        <button type="button" class="iw-confirm-del" id="iw-confirm-del">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <main class="iw-grid-wrap">
     <?php if ($images->count() === 0): ?>
       <p class="iw-empty">
@@ -201,9 +216,12 @@ $offCount = $images->count() - $onCount;
             </div>
 
             <!-- Use-it toggle (4g-1). On = the editor will pull this image;
-                 off = it stays in the workshop (implicit "rework"). -->
+                 off = it stays in the workshop (implicit "rework").
+                 Dropped (4g-2) = permanently delete the original + any
+                 resized derivative. -->
             <div class="iw-controls">
               <button type="button" class="iw-use" aria-pressed="<?= $on ? 'true' : 'false' ?>" aria-label="Toggle Use it for <?= esc($img->filename()) ?>">Use it</button>
+              <button type="button" class="iw-drop" aria-label="Delete <?= esc($img->filename()) ?> (original and resized)">Dropped</button>
             </div>
           </article>
         <?php endforeach; ?>
@@ -368,6 +386,72 @@ $offCount = $images->count() - $onCount;
         recount();
         applyFilter(); // a now-filtered-out card hides immediately
         scheduleSave();
+      });
+
+      // ── Dropped = permanent delete (4g-2) ────────────────────────
+      // Two-step: clicking "Dropped" opens a named confirm modal; only the
+      // modal's Delete actually hits the server. On success the card is
+      // removed from the DOM + the in-memory cards list, the use-it map is
+      // cleaned, counts/filter refresh, and we broadcast so an editor tab
+      // re-pulls (a now-deleted ON image must vanish from its import list).
+      var DELETE_URL  = <?= json_encode(url('dev/image-workshop/delete-image')) ?>;
+      var confirmEl   = document.getElementById('iw-confirm');
+      var confirmName = document.getElementById('iw-confirm-name');
+      var confirmDel  = document.getElementById('iw-confirm-del');
+      var confirmCancel = document.getElementById('iw-confirm-cancel');
+      var pendingCard = null;
+
+      function openConfirm(card) {
+        pendingCard = card;
+        if (confirmName) confirmName.textContent = card.getAttribute('data-filename');
+        if (confirmEl) confirmEl.hidden = false;
+        if (confirmDel) confirmDel.focus();
+      }
+      function closeConfirm() {
+        pendingCard = null;
+        if (confirmEl) confirmEl.hidden = true;
+        if (confirmDel) { confirmDel.disabled = false; confirmDel.textContent = 'Delete'; }
+      }
+      if (confirmCancel) confirmCancel.addEventListener('click', closeConfirm);
+      if (confirmEl) confirmEl.addEventListener('click', function (e) {
+        if (e.target === confirmEl) closeConfirm(); // click on backdrop
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && confirmEl && !confirmEl.hidden) closeConfirm();
+      });
+
+      if (confirmDel) confirmDel.addEventListener('click', function () {
+        if (!pendingCard) return;
+        var card  = pendingCard;
+        var fname = card.getAttribute('data-filename');
+        confirmDel.disabled = true;
+        confirmDel.textContent = 'Deleting…';
+        fetch(DELETE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch: BATCH_ID, filename: fname })
+        }).then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!j || !j.ok) { flash('Delete failed: ' + ((j && j.error) || 'unknown'), true); closeConfirm(); return; }
+            // Drop from DOM + state.
+            cards = cards.filter(function (c) { return c !== card; });
+            if (card.parentNode) card.parentNode.removeChild(card);
+            delete useIt[fname];
+            recount();
+            applyFilter();
+            flash('Deleted “' + fname + '” ✓', false);
+            // Server state changed → nudge any editor import tab to re-pull.
+            if (useitChannel) useitChannel.postMessage({ type: 'useit-changed', batch: BATCH_ID });
+            closeConfirm();
+          })
+          .catch(function () { flash('Delete failed (network)', true); closeConfirm(); });
+      });
+
+      grid.addEventListener('click', function (e) {
+        var btn = e.target.closest('.iw-drop');
+        if (!btn) return;
+        var card = btn.closest('.iw-card');
+        if (card) openConfirm(card);
       });
 
       // ── Filtering (client-side) ──────────────────────────────────

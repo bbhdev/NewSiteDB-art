@@ -499,3 +499,63 @@ body.iw-body {
   border-color: #11210f;
   background: #11210f;
 }
+
+/* Dropped = destructive delete (4g-2). Secondary affordance in the controls
+   bar; muted until hover so it never competes with the Use-it toggle. */
+.iw-drop {
+  flex: 0 0 auto;
+  background: #202227;
+  color: var(--iw-off);
+  border: none;
+  border-left: 1px solid #33363c;
+  padding: 0.55rem 0.85rem;
+  font: inherit;
+  font-size: 0.9em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.iw-drop:hover { background: #3a1d1d; color: #ff8c7a; }
+
+/* Confirm modal — mirrors .iw-busy's overlay treatment. */
+.iw-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 16, 18, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.iw-confirm[hidden] { display: none; }
+.iw-confirm-box {
+  max-width: 28rem;
+  padding: 1.5rem 1.75rem;
+  background: #26282d;
+  border: 1px solid #3a3d44;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.iw-confirm-title { margin: 0 0 0.6rem; color: #f0f0f0; font-size: 1.1em; }
+.iw-confirm-msg { margin: 0 0 1.25rem; color: #c8c8c8; line-height: 1.5; }
+.iw-confirm-msg strong { color: #f0f0f0; }
+.iw-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+.iw-confirm-cancel,
+.iw-confirm-del {
+  font: inherit;
+  font-weight: 700;
+  padding: 0.5rem 1.1rem;
+  border-radius: 6px;
+  border: 1px solid #3a3d44;
+  cursor: pointer;
+}
+.iw-confirm-cancel { background: #2a2c31; color: #d8d8d8; }
+.iw-confirm-cancel:hover { background: #34363c; }
+.iw-confirm-del { background: #b53a3a; color: #fff; border-color: #b53a3a; }
+.iw-confirm-del:hover { background: #cf4646; }
+.iw-confirm-del:disabled { opacity: 0.6; cursor: default; }

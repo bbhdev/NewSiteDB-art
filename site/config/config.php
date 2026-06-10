@@ -2524,6 +2524,93 @@ HTML;
       }
     ],
 
+    /**
+     * v0.10.185 — Image-workshop "Dropped" delete (Convergence Slice 4g-2).
+     *
+     *   POST dev/image-workshop/delete-image
+     *   body: { batch: "<batch page id>", filename: "<file>" }
+     *
+     * Permanently removes a source image from a workshop batch — and "the
+     * resized if it exists": we delete via Kirby's $file->delete() (under
+     * impersonate('kirby'), since routes run with no Panel user), which in
+     * one call removes the source file, its sibling "<file>.txt" content
+     * meta, AND the file's media-cache folder (every resized derivative the
+     * grid/editor ever generated). A raw unlink would leave those media
+     * derivatives orphaned, so we deliberately go Kirby-native here (unlike
+     * the editor's page-library delete, which has no derivative-purge need).
+     *
+     * After the file is gone we rekey the per-batch sidecars: drop the
+     * filename from useit.json (so a deleted ON image doesn't linger as a
+     * phantom pull target) and from sent.json (its transfer history is moot).
+     */
+    [
+      'pattern' => 'dev/image-workshop/delete-image',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+        $body = $kirby->request()->body()->toArray();
+
+        // Sync S2: record activity like the other mutating workshop routes.
+        sync_record_activity_and_notify();
+
+        $batchId  = $body['batch']    ?? null;
+        $filename = $body['filename'] ?? null;
+
+        if (!is_string($batchId) || $batchId === ''
+            || !is_string($filename) || $filename === '') {
+          return $json(['ok' => false, 'error' => 'Missing or invalid body fields.'], 400);
+        }
+
+        // Resolve the batch (drafts included), scoped to the workshop
+        // container so an arbitrary page id can't be targeted.
+        $container = $kirby->page('dev/image-workshop');
+        $batchPage = $container ? $container->childrenAndDrafts()->find($batchId) : null;
+        if (!$batchPage || $batchPage->intendedTemplate()->name() !== 'image-workshop-batch') {
+          return $json(['ok' => false, 'error' => 'Unknown image-workshop batch: ' . $batchId], 404);
+        }
+
+        $img = $batchPage->image($filename);
+        if (!$img) {
+          return $json(['ok' => false, 'error' => 'Unknown image in batch: ' . $filename], 404);
+        }
+
+        // Delete via Kirby so the media-cache derivatives are purged too.
+        // Routes carry no Panel user → impersonate the almighty kirby user
+        // for the permission check.
+        try {
+          $kirby->impersonate('kirby');
+          $img->delete();
+        } catch (\Throwable $e) {
+          return $json(['ok' => false, 'error' => 'Could not delete the image: ' . $e->getMessage()], 500);
+        }
+
+        // ── Rekey sidecars: drop the deleted filename ────────────────────
+        $rekey = function (string $path, string $key) use ($filename) {
+          if (!is_file($path)) return;
+          $decoded = json_decode(file_get_contents($path), true);
+          if (!is_array($decoded) || !isset($decoded[$key]) || !is_array($decoded[$key])) return;
+          if (!array_key_exists($filename, $decoded[$key])) return;
+          unset($decoded[$key][$filename]);
+          $decoded[$key] = (object) $decoded[$key]; // {} not [] when empty
+          $jsonStr = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+          $tmp = $path . '.tmp';
+          if (file_put_contents($tmp, $jsonStr) !== false) {
+            if (!rename($tmp, $path)) { @unlink($tmp); }
+          }
+        };
+        $rekey($batchPage->root() . '/useit.json', 'useIt');
+        $rekey($batchPage->root() . '/sent.json',  'sent');
+
+        // Sync S3: bump the batch _sync sidecar (draft page → pass root()).
+        sync_bump_page($batchPage->id(), $batchPage->root());
+
+        return $json(['ok' => true, 'filename' => $filename]);
+      }
+    ],
+
     /*
      * GET dev/image-workshop/list            (Convergence Slice 4c)
      *   ?batch=<id>      — optional; when omitted, lists batches
