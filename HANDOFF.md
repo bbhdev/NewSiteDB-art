@@ -40,6 +40,43 @@ Read this top-to-bottom once; reference back as needed.
 > This is a standing constraint on Phase 2 editor work. Carry it forward in every
 > handoff.
 
+> ## ⛳ PROJECT NORTH STAR — staging-on-A → publish-to-B is a first-class workflow
+>
+> **Re-stated by the user (v0.10.208) as a standing consideration for ALL
+> evaluations and decisions, alongside the tablet constraint above.**
+>
+> The three nodes are NOT "L is where you author, A and B are dumb mirrors."
+> The real workflow:
+> - **L** — local Mac authoring (the everyday, at-the-office surface).
+> - **A** — staging / live editing surface. **Editing directly on A is
+>   first-class**, not a fallback. You stage changes on A, then **publish A → B**.
+> - **B** — public production site.
+>
+> **The decisive link to the tablet north star:** the tablet layer is
+> first-class (above), and **working on a tablet means working on A** — because
+> the situations that motivate tablet editing are precisely the ones away from
+> the Mac: convenience, travel, an urgent update while not at the office. The
+> tablet doesn't reach L; it reaches A. So "tablet editing is first-class" and
+> "editing on A is first-class" are the **same requirement** seen from two
+> angles. Any decision that quietly assumes A is non-interactive (read-only
+> mirror, no auth-gated editor surface, ops that only make sense from L) breaks
+> the tablet path too.
+>
+> **Smartphone is explicitly NOT first-class** (companion note, for a complete
+> picture): the phone layer is a *demo of Deco's capabilities for other people*
+> (showing off the power unexpectedly), not a real editing target. Tablet =
+> first-class editing; phone = reducible demo surface derived from it.
+>
+> Implications to weigh in EVERY decision:
+> - A must carry a real, auth-gated editing surface and a real **publish-to-B**
+>   affordance — both reachable from a tablet (touch-friendly, not desktop-only).
+> - The sync model's **A → B publish** direction is a primary path, not an
+>   afterthought (see the sync slices: S6 publish A → B, S8 B-freeze + back-prop,
+>   S9 "Published: <date>"). Staging-on-A is *why* that direction is first-class.
+> - Conversely, anything that is genuinely L-only (e.g. shell-out ops — see the
+>   parked PHP shell-out note) must NOT be assumed available when the user is
+>   working on A from a tablet. A's affordances have to stand on their own.
+
 **Current state (v0.10.136):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
