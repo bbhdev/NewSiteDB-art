@@ -20,8 +20,17 @@
  *     transfer ownership moves to the editor, which pulls only the
  *     use-it=on images via /dev/image-workshop/list (consumer-side filter).
  *
- * Deferred to later 4g slices: Dropped=delete (4g-2), per-image long edge
- * (4g-3), in-workshop file rename (4g-5), editable batch names (4g-6).
+ * v0.10.189 (Convergence Slice 4g-3a) — PER-IMAGE LONG EDGE. Each card gets
+ * its own long-edge input + "Apply": Apply POSTs to dev/image-workshop/resize,
+ * which re-renders only that image's derivative, persists the size to a new
+ * per-batch sizes.json sidecar ({ schemaVersion, sizes: { "<file>": px } }),
+ * and returns the fresh url/dims/niceSize/pct so the card swaps its preview
+ * WYSIWYG with no page reload. The global "Test long edge" form remains the
+ * DEFAULT for files without their own size entry. (4g-3b adds the global
+ * "Copy to all" / "Apply to all" bulk helpers.)
+ *
+ * Deferred to later 4g slices: in-workshop file rename (4g-5), editable
+ * batch names (4g-6).
  *
  * Resize semantics mirror the canvas-page runtime and the maxLongEdge
  * commit hook exactly: $file->resize($size, $size) fits the image inside a
@@ -36,8 +45,9 @@
 $v = option('version', 'dev');
 
 // Test long edge: ?size=NNNN, default 1000, clamped to [200, 8000] to
-// match the image blueprint's maxLongEdge bounds. (Still global in 4g-1;
-// per-image long edge arrives in 4g-3.)
+// match the image blueprint's maxLongEdge bounds. Since 4g-3a this is the
+// DEFAULT for files without their own size in sizes.json; per-image sizes
+// override it per card.
 $sizeRaw = kirby()->request()->get('size');
 $size    = is_numeric($sizeRaw) ? (int) $sizeRaw : 1000;
 $size    = max(200, min(8000, $size));
@@ -68,6 +78,22 @@ if (is_file($useItPath)) {
       foreach ($d['verdicts'] as $fn => $verdict) {
         if ($verdict === 'ok') { $useIt[$fn] = true; }
       }
+    }
+  }
+}
+
+// Per-image long edge (4g-3a). sizes.json shape:
+// { schemaVersion, sizes: { "<filename>": px } }. Absence for a file means
+// "use the page default" ($size, the global ?size / 1000 fallback). Each card
+// renders its resized derivative at its own size; the global form remains the
+// default for files without their own entry. Per-card Apply persists here.
+$sizesPath = $page->root() . '/sizes.json';
+$sizes     = [];
+if (is_file($sizesPath)) {
+  $decoded = json_decode(file_get_contents($sizesPath), true);
+  if (is_array($decoded) && isset($decoded['sizes']) && is_array($decoded['sizes'])) {
+    foreach ($decoded['sizes'] as $fn => $px) {
+      if (is_numeric($px)) { $sizes[$fn] = max(200, min(8000, (int) $px)); }
     }
   }
 }
@@ -179,13 +205,16 @@ $offCount = $images->count() - $onCount;
           <?php
             $ow = $img->width();
             $oh = $img->height();
+            // Per-image long edge (4g-3a): this card's own size, or the page
+            // default for files without an entry in sizes.json.
+            $cardSize = $sizes[$img->filename()] ?? $size;
             // Eager resize — generates + caches the derivative.
-            $resized = $img->resize($size, $size);
+            $resized = $img->resize($cardSize, $cardSize);
             $rw = $resized->width();
             $rh = $resized->height();
             $origLong = max($ow, $oh);
-            $pct = $origLong > 0 ? round(($size <= $origLong ? $size : $origLong) / $origLong * 100) : 100;
-            $noShrink = $size >= $origLong;
+            $pct = $origLong > 0 ? round(($cardSize <= $origLong ? $cardSize : $origLong) / $origLong * 100) : 100;
+            $noShrink = $cardSize >= $origLong;
             $on = !empty($useIt[$img->filename()]);
           ?>
           <article class="iw-card" data-filename="<?= esc($img->filename()) ?>" data-useit="<?= $on ? '1' : '0' ?>">
@@ -207,18 +236,24 @@ $offCount = $images->count() - $onCount;
 
               <figure class="iw-cell">
                 <a class="iw-thumblink" href="<?= $resized->url() ?>" target="_blank" rel="noopener">
-                  <img class="iw-thumb" src="<?= $resized->url() ?>" alt="" loading="lazy">
+                  <img class="iw-thumb" data-role="rimg" src="<?= $resized->url() ?>" alt="" loading="lazy">
                 </a>
                 <figcaption class="iw-cap">
-                  <span class="iw-cap-tag iw-cap-tag--resized">resized <?= $size ?></span>
-                  <span class="iw-cap-dims"><?= $rw ?>×<?= $rh ?></span>
-                  <span class="iw-cap-size"><?= esc($resized->niceSize()) ?></span>
-                  <?php if ($noShrink): ?>
-                    <span class="iw-cap-note" title="The test size is at or above the source's long edge, so no downscale happened.">≥ source — no shrink</span>
-                  <?php else: ?>
-                    <span class="iw-cap-note"><?= $pct ?>% of source</span>
-                  <?php endif; ?>
+                  <span class="iw-cap-tag iw-cap-tag--resized">resized</span>
+                  <span class="iw-cap-dims" data-role="rdims"><?= $rw ?>×<?= $rh ?></span>
+                  <span class="iw-cap-size" data-role="rsize"><?= esc($resized->niceSize()) ?></span>
+                  <span class="iw-cap-note" data-role="rnote"<?= $noShrink ? ' title="The test size is at or above the source\'s long edge, so no downscale happened."' : '' ?>><?= $noShrink ? '≥ source — no shrink' : $pct . '% of source' ?></span>
                 </figcaption>
+                <!-- Per-image long edge (4g-3a): set + Apply re-renders THIS
+                     card's resized preview only, and persists to sizes.json. -->
+                <div class="iw-sizerow">
+                  <label class="iw-sizerow-label" for="iw-edge-<?= esc($img->filename()) ?>">Long edge</label>
+                  <input type="number" class="iw-edge" id="iw-edge-<?= esc($img->filename()) ?>"
+                         min="200" max="8000" step="10" value="<?= $cardSize ?>"
+                         inputmode="numeric" autocomplete="off"
+                         aria-label="Long edge (px) for <?= esc($img->filename()) ?>">
+                  <button type="button" class="iw-edge-apply">Apply</button>
+                </div>
               </figure>
             </div>
 
@@ -503,6 +538,89 @@ $offCount = $images->count() - $onCount;
       }
 
       recount();
+    })();
+
+    // Per-image long edge (4g-3a): each card has a long-edge input + Apply.
+    // Apply re-renders THAT image's resized derivative server-side, persists
+    // the size to sizes.json, and swaps the card's preview WYSIWYG — no page
+    // reload, no effect on other cards.
+    (function () {
+      var grid = document.getElementById('iw-grid');
+      if (!grid) return;
+
+      var RESIZE_URL = <?= json_encode(url('dev/image-workshop/resize')) ?>;
+      var BATCH_ID   = <?= json_encode($page->id()) ?>;
+      var saveState  = document.getElementById('iw-savestate');
+
+      function flash(msg, isErr) {
+        if (!saveState) return;
+        saveState.textContent = msg;
+        saveState.classList.toggle('is-error', !!isErr);
+      }
+
+      function applyCard(card, btn) {
+        var fname = card.getAttribute('data-filename');
+        var input = card.querySelector('.iw-edge');
+        if (!input) return;
+        var size = parseInt(input.value, 10);
+        if (!size || size < 200) size = 200;
+        if (size > 8000) size = 8000;
+        input.value = size;
+
+        var oldLabel = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = '…'; }
+        flash('Resizing “' + fname + '”…', false);
+
+        fetch(RESIZE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch: BATCH_ID, filename: fname, size: size })
+        }).then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+            if (!j || !j.ok) { flash('Resize failed: ' + ((j && j.error) || 'unknown'), true); return; }
+            var img  = card.querySelector('[data-role="rimg"]');
+            var link = card.querySelector('.iw-pair .iw-cell:last-child .iw-thumblink');
+            var dims = card.querySelector('[data-role="rdims"]');
+            var sz   = card.querySelector('[data-role="rsize"]');
+            var note = card.querySelector('[data-role="rnote"]');
+            if (img)  img.src = j.url;
+            if (link) link.setAttribute('href', j.url);
+            if (dims) dims.textContent = j.width + '×' + j.height;
+            if (sz)   sz.textContent = j.niceSize;
+            if (note) {
+              if (j.noShrink) {
+                note.textContent = '≥ source — no shrink';
+                note.setAttribute('title', "The test size is at or above the source's long edge, so no downscale happened.");
+              } else {
+                note.textContent = j.pct + '% of source';
+                note.removeAttribute('title');
+              }
+            }
+            input.value = j.size;
+            flash('Resized “' + fname + '” → ' + j.size + ' px ✓' + (j.sidecar ? '' : ' (size not saved)'), !j.sidecar);
+          })
+          .catch(function () {
+            if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+            flash('Resize failed (network)', true);
+          });
+      }
+
+      grid.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.iw-edge-apply') : null;
+        if (!btn) return;
+        var card = btn.closest('.iw-card');
+        if (card) applyCard(card, btn);
+      });
+      // Enter inside a long-edge input applies that card.
+      grid.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        var input = e.target.closest ? e.target.closest('.iw-edge') : null;
+        if (!input) return;
+        e.preventDefault();
+        var card = input.closest('.iw-card');
+        if (card) applyCard(card, card.querySelector('.iw-edge-apply'));
+      });
     })();
 
     // Click-to-view lightbox (4g-2b). Both thumb cells (original + resized)

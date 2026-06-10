@@ -324,6 +324,47 @@ body.iw-body {
   margin-left: auto;
 }
 
+/* Per-image long edge row (4g-3a) — sits under the resized cell's caption.
+   Input + Apply re-render just this card's preview and persist its size. */
+.iw-sizerow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.6rem 0.55rem;
+}
+.iw-sizerow-label {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9aa0a8;
+  white-space: nowrap;
+}
+.iw-edge {
+  width: 4.5rem;
+  background: #2a2c31;
+  color: #f0f0f0;
+  border: 1px solid #3a3d44;
+  border-radius: 3px;
+  padding: 0.22rem 0.4rem;
+  font: inherit;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+}
+.iw-edge:focus { border-color: #f0a060; outline: none; }
+.iw-edge-apply {
+  background: #34373d;
+  color: #e8e8e8;
+  border: 1px solid #3a3d44;
+  border-radius: 3px;
+  padding: 0.22rem 0.7rem;
+  font: inherit;
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.iw-edge-apply:hover:not(:disabled) { background: #3d4046; border-color: #f0a060; color: #fff; }
+.iw-edge-apply:disabled { opacity: 0.6; cursor: default; }
+
 /* Use-it triage bar (4g-1) ──────────────────────────────────────── */
 
 /* Use-it accents, reused by filter chips, toggle button, card tint.

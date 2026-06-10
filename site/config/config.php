@@ -2611,6 +2611,105 @@ HTML;
       }
     ],
 
+    /**
+     * v0.10.189 — Image-workshop per-image long edge (Convergence Slice 4g-3a).
+     *
+     *   POST dev/image-workshop/resize
+     *   body: { batch: "<batch page id>", filename: "<file>", size: <px> }
+     *
+     * Re-renders ONE image's resized derivative at the given long edge and
+     * persists that per-image size to a per-batch sizes.json sidecar
+     * ({ schemaVersion, sizes: { "<filename>": px } }). Returns the fresh
+     * derivative URL + dims + niceSize + pct/no-shrink note so the card can
+     * swap its preview WYSIWYG without a page reload. resize() is read-only
+     * generation (no Panel user needed), identical to the grid render.
+     *
+     * The size is clamped to [200, 8000] to match the image blueprint's
+     * maxLongEdge bounds (same clamp as the old global ?size form and
+     * use-image). $img->resize($size,$size) fits inside a $size-square box:
+     * long edge binds, aspect preserved, no crop.
+     */
+    [
+      'pattern' => 'dev/image-workshop/resize',
+      'method'  => 'POST',
+      'action'  => function () {
+        $kirby = kirby();
+        $json  = function ($data, int $code = 200) {
+          return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
+        };
+        $body = $kirby->request()->body()->toArray();
+
+        // Sync S2: record activity like the other mutating workshop routes.
+        sync_record_activity_and_notify();
+
+        $batchId  = $body['batch']    ?? null;
+        $filename = $body['filename'] ?? null;
+        $sizeRaw  = $body['size']     ?? null;
+
+        if (!is_string($batchId) || $batchId === ''
+            || !is_string($filename) || $filename === ''
+            || !is_numeric($sizeRaw)) {
+          return $json(['ok' => false, 'error' => 'Missing or invalid body fields.'], 400);
+        }
+        $size = max(200, min(8000, (int) $sizeRaw));
+
+        // Resolve the batch (drafts included), scoped to the workshop
+        // container so an arbitrary page id can't be targeted.
+        $container = $kirby->page('dev/image-workshop');
+        $batchPage = $container ? $container->childrenAndDrafts()->find($batchId) : null;
+        if (!$batchPage || $batchPage->intendedTemplate()->name() !== 'image-workshop-batch') {
+          return $json(['ok' => false, 'error' => 'Unknown image-workshop batch: ' . $batchId], 404);
+        }
+
+        $img = $batchPage->image($filename);
+        if (!$img) {
+          return $json(['ok' => false, 'error' => 'Unknown image in batch: ' . $filename], 404);
+        }
+
+        // Render (or cache-hit) the derivative — byte-identical to a grid
+        // render at the same size.
+        $resized = $img->resize($size, $size);
+
+        // Persist this image's size into sizes.json (merge, atomic write).
+        $sizesPath = $batchPage->root() . '/sizes.json';
+        $sizes = [];
+        if (is_file($sizesPath)) {
+          $decoded = json_decode(@file_get_contents($sizesPath), true);
+          if (is_array($decoded) && isset($decoded['sizes']) && is_array($decoded['sizes'])) {
+            $sizes = $decoded['sizes'];
+          }
+        }
+        $sizes[$filename] = $size;
+        $payload = ['schemaVersion' => 1, 'sizes' => (object) $sizes];
+        $jsonStr = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+        $tmp = $sizesPath . '.tmp';
+        $sidecarOk = (file_put_contents($tmp, $jsonStr) !== false && rename($tmp, $sizesPath));
+        if (!$sidecarOk) { @unlink($tmp); }
+
+        // Sync S3: bump the batch _sync sidecar (draft page → pass root()).
+        sync_bump_page($batchPage->id(), $batchPage->root());
+
+        $origLong = max($img->width(), $img->height());
+        $noShrink = $size >= $origLong;
+        $pct = $origLong > 0
+          ? (int) round(($size <= $origLong ? $size : $origLong) / $origLong * 100)
+          : 100;
+
+        return $json([
+          'ok'       => true,
+          'filename' => $filename,
+          'size'     => $size,
+          'url'      => $resized->url(),
+          'width'    => $resized->width(),
+          'height'   => $resized->height(),
+          'niceSize' => $resized->niceSize(),
+          'pct'      => $pct,
+          'noShrink' => $noShrink,
+          'sidecar'  => $sidecarOk,
+        ]);
+      }
+    ],
+
     /*
      * GET dev/image-workshop/list            (Convergence Slice 4c)
      *   ?batch=<id>      — optional; when omitted, lists batches
