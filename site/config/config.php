@@ -2829,6 +2829,53 @@ HTML;
           'application/json'
         );
       }
+    ],
+
+    /*
+     * POST /sync/push/<toRole>[?dryRun=1] — SEND side trigger (S4b.3).
+     *
+     * Runs ON the source node (L). Tars this node's content/ and POSTs it
+     * to <toRole>'s /sync/propagate. This is the route the editor's
+     * "Push L → A" button calls (S4b.4). It is a LOCAL action — the
+     * authenticated, secret-bearing request is the OUTBOUND one this
+     * route makes to the peer; the trigger itself is same-origin from
+     * L's own editor surface, so it is not bearer-gated here. (L is the
+     * local authoring box; /dev and these triggers are not exposed
+     * publicly. A real deployment would additionally firewall it.)
+     *
+     * ?dryRun=1 forwards as a dry-run to the peer: the peer reports what
+     * WOULD be replaced and takes no snapshot / no swap. Used by the UI
+     * to preview before the user confirms the real push.
+     *
+     * Returns the peer's JSON verdict (with httpCode + sent annotations).
+     * A transport/local failure returns ok:false with a 502.
+     */
+    [
+      'pattern' => 'sync/push/(:any)',
+      'method'  => 'POST',
+      'action'  => function (string $toRole) {
+        $sync = option('sync');
+        if (!is_array($sync) || empty($sync['secret'])) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'sync not configured']),
+            'application/json', 503
+          );
+        }
+        $dryRun = (bool) get('dryRun');
+        $result = sync_propagate_to_peer($toRole, $dryRun);
+
+        // Map a local/transport failure to 502 (bad upstream); a peer
+        // that answered keeps the peer's own ok/error verbatim at 200 so
+        // the client can read the structured result either way.
+        $status = 200;
+        if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
+          $status = 502;
+        }
+        return new Kirby\Http\Response(
+          json_encode($result, JSON_UNESCAPED_SLASHES),
+          'application/json', $status
+        );
+      }
     ]
   ]
 ];

@@ -867,3 +867,157 @@ function sync_record_propagate_receipt(string $fromRole): string
     sync_state_write($state);
     return $now;
 }
+
+/*
+ * ─────────────────────────────────────────────────────────────────
+ * Slice S4b.3 — SEND side: tar this node's content/ and POST it to a
+ * peer's /sync/propagate receive endpoint.
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * The PRIMARY in-app push (deploy/propagate.sh is the CLI fallback).
+ * sync_build_propagate_tarball() produces the exact wire format the
+ * receiver expects: a gzip tar with page dirs at the archive root and
+ * the propagation exclusions ALREADY applied (the receiver re-applies
+ * them too — belt and suspenders — but pre-filtering keeps drafts and
+ * the editor surface off the wire). sync_propagate_to_peer() reads the
+ * peer URL + shared secret from option('sync'), POSTs the tarball as a
+ * raw binary body (Content-Type: application/gzip — NOT form-encoded,
+ * or PHP empties php://input on the far side), and returns the peer's
+ * own JSON verdict annotated with the HTTP code and sent size.
+ */
+
+/**
+ * Stage content/ (excludes applied) and build a gzip tarball of it under
+ * the project root. Returns ['ok'=>true,'path'=>…,'files'=>…,'bytes'=>…]
+ * (caller MUST unlink ['path'] when done) or ['ok'=>false,'error'=>…].
+ */
+function sync_build_propagate_tarball(): array
+{
+    $content = kirby()->root('content');
+    $root    = sync_project_root();
+    $tag     = gmdate('Ymd\THis\Z') . '-' . bin2hex(random_bytes(3));
+    $stage   = $root . '/.sync-outgoing-' . $tag;
+    $tarPath = $root . '/.sync-send-' . $tag . '.tar';   // .gz appended by compress()
+    $gzPath  = $tarPath . '.gz';
+
+    // 1. Stage with exclusions → page dirs land at the staging root, which
+    //    becomes the archive root (matches the receiver's extract layout).
+    $counts = sync_copy_content_tree($content, $stage, true);
+    if ($counts === null) {
+        sync_rrmdir($stage);
+        return ['ok' => false, 'error' => 'failed staging content/ for send'];
+    }
+    if (($counts['files'] ?? 0) === 0) {
+        sync_rrmdir($stage);
+        return ['ok' => false, 'error' => 'nothing to send (0 files after exclusions)'];
+    }
+
+    // 2. tar then gzip. PharData reads/creates DATA archives even under
+    //    phar.readonly=1 (that ini only gates executable .phar).
+    try {
+        @unlink($tarPath); @unlink($gzPath);
+        $phar = new PharData($tarPath);
+        $phar->buildFromDirectory($stage);
+        $phar->compress(Phar::GZ);     // writes $gzPath alongside $tarPath
+        $phar = null;
+    } catch (\Throwable $e) {
+        @unlink($tarPath); @unlink($gzPath);
+        sync_rrmdir($stage);
+        return ['ok' => false, 'error' => 'tar build failed: ' . $e->getMessage()];
+    }
+
+    @unlink($tarPath);     // keep only the compressed archive
+    sync_rrmdir($stage);
+    if (!is_file($gzPath)) {
+        return ['ok' => false, 'error' => 'compressed tarball not produced'];
+    }
+    return ['ok' => true, 'path' => $gzPath, 'files' => $counts['files'], 'bytes' => $counts['bytes']];
+}
+
+/**
+ * Push this node's content/ to $toRole's /sync/propagate endpoint.
+ * $dryRun=true asks the peer to report what WOULD be replaced without
+ * snapshotting or swapping (for the editor confirm/preview).
+ *
+ * Returns the peer's decoded JSON response with two fields added:
+ *   'httpCode' — the HTTP status from the peer
+ *   'sent'     — ['bytes'=>int,'files'=>int] actually uploaded
+ * On a local/transport failure returns ['ok'=>false,'error'=>…[,'code']].
+ * Never throws.
+ */
+function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
+{
+    $sync = option('sync');
+    if (!is_array($sync) || empty($sync['secret'])) {
+        return ['ok' => false, 'error' => 'sync not configured'];
+    }
+    $role   = (string) ($sync['role'] ?? '');
+    $secret = (string) $sync['secret'];
+    $peers  = is_array($sync['peers'] ?? null) ? $sync['peers'] : [];
+    if ($role === '') {
+        return ['ok' => false, 'error' => 'this node has no sync role'];
+    }
+    if (!in_array($toRole, sync_known_roles(), true)) {
+        return ['ok' => false, 'error' => 'unknown destination role: ' . $toRole];
+    }
+    $peerUrl = (string) ($peers[$toRole] ?? '');
+    if ($peerUrl === '') {
+        return ['ok' => false, 'error' => "no peer URL configured for {$toRole}"];
+    }
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'error' => 'curl not available'];
+    }
+
+    $built = sync_build_propagate_tarball();
+    if (!$built['ok']) {
+        return $built;
+    }
+    $gzPath = $built['path'];
+
+    // Read the archive into memory and send it as the raw POST body. A
+    // STRING in CURLOPT_POSTFIELDS is sent verbatim with the given
+    // Content-Type — no form/multipart encoding. Symmetric with the
+    // receiver, which reads the whole body via file_get_contents().
+    $body = @file_get_contents($gzPath);
+    @unlink($gzPath);
+    if ($body === false) {
+        return ['ok' => false, 'error' => 'could not read built tarball'];
+    }
+    $size = strlen($body);
+
+    $url = rtrim($peerUrl, '/') . '/sync/propagate?from=' . rawurlencode($role)
+         . ($dryRun ? '&dryRun=1' : '');
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $body,
+        CURLOPT_HTTPHEADER     => [
+            'Content-Type: application/gzip',   // BINARY — see /sync/propagate note
+            'Authorization: Bearer ' . $secret,
+            'User-Agent: NewSiteDB-art-sync/' . (option('version') ?? 'dev'),
+            'Expect:',                           // avoid the 100-continue stall
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT        => 120,           // content (with images) can be MBs
+        CURLOPT_FOLLOWLOCATION => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    if ($resp === false) {
+        return ['ok' => false, 'code' => $code,
+                'error' => 'request failed: ' . ($err !== '' ? $err : 'unknown transport error')];
+    }
+    $decoded = json_decode((string) $resp, true);
+    if (!is_array($decoded)) {
+        return ['ok' => false, 'code' => $code, 'error' => 'non-JSON response from peer',
+                'body' => substr((string) $resp, 0, 300)];
+    }
+    $decoded['httpCode'] = $code;
+    $decoded['sent']     = ['bytes' => $size, 'files' => $built['files']];
+    return $decoded;
+}
