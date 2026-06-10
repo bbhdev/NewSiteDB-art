@@ -734,6 +734,112 @@ return [
       }
     ],
     /*
+     * Snapshot DELETE — S7 first slice (v0.10.213).
+     *
+     * Body { names: [<string>, …] } (also accepts a single { name }).
+     * Batch so the snapshots panel's "Delete checked" can clear several
+     * accumulated auto-pre-propagate snapshots in one request. Lets the
+     * user do snapshot housekeeping from the editor on A instead of
+     * needing FTP/SSH on the server — and delivers per-snapshot delete,
+     * which never existed before.
+     *
+     * Returns { ok, deleted: [names], errors: [{name, error}] }. ok is
+     * true only when every requested name was deleted; partial batches
+     * still 200 with the breakdown so the client can report precisely.
+     *
+     * SAFETY: this route does a recursive delete on a server path, so it
+     * is guarded twice — (1) the same name validation as save/load (bars
+     * '..', leading dot, slashes, FS-unsafe chars), and (2) a
+     * path-containment check: the realpath of each target MUST be a
+     * DIRECT child of library/ (dirname === realpath(library)). That
+     * defeats symlink-escape and any traversal that slipped the regex —
+     * nothing outside library/ can ever be removed.
+     */
+    [
+      'pattern' => 'dev/draw/library/delete',
+      'method'  => 'POST',
+      'action'  => function () {
+        $body  = kirby()->request()->body()->toArray();
+        $names = [];
+        if (isset($body['names']) && is_array($body['names'])) {
+          $names = $body['names'];
+        } elseif (isset($body['name'])) {
+          $names = [$body['name']];
+        }
+        $names = array_values(array_unique(array_map(
+          function ($n) { return trim((string) $n); }, $names
+        )));
+        if (count($names) === 0) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'No snapshot names given.']),
+            'application/json', 400
+          );
+        }
+        $libRoot     = __DIR__ . '/../../library';
+        $libRootReal = realpath($libRoot);
+        if ($libRootReal === false) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'No library/ directory.']),
+            'application/json', 404
+          );
+        }
+        // Identical to save/load so a name accepted on write is always
+        // deletable.
+        $invalid = function ($name) {
+          return
+               $name === ''
+            || mb_strlen($name) > 80
+            || $name === '.' || $name === '..'
+            || $name[0] === '.'
+            || strpos($name, '..') !== false
+            || preg_match('#[\\\\/:\*\?"<>\|\x00-\x1f]#', $name) === 1
+            || preg_match('/^[\p{L}\p{N} _.,\'()\[\]\-]+$/u', $name) !== 1;
+        };
+        // Recursive delete INCLUDING the directory itself (the load
+        // endpoint's $wipe keeps the root; here we remove it).
+        $rmrf = function ($dir) use (&$rmrf) {
+          if (!is_dir($dir)) return true;
+          $items = scandir($dir);
+          if ($items === false) return false;
+          foreach ($items as $it) {
+            if ($it === '.' || $it === '..') continue;
+            $p = $dir . '/' . $it;
+            if (is_dir($p)) {
+              if (!$rmrf($p)) return false;
+            } else {
+              if (@unlink($p) === false) return false;
+            }
+          }
+          return @rmdir($dir);
+        };
+        $deleted = [];
+        $errors  = [];
+        foreach ($names as $name) {
+          if ($invalid($name)) {
+            $errors[] = ['name' => $name, 'error' => 'invalid name'];
+            continue;
+          }
+          $targetReal = realpath($libRoot . '/' . $name);
+          // Must resolve to a direct child of library/ that is a dir.
+          if ($targetReal === false
+              || dirname($targetReal) !== $libRootReal
+              || !is_dir($targetReal)) {
+            $errors[] = ['name' => $name, 'error' => 'not found'];
+            continue;
+          }
+          if ($rmrf($targetReal)) {
+            $deleted[] = $name;
+          } else {
+            $errors[] = ['name' => $name, 'error' => 'delete failed'];
+          }
+        }
+        return new Kirby\Http\Response(
+          json_encode(['ok' => count($errors) === 0, 'deleted' => $deleted, 'errors' => $errors]),
+          'application/json'
+        );
+      }
+    ],
+    /*
      * Font-bundle bookmarklet generator page (Slice 2a-2, v0.8.200).
      *
      * Returns a small HTML page with:
