@@ -2092,9 +2092,37 @@ HTML;
         }
 
         $file = $_FILES['file'] ?? null;
-        if (!is_array($file) || !isset($file['tmp_name'])
-            || ($file['error'] ?? 1) !== UPLOAD_ERR_OK) {
-          return $json(['ok' => false, 'error' => 'No file uploaded, or upload failed.'], 400);
+        // When the POST body exceeds post_max_size, PHP discards both $_POST
+        // and $_FILES — but the page id check above already passed, so reaching
+        // here with an empty $_FILES while CONTENT_LENGTH is large means the
+        // upload blew the *total* request cap, not just the per-file one.
+        if (!is_array($file)) {
+          $len = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+          if ($len > 0) {
+            return $json(['ok' => false, 'error' =>
+              'Upload too large for the server: the request (' . round($len / 1048576, 1)
+              . ' MB) exceeds PHP post_max_size (' . ini_get('post_max_size')
+              . '). Set a smaller "max long edge" so the browser shrinks it first.'], 413);
+          }
+          return $json(['ok' => false, 'error' => 'No file was received.'], 400);
+        }
+        $errCode = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($errCode !== UPLOAD_ERR_OK || !isset($file['tmp_name'])) {
+          $msg = 'Upload failed.';
+          if ($errCode === UPLOAD_ERR_INI_SIZE) {
+            $msg = 'Image too large for the server: it exceeds PHP upload_max_filesize ('
+              . ini_get('upload_max_filesize') . '). Set a smaller "max long edge" so the '
+              . 'browser shrinks it before uploading.';
+          } elseif ($errCode === UPLOAD_ERR_FORM_SIZE) {
+            $msg = 'Image exceeds the form size limit. Set a smaller "max long edge".';
+          } elseif ($errCode === UPLOAD_ERR_PARTIAL) {
+            $msg = 'Upload was interrupted — only part of the file arrived. Try again.';
+          } elseif ($errCode === UPLOAD_ERR_NO_FILE) {
+            $msg = 'No file was selected.';
+          } elseif ($errCode === UPLOAD_ERR_NO_TMP_DIR || $errCode === UPLOAD_ERR_CANT_WRITE) {
+            $msg = 'Server could not store the upload (temp directory issue).';
+          }
+          return $json(['ok' => false, 'error' => $msg], $errCode === UPLOAD_ERR_INI_SIZE ? 413 : 400);
         }
 
         // Size cap — 25 MB.

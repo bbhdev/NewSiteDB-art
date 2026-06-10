@@ -527,6 +527,11 @@ $payload = str_replace('<', '\\u003c', $payload);
       border-radius: 8px; display: block; margin-bottom: 10px;
     }
     .ed-upload-dims { font-size: 12px; opacity: .7; margin: 0 0 10px; }
+    .ed-upload-result {
+      font-size: 12px; margin: 0 0 12px; min-height: 1.2em;
+      color: rgba(120,200,140,.95);
+    }
+    .ed-upload-result.is-warn { color: #f5c518; }
     .ed-upload-field {
       display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin-bottom: 14px;
     }
@@ -1223,29 +1228,41 @@ $payload = str_replace('<', '\\u003c', $payload);
       if (uploadKey) { document.removeEventListener('keydown', uploadKey); uploadKey = null; }
     }
 
-    function doUpload(file, maxLongEdge) {
-      var fd = new FormData();
-      fd.append('page', pageId);
-      fd.append('file', file);
-      if (maxLongEdge) fd.append('maxLongEdge', String(maxLongEdge));
-      var addBody = document.getElementById('ed-upload-add');
-      if (addBody) { addBody.disabled = true; addBody.textContent = 'Uploading…'; }
-      fetch('/dev/page/upload-image', { method: 'POST', body: fd })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed');
-          closeUpload();
-          setStatus('Added ' + j.filename + (j.resizedTo ? (' (resized to ' + j.resizedTo + 'px)') : ''));
-          loaded = false; usage = null; load();   // refresh library + usage
-        })
-        .catch(function (err) {
-          if (addBody) { addBody.disabled = false; addBody.textContent = 'Add to page'; }
-          var st = document.getElementById('ed-upload-err');
-          if (st) st.textContent = 'Upload failed: ' + (err.message || err);
-        });
+    // Human-readable byte size.
+    function fmtBytes(b) {
+      if (!b && b !== 0) return '?';
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(b < 10240 ? 1 : 0) + ' KB';
+      return (b / (1024 * 1024)).toFixed(2) + ' MB';
     }
 
-    // Confirm step: preview + original dims + optional max-long-edge field.
+    // Browser-side resize: re-encode the image fit inside max×max (long edge
+    // binds, no upscale, no crop). Returns a Blob in the source format where
+    // the canvas supports it (jpeg/png/webp); for gif/avif (animation / no
+    // encoder) it resolves null so the caller keeps the original. Doing this
+    // in the browser keeps the POST payload small — the dev server's PHP
+    // upload_max_filesize (2 MB) would otherwise reject most photos before
+    // any server-side resize could run.
+    var RESIZABLE = { 'image/jpeg': 'image/jpeg', 'image/png': 'image/png', 'image/webp': 'image/webp' };
+    function resizeViaCanvas(imgEl, type, tW, tH) {
+      return new Promise(function (resolve) {
+        var outType = RESIZABLE[type];
+        if (!outType || !imgEl.naturalWidth) { resolve(null); return; }
+        try {
+          var c = document.createElement('canvas');
+          c.width = tW; c.height = tH;
+          var ctx = c.getContext('2d');
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(imgEl, 0, 0, tW, tH);
+          c.toBlob(function (blob) { resolve(blob || null); },
+                   outType, outType === 'image/png' ? undefined : 0.92);
+        } catch (e) { resolve(null); }
+      });
+    }
+
+    // Confirm step: preview + original dims + optional max-long-edge field
+    // with a LIVE readout of the resulting dimensions and file size, so the
+    // user sees exactly what will be added before committing.
     function openUpload(file) {
       if (!file || !pageId) return;
       closeUpload();
@@ -1267,35 +1284,132 @@ $payload = str_replace('<', '\\u003c', $payload);
         '<header class="ed-es-panel-head"><h3 class="ed-es-panel-title">Add image to page</h3></header>' +
         '<div class="ed-es-panel-body">' +
           '<img class="ed-upload-preview" src="' + objUrl + '" alt="preview">' +
-          '<p class="ed-upload-dims" id="ed-upload-dims">' + esc(file.name) + '</p>' +
+          '<p class="ed-upload-dims" id="ed-upload-dims">' + esc(file.name) + ' · reading…</p>' +
           '<label class="ed-upload-field">Max long edge (px)' +
             '<input type="number" id="ed-upload-max" min="200" max="8000" step="10" placeholder="original">' +
             '<span class="ed-upload-note">Leave blank to keep the original resolution.</span>' +
           '</label>' +
+          '<p class="ed-upload-result" id="ed-upload-result"></p>' +
           '<p class="ed-upload-dims ed-es-report-warn" id="ed-upload-err"></p>' +
           '<div class="ed-upload-actions">' +
             '<button type="button" class="ed-mini" id="ed-upload-cancel">Cancel</button>' +
-            '<button type="button" class="ed-mini ed-mini-primary" id="ed-upload-add">Add to page</button>' +
+            '<button type="button" class="ed-mini ed-mini-primary" id="ed-upload-add" disabled>Add to page</button>' +
           '</div>' +
         '</div>';
       document.body.appendChild(backdrop);
       document.body.appendChild(panel);
 
-      // Fill in real pixel dimensions once the preview decodes.
+      var maxInput = document.getElementById('ed-upload-max');
+      var resultEl = document.getElementById('ed-upload-result');
+      var errEl    = document.getElementById('ed-upload-err');
+      var addBtn2  = document.getElementById('ed-upload-add');
+      var canResize = !!RESIZABLE[file.type];
+      var natW = 0, natH = 0, ready = false;
+      // Caches the prepared upload so preview + Add never encode twice for
+      // the same target. { max, promise -> {blob, filename, w, h, bytes, resized} }
+      var prep = { max: -1, promise: null };
+
       var probe = new Image();
       probe.onload = function () {
+        natW = probe.naturalWidth; natH = probe.naturalHeight; ready = true;
         var d = document.getElementById('ed-upload-dims');
-        if (d) d.textContent = esc(file.name) + ' · ' + probe.naturalWidth + '×' + probe.naturalHeight;
+        if (d) d.textContent = esc(file.name) + ' · ' + natW + '×' + natH + ' · ' + fmtBytes(file.size);
+        if (addBtn2) addBtn2.disabled = false;
+        refreshPreview();
+      };
+      probe.onerror = function () {
+        if (errEl) errEl.textContent = 'Could not read this image.';
       };
       probe.src = objUrl;
 
+      function targetDims(max) {
+        var longEdge = Math.max(natW, natH);
+        if (!max || max >= longEdge) return { w: natW, h: natH, resize: false };
+        var s = max / longEdge;
+        return { w: Math.max(1, Math.round(natW * s)), h: Math.max(1, Math.round(natH * s)), resize: true };
+      }
+
+      // Build (and memoize) the actual upload payload for a given max.
+      function prepare(max) {
+        if (prep.max === max && prep.promise) return prep.promise;
+        var t = targetDims(max);
+        var p;
+        if (!t.resize) {
+          // No downscale → upload the original file untouched.
+          p = Promise.resolve({ blob: file, filename: file.name, w: natW, h: natH, bytes: file.size, resized: false });
+        } else if (canResize) {
+          p = resizeViaCanvas(probe, file.type, t.w, t.h).then(function (blob) {
+            if (!blob) return { blob: file, filename: file.name, w: natW, h: natH, bytes: file.size, resized: false, serverMax: max };
+            return { blob: blob, filename: file.name, w: t.w, h: t.h, bytes: blob.size, resized: true };
+          });
+        } else {
+          // Can't re-encode this type in the browser → send original, let the
+          // server resize (only works if it fits under upload_max_filesize).
+          p = Promise.resolve({ blob: file, filename: file.name, w: natW, h: natH, bytes: file.size, resized: false, serverMax: max });
+        }
+        prep = { max: max, promise: p };
+        return p;
+      }
+
+      function curMax() {
+        var mv = parseInt(maxInput.value, 10);
+        return (mv >= 200 && mv <= 8000) ? mv : 0;
+      }
+
+      function refreshPreview() {
+        if (!ready || !resultEl) return;
+        var max = curMax();
+        if (errEl) errEl.textContent = '';
+        prepare(max).then(function (r) {
+          if (prep.max !== max) return; // a newer change superseded this one
+          if (!r.resized) {
+            resultEl.textContent = 'Will add: ' + r.w + '×' + r.h + ' · ' + fmtBytes(r.bytes) + ' (original)';
+            if (r.bytes > 2 * 1024 * 1024 && !r.serverMax) {
+              resultEl.textContent += ' — over the 2 MB upload limit; set a max long edge to shrink it.';
+              resultEl.classList.add('is-warn');
+            } else { resultEl.classList.remove('is-warn'); }
+          } else {
+            resultEl.classList.remove('is-warn');
+            resultEl.textContent = 'Will add: ' + r.w + '×' + r.h + ' · ≈ ' + fmtBytes(r.bytes)
+              + ' (from ' + natW + '×' + natH + ')';
+          }
+        });
+      }
+
+      maxInput.addEventListener('input', refreshPreview);
+
       document.getElementById('ed-upload-cancel').addEventListener('click', closeUpload);
-      document.getElementById('ed-upload-add').addEventListener('click', function () {
-        var mv = parseInt(document.getElementById('ed-upload-max').value, 10);
-        doUpload(file, (mv >= 200 && mv <= 8000) ? mv : 0);
+      addBtn2.addEventListener('click', function () {
+        var max = curMax();
+        addBtn2.disabled = true; addBtn2.textContent = 'Preparing…';
+        prepare(max).then(function (r) {
+          addBtn2.textContent = 'Uploading…';
+          doUpload(r.blob, r.filename, r.serverMax || 0);
+        });
       });
       uploadKey = function (ev) { if (ev.key === 'Escape') closeUpload(); };
       document.addEventListener('keydown', uploadKey);
+    }
+
+    function doUpload(blob, filename, serverMax) {
+      var fd = new FormData();
+      fd.append('page', pageId);
+      fd.append('file', blob, filename);
+      if (serverMax) fd.append('maxLongEdge', String(serverMax));
+      fetch('/dev/page/upload-image', { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed');
+          closeUpload();
+          setStatus('Added ' + j.filename + (j.resizedTo ? (' (resized to ' + j.resizedTo + 'px)') : ''));
+          loaded = false; usage = null; load();   // refresh library + usage
+        })
+        .catch(function (err) {
+          var addBody = document.getElementById('ed-upload-add');
+          if (addBody) { addBody.disabled = false; addBody.textContent = 'Add to page'; }
+          var st = document.getElementById('ed-upload-err');
+          if (st) st.textContent = 'Upload failed: ' + (err.message || err);
+        });
     }
 
     if (addBtn && fileInput) {
