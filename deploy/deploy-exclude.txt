@@ -64,6 +64,14 @@ Thumbs.db
 # "$syncSecret" block for the full rationale.
 /site/config/sync.secret.php
 
+# ── Sync per-node ROLE sidecar — per-node, never push, never delete ───
+# v0.10.220. This node's identity ('L'|'A'|'B') lives in a gitignored,
+# rsync-excluded sidecar so role is DECLARED, never inferred and never
+# clobbered by a deploy. Provisioned via sftp/scp per node. A node with
+# no valid role sidecar die()s on boot ("Server role undefined"). See
+# site/config/config.php "$syncRole" block for the full rationale.
+/site/config/sync.role.php
+
 # ── Server-owned web-server config — never push, never delete ─────────
 # .user.ini is host-managed (PHP version selector, memory_limit, …);
 # Infomaniak's Manager rewrites it on certain admin actions, so we

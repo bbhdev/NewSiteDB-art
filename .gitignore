@@ -5,6 +5,13 @@
 # full rationale.
 /site/config/sync.secret.php
 
+# Sync per-node ROLE sidecar (v0.10.220).
+# Declares this node's identity ('L'|'A'|'B') — never tracked, never
+# rsync'd; each node provisions its own. A missing/invalid sidecar
+# HALTS the app ("Server role undefined") rather than defaulting to the
+# privileged L. See config.php "$syncRole" block for full rationale.
+/site/config/sync.role.php
+
 /site/accounts/*
 !/site/accounts/index.html
 /site/cache/*

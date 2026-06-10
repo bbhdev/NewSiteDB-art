@@ -131,6 +131,40 @@ if (!is_string($syncSecret) || $syncSecret === '') {
     $syncSecret = null;
 }
 
+/*
+ * Sync ROLE — declared per node via gitignored sidecar (v0.10.220).
+ *
+ * Node identity (L | A | B) is a DECLARED property of each environment,
+ * never inferred from the hostname or anything else. It lives in a
+ * per-node sidecar file site/config/sync.role.php that is gitignored AND
+ * rsync-excluded — exactly like sync.secret.php — so every node must
+ * positively state who it is. The sidecar is dead simple:
+ *   <?php return 'L';
+ *
+ * FAIL CLOSED — there is deliberately NO default. This block previously
+ * defaulted to 'L' whenever no host-scoped config matched, which meant
+ * any unconfigured environment (a fresh server, a restored backup, a
+ * clone) would SILENTLY boot as the privileged authoring origin L — the
+ * one role that renders the editor and can overwrite A and B. That
+ * fail-open behavior is the footgun this guard closes: a missing or
+ * invalid role now HALTS the whole app with "Server role undefined"
+ * instead of granting L's powers by accident. Role is policy, not
+ * address; it is declared explicitly or the app does not run.
+ *
+ * The guard lives HERE (not in a plugin or a host-scoped config) because
+ * role now comes solely from the sidecar read below — it does not depend
+ * on the host-config merge, so $syncRole is already final at this point.
+ * die() during config load terminates boot before any route, the Panel,
+ * or a sync endpoint can run. Fixing it is a filesystem action (create
+ * the sidecar), not an in-app one, so hard-blocking the app is safe.
+ */
+$syncRole = @include __DIR__ . '/sync.role.php';
+if (!in_array($syncRole, ['L', 'A', 'B'], true)) {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    die('Server role undefined');
+}
+
 return [
   /*
    * App version (semver). Read from the /VERSION file at the repo
@@ -172,18 +206,17 @@ return [
    * sync-layer-topology-and-operations.md) treats this project's three
    * runtime nodes as named participants:
    *
-   *   L  = local Mac (this code path when SERVER_NAME doesn't match a
-   *        host-scoped override; the desktop dev environment).
-   *   A  = newsitedbart.bbh.fr — STAGING. Host-scoped config overrides
-   *        `role` to 'A' there.
-   *   B  = danielbondard.fr — PUBLIC, frozen by default. Host-scoped
-   *        config overrides `role` to 'B' there.
+   *   L  = local Mac — the desktop dev / authoring origin.
+   *   A  = newsitedbart.bbh.fr — STAGING.
+   *   B  = danielbondard.fr — PUBLIC, frozen by default.
    *
-   * This block is the DEFAULT — role='L'. Host-scoped configs
-   * (config.<SERVER_NAME>.php, rsync-excluded) override these values
-   * per environment. Kirby merges host config OVER base via
-   * array_replace_recursive, so a host-scoped override may set just
-   * the differing keys (role, host) and inherit the rest.
+   * `role` is sourced from the gitignored per-node sidecar
+   * site/config/sync.role.php (see the $syncRole block above) — it is
+   * NOT defaulted here and NOT set by the host-scoped configs anymore.
+   * The host-scoped configs (config.<SERVER_NAME>.php, rsync-excluded)
+   * still override `host`/`peers` per environment; Kirby merges them
+   * OVER this base via array_replace_recursive. A node with no valid
+   * role sidecar never reaches this array — config load die()s first.
    *
    * Slice S1 SCOPE: this block + the /sync/whoami route that
    * reads it. No actual content sync yet — those slices follow.
@@ -220,7 +253,7 @@ return [
    *   Kirby's API router.
    */
   'sync' => [
-    'role'   => 'L',
+    'role'   => $syncRole,
     'host'   => 'localhost',
     'secret' => $syncSecret,
     'peers'  => [

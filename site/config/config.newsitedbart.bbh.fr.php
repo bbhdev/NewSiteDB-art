@@ -100,19 +100,24 @@
 
 return [
     /*
-     * Sync identity override (v0.10.140, Slice S1).
+     * Sync identity override (v0.10.140, Slice S1; role moved to
+     * sidecar v0.10.220).
      * This host is STAGING (role 'A'). See sync block in config.php
      * for the architecture rationale; only the differing keys appear
      * here. Kirby merges host config OVER base via
      * array_replace_recursive, so the shared `secret` from config.php
      * is inherited unless overridden.
      *
+     * `role` is NO LONGER set here — it is declared in the gitignored,
+     * rsync-excluded sidecar site/config/sync.role.php on this node
+     * (must contain `<?php return 'A';`). A node with no valid role
+     * sidecar die()s during config load ("Server role undefined").
+     *
      * Peers: A's outbound peer is B (for the A→B propagate that
      * publishes staging to public). A also receives FROM L, but L is
      * a desktop with no inbound URL — A doesn't list L as a peer.
      */
     'sync' => [
-        'role'  => 'A',
         'host'  => 'newsitedbart.bbh.fr',
         'peers' => [
             'B' => 'https://danielbondard.fr',
