@@ -2866,114 +2866,14 @@ HTML;
           );
         }
 
-        $root       = sync_project_root();
-        $tag        = gmdate('Ymd\THis\Z') . '-' . bin2hex(random_bytes(3));
-        $tarPath    = $root . '/.sync-incoming-' . $tag . '.tar.gz';
-        $extractDir = $root . '/.sync-extract-' . $tag;
-
-        $cleanup = function () use ($tarPath, $extractDir) {
-          @unlink($tarPath);
-          sync_rrmdir($extractDir);
-        };
-
-        if (@file_put_contents($tarPath, $raw) === false) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'could not buffer upload to disk']),
-            'application/json', 500
-          );
-        }
-
-        // Extract. PharData reads/extracts data tar archives even under
-        // phar.readonly=1 (that ini only gates executable .phar).
-        try {
-          $phar = new PharData($tarPath);
-          @mkdir($extractDir, 0755, true);
-          $phar->extractTo($extractDir, null, true);
-          $phar = null;   // release handle before cleanup unlinks $tarPath
-        } catch (\Throwable $e) {
-          $cleanup();
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'tarball extract failed: ' . $e->getMessage()]),
-            'application/json', 400
-          );
-        }
-
-        $measure = sync_measure_content_tree($extractDir);
-        if ($measure['files'] === 0) {
-          $cleanup();
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'uploaded archive contained no files']),
-            'application/json', 400
-          );
-        }
-
-        $received = strlen($raw);
-
-        // ?dryRun=1 — report only, no snapshot, no swap. (UI confirm /
-        // preview, and S5 direction detection.)
-        if (get('dryRun')) {
-          $cleanup();
-          return new Kirby\Http\Response(
-            json_encode([
-              'ok'       => true,
-              'dryRun'   => true,
-              'from'     => $from,
-              'received' => ['bytes' => $received],
-              'wouldReplace' => [
-                'pages' => $measure['topPages'],
-                'files' => $measure['files'],
-                'bytes' => $measure['bytes'],
-              ],
-            ], JSON_UNESCAPED_SLASHES),
-            'application/json'
-          );
-        }
-
-        // Real propagate. Mandatory pre-propagate snapshot FIRST.
-        $snap = sync_pre_propagate_snapshot($from);
-        if (!$snap['ok']) {
-          $cleanup();
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'pre-propagate snapshot failed: ' . $snap['error']]),
-            'application/json', 500
-          );
-        }
-
-        // Atomic swap content/ → incoming (preserving dev/, error/,
-        // _drafts/). On failure the swap rolls back its move-aside, so
-        // content/ is left intact; the snapshot exists regardless.
-        $applied = sync_apply_propagate($extractDir);
-        if (!$applied['ok']) {
-          $cleanup();
-          return new Kirby\Http\Response(
-            json_encode([
-              'ok'       => false,
-              'error'    => 'propagate failed: ' . $applied['error'],
-              'snapshot' => $snap['name'],   // restore point
-            ], JSON_UNESCAPED_SLASHES),
-            'application/json', 500
-          );
-        }
-
-        // Destination is now up to date — bump state so it doesn't read
-        // as behind in direction detection.
-        $at = sync_record_propagate_receipt($from);
-        $cleanup();
-
+        // The buffer → extract → snapshot → atomic-swap → receipt dance
+        // is shared with the pull path (sync_ingest_content_tarball), so
+        // both directions wipe-and-replace content/ identically. (S4c
+        // refactor — behavior unchanged from S4b's inline version.)
+        $r = sync_ingest_content_tarball($raw, $from, (bool) get('dryRun'));
         return new Kirby\Http\Response(
-          json_encode([
-            'ok'         => true,
-            'from'       => $from,
-            'snapshot'   => $snap['name'],
-            'received'   => ['bytes' => $received],
-            'replaced'   => [
-              'pages' => $applied['pages'],
-              'files' => $applied['files'],
-              'bytes' => $applied['bytes'],
-            ],
-            'stateBumpedAt' => $at,
-          ], JSON_UNESCAPED_SLASHES),
-          'application/json'
+          json_encode($r['payload'], JSON_UNESCAPED_SLASHES),
+          'application/json', $r['status']
         );
       }
     ],
@@ -3091,6 +2991,55 @@ HTML;
         // Map a local/transport failure to 502 (bad upstream); a peer
         // that answered keeps the peer's own ok/error verbatim at 200 so
         // the client can read the structured result either way.
+        $status = 200;
+        if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
+          $status = 502;
+        }
+        return new Kirby\Http\Response(
+          json_encode($result, JSON_UNESCAPED_SLASHES),
+          'application/json', $status
+        );
+      }
+    ],
+
+    /*
+     * POST /sync/pull/<fromRole>[?dryRun=1] — RECEIVE side trigger (S4c).
+     *
+     * The back-propagate counterpart to /sync/push. Runs ON the puller
+     * (L): fetches <fromRole>'s /sync/export and applies the bytes to THIS
+     * node's content/ (mandatory pre-propagate snapshot lands HERE, since
+     * L is now the destination). This is the route the editor's
+     * "Pull ← A" button calls.
+     *
+     * Same trigger semantics as /sync/push: a LOCAL action, same-origin
+     * from L's own editor, so not bearer-gated here — the secret rides on
+     * the OUTBOUND fetch to the peer's /sync/export (which IS gated). On
+     * A/B the route still exists but pulling a role with no configured
+     * peer URL is a safe no-op error (A's peers has only B, etc.).
+     *
+     * ?dryRun=1 forwards to the peer's export dry-run: it reports what it
+     * WOULD send and L takes no snapshot / no swap — for the UI preview
+     * before the user confirms overwriting local content.
+     *
+     * Returns the ingest verdict (snapshot name + replaced counts) or the
+     * peer's measure (dryRun). A transport/local failure returns 502.
+     */
+    [
+      'pattern' => 'sync/pull/(:any)',
+      'method'  => 'POST',
+      'action'  => function (string $fromRole) {
+        $sync = option('sync');
+        if (!is_array($sync) || empty($sync['secret'])) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'sync not configured']),
+            'application/json', 503
+          );
+        }
+        $dryRun = (bool) get('dryRun');
+        $result = sync_pull_from_peer($fromRole, $dryRun);
+
+        // Same status mapping as push: a local/transport failure → 502;
+        // anything the peer/ingest answered keeps its own ok/error at 200.
         $status = 200;
         if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
           $status = 502;

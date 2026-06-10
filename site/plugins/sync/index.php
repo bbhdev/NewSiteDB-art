@@ -868,6 +868,219 @@ function sync_record_propagate_receipt(string $fromRole): string
     return $now;
 }
 
+/**
+ * ─────────────────────────────────────────────────────────────────
+ * Shared RECEIVE/INGEST path (S4c) — apply an incoming content/ tarball
+ * to THIS node, with the mandatory pre-propagate snapshot.
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * This is the single destructive ingest used by BOTH directions:
+ *   - POST /sync/propagate  (push receive — $raw is the request body)
+ *   - POST /sync/pull/<from> (back-propagate — $raw is the gzip body
+ *     fetched from the source's /sync/export)
+ *
+ * Factoring it means the snapshot → atomic-swap → receipt dance exists
+ * in exactly one place; push and pull cannot drift in how they wipe and
+ * replace content/. Behavior is identical to S4b's inline receive route.
+ *
+ * $raw      gzip-tar bytes (page dirs at the archive root)
+ * $fromRole source role (already validated by the caller)
+ * $dryRun   true → measure only, no snapshot, no swap
+ *
+ * Returns ['status' => <http code>, 'payload' => <json-able array>].
+ * Cleans up its own temp files in every branch. Never throws.
+ */
+function sync_ingest_content_tarball(string $raw, string $fromRole, bool $dryRun = false): array
+{
+    $received = strlen($raw);
+    if ($received === 0) {
+        return ['status' => 400, 'payload' =>
+            ['ok' => false, 'error' => 'empty payload (expected a content/ tar.gz)']];
+    }
+
+    $root       = sync_project_root();
+    $tag        = gmdate('Ymd\THis\Z') . '-' . bin2hex(random_bytes(3));
+    $tarPath    = $root . '/.sync-incoming-' . $tag . '.tar.gz';
+    $extractDir = $root . '/.sync-extract-' . $tag;
+
+    $cleanup = function () use ($tarPath, $extractDir) {
+        @unlink($tarPath);
+        sync_rrmdir($extractDir);
+    };
+
+    if (@file_put_contents($tarPath, $raw) === false) {
+        return ['status' => 500, 'payload' =>
+            ['ok' => false, 'error' => 'could not buffer upload to disk']];
+    }
+
+    // Extract. PharData reads/extracts data tar archives even under
+    // phar.readonly=1 (that ini only gates executable .phar).
+    try {
+        $phar = new PharData($tarPath);
+        @mkdir($extractDir, 0755, true);
+        $phar->extractTo($extractDir, null, true);
+        $phar = null;   // release handle before cleanup unlinks $tarPath
+    } catch (\Throwable $e) {
+        $cleanup();
+        return ['status' => 400, 'payload' =>
+            ['ok' => false, 'error' => 'tarball extract failed: ' . $e->getMessage()]];
+    }
+
+    $measure = sync_measure_content_tree($extractDir);
+    if ($measure['files'] === 0) {
+        $cleanup();
+        return ['status' => 400, 'payload' =>
+            ['ok' => false, 'error' => 'uploaded archive contained no files']];
+    }
+
+    // ?dryRun=1 — report only, no snapshot, no swap. (UI confirm /
+    // preview, and S5 direction detection.)
+    if ($dryRun) {
+        $cleanup();
+        return ['status' => 200, 'payload' => [
+            'ok'           => true,
+            'dryRun'       => true,
+            'from'         => $fromRole,
+            'received'     => ['bytes' => $received],
+            'wouldReplace' => [
+                'pages' => $measure['topPages'],
+                'files' => $measure['files'],
+                'bytes' => $measure['bytes'],
+            ],
+        ]];
+    }
+
+    // Real propagate. Mandatory pre-propagate snapshot FIRST.
+    $snap = sync_pre_propagate_snapshot($fromRole);
+    if (!$snap['ok']) {
+        $cleanup();
+        return ['status' => 500, 'payload' =>
+            ['ok' => false, 'error' => 'pre-propagate snapshot failed: ' . $snap['error']]];
+    }
+
+    // Atomic swap content/ → incoming (preserving dev/, error/,
+    // _drafts/). On failure the swap rolls back its move-aside, so
+    // content/ is left intact; the snapshot exists regardless.
+    $applied = sync_apply_propagate($extractDir);
+    if (!$applied['ok']) {
+        $cleanup();
+        return ['status' => 500, 'payload' => [
+            'ok'       => false,
+            'error'    => 'propagate failed: ' . $applied['error'],
+            'snapshot' => $snap['name'],   // restore point
+        ]];
+    }
+
+    // Destination is now up to date — bump state so it doesn't read as
+    // behind in direction detection.
+    $at = sync_record_propagate_receipt($fromRole);
+    $cleanup();
+
+    return ['status' => 200, 'payload' => [
+        'ok'            => true,
+        'from'          => $fromRole,
+        'snapshot'      => $snap['name'],
+        'received'      => ['bytes' => $received],
+        'replaced'      => [
+            'pages' => $applied['pages'],
+            'files' => $applied['files'],
+            'bytes' => $applied['bytes'],
+        ],
+        'stateBumpedAt' => $at,
+    ]];
+}
+
+/**
+ * PULL side (S4c, runs on L): fetch $fromRole's /sync/export and apply it
+ * to THIS node via sync_ingest_content_tarball(). The mirror of
+ * sync_propagate_to_peer() — but L pulls because it has no inbound URL.
+ *
+ * $dryRun=true fetches the peer's measure (no local snapshot/swap) for
+ * the editor confirm/preview.
+ *
+ * Returns the ingest payload (real) or the peer's measure (dryRun),
+ * annotated with 'httpCode' and (real) 'fetched' bytes. On a
+ * local/transport failure returns ['ok'=>false,'error'=>…[,'code']].
+ * Never throws.
+ */
+function sync_pull_from_peer(string $fromRole, bool $dryRun = false): array
+{
+    $sync = option('sync');
+    if (!is_array($sync) || empty($sync['secret'])) {
+        return ['ok' => false, 'error' => 'sync not configured'];
+    }
+    $secret = (string) $sync['secret'];
+    $peers  = is_array($sync['peers'] ?? null) ? $sync['peers'] : [];
+    if (!in_array($fromRole, sync_known_roles(), true)) {
+        return ['ok' => false, 'error' => 'unknown source role: ' . $fromRole];
+    }
+    $peerUrl = (string) ($peers[$fromRole] ?? '');
+    if ($peerUrl === '') {
+        return ['ok' => false, 'error' => "no peer URL configured for {$fromRole}"];
+    }
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'error' => 'curl not available'];
+    }
+
+    $url = rtrim($peerUrl, '/') . '/sync/export' . ($dryRun ? '?dryRun=1' : '');
+    $ch  = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $secret,
+            'User-Agent: NewSiteDB-art-sync/' . (option('version') ?? 'dev'),
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT        => 120,           // content (with images) can be MBs
+        CURLOPT_FOLLOWLOCATION => false,
+    ]);
+    $resp  = curl_exec($ch);
+    $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $ctype = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    $err   = curl_error($ch);
+    curl_close($ch);
+
+    if ($resp === false) {
+        return ['ok' => false, 'code' => $code,
+                'error' => 'request failed: ' . ($err !== '' ? $err : 'unknown transport error')];
+    }
+    if ($code !== 200) {
+        // Peer answered an error (almost always JSON). Surface its message.
+        $decoded = json_decode((string) $resp, true);
+        return ['ok' => false, 'code' => $code,
+                'error' => is_array($decoded) ? ($decoded['error'] ?? 'peer error')
+                                              : 'peer returned HTTP ' . $code,
+                'body'  => is_array($decoded) ? null : substr((string) $resp, 0, 300)];
+    }
+
+    // dryRun → the peer replied with a JSON measure; pass it through.
+    if ($dryRun) {
+        $decoded = json_decode((string) $resp, true);
+        if (!is_array($decoded)) {
+            return ['ok' => false, 'code' => $code, 'error' => 'non-JSON dry-run response from peer',
+                    'body' => substr((string) $resp, 0, 300)];
+        }
+        $decoded['httpCode'] = $code;
+        $decoded['from']     = $fromRole;
+        return $decoded;
+    }
+
+    // Real pull. Guard: a 200 that is JSON means the peer sent an error
+    // payload where we expected a tarball — don't feed that to PharData.
+    if (stripos($ctype, 'json') !== false) {
+        $decoded = json_decode((string) $resp, true);
+        return ['ok' => false, 'code' => $code,
+                'error' => is_array($decoded) ? ($decoded['error'] ?? 'peer sent JSON, not a tarball')
+                                              : 'peer sent JSON, not a tarball'];
+    }
+
+    $r = sync_ingest_content_tarball((string) $resp, $fromRole, false);
+    $payload = $r['payload'];
+    $payload['httpCode'] = $code;
+    $payload['fetched']  = ['bytes' => strlen((string) $resp)];
+    return $payload;
+}
+
 /*
  * ─────────────────────────────────────────────────────────────────
  * Slice S4b.3 — SEND side: tar this node's content/ and POST it to a
