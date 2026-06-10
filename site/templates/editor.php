@@ -528,16 +528,35 @@ $payload = str_replace('<', '\\u003c', $payload);
       display: flex; flex-direction: row; align-items: center; gap: 6px;
       font-size: 11px; opacity: .85;
     }
-    .ed-import-select {
-      font: inherit; font-size: 12px; padding: 3px 6px;
+    .ed-import-field-label { white-space: nowrap; }
+    /* 4g-2d — custom dark dropdown. Native <select> popups can't be themed
+       on macOS/Opera, so the native control is hidden and we render our own
+       button + list (guaranteed dark, per the all-dark-UI rule). */
+    .ed-dd { position: relative; display: inline-block; }
+    .ed-dd-native { display: none; }
+    .ed-dd-btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font: inherit; font-size: 12px; padding: 3px 8px;
       border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
-      background: var(--bg, #111); color: inherit;
-      /* 4g-2b — render the native dropdown popup dark, not the OS-default
-         light. color-scheme themes the popup + scrollbars; the explicit
-         option colours are the fallback where color-scheme is ignored. */
-      color-scheme: dark;
+      background: var(--bg, #111); color: inherit; cursor: pointer;
     }
-    .ed-import-select option { background: #1a1c20; color: #e8e8e8; }
+    .ed-dd-btn:hover { border-color: rgba(127,127,127,.7); }
+    .ed-dd-caret { font-size: 9px; opacity: .7; }
+    .ed-dd-list {
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 1100;
+      margin: 0; padding: 4px; list-style: none; min-width: 100%;
+      max-height: 280px; overflow: auto;
+      background: #1a1c20; border: 1px solid rgba(127,127,127,.45);
+      border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.5);
+      white-space: nowrap;
+    }
+    .ed-dd-list[hidden] { display: none; }
+    .ed-dd-opt {
+      padding: 5px 10px; border-radius: 5px; font-size: 12px;
+      color: #e8e8e8; cursor: pointer;
+    }
+    .ed-dd-opt:hover { background: rgba(120,170,255,.18); }
+    .ed-dd-opt.is-sel { background: rgba(120,170,255,.28); color: #fff; }
     .ed-import-hint { font-size: 11px; opacity: .55; align-self: center; }
     .ed-import-status { font-size: 11px; opacity: .7; }
     .ed-import-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -943,9 +962,18 @@ $payload = str_replace('<', '\\u003c', $payload);
     <section id="ed-images-import" class="ed-import" hidden>
       <header class="ed-import-head">
         <h4 class="ed-import-title">Import from workshop</h4>
-        <label class="ed-import-field">Batch
-          <select id="ed-import-batch" class="ed-import-select"></select>
-        </label>
+        <span class="ed-import-field"><span class="ed-import-field-label">Batch</span>
+          <span class="ed-dd" id="ed-import-dd">
+            <!-- Native select kept as the state source (value + change event)
+                 but hidden; the custom button/list below renders a guaranteed
+                 dark popup (native popups ignore CSS on macOS/Opera). -->
+            <select id="ed-import-batch" class="ed-import-select ed-dd-native"></select>
+            <button type="button" class="ed-dd-btn" id="ed-import-batch-btn" aria-haspopup="listbox" aria-expanded="false">
+              <span class="ed-dd-label">— choose a batch —</span><span class="ed-dd-caret" aria-hidden="true">▾</span>
+            </button>
+            <ul class="ed-dd-list" id="ed-import-batch-list" role="listbox" hidden></ul>
+          </span>
+        </span>
         <span class="ed-import-hint">Images come in at original size.</span>
         <span class="ed-es-card-spacer"></span>
         <span class="ed-import-status" id="ed-import-status"></span>
@@ -1208,6 +1236,43 @@ $payload = str_replace('<', '\\u003c', $payload);
 
     function setStatus(msg) { if (importStatus) importStatus.textContent = msg || ''; }
 
+    // Custom dark dropdown over the hidden native <select> (4g-2d). Native
+    // popups can't be themed on macOS/Opera, so we render our own list and
+    // keep the <select> as the source of truth: selecting an item sets
+    // .value and dispatches 'change', so all existing wiring is untouched.
+    var ddBtn   = document.getElementById('ed-import-batch-btn');
+    var ddList  = document.getElementById('ed-import-batch-list');
+    var ddLabel = ddBtn ? ddBtn.querySelector('.ed-dd-label') : null;
+    function ddRebuild() {
+      if (!ddList || !batchSel) return;
+      var html = '';
+      Array.prototype.forEach.call(batchSel.options, function (o) {
+        var sel = (o.value === batchSel.value);
+        html += '<li class="ed-dd-opt' + (sel ? ' is-sel' : '') + '" role="option"' +
+          ' data-value="' + esc(o.value) + '" aria-selected="' + (sel ? 'true' : 'false') + '">' +
+          esc(o.textContent) + '</li>';
+      });
+      ddList.innerHTML = html;
+      var cur = batchSel.options[batchSel.selectedIndex];
+      if (ddLabel) ddLabel.textContent = cur ? cur.textContent : '— choose a batch —';
+    }
+    function ddOpen()  { if (ddList) { ddRebuild(); ddList.hidden = false; if (ddBtn) ddBtn.setAttribute('aria-expanded', 'true'); } }
+    function ddClose() { if (ddList) { ddList.hidden = true; if (ddBtn) ddBtn.setAttribute('aria-expanded', 'false'); } }
+    if (ddBtn) ddBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (ddList && ddList.hidden) ddOpen(); else ddClose();
+    });
+    if (ddList) ddList.addEventListener('click', function (e) {
+      var li = e.target.closest ? e.target.closest('.ed-dd-opt') : null;
+      if (!li) return;
+      batchSel.value = li.getAttribute('data-value');
+      ddRebuild();
+      ddClose();
+      batchSel.dispatchEvent(new Event('change'));
+    });
+    document.addEventListener('click', function () { ddClose(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') ddClose(); });
+
     function loadBatches() {
       if (batchesLoaded || !batchSel) return;
       fetch('/dev/image-workshop/list', { headers: { 'Accept': 'application/json' } })
@@ -1221,6 +1286,7 @@ $payload = str_replace('<', '\\u003c', $payload);
               (b.isDraft ? ' (draft)' : '') + ' · ' + b.count + '</option>';
           });
           batchSel.innerHTML = opts;
+          ddRebuild();
           if (!(j.batches || []).length) setStatus('No workshop batches found.');
         })
         .catch(function (err) { setStatus('Could not list batches: ' + (err.message || err)); });
