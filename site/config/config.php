@@ -2836,6 +2836,25 @@ HTML;
       'action'  => function ($role) {
         $result = sync_fetch_peer_state((string)$role);
         $status = $result['ok'] ? 200 : 502;
+
+        // S5.1 — fold in the direction from THIS node's perspective so the
+        // poller (sync-peer-indicator snippet) gets ahead/behind/equal
+        // without re-deriving the comparison client-side. localAt is this
+        // node's lastActivityAt; peerAt comes from the fetched peer state.
+        // On a failed fetch peerAt is null → direction collapses to
+        // 'ahead'/'equal' (never a spurious 'behind' off a network error).
+        $localAt = (string) (sync_state_read()['lastActivityAt'] ?? '');
+        $peerAt  = is_array($result['state'] ?? null)
+          ? (string) ($result['state']['lastActivityAt'] ?? '')
+          : '';
+        $dir = sync_direction_between($localAt !== '' ? $localAt : null,
+                                      $peerAt  !== '' ? $peerAt  : null);
+        $result['peerRole']   = (string) $role;
+        $result['localAt']    = $localAt !== '' ? $localAt : null;
+        $result['peerAt']     = $peerAt  !== '' ? $peerAt  : null;
+        $result['direction']  = $dir['direction'];
+        $result['gapSeconds'] = $dir['gapSeconds'];
+
         return new Kirby\Http\Response(
           json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
           'application/json',
@@ -2903,7 +2922,12 @@ HTML;
         // is shared with the pull path (sync_ingest_content_tarball), so
         // both directions wipe-and-replace content/ identically. (S4c
         // refactor — behavior unchanged from S4b's inline version.)
-        $r = sync_ingest_content_tarball($raw, $from, (bool) get('dryRun'));
+        // ?srcActivityAt=<iso8601> carries the SOURCE's lastActivityAt so
+        // the destination can ADOPT it on ingest (convergence: both nodes
+        // read EQUAL after the swap, not a spurious "behind"). Absent on a
+        // legacy/CLI push → ingest falls back to now(). See
+        // sync_record_propagate_receipt.
+        $r = sync_ingest_content_tarball($raw, $from, (bool) get('dryRun'), (string) get('srcActivityAt'));
         return new Kirby\Http\Response(
           json_encode($r['payload'], JSON_UNESCAPED_SLASHES),
           'application/json', $r['status']
@@ -2980,10 +3004,15 @@ HTML;
         // Raw binary body — the puller reads it whole and feeds it to the
         // shared ingest path (Slice 2). Advertise the counts in headers so
         // a transport-level client can sanity-check without unpacking.
+        // X-Sync-Activity-At carries THIS (source) node's lastActivityAt so
+        // the puller can ADOPT it on ingest — same convergence rule as the
+        // push path's ?srcActivityAt= param. The puller captures it via a
+        // CURLOPT_HEADERFUNCTION and threads it into sync_ingest_content_tarball.
         return new Kirby\Http\Response($body, 'application/gzip', 200, [
-          'X-Sync-Role'  => $role,
-          'X-Sync-Pages' => (string) $built['pages'],
-          'X-Sync-Files' => (string) $built['files'],
+          'X-Sync-Role'        => $role,
+          'X-Sync-Pages'       => (string) $built['pages'],
+          'X-Sync-Files'       => (string) $built['files'],
+          'X-Sync-Activity-At' => (string) (sync_state_read()['lastActivityAt'] ?? ''),
         ]);
       }
     ],

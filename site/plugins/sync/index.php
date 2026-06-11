@@ -535,6 +535,57 @@ function sync_fetch_peer_state(string $role): array
 }
 
 /**
+ * Pure comparison of two `lastActivityAt` timestamps from THIS node's
+ * point of view. Returns the direction and the absolute gap in seconds.
+ *
+ *   'equal'   — both stamps resolve to the same instant (or both absent).
+ *               Nodes are converged; nothing to propagate either way.
+ *   'ahead'   — THIS node's stamp is newer than the peer's. Local has
+ *               unpropagated work; calm/yellow on L, "push when done".
+ *   'behind'  — the PEER's stamp is newer. The peer has work this node
+ *               hasn't ingested; RED + nuclear-modal territory.
+ *
+ * Asymmetric-null handling:
+ *   peer null, local set  → 'ahead'  (we have history, peer is blank)
+ *   local null, peer set  → 'behind' (peer has history, we are blank)
+ *   both null             → 'equal'
+ *
+ * Convergence note: after any propagate the destination adopts the
+ * SOURCE's stamp (see sync_record_propagate_receipt), so a freshly
+ * propagated pair reads 'equal' here rather than the destination
+ * spuriously reading 'behind' against the source.
+ *
+ * `gapSeconds` is null when one side's stamp is absent/unparseable;
+ * 0 when equal; otherwise the absolute difference in seconds (>= 0).
+ */
+function sync_direction_between(?string $localAt, ?string $peerAt): array
+{
+    $localTs = ($localAt !== null && $localAt !== '') ? strtotime($localAt) : false;
+    $peerTs  = ($peerAt  !== null && $peerAt  !== '') ? strtotime($peerAt)  : false;
+
+    // Both absent / unparseable → converged-by-default.
+    if ($localTs === false && $peerTs === false) {
+        return ['direction' => 'equal', 'gapSeconds' => null];
+    }
+    // Only one side has a stamp.
+    if ($peerTs === false) {
+        return ['direction' => 'ahead', 'gapSeconds' => null];
+    }
+    if ($localTs === false) {
+        return ['direction' => 'behind', 'gapSeconds' => null];
+    }
+
+    if ($localTs === $peerTs) {
+        return ['direction' => 'equal', 'gapSeconds' => 0];
+    }
+    $gap = abs($localTs - $peerTs);
+    return [
+        'direction'  => $localTs > $peerTs ? 'ahead' : 'behind',
+        'gapSeconds' => $gap,
+    ];
+}
+
+/**
  * Convenience for save routes: record local activity AND push to
  * upstream peer in one call. Returns the timestamp written so the
  * save handler can include it in its own response if desired.
@@ -853,14 +904,27 @@ function sync_apply_propagate(string $extractDir): array
 
 /**
  * Record that this node's content/ was just overwritten by a propagate
- * from $fromRole. Sets lastActivityAt = now and lastActivityBy =
- * "<role>-propagate" so direction-detection (S5) sees the destination
- * as freshly-updated (not stale/behind). Mirrors propagate.sh's
- * state-bump step. Best-effort; never throws.
+ * from $fromRole.
+ *
+ * S5.1 convergence rule: the destination adopts the SOURCE's content
+ * timestamp ($srcActivityAt), NOT "now". After a propagate the two nodes
+ * hold identical content, so they must read as EQUAL in direction-
+ * detection. Stamping "now" (the pre-S5 behavior) overshot the source —
+ * right after a push L→A, A.lastActivityAt > L.lastActivityAt, which the
+ * pill/modal would read as "A is ahead" and fire the nuclear warning on L
+ * immediately after a successful sync (a false positive). Adopting the
+ * source's timestamp makes both sides equal in BOTH directions while only
+ * ever writing the destination (the sole writable node in a push AND in a
+ * pull). lastActivityBy keeps the "<role>-propagate" marker for provenance.
+ *
+ * Falls back to now() only when the source supplied no parseable timestamp
+ * (e.g. a source that has never recorded activity). Best-effort; never
+ * throws.
  */
-function sync_record_propagate_receipt(string $fromRole): string
+function sync_record_propagate_receipt(string $fromRole, ?string $srcActivityAt = null): string
 {
-    $now   = date('c');
+    $ts    = ($srcActivityAt !== null && $srcActivityAt !== '') ? strtotime($srcActivityAt) : false;
+    $now   = $ts !== false ? date('c', $ts) : date('c');
     $state = sync_state_read();
     $state['lastActivityAt'] = $now;
     $state['lastActivityBy'] = $fromRole . '-propagate';
@@ -883,14 +947,19 @@ function sync_record_propagate_receipt(string $fromRole): string
  * in exactly one place; push and pull cannot drift in how they wipe and
  * replace content/. Behavior is identical to S4b's inline receive route.
  *
- * $raw      gzip-tar bytes (page dirs at the archive root)
- * $fromRole source role (already validated by the caller)
- * $dryRun   true → measure only, no snapshot, no swap
+ * $raw           gzip-tar bytes (page dirs at the archive root)
+ * $fromRole      source role (already validated by the caller)
+ * $dryRun        true → measure only, no snapshot, no swap
+ * $srcActivityAt source node's lastActivityAt (S5.1) — the destination
+ *                adopts it as its own so the two read EQUAL post-propagate.
+ *                Travels in the ?srcActivityAt= query param (push) or the
+ *                X-Sync-Activity-At response header (pull). Null → receipt
+ *                falls back to now().
  *
  * Returns ['status' => <http code>, 'payload' => <json-able array>].
  * Cleans up its own temp files in every branch. Never throws.
  */
-function sync_ingest_content_tarball(string $raw, string $fromRole, bool $dryRun = false): array
+function sync_ingest_content_tarball(string $raw, string $fromRole, bool $dryRun = false, ?string $srcActivityAt = null): array
 {
     $received = strlen($raw);
     if ($received === 0) {
@@ -971,9 +1040,9 @@ function sync_ingest_content_tarball(string $raw, string $fromRole, bool $dryRun
         ]];
     }
 
-    // Destination is now up to date — bump state so it doesn't read as
-    // behind in direction detection.
-    $at = sync_record_propagate_receipt($fromRole);
+    // Destination is now up to date — adopt the source's content timestamp
+    // (S5.1) so the two nodes read EQUAL, not "this one ahead", afterward.
+    $at = sync_record_propagate_receipt($fromRole, $srcActivityAt);
     $cleanup();
 
     return ['status' => 200, 'payload' => [
@@ -1024,6 +1093,9 @@ function sync_pull_from_peer(string $fromRole, bool $dryRun = false): array
 
     $url = rtrim($peerUrl, '/') . '/sync/export' . ($dryRun ? '?dryRun=1' : '');
     $ch  = curl_init($url);
+    // S5.1 — capture the source's content timestamp from its response header
+    // so the local ingest can adopt it (both nodes read EQUAL post-pull).
+    $srcActivityAt = null;
     curl_setopt_array($ch, [
         CURLOPT_HTTPHEADER     => [
             'Authorization: Bearer ' . $secret,
@@ -1033,6 +1105,13 @@ function sync_pull_from_peer(string $fromRole, bool $dryRun = false): array
         CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_TIMEOUT        => 120,           // content (with images) can be MBs
         CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_HEADERFUNCTION => function ($curl, $header) use (&$srcActivityAt) {
+            $parts = explode(':', $header, 2);
+            if (count($parts) === 2 && strcasecmp(trim($parts[0]), 'X-Sync-Activity-At') === 0) {
+                $srcActivityAt = trim($parts[1]);
+            }
+            return strlen($header);
+        },
     ]);
     $resp  = curl_exec($ch);
     $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -1074,7 +1153,7 @@ function sync_pull_from_peer(string $fromRole, bool $dryRun = false): array
                                               : 'peer sent JSON, not a tarball'];
     }
 
-    $r = sync_ingest_content_tarball((string) $resp, $fromRole, false);
+    $r = sync_ingest_content_tarball((string) $resp, $fromRole, false, $srcActivityAt);
     $payload = $r['payload'];
     $payload['httpCode'] = $code;
     $payload['fetched']  = ['bytes' => strlen((string) $resp)];
@@ -1204,7 +1283,12 @@ function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
     }
     $size = strlen($body);
 
+    // S5.1 — carry THIS node's content timestamp so the receiver can adopt
+    // it and the two read EQUAL post-push (see sync_record_propagate_receipt).
+    $srcAt = (string) (sync_state_read()['lastActivityAt'] ?? '');
+
     $url = rtrim($peerUrl, '/') . '/sync/propagate?from=' . rawurlencode($role)
+         . ($srcAt !== '' ? '&srcActivityAt=' . rawurlencode($srcAt) : '')
          . ($dryRun ? '&dryRun=1' : '');
 
     $ch = curl_init($url);

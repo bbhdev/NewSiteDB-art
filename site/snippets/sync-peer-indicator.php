@@ -160,9 +160,11 @@ if ($role !== 'L') return;
   // Three visual states. Solid backgrounds (no opacity) — earlier
   // semi-transparent styling washed into the page-area outline and
   // was harder to read than necessary.
-  //   ok    — calm dark pill, the steady state
-  //   warn  — yellow, A was active very recently (≤ WARN_THRESHOLD)
-  //   error — red, A unreachable / proxy failure
+  //   ok    — calm dark pill: EQUAL (converged), or AHEAD but stale
+  //   warn  — yellow: AHEAD with recent local work (push when done)
+  //   error — red: BEHIND (A ahead — pull before editing), or unreachable
+  // S5.1 maps the server-computed `direction` (ahead/behind/equal, from
+  // THIS node's perspective) onto these; see poll() below.
   var STYLES = {
     ok:    { bg: '#2a2a2a', fg: '#ffffff' },
     warn:  { bg: '#e8b22b', fg: '#1f1f1f' },
@@ -192,8 +194,10 @@ if ($role !== 'L') return;
     return Math.max(0, (Date.now() - d.getTime()) / 1000);
   }
 
+  // S5.1 — text is now the full, self-contained relationship summary
+  // (the messages name A where it matters), so no fixed "A:" prefix.
   function setLabel(text, state) {
-    label.textContent = 'A: ' + text;
+    label.textContent = text;
     var s = STYLES[state] || STYLES.ok;
     el.style.background = s.bg;
     el.style.color = s.fg;
@@ -204,15 +208,36 @@ if ($role !== 'L') return;
       .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
       .then(function (j) {
         if (!j || !j.ok || !j.state) {
-          setLabel('unreachable', 'error');
+          setLabel('A unreachable', 'error');
           return;
         }
-        var iso = j.state.lastActivityAt;
-        var age = ageSeconds(iso);
-        var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
-        setLabel('active ' + relTime(iso), state);
+        // S5.1 — drive the pill off the server-computed direction (this
+        // node's perspective). 'ahead' = L has unpropagated work; 'behind'
+        // = A is ahead of L (danger: editing now would be lost on the next
+        // pull); 'equal' = converged. Fall back to the old recency check
+        // only if a stale server somehow omits `direction`.
+        var dir = j.direction;
+        if (dir === 'behind') {
+          // A is ahead — the dangerous state. Red pill now; the blocking
+          // nuclear modal lands in S5.2.
+          setLabel('A ahead — pull before editing', 'error');
+        } else if (dir === 'ahead') {
+          // L is ahead. Gently flag when local work is recent (you'll want
+          // to push soon); otherwise stay calm.
+          var lage = ageSeconds(j.localAt);
+          var st = (lage !== null && lage <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
+          setLabel("you're ahead — push when done", st);
+        } else if (dir === 'equal') {
+          setLabel('in sync', 'ok');
+        } else {
+          // Legacy/unknown shape — preserve prior behaviour.
+          var iso = j.state.lastActivityAt;
+          var age = ageSeconds(iso);
+          var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
+          setLabel('A active ' + relTime(iso), state);
+        }
       })
-      .catch(function () { setLabel('unreachable', 'error'); });
+      .catch(function () { setLabel('A unreachable', 'error'); });
   }
 
   poll();
