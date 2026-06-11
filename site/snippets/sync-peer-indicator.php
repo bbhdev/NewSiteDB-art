@@ -371,12 +371,18 @@ if ($role !== 'L') return;
   var pushBtnEl = document.getElementById('sync-push-btn');
   var pullBtnEl = document.getElementById('sync-pull-btn');
 
+  // Last direction seen by poll() ('ahead' | 'behind' | 'equal' | null).
+  // The Pull dialog reads it to warn when L is ahead — pulling then
+  // overwrites L's newer, unpropagated work with A's older content.
+  var lastDirection = null;
+
   function poll() {
     fetch('/sync/peer/A', { cache: 'no-store' })
       .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
       .then(function (j) {
         if (!j || !j.ok || !j.state) {
           setLabel('A unreachable', 'error');
+          lastDirection = null;
           if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
           if (pullBtnEl) pullBtnEl.classList.remove('is-behind');
           return;
@@ -387,6 +393,7 @@ if ($role !== 'L') return;
         // pull); 'equal' = converged. Fall back to the old recency check
         // only if a stale server somehow omits `direction`.
         var dir = j.direction;
+        lastDirection = dir || null;
         var ahead = (dir === 'ahead');
         var behind = (dir === 'behind');
         if (dir === 'behind') {
@@ -600,6 +607,20 @@ if ($role !== 'L') return;
       pBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg).replace(/\n/g, '<br>') + '</span>';
       pConfirm.disabled = true;
     }
+    // "L is ahead" warning. Pull overwrites THIS machine's content with A's.
+    // When L is ahead, that older A content clobbers L's newer, unpropagated
+    // work — the symmetric danger to pushing-while-dirty. Non-blocking (a
+    // snapshot of L is taken first, and the user may genuinely want to
+    // discard local work), but loud. Reuses the amber .spm-unsaved box.
+    function aheadNote(){
+      if (lastDirection === 'ahead') {
+        return '<div class="spm-unsaved">⚠ <b>This machine (L) is ahead</b> — it has work '
+          + 'not yet pushed to A. Pulling will <b>overwrite those local changes</b> with A’s '
+          + 'older content. Consider pushing L → A first. (A snapshot of L is taken first, so '
+          + 'this is recoverable.)</div>';
+      }
+      return '';
+    }
     function pReset(){
       pConfirm.style.display = '';
       pConfirm.textContent = 'Overwrite L with A';
@@ -622,7 +643,8 @@ if ($role !== 'L') return;
           if (!j || !j.ok){ pShowError(pErrMsg(j, 'dry-run failed')); return; }
           var w = j.wouldSend || {};
           pBody.innerHTML =
-            'This will <span class="spm-warn">overwrite THIS machine’s content</span> with A’s:<br>'
+            aheadNote()
+            + 'This will <span class="spm-warn">overwrite THIS machine’s content</span> with A’s:<br>'
             + '<b>' + (w.pages||0) + '</b> pages · <b>' + (w.files||0) + '</b> files · ' + fmtBytes(w.bytes) + '.<br>'
             + 'A snapshot of L’s current content is taken first.';
           pConfirm.disabled = false;
