@@ -90,6 +90,79 @@ Read this top-to-bottom once; reference back as needed.
 >   parked PHP shell-out note) must NOT be assumed available when the user is
 >   working on A from a tablet. A's affordances have to stand on their own.
 
+---
+
+## 🧭 Work tracking convention (single coherent scheme, v0.10.242)
+
+**Why this exists:** the project had drifted into THREE incompatible work-item
+naming systems at once — sync "S4/S5", convergence "Slice 7/8", and tasks
+"#36/#37" — so one piece of work often had two or three addresses and references
+used different ones. That is how the way got lost (and how a diagnosis got
+misframed). This scheme replaces all of them with ONE addressing axis.
+
+**The rules:**
+
+1. **One canonical ID per work item — a spaced integer.** The thousands "band"
+   = the epic; within a band, items are spaced (×10) so there is always room to
+   insert. Example: `2041`. This ID is what you cite **everywhere** — chat,
+   commits, memory, this doc.
+2. **Epic = a `[tag]`, never a number.** The tag (and the band digit) carry
+   grouping; they are not addresses. Bands past 9000 are 5-digit — the tag still
+   identifies the epic.
+3. **Spacing & insertion.** New item near an existing one → take a nearby free
+   slot, and the proximity *is* the grouping (e.g. a follow-up to `2040` is
+   `2041`). Tightly-linked sub-slices use +1 (`2040/2041/2042`).
+4. **Genuine subdivision of one item → dotted decimals:** `2041.1`, `2041.2`,
+   then `2041.2.a`, `2041.2.b`. A child never renumbers its parent; the parent
+   closes only when its children do.
+5. **The TaskList tool's own `#N` is ignorable noise.** The tool stamps its own
+   sequential id and can't emit `2041`, so the canonical ID **leads the task
+   subject**. Read the `2041 [sync] …`, ignore the `#N` prefix the tool shows.
+6. **Legacy names (S1–S9, Slice 1–8, 4g-1–6, 3a/3b) are FROZEN** — never
+   extended. The Rosetta below keeps old commits/docs/memory legible.
+
+**Bands:**
+
+| Band | `[tag]` | Subject |
+|---|---|---|
+| 1000 | `[deploy]` | deploy pipeline / targets / host config |
+| 2000 | `[sync]` | L↔A↔B propagate layer (push/pull/publish, freeze, snapshots) |
+| 3000 | `[conv]` | editor convergence (draw+page → one /dev/editor) |
+| 4000 | `[workshop]` | image workshop |
+| 5000 | `[dirty]` | unified dirty/save signal (derived, approach B) |
+| 6000 | `[ui]` | cross-cutting UI / design system / dialog consistency |
+| 7000 | `[cleanup]` | maintenance / cache pruning / tech-debt |
+| 8000 | `[backgrounds]` | site backgrounds — processing + editor + runtime |
+| 9000 | `[tablet]` | iPad first-class editing layer (standing constraint) |
+| 10000 | `[phone]` | smartphone demo mode (reduced from tablet) |
+| 11000 | `[bedit]` | safe fallback editing on B (cross-links 2080) |
+| 12000 | `[behaviors]` | new behavior-type ideas (backlog) |
+
+**Rosetta — legacy → canonical (frozen, do not extend):**
+
+| Legacy | Canonical |
+|---|---|
+| deploy Slice 1–4 | 1010 · 1020 · 1030 · 1040 |
+| sync S1 · S2 · S3 | 2010 · 2020 · 2030 |
+| sync S4a · S4b · S4c | 2040 · 2041 · 2042 |
+| sync S5 · S6 · S7 · S8 · S9 | 2050 · 2060 · 2070 · 2080 · 2090 |
+| sync protocol review | 2095 |
+| conv Slice 1a/1b/1c | 3010 · 3011 · 3012 |
+| conv Slice 2 · 3 · 4 · 5 · 6 | 3020 · 3030 · 3040 · 3050 · 3060 |
+| conv Slice 7 · 8 · "All" | 3070 · 3080 · 3090 |
+| workshop 4g-1 · 4g-1b | 4010 · 4011 |
+| workshop 4g-2 · 4g-3 · 4g-5 · 4g-6 | 4020 · 4030 · 4050 · 4060 |
+| dirty lines (B) · layout (B) | 5010 · 5020 |
+| dirty styles (#36) · images (#37) | 5030 · 5040 |
+| editor dialogs (#33) | 6010 |
+| media cleanup (#39) | 7010 |
+
+> NOTE: sync's canonical order (S5→S6→S7→S8→S9 = 2050→2090) fixes a tracker
+> wart — S8/S9 were *filed* before S6/S7, so creation-order lied about sequence.
+> The spaced IDs encode true sequence regardless of when each was filed.
+
+---
+
 **Current state (v0.10.136):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
