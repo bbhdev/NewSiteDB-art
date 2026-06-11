@@ -64,7 +64,10 @@ if ($role !== 'L') return;
   #sync-pull-btn{ bottom:68px; border-color:#5a3a3a; }
   #sync-pull-btn:hover{ background:#3a2a2a; border-color:#7a4a4a; }
 
-  .sync-prop-modal{ position:fixed; inset:0; z-index:10000;
+  /* z-index 10001 (was 10000) so the push/pull modals layer ABOVE the
+     S5.2 nuclear overlay (10000) — the nuclear "Pull A → L now" button
+     opens the pull preview modal, which must sit on top of the scrim. */
+  .sync-prop-modal{ position:fixed; inset:0; z-index:10001;
     display:flex; align-items:center; justify-content:center;
     font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
   .sync-prop-modal[hidden]{ display:none; }
@@ -90,6 +93,43 @@ if ($role !== 'L') return;
   /* Danger confirm — pull overwrites THIS machine's content. */
   .sync-prop-modal .spm-confirm.danger{ background:#c0392b; color:#fff; }
   .sync-prop-modal .spm-confirm.danger:hover{ background:#e04a3a; }
+
+  /* ── S5.2 — nuclear "A is ahead" blocking overlay ─────────────────
+     Full-screen scrim shown on L's editor whenever A is ahead (the
+     'behind' direction). Editing now is unsafe — the next pull would
+     overwrite it and L's edits can't be merged back — so the overlay
+     BLOCKS the editor until the author either pulls (converge) or takes
+     the deliberate "I know what I'm doing" escape hatch. z-index 10000
+     sits above the editor, pill, and prop buttons (9999) but below the
+     prop modals (10001) so the reused pull modal can stack on top.
+     Buttons are full-width and generously padded — touch-first sizing
+     for the planned tablet editor (no reliance on hover or keyboard). */
+  .sync-nuclear{ position:fixed; inset:0; z-index:10000;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(10,8,8,.82); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,sans-serif; }
+  .sync-nuclear[hidden]{ display:none; }
+  .sync-nuclear .snuc-panel{ width:min(460px,92vw);
+    background:#1f1c1c; border:1px solid #5a3a3a; border-radius:12px;
+    box-shadow:0 18px 60px rgba(0,0,0,.65); color:#ececec; padding:22px 22px 18px; }
+  .sync-nuclear .snuc-title{ font-size:18px; font-weight:700; color:#ff8d7a; margin:0 0 12px; }
+  .sync-nuclear .snuc-body p{ margin:0 0 12px; color:#dcdcdc; }
+  .sync-nuclear .snuc-body b{ color:#fff; }
+  .sync-nuclear .snuc-advice{ color:#f5c518; }
+  .sync-nuclear .snuc-stamps{ background:#161414; border:1px solid #3a3232;
+    border-radius:8px; padding:10px 12px; margin:0 0 12px; }
+  .sync-nuclear .snuc-stamps div{ display:flex; justify-content:space-between; gap:12px; }
+  .sync-nuclear .snuc-stamps div + div{ margin-top:6px; }
+  .sync-nuclear .snuc-k{ color:#9a9a9a; white-space:nowrap; }
+  .sync-nuclear .snuc-v{ text-align:right; }
+  .sync-nuclear .snuc-actions{ display:flex; flex-direction:column; gap:10px; margin-top:6px; }
+  .sync-nuclear button{ font:600 14px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;
+    padding:13px 16px; border-radius:8px; cursor:pointer; border:1px solid transparent;
+    width:100%; box-sizing:border-box; }
+  .sync-nuclear .snuc-pull{ background:#c0392b; color:#fff; }
+  .sync-nuclear .snuc-pull:hover{ background:#e04a3a; }
+  .sync-nuclear .snuc-escape{ background:#262323; color:#bdbdbd; border-color:#444; font-weight:500; }
+  .sync-nuclear .snuc-escape:hover{ background:#302c2c; color:#dadada; }
 </style>
 
 <button id="sync-push-btn" class="sync-prop-btn" type="button"
@@ -141,6 +181,34 @@ if ($role !== 'L') return;
     </div>
   </div>
 </div>
+<?php /* S5.2 — nuclear "A is ahead of L" blocking overlay. Shown by the
+        poller whenever /sync/peer/A reports direction 'behind'. role=
+        alertdialog (not dialog): it's an alert the user must resolve, not
+        a routine dialog. No backdrop-click and no Esc dismissal — the
+        only ways out are an explicit Pull (converge) or the deliberate
+        escape-hatch button. Re-fires on every editor load (the dismissal
+        is in-memory only, reset whenever direction leaves 'behind'). */ ?>
+<div id="sync-nuclear" class="sync-nuclear" hidden role="alertdialog" aria-modal="true"
+     aria-labelledby="snuc-title" aria-describedby="snuc-desc">
+  <div class="snuc-panel">
+    <div class="snuc-title" id="snuc-title">⚠ A is ahead of this machine</div>
+    <div class="snuc-body" id="snuc-desc">
+      <p>A (staging) has newer content than L. <b>Anything you edit here now
+      would be overwritten</b> the next time you pull A → L — and edits made
+      on L can’t be merged back into A.</p>
+      <div class="snuc-stamps">
+        <div><span class="snuc-k">A last edited</span><span class="snuc-v" data-role="peer-when">—</span></div>
+        <div><span class="snuc-k">L last edited</span><span class="snuc-v" data-role="local-when">—</span></div>
+      </div>
+      <p class="snuc-advice">Pull A → L first so this machine matches A, then edit.</p>
+    </div>
+    <div class="snuc-actions">
+      <button type="button" class="snuc-pull"   data-role="pull">Pull&nbsp;A → L&nbsp;now</button>
+      <button type="button" class="snuc-escape" data-role="escape">I know what I’m doing — let me edit anyway</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   // Self-contained polling — no framework deps so this snippet drops
@@ -148,6 +216,13 @@ if ($role !== 'L') return;
   var el = document.getElementById('sync-peer-indicator');
   if (!el) return;
   var label = el.querySelector('[data-role="label"]');
+
+  // S5.2 — shared hook to open the S4c pull preview modal from the
+  // nuclear overlay. The pull flow lives inside its own conditional
+  // block below; it assigns this once wired. Stays null if the pull
+  // control isn't present (then the nuclear "Pull now" button no-ops
+  // gracefully — the escape hatch still works).
+  var openPull = null;
 
   // Activity-age threshold below which the indicator turns yellow
   // (S2b feedback): when both L and A have been authored very
@@ -203,6 +278,60 @@ if ($role !== 'L') return;
     el.style.color = s.fg;
   }
 
+  // ── S5.2 — nuclear overlay machinery ──────────────────────────────
+  var nuc        = document.getElementById('sync-nuclear');
+  var nucPeerWhen  = nuc && nuc.querySelector('[data-role="peer-when"]');
+  var nucLocalWhen = nuc && nuc.querySelector('[data-role="local-when"]');
+  var nucPull    = nuc && nuc.querySelector('[data-role="pull"]');
+  var nucEscape  = nuc && nuc.querySelector('[data-role="escape"]');
+  // In-memory only: the escape hatch suppresses the overlay for the
+  // current "behind" episode (this page load). Reset whenever direction
+  // leaves 'behind', so a NEW behind episode re-arms it; and gone on
+  // reload, so the overlay re-fires on every editor load (the spec).
+  var nuclearDismissed = false;
+
+  // Relative + absolute rendering of a stamp for the nuclear panel.
+  function formatWhen(iso) {
+    if (!iso) return 'never';
+    var rel = relTime(iso);
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return rel;
+    return rel + ' · ' + d.toLocaleString();
+  }
+
+  // Show/hide the overlay from the polled peer JSON. Only ever shown for
+  // direction 'behind' (A ahead of L). Any other direction converges the
+  // state and re-arms the escape hatch.
+  function applyNuclear(j) {
+    if (!nuc) return;
+    if (j && j.direction === 'behind') {
+      if (nuclearDismissed) return;            // suppressed this episode
+      if (nucPeerWhen)  nucPeerWhen.textContent  = formatWhen(j.peerAt);
+      if (nucLocalWhen) nucLocalWhen.textContent = formatWhen(j.localAt);
+      nuc.hidden = false;
+    } else {
+      nuclearDismissed = false;                // re-arm for a future behind
+      nuc.hidden = true;
+    }
+  }
+
+  if (nuc && nucPull) {
+    nucPull.addEventListener('click', function () {
+      // Reuse the S4c pull preview→confirm flow. The pull modal (z 10001)
+      // opens above this overlay (z 10000); on a successful pull the pull
+      // handler re-polls, direction flips to 'equal', and applyNuclear
+      // hides this overlay. No-op (but the escape hatch still works) if
+      // the pull control isn't wired on this page.
+      if (openPull) openPull();
+    });
+  }
+  if (nuc && nucEscape) {
+    nucEscape.addEventListener('click', function () {
+      nuclearDismissed = true;
+      nuc.hidden = true;
+    });
+  }
+
   function poll() {
     fetch('/sync/peer/A', { cache: 'no-store' })
       .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
@@ -236,6 +365,7 @@ if ($role !== 'L') return;
           var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
           setLabel('A active ' + relTime(iso), state);
         }
+        applyNuclear(j);   // S5.2 — block the editor when A is ahead
       })
       .catch(function () { setLabel('A unreachable', 'error'); });
   }
@@ -450,12 +580,20 @@ if ($role !== 'L') return;
             + 'L now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
             + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b><br>'
             + '<span style="opacity:.8">Reload the editor to see A’s content.</span>';
+          // S5.2 — L just adopted A's stamp; re-poll so the pill flips to
+          // 'equal' and the nuclear overlay (if it triggered this pull)
+          // clears itself.
+          poll();
         })
         .catch(function(){
           pBusy = false; pCancel.disabled = false; pCancel.textContent = 'Close';
           pConfirm.style.display = 'none'; pShowError('network error during pull');
         });
     }
+
+    // S5.2 — expose the preview opener so the nuclear overlay's
+    // "Pull A → L now" button reuses this exact flow.
+    openPull = pPreview;
 
     pullBtn.addEventListener('click', pPreview);
     pConfirm.addEventListener('click', pDoPull);
