@@ -22,6 +22,69 @@
 
 $syncOpt = option('sync');
 $role = is_array($syncOpt) ? (string)($syncOpt['role'] ?? '') : '';
+
+// ── A-side informational pill ────────────────────────────────────────
+// A (and B) cannot reach L over the network, but L pings its
+// lastActivityAt to A on every save, so A already knows when L was last
+// authored. GET /sync/self compares A's own activity against that stored
+// stamp and returns ahead/behind/equal. A is PASSIVE in the L↔A
+// relationship — L drives both push (L→A) and pull (A→L) — so this pill
+// only INFORMS ("L is ahead — newer work upstream"); it carries no
+// controls. The L code further below is left entirely untouched.
+if ($role === 'A'):
+?>
+<div id="sync-self-indicator"
+     style="position:fixed;bottom:8px;right:8px;z-index:9999;
+            font:11px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;
+            background:#2a2a2a;color:#fff;
+            padding:4px 8px;border-radius:4px;
+            pointer-events:none;user-select:none;
+            transition:background-color 0.2s, color 0.2s;">
+  <span data-role="label">L: …</span>
+</div>
+<script>
+(function(){
+  var el = document.getElementById('sync-self-indicator');
+  if (!el) return;
+  var label = el.querySelector('[data-role="label"]');
+  // Same calm-dark-pill + coloured-TEXT scheme as L's indicator: amber
+  // #f5c518 for "attention" (L has work not yet here / A is ahead), white
+  // for converged, red #ff8d7a only for a genuine read failure.
+  var STYLES = {
+    ok:    { bg:'#2a2a2a', fg:'#ffffff' },
+    amber: { bg:'#2a2a2a', fg:'#f5c518' },
+    error: { bg:'#2a2a2a', fg:'#ff8d7a' }
+  };
+  function setLabel(text, s){
+    label.textContent = text;
+    var c = STYLES[s] || STYLES.ok;
+    el.style.background = c.bg; el.style.color = c.fg;
+  }
+  function poll(){
+    // Local route — no outbound request to L. Reads peerStamps['L'] that
+    // L's save-time pings deposited on this node.
+    fetch('/sync/self', { cache:'no-store' })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
+      .then(function(j){
+        if (!j || !j.ok){ setLabel('sync state unavailable', 'error'); return; }
+        var dir = j.direction;
+        if (dir === 'behind')     setLabel('L is ahead — newer work upstream', 'amber');
+        else if (dir === 'ahead') setLabel('ahead of L — L can pull', 'amber');
+        else if (dir === 'equal') setLabel('in sync with L', 'ok');
+        else                      setLabel('L: state unknown', 'ok');
+      })
+      .catch(function(){ setLabel('sync state unavailable', 'error'); });
+  }
+  poll();
+  setInterval(poll, 60000);
+  window.addEventListener('focus', poll);
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+})();
+</script>
+<?php
+return;  // A shows only the informational pill — no push/pull controls.
+endif;
+
 if ($role !== 'L') return;
 ?>
 <div id="sync-peer-indicator"
@@ -713,11 +776,18 @@ if ($role !== 'L') return;
             '<span class="spm-ok">✓ Pulled A → L.</span><br>'
             + 'L now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
             + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b><br>'
-            + '<span style="opacity:.8">Reload the editor to see A’s content.</span>';
+            + '<span style="opacity:.8">Reloading the editor with A’s content…</span>';
           // S5.2 — L just adopted A's stamp; re-poll so the pill flips to
           // 'equal' and the nuclear overlay (if it triggered this pull)
           // clears itself.
           poll();
+          // v0.10.236 — the pull overwrote content/ ON DISK, but the editor
+          // still holds the pre-pull state in memory; previously the user
+          // had to reload by hand to see A's content. Auto-reload after a
+          // beat so the success message is readable first. A full reload is
+          // the robust choice: the editor re-boots and re-reads disk, rather
+          // than trying to surgically re-hydrate in-memory state.
+          setTimeout(function(){ window.location.reload(); }, 1500);
         })
         .catch(function(){
           pBusy = false; pCancel.disabled = false; pCancel.textContent = 'Close';

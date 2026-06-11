@@ -2864,6 +2864,51 @@ HTML;
     ],
 
     /*
+     * GET /sync/self — this node's direction vs L, computed from LOCAL
+     * state only (no outbound fetch). The counterpart to /sync/peer/<role>:
+     *
+     * L polls /sync/peer/A because L CAN reach A. A (and B) cannot reach L
+     * — L is a laptop behind no public address. But L pings its
+     * lastActivityAt to A on every save (sync_notify_peers_of_local_activity
+     * → A stores it in peerStamps['L']), so A already holds L's latest
+     * timestamp. This route compares A's own lastActivityAt against that
+     * stored peer stamp and returns the same {direction, gapSeconds} shape,
+     * letting A render an informational "L is ahead / in sync" pill with
+     * zero network round-trips.
+     *
+     * Same loopback-only safety as /sync/peer: read-only, a few timestamps,
+     * no write surface, no secret exposure.
+     */
+    [
+      'pattern' => 'sync/self',
+      'method'  => 'GET',
+      'action'  => function () {
+        $state    = sync_state_read();
+        $localAt  = (string) ($state['lastActivityAt'] ?? '');
+        $peers    = is_array($state['peerStamps'] ?? null) ? $state['peerStamps'] : [];
+        $peerRole = 'L';   // the upstream this node tracks (A/B both watch L)
+        $peerAt   = (string) ($peers[$peerRole] ?? '');
+        $dir = sync_direction_between($localAt !== '' ? $localAt : null,
+                                      $peerAt  !== '' ? $peerAt  : null);
+        $sync = option('sync');
+        $role = is_array($sync) ? (string) ($sync['role'] ?? '') : '';
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'         => true,
+            'role'       => $role,
+            'peerRole'   => $peerRole,
+            'localAt'    => $localAt !== '' ? $localAt : null,
+            'peerAt'     => $peerAt  !== '' ? $peerAt  : null,
+            'direction'  => $dir['direction'],
+            'gapSeconds' => $dir['gapSeconds'],
+          ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
+          'application/json',
+          200
+        );
+      }
+    ],
+
+    /*
      * POST /sync/propagate?from=<role> — receive a content/ push (S4b).
      *
      * The PRIMARY in-app propagate path (the CLI deploy/propagate.sh is
