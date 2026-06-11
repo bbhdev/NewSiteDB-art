@@ -142,6 +142,10 @@ if ($role !== 'L') return;
      no extra screen space. */
   .sync-prop-btn.is-ahead{ background:#e8b22b; color:#1c1c1c; border-color:#caa01f; }
   .sync-prop-btn.is-ahead:hover{ background:#f3bf32; border-color:#d8ad22; }
+  /* Mirror of .is-ahead for the opposite direction: when A is ahead, the
+     Pull (A → L) button — the action to take — turns red fill. */
+  .sync-prop-btn.is-behind{ background:#c0392b; color:#fff; border-color:#c0392b; }
+  .sync-prop-btn.is-behind:hover{ background:#d2452f; border-color:#d2452f; }
 </style>
 
 <button id="sync-push-btn" class="sync-prop-btn" type="button"
@@ -259,7 +263,11 @@ if ($role !== 'L') return;
     // Distinct from 'warn' (amber fill), which the legacy branch still uses.
     ahead: { bg: '#2a2a2a', fg: '#f5c518' },
     warn:  { bg: '#e8b22b', fg: '#1f1f1f' },
-    error: { bg: '#c93333', fg: '#ffffff' }
+    // S5.3 — same treatment for the danger states (A ahead / unreachable):
+    // calm dark pill, RED TEXT — never a red fill. A filled pill reads as a
+    // clickable button; the pill is a passive label (the Pull button is the
+    // actual control). Red text #ff8d7a is the project's meaningful-red.
+    error: { bg: '#2a2a2a', fg: '#ff8d7a' }
   };
 
   function relTime(iso) {
@@ -353,7 +361,9 @@ if ($role !== 'L') return;
   // existing Push (L → A) control turns amber whenever L is ahead, signalling
   // the action to take, and reverts to calm dark once converged. Toggled
   // from poll() alongside the pill's own amber state. No extra DOM.
+  // Likewise the Pull button turns red fill when A is ahead ('behind').
   var pushBtnEl = document.getElementById('sync-push-btn');
+  var pullBtnEl = document.getElementById('sync-pull-btn');
 
   function poll() {
     fetch('/sync/peer/A', { cache: 'no-store' })
@@ -362,6 +372,7 @@ if ($role !== 'L') return;
         if (!j || !j.ok || !j.state) {
           setLabel('A unreachable', 'error');
           if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
+          if (pullBtnEl) pullBtnEl.classList.remove('is-behind');
           return;
         }
         // S5.1 — drive the pill off the server-computed direction (this
@@ -371,6 +382,7 @@ if ($role !== 'L') return;
         // only if a stale server somehow omits `direction`.
         var dir = j.direction;
         var ahead = (dir === 'ahead');
+        var behind = (dir === 'behind');
         if (dir === 'behind') {
           // A is ahead — the dangerous state. Red pill + the S5.2 nuclear
           // modal block the editor.
@@ -391,14 +403,17 @@ if ($role !== 'L') return;
           var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
           setLabel('A active ' + relTime(iso), state);
         }
-        // S5.3 — mirror the ahead state onto the Push button so the L → A
-        // action you should take also glows amber until you take it.
+        // S5.3 — mirror the direction onto the action buttons: Push glows
+        // amber when L is ahead, Pull glows red when A is ahead. Each reverts
+        // to calm dark once that direction no longer holds.
         if (pushBtnEl) pushBtnEl.classList.toggle('is-ahead', ahead);
+        if (pullBtnEl) pullBtnEl.classList.toggle('is-behind', behind);
         applyNuclear(j);   // S5.2 — block the editor when A is ahead
       })
       .catch(function () {
         setLabel('A unreachable', 'error');
         if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
+        if (pullBtnEl) pullBtnEl.classList.remove('is-behind');
       });
   }
 
