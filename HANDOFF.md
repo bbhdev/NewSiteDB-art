@@ -164,7 +164,55 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 
 ---
 
-**Current state (v0.10.136):** Phase 1 complete (v0.9.0 milestone).
+## 📍 Current frontier (v0.10.243)
+
+> The long prose block immediately below this section is a **historical
+> snapshot (~v0.10.96–136 era)** — accurate for the typography / text-marks
+> work of that period, but it predates the entire sync + dirty + convergence
+> arc. Do NOT read it as the frontier. The live frontier is the **relabeled
+> task list** (canonical IDs, see the Work-tracking-convention section above)
+> + the **memory files** (MEMORY.md index) + the **commit journal**. This
+> block summarizes where each epic actually stands.
+
+Status by epic (canonical IDs; ✅ done · ▶ pending):
+
+- **`[deploy]` 1000** — ✅ 1010–1040 (named targets, host config, excludes/bootstrap,
+  first mirror). Note: B mirror within 1040 still pending.
+- **`[sync]` 2000** — ✅ 2010 node id · 2020 activity/handshake · 2030 per-page
+  `_sync` stamps + diff manifest · 2040 secret sidecar · 2041 L→A push · 2042
+  A→L pull · 2050 direction-detection UI (ahead/behind + nuclear modal).
+  ▶ 2060 publish A→B · 2070 snapshot retention · 2080 B-freeze + unlock + B→A
+  back-prop · 2090 "Published: <date>" snippet · 2095 holistic protocol review.
+  Topology + operations + role-sidecar detail live in the sync memory files.
+- **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
+  3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
+  3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ▶ 3070 library
+  repositioning · 3080 library propagation · 3090 "All" mode.
+- **`[workshop]` 4000** — ✅ 4010/4011/4020/4030/4050/4060 (all landed).
+- **`[dirty]` 5000** — ✅ 5010 lines (B) · 5020 layout (B) · 5040 images
+  (RESOLVED — was a propagate-location bug, not a dirty gap; see the unified-dirty
+  memory's 2026-06-11 correction). ▶ 5030 styles: slice-3a wiring done (dirty
+  signal only, site-wide route), slice-3b (derive typography dirty from a content
+  signature, like B) deferred.
+- **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
+- **`[cleanup]` 7000** — ▶ 7010 media/ cache prune (low urgency, near project end).
+- **Forward epics, registered not started** — 8010 `[backgrounds]` · 9010 `[ui]`
+  (starts by refining editor UI, then studies tablet/phone deltas) · 10010
+  `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback edit on B) ·
+  13010 `[behaviors]` idea backlog.
+
+Notable landings since the snapshot below: full sync layer 2010–2050; derived-dirty
+B for lines/layout + styles wiring; the **image-library-unlisted fix** (v0.10.240:
+the per-page image library is now an unlisted Kirby page `content/<page>/images/`
+so it rides the propagate — previously a draft, excluded, so A was never seeded) +
+guard template + snapshot migration (v0.10.241); sync role declared via gitignored
+`sync.role.php` sidecar (fail-closed); and the work-item numbering unification
+(v0.10.242–243). For the *why* behind any of these, read the matching memory file
+or `git log`.
+
+---
+
+**Historical state snapshot (~v0.10.96–136, superseded — see Current frontier above):** Phase 1 complete (v0.9.0 milestone).
 Phase 2 Slice 1 complete; Slice 2 complete; Slice 3a (typography
 tokens — seed + select) landed; Slice 3b-1 (typography panel in draw
 — read-only list + `dev/draw/typography` save round-trip), 3b-2
