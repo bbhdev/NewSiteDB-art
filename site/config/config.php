@@ -355,7 +355,7 @@ return [
         return;
       }
       try {
-        Kirby\Cms\Page::create([
+        $imgChild = Kirby\Cms\Page::create([
           'parent'   => $page,
           'slug'     => 'images',
           'template' => 'image-container',
@@ -363,6 +363,21 @@ return [
             'title' => 'Image library',
           ],
         ]);
+        // Page::create() defaults to a DRAFT → content/<page>/_drafts/images/,
+        // which the L→A sync propagate strips (it excludes _drafts/ at ANY
+        // depth, by design, for genuine unpublished pages). But the image
+        // library is durable per-page assets, NOT unpublished work — every
+        // comment here and in the blueprint always described its home as
+        // content/<page>/images/ (unlisted). The draft location was only ever
+        // an accident of Page::create()'s default. Publish to UNLISTED so the
+        // library travels with its parent on push. The blueprint locks
+        // changeStatus:false against AUTHORS, so impersonate the almighty
+        // 'kirby' user for this system-level publish. (v0.10.240)
+        $page->kirby()->impersonate('kirby', function () use ($imgChild) {
+          if ($imgChild->isDraft()) {
+            $imgChild->changeStatus('unlisted');
+          }
+        });
       } catch (\Throwable $e) {
         // Don't fail the parent page creation if the child can't
         // be made (e.g. permissions). The author can create the
@@ -1858,22 +1873,25 @@ HTML;
           return $json(['ok' => false, 'error' => 'Unknown page: ' . $pageId], 404);
         }
 
-        // The per-page image library is a draft → childrenAndDrafts().
-        // It's auto-created by the page.create:after hook, but ONLY for
-        // canvas-page pages. A page authored under a different template
-        // (or created before the hook existed) won't have one — so we
-        // lazily provision it here at the filesystem level rather than
-        // erroring. Page::create would hit permission checks (this route
+        // Resolve the per-page image library (slug 'images') via
+        // childrenAndDrafts() so we find it whether it's the new UNLISTED
+        // page (content/<page>/images/) or a legacy draft not yet migrated.
+        // It's auto-created + published-to-unlisted by the page.create:after
+        // hook, but ONLY for canvas-page pages. A page authored under a
+        // different template (or created before the hook existed) won't have
+        // one — so we lazily provision it here at the filesystem level rather
+        // than erroring. Page::create would hit permission checks (this route
         // runs with no Panel user — the same reason we move_uploaded_file
-        // rather than createFile below), so we mkdir the draft directly
-        // and drop an image-container content file so Panel recognises it
+        // rather than createFile below), so we mkdir the unlisted dir directly
+        // (content/<page>/images/, NOT _drafts/, so the sync propagate includes
+        // it) and drop an image-container content file so Panel recognises it
         // as a page. A subsequent dev/page/images refetch (fresh request,
-        // re-reads disk) then sees the new child.
+        // re-reads disk) then sees the new child. (v0.10.240)
         $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
         if ($imgPage) {
           $dir = $imgPage->root();
         } else {
-          $dir = $page->root() . '/_drafts/images';
+          $dir = $page->root() . '/images';
           if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
             return $json(['ok' => false, 'error' => 'Could not create the image library.'], 500);
           }
@@ -1992,7 +2010,7 @@ HTML;
      *   body: { page: "<pageId>", filename: "<name.ext>" }
      *
      * Removes the binary plus its Kirby meta sidecar (<name.ext>.txt) from
-     * content/<page>/_drafts/images/. Runs with NO Panel user (same reason
+     * content/<page>/images/. Runs with NO Panel user (same reason
      * as upload-image / use-image), so we unlink at the filesystem level
      * rather than via $file->delete(). The caller (editor Images mode) is
      * responsible for warning the user when the image is still in use; this
@@ -2031,7 +2049,7 @@ HTML;
           return $json(['ok' => false, 'error' => 'Unknown page: ' . $pageId], 404);
         }
         $imgPage = $page->childrenAndDrafts()->findBy('slug', 'images');
-        $dir = $imgPage ? $imgPage->root() : ($page->root() . '/_drafts/images');
+        $dir = $imgPage ? $imgPage->root() : ($page->root() . '/images');
         $path = $dir . '/' . $filename;
 
         if (!is_file($path)) {
@@ -2244,7 +2262,7 @@ HTML;
         if ($imgPage) {
           $dir = $imgPage->root();
         } else {
-          $dir = $target->root() . '/_drafts/images';
+          $dir = $target->root() . '/images';
           if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
             return $json(['ok' => false, 'error' => 'Could not create the image library.'], 500);
           }
