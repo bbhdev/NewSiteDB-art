@@ -23124,8 +23124,26 @@
     var KEY = 'dev-editor:mode';
     var MODES = ['lines', 'layout', 'styles', 'images'];
     var initial = (function () {
-      var q = new URLSearchParams(location.search).get('mode');
-      if (MODES.indexOf(q) !== -1) return q;
+      // ?mode= is a ONE-TIME preselect, not a sticky state. The old
+      // /dev/draw and /dev/page bookmarks 302 to /dev/editor?mode=lines /
+      // ?mode=layout (config.php) to land on the matching tab. But the
+      // param lingers in the address bar, so without stripping it every
+      // RELOAD would re-read it and yank the user back to that tab —
+      // overriding the tab they actually switched to. Reload should
+      // refresh in place, not change tab. So: honour ?mode= once, then
+      // remove it from the URL so subsequent reloads fall through to the
+      // localStorage-persisted working tab below.
+      var params = new URLSearchParams(location.search);
+      var q = params.get('mode');
+      if (MODES.indexOf(q) !== -1) {
+        params.delete('mode');
+        try {
+          var qs = params.toString();
+          history.replaceState(null, '',
+            location.pathname + (qs ? '?' + qs : '') + location.hash);
+        } catch (e) {}
+        return q;
+      }
       var s = null;
       try { s = localStorage.getItem(KEY); } catch (e) {}
       return (MODES.indexOf(s) !== -1) ? s : 'lines';
