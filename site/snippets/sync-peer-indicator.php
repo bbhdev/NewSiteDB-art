@@ -386,7 +386,7 @@ if ($role !== 'L') return;
         if (dir === 'behind') {
           // A is ahead — the dangerous state. Red pill + the S5.2 nuclear
           // modal block the editor.
-          setLabel('A ahead — pull before editing', 'error');
+          setLabel('A is ahead — pull before editing', 'error');
         } else if (ahead) {
           // L is ahead = there's unpropagated work. S5.3: flag it
           // persistently in amber TEXT (the 'ahead' style — dark pill, amber
