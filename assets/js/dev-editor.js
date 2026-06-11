@@ -12540,12 +12540,17 @@
     // (The v0.10.122 sticky save BAR and the per-row inline save were removed in
     // the 3a Step-2 redesign — one top button + the panel button is enough.)
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
+    // v0.10.239: styles joined the unified dirty signal (save bus participant
+    // `styles`). Nudge the sync pill the moment the typography dirty axis flips
+    // so "unsaved changes" shows immediately, not after the next 60s poll.
+    if (typeof window.edNotifyDirty === 'function') window.edNotifyDirty();
   }
   function clearTypographyDirty() {
     typographyDirty = false;
     const btn = document.getElementById('save-typography-btn');
     if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save styles'; }
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
+    if (typeof window.edNotifyDirty === 'function') window.edNotifyDirty();
   }
 
   function addTypographyToken() {
@@ -16913,6 +16918,28 @@
       saveStatus.textContent = 'Save failed: ' + msg;
       _saving = false; reflectSaveButton();
     }
+  };
+
+  // ── Styles (typography) dirty participant (v0.10.239, #36 slice 3a) ──
+  // Typography is SITE-WIDE and persists via its own /dev/draw/typography
+  // route (the "Save styles" button), NOT the per-page /dev/editor/save that
+  // lines+layout share. So it must NOT take part in the unified POST:
+  // wants() is always false, there is no gather(), and 'styles' is absent from
+  // the coordinator's ORDER — unifiedSave never touches it.
+  //
+  // It joins the bus for ONE reason: edHasUnsavedData() unions every
+  // participant's dirty() (a for-in, independent of wants()/ORDER), and the
+  // sync Push dialog reads that to warn "you have unsaved data". Without this,
+  // a push made with dirty typography would ship the LAST-SAVED typography
+  // file and silently drop the in-editor style edits, while the post-push
+  // indicator falsely read "in sync" — the same gap the lines/layout dirty
+  // signals already close. (Derived-dirty B for typography — so a manual
+  // revert clears it — is the follow-up slice 3b; this only routes the
+  // existing typographyDirty boolean into the unified signal.)
+  _saveBus.participants.styles = {
+    wants: function () { return false; },        // never part of the unified POST
+    dirty: function () { return !!typographyDirty; },
+    block: function () { return false; }
   };
 
   // ── Wire-up ───────────────────────────────────────────────────────
