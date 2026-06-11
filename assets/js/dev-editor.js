@@ -19420,10 +19420,45 @@
   // Step 3: dirty tracking. Every mutation (add / drag commit /
   // later resize / delete / chapter ops) calls markDirty(); a
   // successful save clears it. Save button is enabled iff dirty.
+  //
+  // v0.10.238: DERIVED dirty (approach B), the layout sibling of the
+  // lines-mode work (#34, Section 1). dirty is no longer a sticky asserted
+  // flag — it answers "does the persisted projection differ from on-disk?".
+  // Unlike lines (≈50 raw setters + an undo/snapshot funnel that recomputed),
+  // layout funnels every mutation through this single markDirty(), so the
+  // recompute lives right here: an edit lights the button instantly AND
+  // reversing it by hand (drag a rect back, retype a value to its old text)
+  // clears it again — there is no undo/restore path in layout to do this
+  // anywhere else. The signature mirrors the participant's gather() projection
+  // EXACTLY ({schemaVersion, chapters, rects}); this same dirty signal gates
+  // the sync push/pull "unsaved data" warnings, so a field left out of the
+  // signature would let a push ship incomplete content (false-clean).
   let dirty = false;
   let saving = false;
-  function markDirty()  { dirty = true;  syncSaveButton(); writeStatus(); }
-  function markClean()  { dirty = false; syncSaveButton(); writeStatus(); }
+  let savedSig = null;
+  function stableStringify(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+    return '{' + Object.keys(v).sort().map(function (k) {
+      return JSON.stringify(k) + ':' + stableStringify(v[k]);
+    }).join(',') + '}';
+  }
+  function contentSig() {
+    return stableStringify({
+      schemaVersion: state.schemaVersion,
+      chapters:      state.chapters,
+      rects:         state.rects
+    });
+  }
+  function captureSavedBaseline() { savedSig = contentSig(); }
+  function recomputeDirty() {
+    // Before the boot baseline exists, stay optimistic (any pre-baseline
+    // mutation is a real edit).
+    if (savedSig === null) { dirty = true; return; }
+    dirty = (contentSig() !== savedSig);
+  }
+  function markDirty()  { recomputeDirty();             syncSaveButton(); writeStatus(); }
+  function markClean()  { dirty = false; captureSavedBaseline(); syncSaveButton(); writeStatus(); }
   function syncSaveButton() {
     const btn = document.getElementById('save-btn');
     if (btn) {
@@ -23002,6 +23037,7 @@
   });
 
   render();
+  captureSavedBaseline(); // v0.10.238: loaded state == on-disk baseline for derived-dirty
   syncSaveButton();
 
   // Kick the image-library fetch after first paint. Bound image rects
