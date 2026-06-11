@@ -1331,6 +1331,51 @@
     enumerable: true, configurable: true
   });
   reflectSaveButton(); // initial paint: clean → dim + disabled
+
+  // v0.10.234: DERIVED dirty (approach B). `state.dirty` used to be a sticky
+  // asserted flag — set true at ~50 sites and, fatally, unconditionally true
+  // in restoreFromSnapshot(), so undoing back to the on-disk state still lit
+  // the Save button. Now dirty is the answer to a question: "does in-memory
+  // content differ from what's on disk?". `savedSig` is a stable signature of
+  // the persisted-content projection, captured at load + after each successful
+  // save; recomputeDirty() compares the live signature against it.
+  //
+  // The ~50 raw `state.dirty = true` assignments stay as INSTANT optimistic
+  // feedback (button lights the moment you edit). The debounced snapshot funnel
+  // and undo/redo (restoreFromSnapshot) call recomputeDirty(), which is what
+  // lets undo-to-origin — or manually typing a value back — actually clear it.
+  //
+  // CRITICAL: the signature is built from the SAME four fields lines.gather()
+  // POSTs to disk ({masters, byClass, palette, pageCfg ← pageConfig}). This
+  // dirty signal also gates the sync push/pull "unsaved data" warnings, so a
+  // false-clean (a persisted field left out of the signature) would silently
+  // let a push ship incomplete content. Those four ARE the complete persisted
+  // set for lines, and they're exactly what restoreFromSnapshot restores —
+  // selection / activeGroup / classId are view state and are deliberately
+  // excluded so selecting a line never reads as a content change.
+  let savedSig = null;
+  function stableStringify(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+    return '{' + Object.keys(v).sort().map(function (k) {
+      return JSON.stringify(k) + ':' + stableStringify(v[k]);
+    }).join(',') + '}';
+  }
+  function contentSig() {
+    return stableStringify({
+      byClass:    state.byClass,
+      masters:    state.masters,
+      palette:    state.palette,
+      pageConfig: state.pageConfig
+    });
+  }
+  function captureSavedBaseline() { savedSig = contentSig(); }
+  function recomputeDirty() {
+    // Before the boot baseline exists, leave the optimistic setter alone.
+    if (savedSig === null) return;
+    state.dirty = (contentSig() !== savedSig);
+  }
+
   // Make sure every useClass has a dims slot + a byClass entry, so
   // getters never see undefined.
   useClasses.forEach(function (cid) {
@@ -2966,6 +3011,10 @@
     if (state.history.length > HISTORY_MAX) state.history.shift();
     state.historyIdx = state.history.length - 1;
     updateUndoButtons();
+    // v0.10.234: a committed mutation — settle the true dirty value (the raw
+    // `state.dirty = true` sites gave instant optimistic feedback; this clears
+    // it if the edit cancelled out to the saved baseline). No-op pre-boot.
+    recomputeDirty();
   }
 
   // Debounced snapshot for field-by-field text/number edits. Rapid
@@ -3005,7 +3054,10 @@
     state.activeGroupId = (snap.activeGroupId && currentGroupIds.indexOf(snap.activeGroupId) !== -1)
       ? snap.activeGroupId
       : (currentGroups[0] ? currentGroups[0].id : null);
-    state.dirty = true;
+    // v0.10.234: derive dirty from content, not "an undo happened". Undoing
+    // back to the saved state now correctly clears the Save button; redoing
+    // away from it re-lights it.
+    recomputeDirty();
     renderAll();
     updateUndoButtons();
   }
@@ -16833,7 +16885,11 @@
     // Route this section's result ({ ok, error? }) into the Lines UI.
     apply: function (r) {
       if (r && r.ok) {
-        state.dirty = false;
+        // v0.10.234: the just-saved content IS the new on-disk baseline.
+        // gather() already wrote state.masters = decomposed.masters above, so
+        // the live signature now matches what's on disk → recompute → clean.
+        captureSavedBaseline();
+        recomputeDirty();
         // Flash the Save button itself (where the user's eyes already
         // are) instead of relying on the status text aside.
         saveBtn.classList.add('is-flash-success');
@@ -18170,6 +18226,7 @@
   renderCanvasPanel();  // sidebar inputs for pageW/H + canvasW/H
   setActiveTool('select');
   snapshot();
+  captureSavedBaseline(); // v0.10.234: loaded state == on-disk baseline for derived-dirty
   renderAll();
   centerOnPage();
 
