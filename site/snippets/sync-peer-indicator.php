@@ -621,10 +621,12 @@ if ($role !== 'L') return;
         var has = dirty
           ? 'it has <b>saved work not yet pushed to A</b> and also <b>some unsaved work</b>'
           : 'it has work not yet pushed to A';
+        // Suggest saving only when there's unsaved work to save.
+        var advice = dirty ? 'Consider saving and pushing L → A first.'
+                           : 'Consider pushing L → A first.';
         return '<div class="spm-unsaved">⚠ <b>This machine (L) is ahead</b> — ' + has + '. '
           + 'Pulling will <b>overwrite those local changes</b> with A’s older content. '
-          + 'Consider pushing L → A first. (A snapshot of L is taken first, so this is '
-          + 'recoverable.)</div>';
+          + advice + ' (A snapshot of L is taken first, so this is recoverable.)</div>';
       }
       return '';
     }
