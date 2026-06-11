@@ -130,13 +130,14 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 | 3000 | `[conv]` | editor convergence (draw+page → one /dev/editor) |
 | 4000 | `[workshop]` | image workshop |
 | 5000 | `[dirty]` | unified dirty/save signal (derived, approach B) |
-| 6000 | `[ui]` | cross-cutting UI / design system / dialog consistency |
+| 6000 | `[editor]` | the editor itself — a core pillar (interaction, dialogs, modes) |
 | 7000 | `[cleanup]` | maintenance / cache pruning / tech-debt |
 | 8000 | `[backgrounds]` | site backgrounds — processing + editor + runtime |
-| 9000 | `[tablet]` | iPad first-class editing layer (standing constraint) |
-| 10000 | `[phone]` | smartphone demo mode (reduced from tablet) |
-| 11000 | `[bedit]` | safe fallback editing on B (cross-links 2080) |
-| 12000 | `[behaviors]` | new behavior-type ideas (backlog) |
+| 9000 | `[ui]` | cross-cutting UI / design system — flows down to tablet + phone |
+| 10000 | `[tablet]` | iPad first-class editing layer (standing constraint) |
+| 11000 | `[phone]` | smartphone demo mode (reduced from tablet) |
+| 12000 | `[bedit]` | safe fallback editing on B (cross-links 2080) |
+| 13000 | `[behaviors]` | new behavior-type ideas (backlog) |
 
 **Rosetta — legacy → canonical (frozen, do not extend):**
 
