@@ -16784,6 +16784,11 @@
   _saveBus.participants.lines = {
     // Lines has no dirty-gate on save today — it always writes.
     wants: function () { return true; },
+    // …but it DOES track unsaved edits (state.dirty drives the Save
+    // button). Report it so window.edHasUnsavedData() — used by the
+    // sync Push dialog to warn "you have unsaved data" — sees lines
+    // edits even though wants() is unconditionally true.
+    dirty: function () { return !!state.dirty; },
     // Gather the `lines` section of the unified payload (page is injected
     // server-side). May throw { edCancel: true } to abort the WHOLE save
     // — the v0.8.46 skeleton-line guard: lines that reference missing
@@ -22814,6 +22819,10 @@
   const _saveBus = (window.__edSaveBus = window.__edSaveBus || { participants: {} });
   _saveBus.participants.layout = {
     wants: function () { return dirty; },
+    // Same as wants() today, but reported explicitly so the unified
+    // dirty check (window.edHasUnsavedData) doesn't depend on wants()
+    // semantics staying coupled to the dirty flag.
+    dirty: function () { return dirty; },
     block: function () { return !!pickerEl; },
     // Returns the `layout` section of the unified payload. Canvas
     // dimensions are intentionally NOT sent — they come from Deco's
@@ -23076,6 +23085,24 @@
 
   // Public hooks.
   window.__edUnifiedSave = unifiedSave;
+  // Unified "is there unsaved editor data?" — unions every save
+  // participant's self-reported dirty(). The sync Push dialog reads this
+  // to warn the user: a push propagates content/ ON DISK, so unsaved
+  // in-editor edits would NOT travel, yet the post-push indicator would
+  // read "in sync" — a false-converged state w.r.t. the unsaved work.
+  window.edHasUnsavedData = function () {
+    var bus = window.__edSaveBus;
+    if (!bus || !bus.participants) return false;
+    var parts = bus.participants;
+    for (var k in parts) {
+      if (!Object.prototype.hasOwnProperty.call(parts, k)) continue;
+      var p = parts[k];
+      if (p && typeof p.dirty === 'function') {
+        try { if (p.dirty()) return true; } catch (e) {}
+      }
+    }
+    return false;
+  };
   // The Images pane calls edFlushLayoutSave() before recomputing image
   // usage, so just-placed layout images aren't read as unused. Scope it to
   // the layout section only — it must not trigger the lines skeleton-confirm.

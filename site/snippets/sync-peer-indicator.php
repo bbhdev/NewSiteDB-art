@@ -82,6 +82,12 @@ if ($role !== 'L') return;
   .sync-prop-modal .spm-body b{ color:#fff; }
   .sync-prop-modal .spm-body .spm-warn{ color:#ff8d7a; }
   .sync-prop-modal .spm-body .spm-ok{ color:#7ddca0; }
+  /* Unsaved-data warning — amber, boxed, above the push summary. */
+  .sync-prop-modal .spm-body .spm-unsaved{
+    color:#f5c518; background:#2e2818; border:1px solid #6a5a1f;
+    border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.4;
+  }
+  .sync-prop-modal .spm-body .spm-unsaved b{ color:#ffe08a; }
   .sync-prop-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
   .sync-prop-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
     padding:8px 13px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
@@ -472,6 +478,21 @@ if ($role !== 'L') return;
       }
       return m;
     }
+    // Unsaved-editor-data warning. A push propagates content/ AS IT IS ON
+    // DISK; in-editor edits not yet saved do NOT travel — yet the post-push
+    // indicator would read "in sync", a false-converged state w.r.t. that
+    // unsaved work. So if the editor reports unsaved data, warn (non-blocking
+    // — the user may intend to push only the saved state).
+    function unsavedNote(){
+      try {
+        if (typeof window.edHasUnsavedData === 'function' && window.edHasUnsavedData()) {
+          return '<div class="spm-unsaved">⚠ You have <b>local unsaved data</b>. '
+            + 'A push sends only what’s saved to disk — unsaved edits won’t travel, '
+            + 'and A will read as “in sync” without them. Save first to include them.</div>';
+        }
+      } catch (e) {}
+      return '';
+    }
     function resetModal(){
       mConfirm.style.display = '';
       mConfirm.textContent = 'Push to A';
@@ -495,7 +516,8 @@ if ($role !== 'L') return;
           var w = j.wouldReplace || {};
           var sent = (j.sent && j.sent.bytes != null) ? fmtBytes(j.sent.bytes) : '?';
           mBody.innerHTML =
-            'This will <span class="spm-warn">overwrite A’s content</span> with L’s:<br>'
+            unsavedNote()
+            + 'This will <span class="spm-warn">overwrite A’s content</span> with L’s:<br>'
             + '<b>' + (w.pages||0) + '</b> pages · <b>' + (w.files||0) + '</b> files · '
             + fmtBytes(w.bytes) + ' <span style="opacity:.8">(' + sent + ' gzipped on the wire)</span>.<br>'
             + 'A snapshot of A’s current content is taken first.';
