@@ -254,6 +254,10 @@ if ($role !== 'L') return;
   // THIS node's perspective) onto these; see poll() below.
   var STYLES = {
     ok:    { bg: '#2a2a2a', fg: '#ffffff' },
+    // S5.3 — 'ahead' keeps the calm dark pill but turns the TEXT amber, so
+    // the "you're ahead" signal is persistent yet minimal (no amber fill).
+    // Distinct from 'warn' (amber fill), which the legacy branch still uses.
+    ahead: { bg: '#2a2a2a', fg: '#f5c518' },
     warn:  { bg: '#e8b22b', fg: '#1f1f1f' },
     error: { bg: '#c93333', fg: '#ffffff' }
   };
@@ -373,11 +377,11 @@ if ($role !== 'L') return;
           setLabel('A ahead — pull before editing', 'error');
         } else if (ahead) {
           // L is ahead = there's unpropagated work. S5.3: flag it
-          // persistently in amber (the 'warn' style) for the WHOLE time L is
-          // ahead — not just when recent — until a push converges to 'equal'.
-          // This replaces the abandoned leave-reminder toast: same signal,
-          // zero extra screen space, no unreliable leave-intent detection.
-          setLabel("you're ahead — push when done", 'warn');
+          // persistently in amber TEXT (the 'ahead' style — dark pill, amber
+          // text) for the WHOLE time L is ahead, until a push converges to
+          // 'equal'. This replaces the abandoned leave-reminder toast: same
+          // signal, zero extra screen space, no leave-intent detection.
+          setLabel("you're ahead — push when done", 'ahead');
         } else if (dir === 'equal') {
           setLabel('in sync', 'ok');
         } else {
