@@ -1321,9 +1321,14 @@
   let _dirty = false;
   let _saving = false;
   function reflectSaveButton() {
-    if (!saveBtn) return;
-    saveBtn.disabled = _saving || !_dirty;
-    saveBtn.classList.toggle('is-dirty', _dirty && !_saving);
+    if (saveBtn) {
+      saveBtn.disabled = _saving || !_dirty;
+      saveBtn.classList.toggle('is-dirty', _dirty && !_saving);
+    }
+    // v0.10.235: feed the dirty axis to the sync pill. Guarded — this runs
+    // during lines boot before Section 3 defines the global; it's a no-op
+    // until then, and the post-boot poll paints the correct initial state.
+    if (typeof window.edNotifyDirty === 'function') window.edNotifyDirty();
   }
   Object.defineProperty(state, 'dirty', {
     get: function () { return _dirty; },
@@ -19421,9 +19426,13 @@
   function markClean()  { dirty = false; syncSaveButton(); writeStatus(); }
   function syncSaveButton() {
     const btn = document.getElementById('save-btn');
-    if (!btn) return;
-    btn.disabled = saving || !dirty;
-    btn.classList.toggle('is-dirty', dirty && !saving);
+    if (btn) {
+      btn.disabled = saving || !dirty;
+      btn.classList.toggle('is-dirty', dirty && !saving);
+    }
+    // v0.10.235: feed the layout dirty axis to the sync pill (see lines'
+    // reflectSaveButton). Guarded — global defined later in Section 3.
+    if (typeof window.edNotifyDirty === 'function') window.edNotifyDirty();
   }
   function flashSaveButton() {
     const btn = document.getElementById('save-btn');
@@ -23129,6 +23138,14 @@
           : { ok: false, error: (json && json.error) || ('HTTP ' + res.status) };
         if (typeof p.apply === 'function') p.apply(sectionResult);
       });
+
+      // v0.10.235: a successful save moves L's on-disk content forward, so
+      // the sync indicator's propagation direction may have just changed
+      // (L is now ahead of A). Nudge it to re-poll immediately instead of
+      // waiting up to 60s — mirrors the explicit poll() that push/pull do.
+      if (res && res.ok) {
+        try { window.dispatchEvent(new Event('ed:editor-saved')); } catch (e) {}
+      }
     } catch (netErr) {
       const msg = (netErr && netErr.message) ? netErr.message : String(netErr);
       taking.forEach(function (k) {
@@ -23159,6 +23176,22 @@
       }
     }
     return false;
+  };
+  // v0.10.235: notify the sync indicator (sync-peer-indicator.php) the
+  // moment the unsaved-dirty axis CHANGES, so the pill reflects "unsaved
+  // changes" immediately rather than only after the next 60s poll. The
+  // pill has two axes: propagation direction (on-disk L vs A — moves only
+  // on save) and this dirty axis (in-editor unsaved work). Transition-
+  // guarded against the last emitted value so a long drag — which fires
+  // reflectSaveButton() on every mutation but keeps dirty === true — emits
+  // exactly once, not per frame.
+  var _lastDirtyEmitted = null;
+  window.edNotifyDirty = function () {
+    var cur = false;
+    try { cur = !!window.edHasUnsavedData(); } catch (e) {}
+    if (cur === _lastDirtyEmitted) return;
+    _lastDirtyEmitted = cur;
+    try { window.dispatchEvent(new Event('ed:dirty-changed')); } catch (e) {}
   };
   // The Images pane calls edFlushLayoutSave() before recomputing image
   // usage, so just-placed layout images aren't read as unused. Scope it to

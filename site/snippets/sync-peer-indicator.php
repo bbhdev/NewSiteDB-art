@@ -376,6 +376,43 @@ if ($role !== 'L') return;
   // overwrites L's newer, unpropagated work with A's older content.
   var lastDirection = null;
 
+  // Is the editor holding unsaved in-memory changes? Defined in dev-editor.js
+  // Section 3; may be absent during early boot → treat as clean.
+  function isDirty() {
+    try { return typeof window.edHasUnsavedData === 'function' && !!window.edHasUnsavedData(); }
+    catch (e) { return false; }
+  }
+
+  // v0.10.235 — the pill combines TWO axes:
+  //   • propagation direction (lastDirection: on-disk L vs A, moves only on
+  //     save) — supplied by the server poll;
+  //   • local dirty (isDirty: unsaved in-editor work) — supplied by the
+  //     editor via the 'ed:dirty-changed' event.
+  // Folding dirty in means an unsaved edit shows up the instant you make it
+  // ('equal + dirty' → amber "unsaved changes") instead of looking "in sync"
+  // until you save. Only acts on the three known directions — for null
+  // (unreachable / legacy) poll() owns the label and this is a no-op.
+  function renderPill() {
+    var dir = lastDirection;
+    if (dir === 'behind') {
+      // A is ahead — the dangerous state. Red pill + the S5.2 nuclear modal
+      // block the editor. Dominates regardless of local dirty.
+      setLabel('A is ahead — pull before editing', 'error');
+    } else if (dir === 'ahead') {
+      // L is ahead = unpropagated saved work. Persistent amber until a push
+      // converges to 'equal'. If ALSO dirty, name the extra unsaved work so
+      // the user knows a save-then-push (not just push) is needed.
+      setLabel(isDirty() ? "you're ahead + unsaved work"
+                         : "you're ahead — push when done", 'ahead');
+    } else if (dir === 'equal') {
+      // On disk L and A match. If the editor holds unsaved edits, surface
+      // them in amber rather than the calm "in sync" — saving is the next
+      // step before the on-disk state actually matches what's on screen.
+      var d = isDirty();
+      setLabel(d ? 'unsaved changes' : 'in sync', d ? 'ahead' : 'ok');
+    }
+  }
+
   function poll() {
     fetch('/sync/peer/A', { cache: 'no-store' })
       .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
@@ -393,24 +430,15 @@ if ($role !== 'L') return;
         // pull); 'equal' = converged. Fall back to the old recency check
         // only if a stale server somehow omits `direction`.
         var dir = j.direction;
-        lastDirection = dir || null;
         var ahead = (dir === 'ahead');
         var behind = (dir === 'behind');
-        if (dir === 'behind') {
-          // A is ahead — the dangerous state. Red pill + the S5.2 nuclear
-          // modal block the editor.
-          setLabel('A is ahead — pull before editing', 'error');
-        } else if (ahead) {
-          // L is ahead = there's unpropagated work. S5.3: flag it
-          // persistently in amber TEXT (the 'ahead' style — dark pill, amber
-          // text) for the WHOLE time L is ahead, until a push converges to
-          // 'equal'. This replaces the abandoned leave-reminder toast: same
-          // signal, zero extra screen space, no leave-intent detection.
-          setLabel("you're ahead — push when done", 'ahead');
-        } else if (dir === 'equal') {
-          setLabel('in sync', 'ok');
+        if (dir === 'ahead' || dir === 'behind' || dir === 'equal') {
+          lastDirection = dir;
+          renderPill();   // pill = f(direction, local dirty)
         } else {
-          // Legacy/unknown shape — preserve prior behaviour.
+          // Legacy/unknown shape — preserve prior behaviour. No known
+          // direction, so renderPill() can't help; paint directly here.
+          lastDirection = null;
           var iso = j.state.lastActivityAt;
           var age = ageSeconds(iso);
           var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
@@ -441,6 +469,12 @@ if ($role !== 'L') return;
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) poll();
   });
+  // v0.10.235 — react to local editor events instead of waiting up to 60s:
+  //   • a save moves L's on-disk content → re-poll (direction may now differ);
+  //   • a dirty-axis change (edit / undo-to-clean) → re-paint the pill with
+  //     the direction we already know (no server round-trip needed).
+  window.addEventListener('ed:editor-saved', poll);
+  window.addEventListener('ed:dirty-changed', renderPill);
 
   // ── S4b.4 — "Push L → A" control ──────────────────────────────────
   // Two-step: a dry-run preview (no snapshot, no swap) populates the
