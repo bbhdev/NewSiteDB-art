@@ -181,7 +181,7 @@ if ($role !== 'L') return;
         title="Pull A → L — overwrites THIS machine's content (L is snapshotted first)">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M19 12H5M11 18l-6-6 6-6"/>
+    <path d="M12 5v14M5 12l7 7 7-7"/>
   </svg>
   <span>Pull&nbsp;←&nbsp;A</span>
 </button>
