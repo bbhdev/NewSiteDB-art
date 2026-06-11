@@ -1157,6 +1157,21 @@ function sync_pull_from_peer(string $fromRole, bool $dryRun = false): array
     $payload = $r['payload'];
     $payload['httpCode'] = $code;
     $payload['fetched']  = ['bytes' => strlen((string) $resp)];
+
+    // v0.10.237 — converge the SOURCE's view after a successful pull.
+    // The ingest made THIS node adopt the source's lastActivityAt, so the
+    // two now hold identical content. But the source doesn't know that: its
+    // peerStamps['L'] still reflects L's PRE-pull activity (older than the
+    // source's own stamp), so the source's /sync/self pill would falsely
+    // read "ahead of L" forever. Push L's newly-adopted stamp back to the
+    // source so its peerStamps['L'] catches up and it reads 'equal'.
+    // Reuses the save-time notify path (L→A only; a no-op for other roles).
+    // Fire-and-forget: sync_ping_peer short-timeouts and swallows failures,
+    // so a slow/absent source never blocks the pull's own success.
+    if (($r['status'] ?? 0) === 200) {
+        $adopted = (string) (sync_state_read()['lastActivityAt'] ?? '');
+        if ($adopted !== '') sync_notify_peers_of_local_activity($adopted);
+    }
     return $payload;
 }
 
