@@ -131,36 +131,17 @@ if ($role !== 'L') return;
   .sync-nuclear .snuc-escape{ background:#262323; color:#bdbdbd; border-color:#444; font-weight:500; }
   .sync-nuclear .snuc-escape:hover{ background:#302c2c; color:#dadada; }
 
-  /* ── S5.3 — non-blocking "unpropagated work" leave reminder ───────────
-     A calm sticky note shown when the author steps away from the editor
-     (tab hidden / window blur / pagehide) while L is AHEAD of A — i.e.
-     there's local work that hasn't been pushed. Unlike the nuclear overlay
-     this does NOT block: it's an opt-in nudge ("push before you forget"),
-     stacked just above the push/pull buttons, dismissible, re-armed each
-     load. Amber accent = attention, not alarm — pushing is reversible, so
-     no danger-red here. Touch-sized button + × for the tablet editor. */
-  .sync-leave-toast{ position:fixed; right:8px; bottom:102px; z-index:9999;
-    width:min(290px,calc(100vw - 16px)); box-sizing:border-box;
-    background:#232020; border:1px solid #5a4a2a; border-left:3px solid #f5c518;
-    border-radius:8px; box-shadow:0 8px 26px rgba(0,0,0,.5);
-    color:#ececec; padding:12px 12px 12px 13px;
-    font:13px/1.45 -apple-system,BlinkMacSystemFont,sans-serif; }
-  .sync-leave-toast[hidden]{ display:none; }
-  .sync-leave-toast .slt-head{ display:flex; align-items:flex-start; gap:8px; }
-  .sync-leave-toast .slt-title{ font-weight:700; color:#f5c518; flex:1; }
-  .sync-leave-toast .slt-x{ flex:none; appearance:none; -webkit-appearance:none;
-    background:transparent; border:0; color:#9a9a9a; cursor:pointer;
-    font-size:18px; line-height:1; padding:2px; margin:-2px -2px 0 0;
-    width:26px; height:26px; border-radius:5px;
-    display:flex; align-items:center; justify-content:center; }
-  .sync-leave-toast .slt-x:hover{ background:#322c2c; color:#dcdcdc; }
-  .sync-leave-toast .slt-body{ color:#cfcfcf; margin:6px 0 11px; }
-  .sync-leave-toast .slt-body b{ color:#fff; }
-  .sync-leave-toast .slt-push{ width:100%; box-sizing:border-box;
-    font:600 13px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;
-    background:#f5c518; color:#1c1c1c; border:1px solid transparent;
-    padding:11px 14px; border-radius:7px; cursor:pointer; }
-  .sync-leave-toast .slt-push:hover{ background:#ffd23b; }
+  /* ── S5.3 — "ahead" highlight: amber Push button ──────────────────────
+     The unpropagated-work reminder is zero-footprint by design: instead of
+     a separate toast (abandoned — leave-intent can't be detected reliably:
+     tab-close can't render UI, and blur/visibilitychange fire on any glance
+     elsewhere), the existing controls just turn amber whenever L is ahead
+     of A, and revert to calm dark once converged. The pill text uses the
+     'warn' style (handled in JS); the Push button — the L→A action you
+     should take — picks up `.is-ahead` here. Persistent until push, costs
+     no extra screen space. */
+  .sync-prop-btn.is-ahead{ background:#e8b22b; color:#1c1c1c; border-color:#caa01f; }
+  .sync-prop-btn.is-ahead:hover{ background:#f3bf32; border-color:#d8ad22; }
 </style>
 
 <button id="sync-push-btn" class="sync-prop-btn" type="button"
@@ -240,21 +221,6 @@ if ($role !== 'L') return;
   </div>
 </div>
 
-<?php /* S5.3 — non-blocking "unpropagated work" leave reminder. Surfaced by
-        the leave-intent handlers (visibilitychange→hidden / blur / pagehide)
-        whenever the last poll reported direction 'ahead' (L has local work
-        not yet on A). Opt-in and reversible — it never blocks the editor;
-        the inline "Push L → A" reuses the S4b push preview→confirm flow.
-        role=status + aria-live=polite: informational, not an alert. */ ?>
-<div id="sync-leave-toast" class="sync-leave-toast" hidden role="status" aria-live="polite">
-  <div class="slt-head">
-    <span class="slt-title">Unpropagated work</span>
-    <button type="button" class="slt-x" data-role="dismiss" aria-label="Dismiss reminder">×</button>
-  </div>
-  <div class="slt-body" data-role="msg">L has local work not yet on A.</div>
-  <button type="button" class="slt-push" data-role="push">Push&nbsp;L → A</button>
-</div>
-
 <script>
 (function () {
   // Self-contained polling — no framework deps so this snippet drops
@@ -269,14 +235,6 @@ if ($role !== 'L') return;
   // control isn't present (then the nuclear "Pull now" button no-ops
   // gracefully — the escape hatch still works).
   var openPull = null;
-
-  // S5.3 — hook to open the push preview from the leave-reminder toast
-  // (mirror of openPull). Assigned by the push control block below; stays
-  // null if that control isn't present (then the toast's Push button no-ops
-  // gracefully). `lastPeer` caches the most recent /sync/peer/A poll so the
-  // leave-intent handlers can read direction/gap without re-fetching.
-  var openPush = null;
-  var lastPeer = null;
 
   // Activity-age threshold below which the indicator turns yellow
   // (S2b feedback): when both L and A have been authored very
@@ -386,48 +344,12 @@ if ($role !== 'L') return;
     });
   }
 
-  // ── S5.3 — "unpropagated work" leave reminder ──────────────────────
-  var toast     = document.getElementById('sync-leave-toast');
-  var toastMsg  = toast && toast.querySelector('[data-role="msg"]');
-  var toastX    = toast && toast.querySelector('[data-role="dismiss"]');
-  var toastPush = toast && toast.querySelector('[data-role="push"]');
-  // Per-load: the × suppresses the toast until the next page load (and is
-  // re-armed early whenever direction leaves 'ahead' — e.g. after a push
-  // converges to equal — so a fresh ahead-episode can nudge again).
-  var toastDismissed = false;
-
-  // Humanise a gap in seconds as an approximate duration. Output is plain
-  // ASCII (~Nmin / ~Nh / ~Nd / "under a minute") — safe to drop into HTML
-  // without escaping.
-  function fmtGap(sec) {
-    if (sec == null) return null;
-    if (sec < 60)    return 'under a minute';
-    if (sec < 3600)  return '~' + Math.round(sec / 60) + 'min';
-    if (sec < 86400) return '~' + Math.round(sec / 3600) + 'h';
-    return '~' + Math.round(sec / 86400) + 'd';
-  }
-
-  // Show the reminder iff L is currently ahead and it wasn't dismissed this
-  // load. Called from the leave-intent handlers; reads the cached last poll.
-  function maybeShowLeaveToast() {
-    if (!toast || toastDismissed) return;
-    if (!lastPeer || lastPeer.direction !== 'ahead') return;
-    if (toastMsg) {
-      var gap = fmtGap(lastPeer.gapSeconds);
-      toastMsg.innerHTML = gap
-        ? 'L is <b>' + gap + '</b> ahead of A — push before you forget?'
-        : 'L has local work <b>not yet on A</b> — push before you forget?';
-    }
-    toast.hidden = false;
-  }
-  function hideLeaveToast() { if (toast) toast.hidden = true; }
-
-  if (toastX)    toastX.addEventListener('click', function () {
-    toastDismissed = true; hideLeaveToast();
-  });
-  if (toastPush) toastPush.addEventListener('click', function () {
-    if (openPush) openPush();   // reuse the S4b push preview→confirm flow
-  });
+  // ── S5.3 — "ahead" amber highlight on the Push button ──────────────
+  // The unpropagated-work reminder is the persistent-but-minimal kind: the
+  // existing Push (L → A) control turns amber whenever L is ahead, signalling
+  // the action to take, and reverts to calm dark once converged. Toggled
+  // from poll() alongside the pill's own amber state. No extra DOM.
+  var pushBtnEl = document.getElementById('sync-push-btn');
 
   function poll() {
     fetch('/sync/peer/A', { cache: 'no-store' })
@@ -435,25 +357,27 @@ if ($role !== 'L') return;
       .then(function (j) {
         if (!j || !j.ok || !j.state) {
           setLabel('A unreachable', 'error');
+          if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
           return;
         }
-        lastPeer = j;   // S5.3 — cache for the leave-intent handlers
         // S5.1 — drive the pill off the server-computed direction (this
         // node's perspective). 'ahead' = L has unpropagated work; 'behind'
         // = A is ahead of L (danger: editing now would be lost on the next
         // pull); 'equal' = converged. Fall back to the old recency check
         // only if a stale server somehow omits `direction`.
         var dir = j.direction;
+        var ahead = (dir === 'ahead');
         if (dir === 'behind') {
-          // A is ahead — the dangerous state. Red pill now; the blocking
-          // nuclear modal lands in S5.2.
+          // A is ahead — the dangerous state. Red pill + the S5.2 nuclear
+          // modal block the editor.
           setLabel('A ahead — pull before editing', 'error');
-        } else if (dir === 'ahead') {
-          // L is ahead. Gently flag when local work is recent (you'll want
-          // to push soon); otherwise stay calm.
-          var lage = ageSeconds(j.localAt);
-          var st = (lage !== null && lage <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
-          setLabel("you're ahead — push when done", st);
+        } else if (ahead) {
+          // L is ahead = there's unpropagated work. S5.3: flag it
+          // persistently in amber (the 'warn' style) for the WHOLE time L is
+          // ahead — not just when recent — until a push converges to 'equal'.
+          // This replaces the abandoned leave-reminder toast: same signal,
+          // zero extra screen space, no unreliable leave-intent detection.
+          setLabel("you're ahead — push when done", 'warn');
         } else if (dir === 'equal') {
           setLabel('in sync', 'ok');
         } else {
@@ -463,13 +387,15 @@ if ($role !== 'L') return;
           var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
           setLabel('A active ' + relTime(iso), state);
         }
+        // S5.3 — mirror the ahead state onto the Push button so the L → A
+        // action you should take also glows amber until you take it.
+        if (pushBtnEl) pushBtnEl.classList.toggle('is-ahead', ahead);
         applyNuclear(j);   // S5.2 — block the editor when A is ahead
-        // S5.3 — once L is no longer ahead (pushed → equal, or A pulled
-        // ahead → behind), the reminder is moot: hide it and re-arm the
-        // dismiss so a future ahead-episode can nudge again.
-        if (j.direction !== 'ahead') { toastDismissed = false; hideLeaveToast(); }
       })
-      .catch(function () { setLabel('A unreachable', 'error'); });
+      .catch(function () {
+        setLabel('A unreachable', 'error');
+        if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
+      });
   }
 
   poll();
@@ -480,18 +406,9 @@ if ($role !== 'L') return;
   // visible — the moment you switch back from another tool is when
   // a stale indicator is most misleading.
   window.addEventListener('focus', poll);
-  // visibilitychange does double duty: becoming visible re-polls (a stale
-  // pill is most misleading right when you switch back); becoming hidden is
-  // a leave-intent signal for the S5.3 reminder.
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) poll();
-    else maybeShowLeaveToast();
   });
-  // S5.3 — other ways of stepping away: app/window switch (blur) and
-  // navigation / bfcache (pagehide). Each surfaces the leave reminder when
-  // L is ahead, so it's waiting when the author returns to the editor.
-  window.addEventListener('blur', maybeShowLeaveToast);
-  window.addEventListener('pagehide', maybeShowLeaveToast);
 
   // ── S4b.4 — "Push L → A" control ──────────────────────────────────
   // Two-step: a dry-run preview (no snapshot, no swap) populates the
@@ -593,10 +510,6 @@ if ($role !== 'L') return;
           mConfirm.style.display = 'none'; showError('network error during push');
         });
     }
-
-    // S5.3 — expose the preview opener so the leave-reminder toast's
-    // "Push L → A" button reuses this exact flow.
-    openPush = preview;
 
     pushBtn.addEventListener('click', preview);
     mConfirm.addEventListener('click', doPush);
