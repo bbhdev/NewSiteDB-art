@@ -614,10 +614,17 @@ if ($role !== 'L') return;
     // discard local work), but loud. Reuses the amber .spm-unsaved box.
     function aheadNote(){
       if (lastDirection === 'ahead') {
-        return '<div class="spm-unsaved">⚠ <b>This machine (L) is ahead</b> — it has work '
-          + 'not yet pushed to A. Pulling will <b>overwrite those local changes</b> with A’s '
-          + 'older content. Consider pushing L → A first. (A snapshot of L is taken first, so '
-          + 'this is recoverable.)</div>';
+        var dirty = false;
+        try { dirty = (typeof window.edHasUnsavedData === 'function') && window.edHasUnsavedData(); } catch (e) {}
+        // When the editor is also dirty, spell out BOTH kinds of at-risk work:
+        // saved-but-unpushed (the 'ahead' state) AND unsaved in-editor edits.
+        var has = dirty
+          ? 'it has <b>saved work not yet pushed to A</b> and also <b>some unsaved work</b>'
+          : 'it has work not yet pushed to A';
+        return '<div class="spm-unsaved">⚠ <b>This machine (L) is ahead</b> — ' + has + '. '
+          + 'Pulling will <b>overwrite those local changes</b> with A’s older content. '
+          + 'Consider pushing L → A first. (A snapshot of L is taken first, so this is '
+          + 'recoverable.)</div>';
       }
       return '';
     }
