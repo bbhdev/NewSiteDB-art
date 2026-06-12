@@ -509,6 +509,22 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   zig-zag the sync epic. Pick up under the 6000 editor pillar after the sync
   epic's 2095 review.
 - **`[cleanup]` 7000** — ▶ 7010 media/ cache prune (low urgency, near project end).
+  · ▶ **7020 end-of-project cruft sweep** (registered 2026-06-13, not started, run
+  near project end). **Why:** the iterative test cycles accrete cruft — stray
+  content folders (`content/3_imagepage/`, `4_test-page-2/`, `5_test-page-3/`,
+  `6_test/`, `medium/`, `narrow/`, `wide/`, `_shared/`, scratch `images/`,
+  `_sync.json` sidecars), orphaned/test images, throwaway Kirby pages and
+  vignettes used to exercise a feature once, and any other leftover files/dirs
+  that aren't load-bearing. **Scope:** remove *everything that is test/throwaway*,
+  keeping ONLY (a) the Kirby infrastructure proper (`kirby/`, `site/` —
+  templates/blueprints/plugins/snippets/config, `index.php`, `.htaccess`, the
+  genuine production content pages) and (b) a clean Deco (the editor assets +
+  the real authored pages it edits, no scratch batches or test canvases).
+  **Discipline:** this is a *deletion* pass over user data — inventory first,
+  classify each path test-vs-keep, get the user's confirmation on the kill-list
+  before deleting (content is gitignored, so deletions aren't git-recoverable).
+  Deferred to end-of-project because the test pages are still useful scaffolding
+  while features are in flight.
 - **Forward epics, registered not started** — 8010 `[backgrounds]` · **9000 `[ui]`**
   (starts by refining editor UI, then studies tablet/phone deltas): 9010 general
   editor-UI refinement · **9020 draw/library structure rework** (absorbs former
