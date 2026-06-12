@@ -164,7 +164,7 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 
 ---
 
-## 📍 Current frontier (v0.10.254)
+## 📍 Current frontier (v0.10.255)
 
 > The long prose block immediately below this section is a **historical
 > snapshot (~v0.10.96–136 era)** — accurate for the typography / text-marks
@@ -181,8 +181,19 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
 - **`[sync]` 2000** — ✅ 2010 node id · 2020 activity/handshake · 2030 per-page
   `_sync` stamps + diff manifest · 2040 secret sidecar · 2041 L→A push · 2042
   A→L pull · 2050 direction-detection UI (ahead/behind + nuclear modal). ✅
-  **2060 publish A→B — CODE-COMPLETE v0.10.252–254, NOT yet validated** (the
-  buttons fire real pushes to live A/B; validate on the real nodes). Built as
+  **2060 publish A→B — VALIDATED (transport, dry-run) v0.10.252–255.** The full
+  L→A→B relay path was proven end-to-end via the safe dry-run on the live nodes:
+  A built+sent its tarball (37 files, ~1.34 MB) and B replied `httpCode:200`
+  with a "would replace 9 pages / 37 files" verdict, nothing written.
+  **Gotcha found + fixed (v0.10.255): A runs PHP 8.5, where `curl_close()` is
+  deprecated (no-op since 8.0). The A→B dry-run was the first time
+  `sync_propagate_to_peer()` ran ON A (L→A always built/sent from L's older
+  PHP), so the deprecated call had never fired — Whoops escalated it to the
+  generic `{"code":8192}` production fatal. Removed all 5 `curl_close($ch)` in
+  the sync plugin (behavior-preserving on every PHP version).** Still pending: a
+  REAL (non-dry) publish writing B — drive it from the UI button (the intended
+  UX), not a curl; and note B is same-host PHP 8.5, so B must also run v0.10.255+
+  before a real publish (its receive/notify-back path uses curl). Built as
   3 slices: **(1, v0.10.252)** Panel-auth gate on the same-origin local
   triggers `/sync/push`+`/sync/pull` for public nodes (they sit outside the
   `/dev/*` 403 gate) — open on L, 403 on A/B without a session. **(2,
