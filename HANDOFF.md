@@ -210,10 +210,13 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   `sync_pre_propagate_snapshot()`, keeping the newest 30 `auto-pre-propagate`
   snapshots in THIS node's `library/`. Conservative gating: prune only when BOTH
   name-prefix AND meta `kind==='auto-pre-propagate'` match — manual snapshots
-  never touched/counted; unconfirmable (corrupt-meta) autos kept. ▶ **Slice 2:**
-  surface `kind`/`fromRole` in `dev/draw/library/list` + label auto-vs-manual in
-  the panel (list currently returns only name/savedAt/appVersion/schemaVersion).
-  · 2080 B-freeze + unlock + B→A
+  never touched/counted; unconfirmable (corrupt-meta) autos kept. **Slice 2
+  (v0.10.259): display-only folder** — `library/list` now returns `kind`+`fromRole`;
+  the panel partitions snapshots so manual saves stay flat while autos collapse
+  into a closed-by-default `<details>` "⟳ Auto snapshots (N)" folder (friendly
+  "Pre-sync snapshot (from <role>)" labels, raw name on hover). Disk stays FLAT —
+  pure presentation; Load/Delete still target real names. **→ 2070 done** (live
+  UI check pending next deploy). ▶ 2080 B-freeze + unlock + B→A
   back-prop · 2090 "Published: <date>" snippet · 2095 holistic protocol review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
