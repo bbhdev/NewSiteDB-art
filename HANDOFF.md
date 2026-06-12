@@ -226,9 +226,26 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   (editor/save, library/load = snapshot RESTORE, page upload/delete-image,
   workshop use-image). NOT on `/sync/*` — A→B propagate (`POST /sync/propagate`,
   bearer-gated) must keep writing B while frozen; that's the only sanctioned way
-  B changes. ▶ Slice 2 (unlock/refreeze + mandatory B→A back-prop + B banner),
-  Slice 3 (cross-node unlock indicators + A/L publish-block). · 2090 "Published:
-  <date>" snippet · 2095 holistic protocol review.
+  B changes. **Slice 2a (v0.10.261): B-unlock state machine (server).** Routes
+  `GET /sync/b-status` (informational) + Panel-gated `POST /sync/{unlock-b,
+  prolong-b,backprop-b,refreeze-b}`. **Two-step UX (user's call):** unlock takes
+  a planned duration (hours, clamped 15min–24h); re-freeze is GATED (409) until a
+  B→A back-prop has run since the unlock. **Timed unlock + lazy auto-lock (no cron
+  — B is shared hosting):** `sync_b_frozen_from_state` treats a lapsed
+  `unlockExpiresAt` as frozen, so any write past expiry is refused = an active
+  re-lock without a daemon; `sync_b_status()` persists the re-freeze on poll. The
+  author can Prolong the window. **"Is it lost?" guarantee:** auto-lock blocks
+  only NEW writes; B's content/ is untouched + still served, and the B→A back-prop
+  (a `/sync/*` route, not freeze-gated) stays available even AFTER auto-lock — so
+  edits are always recoverable. `pendingBackProp` (unlockedAt set, no back-prop
+  since) survives auto-lock → drives S3's publish-block. State fields (additive,
+  no schema bump): frozen, unlockedAt, unlockExpiresAt, unlockHours,
+  lastBackPropAt, autoLockedAt. Validated by a 14-check isolation lifecycle test.
+  ▶ **Slice 2b** (B editor UI — unlock panel w/ hours picker, live countdown,
+  near-timeout alert @10min, Prolong, Back-propagate, gated Re-freeze) ·
+  ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
+  pendingBackProp). · 2090 "Published: <date>" snippet · 2095 holistic protocol
+  review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
