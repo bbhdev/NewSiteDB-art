@@ -5112,6 +5112,34 @@ boundary strong.
   high confidence). The per-route `dev/draw/*` auth audit + MIME validation from
   the original Phase-3 list remain open.
 
+**🔓 BREAK-GLASS — disable 2FA on ONE locked-out node.** When an A/B node is
+unenterable (usually because `email.secret.php` is missing/wrong so Kirby can't
+send the code AND no TOTP is enrolled yet):
+- **Do NOT edit `config.php:221`** — it's tracked + rsync'd to every node, so it
+  would flip 2FA off everywhere on the next deploy. Instead edit ONLY the stuck
+  node's host override `site/config/config.<SERVER_NAME>.php` (already exists
+  there — holds the `/dev/*` 403 gate; rsync-excluded so it never propagates and
+  a deploy never clobbers it). Kirby merges it over config.php with
+  `array_replace_recursive` (App.php:1066/1090), so target the exact leaf:
+  ```php
+  return [
+      // … existing host overrides already here …
+      'auth' => [
+          'methods' => ['password' => ['2fa' => false]],  // break-glass: 2FA off, THIS node only
+      ],
+  ];
+  ```
+  `password => ['2fa'=>true]` becomes `['2fa'=>false]` → node drops to
+  password-only, nothing else changes, no main-config redeploy.
+- **Recovery:** log in with password → fix `email.secret.php` (or enroll TOTP) →
+  **remove the `'auth'` block** to restore mandatory 2FA.
+- **If it doesn't take immediately:** Infomaniak OPcache — re-save (touch) the
+  file or wait a few seconds (same caveat as the role sidecar).
+- **Lighter case — 2FA fine but lost TOTP device, email still sends:** no config
+  override needed; log in via the emailed code, or delete the user's TOTP secret
+  under `site/accounts/…` to force re-enroll. The override is specifically for
+  when EMAIL itself is broken.
+
 ### Parked: Panel IP allowlist via dynamic DNS
 
 Idea floated during the v0.10.x security batch, **not needed now,
