@@ -5107,10 +5107,10 @@ boundary strong.
   a small **gear icon → pop-up menu → "set up one-time codes"** (next-to-last
   item) on the account view. Enrolled + tested there on A. When the bundled
   `kirby/` source disagrees with live Panel behaviour, **trust the live Panel.**
-- **Still pending:** run the same logout→login(emailed code)→enroll-TOTP test on
-  **B** to confirm (identical config + same host + email already proven on B, so
-  high confidence). The per-route `dev/draw/*` auth audit + MIME validation from
-  the original Phase-3 list remain open.
+- **VALIDATED on B too (2026-06-12):** same logout→login(emailed code)→enroll-TOTP
+  flow confirmed on B. **2FA is now complete on both exposed nodes (A + B).** The
+  per-route `dev/draw/*` auth audit + MIME validation from the original Phase-3
+  list remain open (separate workstream).
 
 **🔓 BREAK-GLASS — disable 2FA on ONE locked-out node.** When an A/B node is
 unenterable (usually because `email.secret.php` is missing/wrong so Kirby can't
