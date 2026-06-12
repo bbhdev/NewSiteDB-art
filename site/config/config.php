@@ -568,7 +568,14 @@ return [
               'name'           => $e,
               'savedAt'        => $meta['savedAt']        ?? null,
               'appVersion'     => $meta['appVersion']     ?? null,
-              'schemaVersion'  => $meta['schemaVersion']  ?? null
+              'schemaVersion'  => $meta['schemaVersion']  ?? null,
+              // 2070 Slice 2: classify so the panel can group auto snapshots
+              // into a display-only subfolder, keeping them from polluting the
+              // user's named saves. 'kind' / 'fromRole' come from meta.json
+              // (auto snapshots write kind='auto-pre-propagate' + fromRole;
+              // manual saves write neither).
+              'kind'           => $meta['kind']           ?? null,
+              'fromRole'       => $meta['fromRole']       ?? null
             ];
           }
           usort($out, function ($a, $b) {

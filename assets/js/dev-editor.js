@@ -7433,13 +7433,56 @@
           list.appendChild(empty);
           return;
         }
-        snaps.forEach(function (s) { list.appendChild(buildRow(s, body.schemaVersion)); });
+        // 2070 Slice 2: keep machine-made pre-sync snapshots from polluting
+        // the user's named saves. Manual saves render flat (as before); the
+        // auto-pre-propagate ones are tucked into a collapsed display-only
+        // "folder" below. The on-disk library/ stays flat — this is purely a
+        // presentation grouping, so Load / Delete still target real names.
+        const auto   = snaps.filter(function (s) { return s.kind === 'auto-pre-propagate'; });
+        const manual = snaps.filter(function (s) { return s.kind !== 'auto-pre-propagate'; });
+
+        if (manual.length) {
+          manual.forEach(function (s) { list.appendChild(buildRow(s, body.schemaVersion, false)); });
+        } else {
+          const none = document.createElement('div');
+          none.className = 'ed-snapshots-empty';
+          none.textContent = 'No saved snapshots yet — only automatic ones (below).';
+          list.appendChild(none);
+        }
+        if (auto.length) {
+          list.appendChild(buildAutoFolder(auto, body.schemaVersion));
+        }
       } catch (err) {
         setStatus('Failed to load list: ' + err.message, true);
       }
     }
 
-    function buildRow(snap, currentSchema) {
+    // Build the collapsed, display-only folder that holds auto snapshots.
+    // Native <details> gives free keyboard + a11y disclosure; it starts
+    // closed so the autos stay out of the way until the user opens them.
+    function buildAutoFolder(auto, currentSchema) {
+      const det = document.createElement('details');
+      det.className = 'ed-snapshots-folder';
+      const sum = document.createElement('summary');
+      sum.className = 'ed-snapshots-folder-summary';
+      sum.title = 'Snapshots taken automatically before each sync. The newest 30 are kept; older ones are pruned.';
+      const lbl = document.createElement('span');
+      lbl.className = 'ed-snapshots-folder-label';
+      lbl.textContent = '⟳ Auto snapshots';
+      const cnt = document.createElement('span');
+      cnt.className = 'ed-snapshots-folder-count';
+      cnt.textContent = String(auto.length);
+      sum.appendChild(lbl);
+      sum.appendChild(cnt);
+      det.appendChild(sum);
+      const inner = document.createElement('div');
+      inner.className = 'ed-snapshots-folder-inner';
+      auto.forEach(function (s) { inner.appendChild(buildRow(s, currentSchema, true)); });
+      det.appendChild(inner);
+      return det;
+    }
+
+    function buildRow(snap, currentSchema, isAuto) {
       const row = document.createElement('div');
       row.className = 'ed-snapshots-row';
       // v0.10.214: per-row checkbox feeding the "Delete checked" bar.
@@ -7468,7 +7511,14 @@
       meta.className = 'ed-snapshots-meta';
       const nm = document.createElement('div');
       nm.className = 'ed-snapshots-name';
-      nm.textContent = snap.name;
+      if (isAuto) {
+        // Friendly label for the machine names (auto-pre-propagate-<UTC>-from-X);
+        // the real on-disk name stays available on hover and drives delete/load.
+        nm.textContent = 'Pre-sync snapshot' + (snap.fromRole ? ' (from ' + snap.fromRole + ')' : '');
+        nm.title = snap.name;
+      } else {
+        nm.textContent = snap.name;
+      }
       meta.appendChild(nm);
       const sub = document.createElement('div');
       sub.className = 'ed-snapshots-sub';

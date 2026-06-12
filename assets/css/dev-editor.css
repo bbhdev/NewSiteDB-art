@@ -3193,6 +3193,34 @@ body.ed-seq-order-editing #lines-layer { pointer-events: none; }
 .ed-snapshots-name { color: #f0f0f0; font-weight: 600; font-size: 0.95em; }
 .ed-snapshots-sub  { color: #999; font-size: 0.78em; margin-top: 0.1em; }
 
+/* 2070 Slice 2: auto (pre-sync) snapshots live in a collapsed, display-only
+   folder so they don't clutter the user's named saves. The on-disk library/
+   stays flat — this is purely a presentation grouping. Closed by default. */
+.ed-snapshots-folder {
+  border: 1px solid #3a3a3a; border-radius: 4px; background: #1e1e1e;
+}
+.ed-snapshots-folder-summary {
+  display: flex; align-items: center; gap: 0.5rem; cursor: pointer;
+  padding: 0.45rem 0.6rem; color: #c8c8c8; font-size: 0.9em;
+  user-select: none; list-style: none;
+}
+.ed-snapshots-folder-summary::-webkit-details-marker { display: none; }
+.ed-snapshots-folder-summary::before {
+  content: '\25B8'; /* ▸ */ color: #888; font-size: 1.05em;
+  display: inline-block; transition: transform 0.12s;
+}
+.ed-snapshots-folder[open] > .ed-snapshots-folder-summary::before { transform: rotate(90deg); }
+.ed-snapshots-folder-summary:hover { color: #f0f0f0; }
+.ed-snapshots-folder-label { font-weight: 600; }
+.ed-snapshots-folder-count {
+  background: #333; color: #bbb; border-radius: 999px;
+  padding: 0.05rem 0.55rem; font-size: 0.82em; font-variant-numeric: tabular-nums;
+}
+.ed-snapshots-folder-inner {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.3rem 0.4rem 0.45rem; border-top: 1px solid #2e2e2e;
+}
+
 /* v0.10.214: per-row select checkbox + "Delete checked" action bar.
    The button stays deliberately muted (low weight, grey) until at
    least one row is checked; then .is-armed makes it clearly visible,
