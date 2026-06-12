@@ -314,7 +314,8 @@ $payload = json_encode([
         <h3>Element styles</h3>
         <span class="ed-typo-head-btns">
           <button type="button" id="new-typo-btn" class="ed-mini" title="Add an element style">+ Style</button>
-          <button type="button" id="save-typography-btn" class="ed-mini" title="Write typography-tokens.json">Save styles</button>
+          <?php /* save-typography-btn removed v0.10.250 ([conv] 3065): typography now
+                   rides the unified header Save, no standalone styles-save button. */ ?>
         </span>
       </header>
       <ul id="typography-list" class="ed-typo-list"></ul>

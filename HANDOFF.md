@@ -188,7 +188,7 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
   3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ✅ **3065 fold STYLES
   into the unified save** (the save *action*, distinct from the already-done dirty
-  *signal*) — **code-complete v0.10.247/248, awaiting user editor-validation.**
+  *signal*) — **DONE, user-validated v0.10.249 ("save is good"); cleanup v0.10.250.**
   One Save button + Cmd-S now write lines+layout+**typography** in a single
   `/dev/editor/save` POST → a full L→A→B push is one action. **Slice A (v0.10.247,
   server):** extracted `deco_save_typography()` (one validator+writer, in
@@ -202,12 +202,23 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   `editor.php` + its wiring; `saveTypography()` reduced to a `__edUnifiedSave()`
   alias. Precedent that justified it: `deco_save_lines()` already writes the
   site-wide palette through this seam, so "site-wide ⇒ separate" was never real.
-  **Deferred (not regressions):** legacy `/dev/draw/typography` POST route +
-  `draw.php`'s own button are now caller-less → small cleanup slice (route GET +
-  GET `/usage` still used). Known cosmetic edge from the pre-6c two-scope button
-  model: typography dirty while in Layout mode (layout clean) may not light the
-  button until 6c merges the engines; the dirty SIGNAL stays correct so a push is
-  never silently incomplete. · ▶ 3070 library repositioning ·
+  **Cleanup DONE v0.10.250:** the bare `/dev/draw/typography` route is now
+  GET-only (read-only diagnostic, symmetric with `/usage`); its ~135-line POST
+  validator — a duplicate of `deco_save_typography()` — is deleted, so that helper
+  is the SINGLE typography writer (edit validation there). Removed too:
+  `draw.php`'s dead `save-typography-btn` and the orphaned
+  `.ed-typo-save-main`/`#save-typography-btn` CSS in the live stylesheet.
+  **Two app-falsehood fixes v0.10.249** (per the user's rule "never give wrong
+  info to the user of an app"): (1) the former cosmetic edge — typography dirty in
+  Layout mode (or layout dirty in Lines mode) might leave the shared `#save-btn`
+  falsely grey under the pre-6c two-scope button model — is FIXED: both
+  `reflectSaveButton` (lines scope) and `syncSaveButton` (layout scope) now OR in
+  the full union via `window.edHasUnsavedData()` (typeof-guarded), so the button
+  reflects EVERY participant's dirtiness in EVERY mode. (2) the rect selection
+  overlay (`.pe-overlay` z:2147483647) was occluding the push/pull modal — fixed by
+  `isolation: isolate` on `.pe-canvas-surface`, confining that ceiling to the canvas
+  stacking context (above rects, below app modals at 10000+) rather than raising
+  modal z. · ▶ 3070 library repositioning ·
   3080 library propagation · 3090 "All" mode.
 - **`[workshop]` 4000** — ✅ 4010/4011/4020/4030/4050/4060 (all landed).
 - **`[dirty]` 5000** — ✅ **EPIC COMPLETE** (user-validated v0.10.246): 5010 lines

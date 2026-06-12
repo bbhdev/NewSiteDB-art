@@ -2742,19 +2742,10 @@ body.editor input[type="range"] {
   color: #1a1407; background: #d8b24a; border-color: #d8b24a; font-weight: 600;
 }
 .ed-typo-edit-save.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
-/* The single, full-width top Save button for the styles list. Made prominent
-   (full row, larger hit area) per the Step-2 spec — it's the only sidebar save
-   control now (the sticky bar + per-row saves were removed). Doubles as the
-   dirty indicator via .is-dirty (filled amber). */
-.ed-typo-save-main {
-  display: block; width: 100%;
-  margin-top: 0.6rem; padding: 0.55rem 0.9rem;
-  font-size: 0.9rem; font-weight: 600; line-height: 1.1;
-}
-#save-typography-btn.is-dirty {
-  color: #1a1407; background: #d8b24a; border-color: #d8b24a; font-weight: 600;
-}
-#save-typography-btn.is-dirty:hover { background: #e6bf57; border-color: #e6bf57; }
+/* [conv] 3065 (v0.10.250): the standalone styles-save button (.ed-typo-save-main
+   / #save-typography-btn) was removed — typography now rides the unified header
+   Save (one Save writes lines+layout+styles). Its dirty-amber rules are deleted
+   with it; the shared #save-btn carries the dirty indicator now (see .ed-save). */
 /* Kept: the id chip still appears in the "View in panel" preview modal. */
 .ed-typo-id {
   color: #8a9099; font-size: 0.68em; flex: none;

@@ -1276,182 +1276,37 @@ HTML;
       }
     ],
     /*
-     * Typography tokens (Slice 3b-1, v0.10.76).
+     * Typography tokens (Slice 3b-1, v0.10.76; POST retired v0.10.250).
      *
      * Site-wide named type styles, stored at
      * content/_shared/typography-tokens.json with shape
      *   { schemaVersion, tokens: [ {id,name,family,sizePx,weight,
-     *     lineHeight,letterSpacingPx,italic}, ... ], savedAt, count }
+     *     lineHeight,letterSpacingPx,italic,color,isDefault}, ... ],
+     *     savedAt, count }
      * — the same _shared pattern as palette.json / font-bundle.json.
-     * Authored in the draw editor (this route is its persistence layer);
-     * read everywhere via deco_load_typography() and emitted as CSS via
+     * Read everywhere via deco_load_typography() and emitted as CSS via
      * deco_typography_css() (Slice 3a).
      *
-     *   GET  dev/draw/typography → { ok, tokens: [...] }
-     *   POST dev/draw/typography   body { tokens: [...] } → writes file
+     *   GET dev/draw/typography → { ok, tokens: [...] }
      *
-     * Validation is format-only and matches the CSS emitter's sanitiser:
-     * id  : ^[a-z0-9_-]{1,64}$  (also the rect typographyId contract);
-     *       duplicates rejected (CSS classes would collide).
-     * name: non-empty, Unicode-tolerant, ≤64 (same set as chapter names).
-     * family: '' or [A-Za-z0-9 '_-], ≤64 (empty → falls back to sans-serif).
-     * numerics are CLAMPED, not rejected (sizePx 1–400, weight 100–900,
-     * lineHeight 0.5–4, letterSpacingPx -20–50); italic coerced to bool.
-     * Token-ref integrity (rects pointing at a token) is intentionally
-     * NOT enforced here — refs may dangle and degrade gracefully.
+     * READ-ONLY. This used to be a GET|POST route whose POST validated +
+     * wrote the file. As of [conv] 3065 (v0.10.247–250) typography is part
+     * of the UNIFIED save: the client posts it under the `styles` section of
+     * /dev/editor/save, which calls deco_save_typography() (the validator +
+     * writer extracted from this route's old POST body — see
+     * site/plugins/deco/index.php). The standalone POST is gone; this GET
+     * survives as a read-only diagnostic endpoint, symmetric with the
+     * sibling dev/draw/typography/usage GET. To change validation, edit
+     * deco_save_typography(), not this route.
      */
     [
       'pattern' => 'dev/draw/typography',
-      'method'  => 'GET|POST',
+      'method'  => 'GET',
       'action'  => function () {
-        $method     = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-        $hdrs       = ['Content-Type' => 'application/json'];
-        $sharedDir  = kirby()->root('content') . '/_shared';
-        $tokensPath = $sharedDir . '/typography-tokens.json';
-
-        if ($method === 'GET') {
-          $tokens = deco_load_typography(kirby()->root('content'));
-          return new Kirby\Http\Response(
-            json_encode(['ok' => true, 'tokens' => $tokens]),
-            'application/json', 200, $hdrs
-          );
-        }
-
-        // POST: validate + write.
-        $body = kirby()->request()->body()->toArray();
-        $raw  = isset($body['tokens']) && is_array($body['tokens']) ? $body['tokens'] : null;
-        if ($raw === null) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Missing or invalid "tokens" array in body.']),
-            'application/json', 400, $hdrs
-          );
-        }
-
-        $clamp = function ($v, $lo, $hi, $def) {
-          if (!is_numeric($v)) return $def;
-          $v = (float) $v;
-          return max($lo, min($hi, $v));
-        };
-        $clean   = [];
-        $seenIds = [];
-        foreach ($raw as $t) {
-          if (!is_array($t)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Each token must be an object.']),
-              'application/json', 400, $hdrs
-            );
-          }
-          $id = isset($t['id']) ? (string) $t['id'] : '';
-          if (!preg_match('/^[a-z0-9_-]{1,64}$/', $id)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid token id: "' . $id . '" (lowercase a-z, 0-9, _ or -, 1-64 chars).']),
-              'application/json', 400, $hdrs
-            );
-          }
-          if (isset($seenIds[$id])) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Duplicate token id: "' . $id . '".']),
-              'application/json', 400, $hdrs
-            );
-          }
-          $seenIds[$id] = true;
-
-          $name = isset($t['name']) ? trim((string) $t['name']) : '';
-          if ($name === '' || mb_strlen($name) > 64 || !preg_match("/^[\p{L}\p{N} _.,'()\[\]\\-]+$/u", $name)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid token name for "' . $id . '".']),
-              'application/json', 400, $hdrs
-            );
-          }
-
-          $family = isset($t['family']) ? trim((string) $t['family']) : '';
-          if ($family !== '' && !preg_match("/^[A-Za-z0-9 '_-]{1,64}$/", $family)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid font family for "' . $id . '".']),
-              'application/json', 400, $hdrs
-            );
-          }
-
-          // Colour: optional palette-ID reference. Empty/absent → null
-          // (inherit). Format-only check (matches the palette id contract);
-          // membership is NOT enforced — a dangling ref degrades gracefully
-          // (no colour emitted → inherit), like a dangling typographyId.
-          $colorRaw = isset($t['color']) ? trim((string) $t['color']) : '';
-          if ($colorRaw !== '' && !preg_match('/^[a-z0-9_-]{1,64}$/', $colorRaw)) {
-            return new Kirby\Http\Response(
-              json_encode(['ok' => false, 'error' => 'Invalid colour ref for "' . $id . '" (palette id: lowercase a-z, 0-9, _ or -).']),
-              'application/json', 400, $hdrs
-            );
-          }
-
-          $clean[] = [
-            'id'              => $id,
-            'name'            => $name,
-            'family'          => $family,
-            'sizePx'          => $clamp($t['sizePx']          ?? null, 1.0,   400.0, 16.0),
-            'weight'          => (int) $clamp($t['weight']     ?? null, 100,   900,   400),
-            'lineHeight'      => $clamp($t['lineHeight']       ?? null, 0.5,   4.0,   1.4),
-            'letterSpacingPx' => $clamp($t['letterSpacingPx']  ?? null, -20.0, 50.0,  0.0),
-            'italic'          => !empty($t['italic']),
-            'color'           => $colorRaw !== '' ? $colorRaw : null,
-            'isDefault'       => !empty($t['isDefault']),
-          ];
-        }
-
-        // Totality (A2): the one-layer model forbids an "undefined style", so
-        // the registry must be non-empty and declare EXACTLY ONE default, and
-        // that default must carry a concrete colour (it is the root fallback —
-        // it can't itself inherit). These are governance contracts; the panel
-        // UI upholds them, so a violation here means a hand-edited / buggy POST.
-        if (count($clean) === 0) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'At least one element style is required (there is no “undefined style”).']),
-            'application/json', 400, $hdrs
-          );
-        }
-        $defaults = array_values(array_filter($clean, function ($t) { return $t['isDefault']; }));
-        if (count($defaults) === 0) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'One element style must be marked as the default.']),
-            'application/json', 400, $hdrs
-          );
-        }
-        if (count($defaults) > 1) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Only one element style can be the default.']),
-            'application/json', 400, $hdrs
-          );
-        }
-        if ($defaults[0]['color'] === null) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'The default style “' . $defaults[0]['name'] . '” must have a colour (it is the root fallback and cannot inherit).']),
-            'application/json', 400, $hdrs
-          );
-        }
-
-        if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Could not create _shared directory.']),
-            'application/json', 500, $hdrs
-          );
-        }
-        $payload = [
-          'schemaVersion' => 1,
-          'tokens'        => $clean,
-          'savedAt'       => date('c'),
-          'count'         => count($clean),
-        ];
-        $tmpPath = $tokensPath . '.tmp';
-        $bytes   = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
-        if (@file_put_contents($tmpPath, $bytes) === false || !@rename($tmpPath, $tokensPath)) {
-          return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Failed to write typography-tokens.json.']),
-            'application/json', 500, $hdrs
-          );
-        }
+        $tokens = deco_load_typography(kirby()->root('content'));
         return new Kirby\Http\Response(
-          json_encode(['ok' => true, 'tokens' => $clean, 'count' => count($clean)]),
-          'application/json', 200, $hdrs
+          json_encode(['ok' => true, 'tokens' => $tokens]),
+          'application/json', 200, ['Content-Type' => 'application/json']
         );
       }
     ],
