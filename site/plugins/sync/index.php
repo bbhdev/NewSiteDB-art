@@ -408,11 +408,19 @@ function sync_b_record_backprop(): void
 }
 
 /**
- * Re-freeze B. GATED (2080 S2a, two-step UX): if an unlock is on record
- * (`unlockedAt` set) but no B→A back-propagate has run since it, refuse with
- * 409 — the author must back-propagate first, or those edits die on the next
- * A→B publish. On success, clears the whole unlock bookkeeping so B returns
- * to a clean default-frozen state.
+ * Re-freeze B. GATED on the DIVERGENCE axis (v0.10.271), matching the client
+ * re-freeze gate and the Back B→A pill — "the code is the same everywhere".
+ * Refuses with 409 ONLY when B is genuinely ahead of A (direction === 'ahead'):
+ * relocking then would strand edits A lacks, which the next A→B publish would
+ * overwrite. equal / behind / unknown all ALLOW re-freeze — re-freeze is not the
+ * anti-clobber layer (the publish guard is), and on an unreachable A we don't
+ * fail-closed (relocking shrinks B's public-editable surface, the safe way).
+ *
+ * Was gated on `pendingBackProp` (unlock-on-record + no back-prop since), but
+ * that fires after ANY unlock — even a look-only one with no edits — so once
+ * the client gate stopped blocking (v0.10.268) the user could click through to
+ * a spurious 409. Divergence is the truth both gates now share. On success,
+ * clears the whole unlock bookkeeping so B returns to a clean default-frozen state.
  */
 function sync_b_refreeze(): array
 {
@@ -421,11 +429,21 @@ function sync_b_refreeze(): array
     }
     $state  = sync_state_read();
     $fields = sync_b_status_fields($state);
-    if ($fields['pendingBackProp']) {
+    // Confirmed B-ahead only — same eval the status poll / pill use.
+    $aheadOfA = false;
+    $peer = sync_fetch_peer_state('A');
+    if (!empty($peer['ok']) && is_array($peer['state'] ?? null)) {
+        $cmp = sync_direction_between(
+            $state['lastActivityAt'] ?? null,
+            $peer['state']['lastActivityAt'] ?? null
+        );
+        $aheadOfA = ($cmp['direction'] === 'ahead');
+    }
+    if ($aheadOfA) {
         return [
             'ok'    => false,
             'code'  => 409,
-            'error' => 'Back-propagate B → A before re-freezing — B holds edits A '
+            'error' => 'Push B → A before re-freezing — B holds edits A '
                      . 'does not have, and the next A → B publish would overwrite them.',
         ] + $fields;
     }
