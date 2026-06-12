@@ -928,11 +928,11 @@ $payload = str_replace('<', '\\u003c', $payload);
            canvas card), orphans, and dangling refs. -->
       <button type="button" id="audit-typo-btn" class="ed-mini ed-typo-view-btn"
               title="Scan every page: which objects use each style, orphans, dangling refs">Check usage</button>
-      <!-- The single Save control. The duplicate sticky save-bar + per-row
-           inline saves were removed; this top button is made full-width and
-           prominent (it doubles as the dirty indicator via .is-dirty). -->
-      <button type="button" id="save-typography-btn" class="ed-mini ed-typo-save-main"
-              title="Write typography-tokens.json">Save styles</button>
+      <!-- v0.10.248 ([conv] 3065): the standalone "Save styles" button is gone.
+           Typography is now part of the UNIFIED save — the shared header Save
+           button (and Cmd-S) write it together with lines + layout in one POST,
+           so a full L→A→B push is a single action. The header button lights
+           (.is-dirty) for dirty typography just as it does for lines/layout. -->
     </section>
   </aside>
 

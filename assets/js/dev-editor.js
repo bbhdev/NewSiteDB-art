@@ -1321,9 +1321,24 @@
   let _dirty = false;
   let _saving = false;
   function reflectSaveButton() {
+    // v0.10.248 ([conv] 3065): the shared header Save button now also lights for
+    // dirty typography (Styles mode no longer has its own "Save styles" button —
+    // one Save writes everything). We read the styles participant's dirty() off
+    // the save bus rather than the `typographyDirty` binding directly: this fn is
+    // first called at boot, BEFORE `let typographyDirty` initialises, so a direct
+    // reference would throw (TDZ). The participant is registered later still, so
+    // by the time it exists typographyDirty is safely initialised; until then the
+    // guard yields false. (Layout drives this same button from its own scope.)
+    let stylesDirty = false;
+    try {
+      const _b = window.__edSaveBus;
+      const _sp = _b && _b.participants && _b.participants.styles;
+      if (_sp && typeof _sp.dirty === 'function') stylesDirty = !!_sp.dirty();
+    } catch (e) {}
+    const _anyDirty = _dirty || stylesDirty;
     if (saveBtn) {
-      saveBtn.disabled = _saving || !_dirty;
-      saveBtn.classList.toggle('is-dirty', _dirty && !_saving);
+      saveBtn.disabled = _saving || !_anyDirty;
+      saveBtn.classList.toggle('is-dirty', _anyDirty && !_saving);
     }
     // v0.10.235: feed the dirty axis to the sync pill. Guarded — this runs
     // during lines boot before Section 3 defines the global; it's a no-op
@@ -12390,8 +12405,9 @@
   // an editable name, the stable `ty-<id>` identity chip, a live sample
   // rendered with the token's own `.ty-<id>` class, a compact spec line,
   // and a delete button. Tokens are NOT in the draw undo history — they
-  // persist via their own /dev/draw/typography route (the Save button in
-  // the panel head), not the per-page draw save.
+  // persist through the UNIFIED save as of v0.10.248 ([conv] 3065): the shared
+  // header Save button → /dev/editor/save → deco_save_typography → site-wide
+  // _shared/typography-tokens.json (no longer a dedicated route/button).
   //
   // 3b-1: read-only list + save round-trip.
   // 3b-2 (this): create / rename / delete + dirty indicator + client-side
@@ -12568,10 +12584,12 @@
       Object.keys(modifiedTypoIds).forEach(function (k) { delete modifiedTypoIds[k]; });
       renderElementStyleDisplay();
     }
-    // The single top "Save styles" button reflects dirtiness (filled amber
-    // when dirty, plain when a revert settled it back to clean).
-    const btn = document.getElementById('save-typography-btn');
-    if (btn) { btn.classList.toggle('is-dirty', typographyDirty); btn.textContent = 'Save styles'; }
+    // v0.10.248 ([conv] 3065): the dedicated "Save styles" button is gone —
+    // styles ride the unified save now. Repaint the SHARED header Save button so
+    // it lights (.is-dirty + enabled) whenever typography is dirty, exactly as a
+    // lines/layout edit lights it. reflectSaveButton() reads this dirtiness back
+    // off the styles save-bus participant.
+    reflectSaveButton();
     // The standalone Edit panel's Save button (class ed-typo-edit-save) tracks
     // dirty/clean too, so saving is reachable right where the author is editing.
     // (The v0.10.122 sticky save BAR and the per-row inline save were removed in
@@ -12584,8 +12602,7 @@
   }
   function clearTypographyDirty() {
     typographyDirty = false;
-    const btn = document.getElementById('save-typography-btn');
-    if (btn) { btn.classList.remove('is-dirty'); btn.textContent = 'Save styles'; }
+    reflectSaveButton();   // v0.10.248: settle the shared header Save button
     document.querySelectorAll('.ed-typo-edit-save').forEach(applyTypoEditSaveState);
     if (typeof window.edNotifyDirty === 'function') window.edNotifyDirty();
   }
@@ -12958,15 +12975,14 @@
 
     // Footer is "Close" only (v0.10.166). Field edits already apply live
     // (rebuildTypographyClientCss + markTypographyDirty + display refresh via
-    // afterFieldEdit), so persistence is owned solely by the sidebar
-    // #save-typography-btn. A footer "Save styles" button competed with that
-    // top button — it didn't clear the top's dirty state, so the user thought
-    // styles weren't saved. One unambiguous "Close" affordance fixes that.
+    // afterFieldEdit); persistence is the UNIFIED save (v0.10.248, [conv] 3065) —
+    // the shared header Save button writes typography with everything else. A
+    // footer save button would just duplicate that, so the panel stays "Close".
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'ed-mini ed-es-panel-save';
     close.textContent = 'Close';
-    close.title = 'Close — use the sidebar Save styles button to write changes';
+    close.title = 'Close — edits apply live; use the Save button to write them';
     close.addEventListener('click', closeElementStylePanel);
     body.appendChild(close);
 
@@ -12979,45 +12995,17 @@
     document.addEventListener('keydown', esPanelKeyHandler);
   }
 
-  // Persist the current tokens to content/_shared/typography-tokens.json
-  // via the dedicated route. On success the server-normalised set is
-  // adopted back and all session ids lock (clear newTypoIds), so further
-  // renames no longer mutate ids.
-  async function saveTypography(btn) {
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-    try {
-      const res = await fetch('/dev/draw/typography', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokens: state.typography })
-      });
-      const j = await res.json();
-      if (!res.ok || !j.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + res.status));
-      if (Array.isArray(j.tokens)) {
-        state.typography = j.tokens;   // adopt the server-normalised set
-      }
-      Object.keys(newTypoIds).forEach(function (k) { delete newTypoIds[k]; });
-      Object.keys(modifiedTypoIds).forEach(function (k) { delete modifiedTypoIds[k]; });
-      rebuildTypographyClientCss();
-      renderTypographyList();
-      // 5030 slice 3b: the just-saved (server-normalised) tokens ARE the new
-      // on-disk baseline — capture before clearing so a later edit-then-revert
-      // compares against what actually landed on disk.
-      captureTypoBaseline();
-      clearTypographyDirty();
-      if (btn) { btn.disabled = false; btn.textContent = 'Saved.'; }
-      setTimeout(function () {
-        const b = document.getElementById('save-typography-btn');
-        if (b && !typographyDirty) b.textContent = 'Save styles';
-      }, 1800);
-    } catch (err) {
-      console.error('[dev-draw] typography save failed:', err);
-      if (btn) { btn.disabled = false; btn.textContent = 'Failed'; }
-      alert('Typography save failed: ' + err.message);
-      setTimeout(function () {
-        const b = document.getElementById('save-typography-btn');
-        if (b) b.textContent = 'Save styles';
-      }, 1800);
+  // Persist the current tokens to content/_shared/typography-tokens.json.
+  // v0.10.248 ([conv] 3065): the dedicated /dev/draw/typography POST is retired —
+  // typography is now a participant of the UNIFIED save, so persistence flows
+  // through window.__edUnifiedSave() → /dev/editor/save → deco_save_typography(),
+  // and the styles participant's apply() runs the adopt-normalised-set + settle-
+  // dirty work this function used to do inline. Kept as a thin alias so any stray
+  // caller (or a future Cmd-S-from-panel binding) still persists through the one
+  // seam rather than a now-removed route.
+  async function saveTypography() {
+    if (typeof window.__edUnifiedSave === 'function') {
+      await window.__edUnifiedSave();
     }
   }
 
@@ -16961,27 +16949,54 @@
     }
   };
 
-  // ── Styles (typography) dirty participant (v0.10.239, #36 slice 3a) ──
-  // Typography is SITE-WIDE and persists via its own /dev/draw/typography
-  // route (the "Save styles" button), NOT the per-page /dev/editor/save that
-  // lines+layout share. So it must NOT take part in the unified POST:
-  // wants() is always false, there is no gather(), and 'styles' is absent from
-  // the coordinator's ORDER — unifiedSave never touches it.
+  // ── Styles (typography) save participant (v0.10.248, [conv] 3065) ─────
+  // Typography is SITE-WIDE — it persists to content/_shared/typography-
+  // tokens.json, not the per-page rects/lines files. But "site-wide" never
+  // meant "separate save": deco_save_lines() already writes the site-wide
+  // PALETTE through the very same /dev/editor/save seam. So as of 3065 styles
+  // is a FULL participant of the unified save, exactly like lines and layout —
+  // one Save (or Cmd-S) now writes everything, and a single L→A→B push carries
+  // the whole state. The old standalone "Save styles" button + /dev/draw/
+  // typography POST are retired (the GET stays; saveTypography() is now a thin
+  // alias to the unified save).
   //
-  // It joins the bus for ONE reason: edHasUnsavedData() unions every
-  // participant's dirty() (a for-in, independent of wants()/ORDER), and the
-  // sync Push dialog reads that to warn "you have unsaved data". Without this,
-  // a push made with dirty typography would ship the LAST-SAVED typography
-  // file and silently drop the in-editor style edits, while the post-push
-  // indicator falsely read "in sync" — the same gap the lines/layout dirty
-  // signals already close. (Slice 3b, v0.10.245: typographyDirty is now
-  // DERIVED from a content signature — see recomputeTypoDirty near its
-  // declaration — so a manual revert clears it, matching lines/layout. This
-  // dirty() just forwards that derived value.)
+  //   wants()  — only when there's something to write (derived dirty signal),
+  //              so a styles-clean save doesn't rewrite the tokens file.
+  //   gather() — the `styles` section: { tokens } (no page; site-wide). Mirror
+  //              of what saveTypography used to POST.
+  //   apply()  — adopt the server-normalised tokens as the new on-disk
+  //              baseline (clamps/totality applied), clear session id maps, and
+  //              settle the derived dirty signal — the same success path
+  //              saveTypography ran, minus its own fetch.
+  //   dirty()  — the derived signal (still unioned by edHasUnsavedData() for
+  //              the sync push/pull "unsaved data" warning, as before).
   _saveBus.participants.styles = {
-    wants: function () { return false; },        // never part of the unified POST
+    wants: function () { return !!typographyDirty; },
     dirty: function () { return !!typographyDirty; },
-    block: function () { return false; }
+    block: function () { return false; },
+    gather: function () {
+      return { tokens: state.typography };
+    },
+    apply: function (r) {
+      if (r && r.ok) {
+        if (Array.isArray(r.tokens)) state.typography = r.tokens;  // adopt normalised set
+        Object.keys(newTypoIds).forEach(function (k) { delete newTypoIds[k]; });
+        Object.keys(modifiedTypoIds).forEach(function (k) { delete modifiedTypoIds[k]; });
+        rebuildTypographyClientCss();
+        renderTypographyList();
+        captureTypoBaseline();   // the just-saved tokens ARE the new baseline
+        clearTypographyDirty();  // settles typographyDirty + repaints surfaces
+      } else {
+        // Surface in the shared save status (the header is where the eyes are
+        // now that the dedicated button is gone).
+        saveStatus.classList.add('is-error');
+        saveStatus.textContent = 'Styles save failed: ' + ((r && r.error) || 'unknown error');
+      }
+    },
+    fail: function (msg) {
+      saveStatus.classList.add('is-error');
+      saveStatus.textContent = 'Styles save failed: ' + msg;
+    }
   };
 
   // ── Wire-up ───────────────────────────────────────────────────────
@@ -16999,12 +17014,10 @@
   if (newTypoBtn) {
     newTypoBtn.addEventListener('click', addTypographyToken);
   }
-  const saveTypographyBtn = document.getElementById('save-typography-btn');
-  if (saveTypographyBtn) {
-    saveTypographyBtn.addEventListener('click', function () { saveTypography(saveTypographyBtn); });
-  }
-  // (The sticky save-BAR button was removed in the 3a Step-2 redesign — the
-  // single top "Save styles" button + the panel's Save button cover saving.)
+  // v0.10.248 ([conv] 3065): no dedicated "Save styles" button to wire — the
+  // shared header Save button (and Cmd-S) write typography through the unified
+  // save. (Earlier the sticky save-BAR, then the per-row inline saves, were each
+  // removed in turn; the standalone top button is the last to go.)
   const viewTypoBtn = document.getElementById('view-typo-btn');
   if (viewTypoBtn) {
     // Wrap so the click Event isn't passed as the `only` argument
@@ -23165,8 +23178,11 @@
 
   // Order matters: 'lines' first because it is the only participant that
   // can CANCEL the save (skeleton-line confirm). Gathering it first means
-  // a cancel aborts before we touch layout's saving/transient state.
-  const ORDER = ['lines', 'layout'];
+  // a cancel aborts before we touch layout's/styles' saving state.
+  // 'styles' (v0.10.248, [conv] 3065): site-wide typography, gathered only
+  // when dirty (wants()), written to _shared/ by the same seam — last because
+  // it's order-independent of the per-page sections.
+  const ORDER = ['lines', 'layout', 'styles'];
 
   /**
    * Gather → POST once → route results.
