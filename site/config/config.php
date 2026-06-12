@@ -190,6 +190,40 @@ if (!is_array($emailConfig)) {
     $emailConfig = [];
 }
 
+/*
+ * Two-factor auth (v0.10.277).
+ *
+ * MANDATORY on the net-exposed nodes (A/B); OFF on L (localhost — 2FA there is
+ * pointless friction, and L may have no email sidecar, which would risk a local
+ * lockout). Role drives it, so the same tracked config does the right thing on
+ * each node.
+ *
+ *   methods ['password' => ['2fa' => true]] → after the password, Kirby demands
+ *   a second factor. auth.challenges defaults to ['totp','email'], so it uses
+ *   TOTP (authenticator app) once the user has enrolled one, and falls back to
+ *   an emailed code before then. The email fallback is the BOOTSTRAP: the TOTP
+ *   enroll affordance only appears once 2fa is on (System::is2FAWithTOTP), so the
+ *   first post-flip login on A/B goes via an emailed code, after which the user
+ *   enrolls TOTP from the Panel account view. Hence email had to work first.
+ *
+ *   challenge.email.from — Kirby defaults the code email's From to noreply@<host>
+ *   (EmailChallenge.php), a domain the authenticated SMTP mailbox is NOT an alias
+ *   of → Infomaniak rejects it. Pin From to the SMTP username (read from the
+ *   gitignored sidecar, so no real address is hardcoded here and it auto-matches
+ *   whatever mailbox each node uses) so 2FA codes ride the same DKIM-signed
+ *   sender proven by /dev/email-test.
+ *
+ * Lockout recovery, if ever needed: set 2fa back to false here and redeploy, or
+ * delete the user's TOTP secret in site/accounts/, then re-enroll.
+ */
+$emailFrom   = $emailConfig['transport']['username'] ?? null;
+$authOptions = [
+    'methods' => ($syncRole === 'L') ? ['password'] : ['password' => ['2fa' => true]],
+];
+if (is_string($emailFrom) && $emailFrom !== '') {
+    $authOptions['challenge'] = ['email' => ['from' => $emailFrom]];
+}
+
 return [
   /*
    * App version (semver). Read from the /VERSION file at the repo
@@ -232,6 +266,13 @@ return [
    * surfaced via /dev/email-test).
    */
   'email' => $emailConfig,
+
+  /*
+   * Two-factor auth — role-gated (mandatory on A/B, off on L). Built above
+   * as $authOptions, with the challenge-email From pinned to the SMTP mailbox
+   * for DKIM-signed deliverability. See the $authOptions block for rationale.
+   */
+  'auth' => $authOptions,
 
   /*
    * Sync layer — node identity + shared-secret auth (v0.10.140, Slice S1).
