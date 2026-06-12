@@ -12556,6 +12556,18 @@
     // than sticking true, so reverting an edit clears the signal. Every call
     // site mutates state.typography BEFORE calling this, so the sig is fresh.
     recomputeTypoDirty();
+    // v0.10.246: when the edit settled back to the on-disk baseline, also drop
+    // the per-card "new"/"modified" session flags so their amber .is-modified
+    // outline clears — otherwise only a save clears them and a manual revert
+    // (type the value back, or add-then-delete a token) left a stale outline
+    // even though the Save button had correctly greyed. Both signals now track
+    // the same on-disk equality. The cards are a separate surface from the
+    // edit panel, so re-rendering them can't disturb a field being typed in.
+    if (!typographyDirty) {
+      Object.keys(newTypoIds).forEach(function (k) { delete newTypoIds[k]; });
+      Object.keys(modifiedTypoIds).forEach(function (k) { delete modifiedTypoIds[k]; });
+      renderElementStyleDisplay();
+    }
     // The single top "Save styles" button reflects dirtiness (filled amber
     // when dirty, plain when a revert settled it back to clean).
     const btn = document.getElementById('save-typography-btn');
