@@ -960,6 +960,11 @@ return [
             'application/json', 500
           );
         }
+        // 2095: a snapshot load wholesale-replaced content/ (propagate scope) —
+        // advance the L/A ahead-behind clock so the pill reflects that L now
+        // differs from A. After the wipe+copy succeeded, never on the failure
+        // path above.
+        sync_record_activity_and_notify();
         return new Kirby\Http\Response(
           json_encode(['ok' => true, 'restored' => $meta]),
           'application/json'
@@ -2066,6 +2071,13 @@ HTML;
           }
         }
 
+        // 2095: a page image just landed in content/<page>/images/, which is
+        // in propagate scope — advance the L/A ahead-behind clock so the pill
+        // doesn't read a false "in sync" while L holds an unpushed image.
+        // Placed AFTER the write (unlike editor/save's at-entry stamp): this
+        // route has heavy pre-write validation that often bails, and an
+        // entry-stamp would itself be a false "ahead" on every rejected upload.
+        sync_record_activity_and_notify();
         return $json(['ok' => true, 'filename' => $filename, 'resizedTo' => $resizedTo]);
       }
     ],
@@ -2131,6 +2143,10 @@ HTML;
         // file — remove it too so no orphan meta lingers.
         if (is_file($path . '.txt')) { @unlink($path . '.txt'); }
 
+        // 2095: removed a page image from content/<page>/images/ (propagate
+        // scope) — advance the L/A ahead-behind clock. After the unlink, so a
+        // not-found / failed delete never bumps it.
+        sync_record_activity_and_notify();
         return $json(['ok' => true, 'filename' => $filename]);
       }
     ],
@@ -2161,9 +2177,11 @@ HTML;
         $kirby = kirby();
         $body  = $kirby->request()->body()->toArray();
 
-        // Sync S2: see dev/draw/save for rationale on placement at entry.
-        sync_record_activity_and_notify();
-
+        // 2095: NO ahead-behind advance here. useit.json lives under
+        // dev/image-workshop/, excluded from BOTH propagate (top-level dev/)
+        // and the manifest — it never reaches A/B. Advancing would flag false
+        // "unpushed work" for a save that propagates nothing. The propagating
+        // act is use-image (the copy into content/), which advances instead.
         $batchId = $body['batch'] ?? null;
         $useIt   = $body['useIt'] ?? null;
 
@@ -2364,6 +2382,14 @@ HTML;
           return $json(['ok' => false, 'error' => 'Could not write the image into the target library.'], 500);
         }
 
+        // 2095: this is the workshop's RESULT — a derivative copied into
+        // content/<target>/images/ (propagate scope) — so advance the L/A
+        // ahead-behind clock here. The workshop's own scratch (useit/sizes/sent
+        // under dev/) does NOT advance; only this transfer into content/ does.
+        // After the copy, before the sent.json sidecar bookkeeping (itself
+        // scratch), so a sidecar miss still leaves the clock correctly bumped.
+        sync_record_activity_and_notify();
+
         // Record the transfer in the per-batch sent.json sidecar.
         // Shape: { schemaVersion, sent: { "<filename>": [ {page,title}, ... ] } }.
         $sentPath = $batchPage->root() . '/sent.json';
@@ -2435,9 +2461,11 @@ HTML;
         };
         $body = $kirby->request()->body()->toArray();
 
-        // Sync S2: record activity like the other mutating workshop routes.
-        sync_record_activity_and_notify();
-
+        // 2095: NO ahead-behind advance — a workshop batch lives under
+        // dev/image-workshop/, excluded from propagate and the manifest, so
+        // deleting a scratch image changes nothing that reaches A/B. (The
+        // page-library delete that DOES propagate is dev/page/delete-image,
+        // which advances.)
         $batchId  = $body['batch']    ?? null;
         $filename = $body['filename'] ?? null;
 
@@ -2522,9 +2550,10 @@ HTML;
         };
         $body = $kirby->request()->body()->toArray();
 
-        // Sync S2: record activity like the other mutating workshop routes.
-        sync_record_activity_and_notify();
-
+        // 2095: NO ahead-behind advance — resizing a workshop derivative only
+        // touches scratch under dev/image-workshop/ (sizes.json + the cached
+        // derivative), excluded from propagate and the manifest. Nothing
+        // reaches A/B until use-image copies a result into content/.
         $batchId  = $body['batch']    ?? null;
         $filename = $body['filename'] ?? null;
         $sizeRaw  = $body['size']     ?? null;

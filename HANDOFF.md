@@ -407,8 +407,33 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   Low-key `.site-published` element with a placeholder style the author can
   restyle/move. Wired as the default into `footer.php` (the only
   `snippet('footer')` consumer is `home.php`, so it shows at the home-page foot);
-  other templates can include `snippet('published-date')` directly. · 2095
-  holistic protocol review.
+  other templates can include `snippet('published-date')` directly.
+  ✅ **2095 holistic ahead/behind protocol audit** — **DONE v0.10.282, awaiting
+  live validation.** Audited every disk-write route against one rule: the
+  `lastActivityAt` clock (which the L/A pill + nuclear modal read, and which the
+  destination ADOPTS on ingest so the two read *equal*) must advance **iff** the
+  request changes propagate-scope content (`content/` minus `dev/`+`error/`+
+  `_drafts/`). Styles was already correct (the typography *write* folded into
+  `dev/editor/save` at 3065; `dev/draw/typography` is GET-only). **Images was the
+  unmerged mode, and its wiring was inverted:** the three *workshop* routes
+  (`save`/`resize`/`delete-image`) advanced the clock while only touching
+  `dev/image-workshop/` scratch (excluded from BOTH propagate and the manifest) →
+  harmless but annoying false-"ahead" nag; while the three routes that DO mutate
+  propagate-scope content — `dev/page/upload-image`, `dev/page/delete-image`,
+  `dev/image-workshop/use-image` (the workshop's *result* copied into
+  `content/<page>/images/`) — did NOT advance → **false-"equal"**, the dangerous
+  one: the pill reads "in sync" while L holds unpushed image work, so a later
+  "Pull A → L" silently overwrites it (the exact data-loss the protocol exists to
+  prevent). Fix (v0.10.282, all in `config.php`): **added** the advance to the
+  three page-image content writers (placed AFTER the successful write, not at
+  entry like `editor/save`, because these have heavy pre-write validation that
+  bails — an entry-stamp would itself false-"ahead" every rejected upload);
+  **removed** it from the three workshop scratch routes; and **added** it to
+  `dev/draw/library/load` (a snapshot restore wholesale-replaces `content/`,
+  previously a silent false-"equal"). Net: exactly 5 advance sites, all
+  propagate-scope (`library/load`, `editor/save`, `upload-image`,
+  `page/delete-image`, `use-image`). The governing rule "advance iff
+  propagate-scope write" is the invariant any new write route must honour.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
