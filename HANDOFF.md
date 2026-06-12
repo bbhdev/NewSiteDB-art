@@ -259,13 +259,28 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   Back-prop modal: dry-run preview (wouldReplace pages/files/bytes) → confirm.
   **DIRTY signal = the canonical one (v0.10.263 correction).** Earlier draft computed
   a bespoke `dirty` from `lastBackPropAt ?? unlockedAt` baselines — reverted. B is the
-  same binary as L/A and the divergence eval already exists: `sync_b_status()` now
-  attaches `direction` (ahead/behind/equal) by running `sync_direction_between()` over
-  `lastActivityAt`, fetched from A via `sync_fetch_peer_state('A')` — the SAME path
-  L↔A use, just A as the peer. `dirty = direction === 'ahead'`. Fail-soft: A
-  unreachable/unconfigured → `direction:'unknown'`, `peerReached:false`, UI shows no
-  amber (won't guess). **Dependency:** needs A in B's `sync.peers` map (config, same
-  plumbing L has; B/A same host). **Dependency:** needs A in B's `sync.peers` map.
+  same binary as L/A and the divergence eval already exists: `direction`
+  (ahead/behind/equal) from `sync_direction_between()` over `lastActivityAt`, with A as
+  the peer. `dirty = direction === 'ahead'`.
+  **v0.10.272 — A is SNAPSHOTTED ONCE AT UNLOCK, not polled every status check.**
+  Originally `sync_b_status()` re-fetched A live (`sync_fetch_peer_state('A')`) on every
+  poll. That was wrong: B-editing is a declared fallback, A isn't concurrently changed
+  during a B session, so repeated polls learn nothing — they only burned the dev
+  server's worker pool on a blocking cURL in the hot path (the "can't compare with A"
+  starvation seen in testing: every poll timed out for the whole unlocked session,
+  recovering only when B went idle/frozen). Now: `sync_b_unlock()` fetches A's
+  `lastActivityAt` ONCE and stores `peerSnapshotAt` (+`peerSnapshotTakenAt`,
+  +`peerSnapshotFailed` if A was unreachable at unlock — unlock still proceeds, baseline
+  flagged a guess). `sync_b_status()` computes `direction = sync_direction_between(local,
+  peerSnapshotAt)` — a CHEAP LOCAL read, no fetch. No snapshot on record (frozen, never
+  unlocked) ⇒ converged published mirror ⇒ `'equal'`. `sync_b_record_backprop()` advances
+  the snapshot to local after a Push B→A (A adopts B's stamp ⇒ back to `'equal'`).
+  `sync_b_refreeze()` gates against the snapshot too; clears it on a clean re-freeze.
+  Client `backVisual`: the per-poll "unknown/unreachable" hot path is GONE (direction is
+  always equal/ahead/behind); the lone residual "couldn't check" case is
+  `peerSnapshotFailed` → muted "couldn't verify A at unlock". The v0.10.269 peerError
+  tooltip is no longer fed (status does no fetch) — left harmless. **Dependency:** needs
+  A in B's `sync.peers` map (config; B/A same host) — but only consulted at unlock now.
   **v0.10.265 — Back B→A is a 5-STATE pill off TWO axes** (superseding the earlier
   one-axis `dirty===ahead`→amber). Axis 1 = on-disk `direction` (server poll).
   Axis 2 = unsaved editor BUFFER — the SAME signal L/A use: `window.edHasUnsavedData()`
@@ -287,7 +302,10 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   can't answer B's nested `/sync/state` in time. Hint is now "can't compare with A —
   rechecking" (sets the retry expectation); `sync_b_status()` passes the raw `peerError`
   (+ HTTP code) through and the client shows it in the hint's tooltip (`title`). Still
-  won't false-claim "in sync". **Re-freeze is
+  won't false-claim "in sync". **(Largely SUPERSEDED by v0.10.272 — see DIRTY block:
+  status no longer fetches A per poll, so this "unknown/rechecking" hot path is gone;
+  the residual case is `peerSnapshotFailed` at unlock → "couldn't verify A at unlock".)**
+  **Re-freeze is
   struck-through (line-through, not greyed) while inhibited** to read as deliberate.
   **GATE — v0.10.268, RESOLVED in the lock-mechanism discussion:** re-freeze *enable*
   now keys on the **divergence axis** (`diverged = direction==='ahead'`), the SAME
@@ -304,15 +322,17 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   matches:** it was still 409-ing on `pendingBackProp` (true after ANY unlock), so once
   the client gate stopped blocking (v0.10.268) a not-ahead B showed an enabled Re-freeze
   button the server then rejected — client says go, server says no. `sync_b_refreeze`
-  now computes direction itself (fetch A + `sync_direction_between`) and refuses ONLY on
-  confirmed `'ahead'`. **Carried follow-up (still S3):** `pendingBackProp` is STILL the
+  now computes direction itself and refuses ONLY on confirmed `'ahead'` (vs the session
+  snapshot since v0.10.272; was a live fetch in v0.10.271). **Carried follow-up (still S3):** `pendingBackProp` is STILL the
   signal for A's A→B *publish* guard and still has the look-only false-positive there —
   migrate that to divergence in Slice 3. The field stays emitted; only the re-freeze
   route (client + server) stopped gating on it. (The earlier "compact the crowded bottom-right
   affordances" deferral is DONE — see the v0.10.267 horizontal bar above.)
   **v0.10.264 poll fix:** while
-  UNLOCKED the pill re-polls every ~5s (safety net + catches A-side Publishes); 30s
-  baseline kept for the frozen resting pill.
+  UNLOCKED the pill re-polls every ~5s; 30s baseline for the frozen resting pill.
+  **(v0.10.272: the "catches A-side Publishes" rationale is RETIRED — /sync/b-status is
+  now a cheap local read against the unlock snapshot, so the poll only picks up an
+  auto-lock / out-of-band change; the A-side-publish race is Slice 3's publish guard.)**
   ✓ **Lock-mechanism discussion** — DONE (v0.10.268): re-freeze gate keys on divergence,
   allow-on-unknown; details in the GATE block above. ·
   ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
