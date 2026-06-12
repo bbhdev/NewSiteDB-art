@@ -505,8 +505,14 @@ if ($role === 'B'):
   // "light" = coloured text+outline on dark; "full" = saturated background.
   // Hint colours per the spec: a gray, b/d/e amber, c red.
   function backVisual(){
-    var dir = st && st.direction;        // 'equal' | 'ahead'(B>A) | 'behind'(A>B) | 'unknown'
+    var dir = st && st.direction;        // 'equal' | 'ahead'(B>A) | 'behind'(A>B)
     var buf = isDirty();
+    // direction is now computed locally against the unlock-time snapshot of A
+    // (v0.10.272), so the old per-poll "unknown/unreachable" hot path is gone.
+    // The one remaining "couldn't check A" case is peerSnapshotFailed — A was
+    // unreachable AT UNLOCK, so the baseline is a guess. We surface that honestly
+    // on the otherwise-calm equal state rather than claiming a verified sync.
+    var unverified = !!(st && st.peerSnapshotFailed);
     if (dir === 'behind')                                                       // c
       return { btn:'sbp-red-full',   hint:'A is ahead — do not push',  hc:'sbh-red'   };
     if (dir === 'ahead')                                                        // d / e
@@ -514,14 +520,11 @@ if ($role === 'B'):
                  : { btn:'sbp-amber-full',  hint:'data ready to push to A',  hc:'sbh-amber' };
     if (dir === 'equal')                                                        // a / b
       return buf ? { btn:'sbp-amber-light', hint:'save before pushing to A', hc:'sbh-amber' }
-                 : { btn:'',                hint:'in sync with A',           hc:'sbh-gray'  };
-    // unknown — THIS poll couldn't read A's state. Do NOT assert "unreachable":
-    // the cause may be a transient/slow fetch (e.g. a single-worker dev server
-    // that can't answer B's nested /sync/state in time), a missing peer URL, or
-    // a bad response — not A being down. "rechecking" sets the right expectation
-    // (the 5s/30s poll retries); the raw reason rides in the tooltip.
-    return { btn:'', hint:'can’t compare with A — rechecking', hc:'sbh-gray',
-             title: (st && st.peerError) ? ('Last A check: ' + st.peerError) : '' };
+                 : unverified ? { btn:'', hint:'couldn’t verify A at unlock', hc:'sbh-gray',
+                                  title:'A was unreachable when B was unlocked — divergence is a guess until the next Push B→A.' }
+                              : { btn:'', hint:'in sync with A',           hc:'sbh-gray'  };
+    // Defensive only — direction should never be anything else now.
+    return { btn:'', hint:'can’t compare with A', hc:'sbh-gray' };
   }
   // The single inline hint slot (between lock+timer and the actions cluster).
   // `title` = optional hover tooltip (used to expose the raw peer-fetch error
@@ -614,10 +617,13 @@ if ($role === 'B'):
       timer.textContent = fmtLeft(localSecs);   // the countdown IS the timeout signal (no detail text)
       if (localSecs === 0) poll();   // window lapsed → confirm the re-lock with the server
     }
-    // While UNLOCKED, refresh on-disk divergence every ~5s as a safety net (also
-    // catches A-side changes via a Publish). The instant signals are the editor
-    // events wired below: ed:editor-saved → poll (divergence may now differ),
-    // ed:dirty-changed → render (buffer axis: light-amber/light-red flips live).
+    // While UNLOCKED, re-poll every ~5s. As of v0.10.272 /sync/b-status is a CHEAP
+    // LOCAL read (divergence is computed against the unlock snapshot, no live A
+    // fetch), so this is just a low-cost refresh to pick up an auto-lock or an
+    // out-of-band state change — NOT a peer check (B no longer chases A-side
+    // changes; Slice 3's publish guard owns that). The instant signals are the
+    // editor events wired below: ed:editor-saved → poll (local stamp moved →
+    // recompute vs snapshot), ed:dirty-changed → render (buffer axis live).
     if (st && !st.frozen){
       if (++pollAccum >= 5){ pollAccum = 0; poll(); }
     } else {

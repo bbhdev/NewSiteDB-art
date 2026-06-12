@@ -319,32 +319,28 @@ function sync_b_status(): array
     }
     $fields = sync_b_status_fields($state);
 
-    // Divergence vs A — the SAME ahead/behind/equal evaluation L and A run on
-    // their own pills (sync_direction_between over lastActivityAt), just with A
-    // as the peer. `dirty` ("B holds edits A does not have") is direction ===
-    // 'ahead'. This is the canonical signal, not a B-specific reinvention.
-    // Fail-soft: if A has no peer URL or is unreachable we cannot tell, so we
-    // report 'unknown' and the UI declines to nag (no amber) rather than guess.
-    $fields['direction']   = 'unknown';
-    $fields['peerReached'] = false;
-    $fields['peerError']   = null;          // WHY the fetch failed (diagnostic; surfaced in the hint tooltip)
-    if (sync_role() === 'B') {
-        $peer = sync_fetch_peer_state('A');
-        if (!empty($peer['ok']) && is_array($peer['state'] ?? null)) {
-            $cmp = sync_direction_between(
-                $state['lastActivityAt'] ?? null,
-                $peer['state']['lastActivityAt'] ?? null
-            );
-            $fields['direction']   = $cmp['direction'];
-            $fields['peerReached'] = true;
-        } else {
-            // Keep the underlying reason so the UI can stop collapsing five
-            // distinct causes (not-configured / no-peer-URL / curl-missing /
-            // HTTP-or-timeout / bad-shape) into a single false "unreachable".
-            $fields['peerError'] = (string)($peer['error'] ?? 'unknown error')
-                . ($peer['code'] ? ' (HTTP ' . $peer['code'] . ')' : '');
-        }
+    // Divergence vs A — compared against the SNAPSHOT of A's lastActivityAt taken
+    // ONCE at unlock (v0.10.272), NOT a live per-poll fetch. Rationale: B-editing
+    // is a declared fallback and A is not concurrently changed during a B session,
+    // so re-querying A every poll learns nothing — it only burned the dev server's
+    // worker pool on a blocking cURL inside the hot status path (the "can't compare
+    // with A" starvation seen in testing). The snapshot is captured in
+    // sync_b_unlock(), refreshed to local on a successful Push B→A
+    // (sync_b_record_backprop), and cleared on a clean re-freeze. With no snapshot
+    // on record (frozen, never unlocked this cycle) B is the converged published
+    // mirror of A → 'equal'. `dirty` ("B holds edits A does not have") is
+    // direction === 'ahead'. The A→B-publish-while-B-ahead race this used to chase
+    // belongs to Slice 3's publish guard (block at the source), not B's poll.
+    $snapAt = array_key_exists('peerSnapshotAt', $state) ? $state['peerSnapshotAt'] : false;
+    if ($snapAt === false) {
+        $fields['direction'] = 'equal';        // no active baseline ⇒ resting mirror
+    } else {
+        $cmp = sync_direction_between($state['lastActivityAt'] ?? null, $snapAt);
+        $fields['direction'] = $cmp['direction'];
     }
+    $fields['peerSnapshotAt']      = ($snapAt === false) ? null : $snapAt;
+    $fields['peerSnapshotTakenAt'] = $state['peerSnapshotTakenAt'] ?? null;
+    $fields['peerSnapshotFailed']  = !empty($state['peerSnapshotFailed']);  // couldn't reach A at unlock
     $fields['dirty'] = ($fields['direction'] === 'ahead');
     return $fields;
 }
@@ -369,6 +365,21 @@ function sync_b_unlock($hours): array
     $state['unlockExpiresAt'] = date('c', $now + (int) round($h * 3600));
     $state['lastBackPropAt']  = null;
     $state['autoLockedAt']    = null;
+    // Snapshot A's lastActivityAt ONCE, now — the baseline every divergence check
+    // in this session compares against (v0.10.272). This is the only time B queries
+    // A live: a fallback B session won't see A change, so re-polling is pointless.
+    // If A is unreachable at unlock (it may well be, in a fallback) we proceed with
+    // a null baseline and flag it — the UI shows a muted "couldn't verify A" rather
+    // than blocking the emergency edit.
+    $peer = sync_fetch_peer_state('A');
+    if (!empty($peer['ok']) && is_array($peer['state'] ?? null)) {
+        $state['peerSnapshotAt']     = $peer['state']['lastActivityAt'] ?? null;
+        $state['peerSnapshotFailed'] = false;
+    } else {
+        $state['peerSnapshotAt']     = null;
+        $state['peerSnapshotFailed'] = true;
+    }
+    $state['peerSnapshotTakenAt'] = date('c', $now);
     sync_state_write($state);
     return ['ok' => true] + sync_b_status_fields($state);
 }
@@ -404,17 +415,23 @@ function sync_b_record_backprop(): void
 {
     $state = sync_state_read();
     $state['lastBackPropAt'] = date('c');
+    // A adopts B's (source) stamp on a propagate, so B == A now. Advance the
+    // session snapshot to local (v0.10.272) → divergence reads 'equal' again,
+    // and further edits this session correctly re-read as 'ahead'.
+    $state['peerSnapshotAt']     = $state['lastActivityAt'] ?? null;
+    $state['peerSnapshotFailed'] = false;
     sync_state_write($state);
 }
 
 /**
  * Re-freeze B. GATED on the DIVERGENCE axis (v0.10.271), matching the client
  * re-freeze gate and the Back B→A pill — "the code is the same everywhere".
- * Refuses with 409 ONLY when B is genuinely ahead of A (direction === 'ahead'):
- * relocking then would strand edits A lacks, which the next A→B publish would
- * overwrite. equal / behind / unknown all ALLOW re-freeze — re-freeze is not the
- * anti-clobber layer (the publish guard is), and on an unreachable A we don't
- * fail-closed (relocking shrinks B's public-editable surface, the safe way).
+ * Refuses with 409 ONLY when B is genuinely ahead of A (direction === 'ahead'),
+ * computed against the session snapshot taken at unlock (v0.10.272 — no live
+ * fetch). relocking then would strand edits A lacks, which the next A→B publish
+ * would overwrite. equal / behind / unknown all ALLOW re-freeze — re-freeze is not
+ * the anti-clobber layer (the publish guard is), and with no snapshot on record we
+ * don't fail-closed (relocking shrinks B's public-editable surface, the safe way).
  *
  * Was gated on `pendingBackProp` (unlock-on-record + no back-prop since), but
  * that fires after ANY unlock — even a look-only one with no edits — so once
@@ -429,16 +446,13 @@ function sync_b_refreeze(): array
     }
     $state  = sync_state_read();
     $fields = sync_b_status_fields($state);
-    // Confirmed B-ahead only — same eval the status poll / pill use.
-    $aheadOfA = false;
-    $peer = sync_fetch_peer_state('A');
-    if (!empty($peer['ok']) && is_array($peer['state'] ?? null)) {
-        $cmp = sync_direction_between(
-            $state['lastActivityAt'] ?? null,
-            $peer['state']['lastActivityAt'] ?? null
-        );
-        $aheadOfA = ($cmp['direction'] === 'ahead');
-    }
+    // Confirmed B-ahead only — compared against the session SNAPSHOT (v0.10.272),
+    // the same baseline the status poll / pill use. No live fetch here either:
+    // a session that never queried A (snapshot null) can't be proven ahead, so we
+    // allow re-freeze (don't fail-closed — re-freeze isn't the anti-clobber layer).
+    $snapAt = array_key_exists('peerSnapshotAt', $state) ? $state['peerSnapshotAt'] : null;
+    $aheadOfA = $snapAt !== null
+        && sync_direction_between($state['lastActivityAt'] ?? null, $snapAt)['direction'] === 'ahead';
     if ($aheadOfA) {
         return [
             'ok'    => false,
@@ -453,6 +467,10 @@ function sync_b_refreeze(): array
     $state['unlockExpiresAt'] = null;
     $state['lastBackPropAt']  = null;
     $state['autoLockedAt']    = null;
+    // Clear the session snapshot — B is back to the converged published mirror.
+    $state['peerSnapshotAt']      = null;
+    $state['peerSnapshotTakenAt'] = null;
+    $state['peerSnapshotFailed']  = false;
     sync_state_write($state);
     return ['ok' => true] + sync_b_status_fields($state);
 }
