@@ -22,6 +22,16 @@
 # was parsed by the Panel SPA router as an internal Panel view, giving
 # "Could not find Panel view for route: dev/editor". A full http(s) URL
 # is treated as an external link → real navigation to the front-end route.
+#
+# v0.11.1 — "Open batch in Workshop" sibling button. After the editor
+# consolidation, the standalone Image Workshop UI (image-workshop-batch.php
+# at /dev/image-workshop/<slug>) lost its direct entry point — the panel
+# batch page only deep-linked into Deco's Images mode. This restores it.
+# Link is `{{ page.url }}`: the batch's OWN front-end URL, identical to what
+# the workshop INDEX (image-workshop.php) already links to via `$b->url()`.
+# Absolute (Panel SPA treats it as external → real navigation, same as deco)
+# and resolves a DRAFT batch's URL correctly (drafts render for the
+# logged-in panel session).
 
 title: Batch
 
@@ -34,6 +44,11 @@ buttons:
     icon: edit
     theme: love
     link: "{{ site.url }}/dev/editor?mode=images&batch={{ page.id }}"
+  workshop:
+    text: Open batch in Workshop
+    icon: image
+    theme: info
+    link: "{{ page.url }}"
 
 columns:
   main:
