@@ -246,10 +246,14 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   **flush-right stacked** (resting frozen state is just `🔒 B frozen` + "Unlock to
   edit"). Unlocking opens a modal with **preset duration chips (1h/2h/4h, default
   2h)** — presets are safe because the author can Prolong — and a **strong amber hint
-  ("Back B→A before re-freezing")**. Unlocked state: open-lock icon carries the state
-  (no "unlocked" word), `🔓 <countdown>`, then actions in order **Back B→A · ＋Prolong
-  · Re-freeze**. Back B→A is FIRST (encourage pushing to A). A 10-min one-shot
-  "re-locks soon" warning fires near timeout. Touch targets ≥40px (chips 52px).
+  ("Back B→A before re-freezing")**. **v0.10.267 — the pill is now a HORIZONTAL BAR
+  glued to the bottom edge** (`left:50%`/`translateX(-50%)`/`bottom:0`), not a
+  flush-right stacked column — the column + detail text was too vertically greedy.
+  Same calm-dark bg + outline (amber when unlocked). Order L→R: **lock+timer · hint ·
+  Back B→A · ＋Prolong · Re-freeze**. The hint is one inline slot (the 5-state Back
+  B→A line; in frozen-dirty it becomes the red danger line). The timeout DETAIL text
+  ("re-locks in … — Prolong") was removed — the `🔓 <countdown>` IS the timeout
+  signal. Touch targets ≥40px (chips 52px).
   Back-prop modal: dry-run preview (wouldReplace pages/files/bytes) → confirm.
   **DIRTY signal = the canonical one (v0.10.263 correction).** Earlier draft computed
   a bespoke `dirty` from `lastBackPropAt ?? unlockedAt` baselines — reverted. B is the
@@ -283,8 +287,9 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   but a struck-through Re-freeze (server forces a back-prop after any unlock). That
   transient mismatch is INTENTIONALLY deferred to the **lock-mechanism / safe-unlock
   discussion** (next): decide whether the gate should read the divergence axis so
-  "nothing changed ⇒ re-freeze freely". **Deferred [ui]:** compact the crowded
-  bottom-right affordances in the 9000 [ui] band. **v0.10.264 poll fix:** while
+  "nothing changed ⇒ re-freeze freely". (The earlier "compact the crowded
+  bottom-right affordances" deferral is DONE — see the v0.10.267 horizontal bar
+  above.) **v0.10.264 poll fix:** while
   UNLOCKED the pill re-polls every ~5s (safety net + catches A-side Publishes); 30s
   baseline kept for the frozen resting pill.
   ▶ **Lock-mechanism discussion** (gate-on-dirty? unlock safety) — NEXT, before S3. ·
@@ -363,8 +368,8 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   needs a clearly-open-lock icon; touch-target sizing per global icon rule) ·
   10010 `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback
   edit on B) · 13010 `[behaviors]` idea backlog.
-  - **9010 nit logged:** B-pill header (lock + countdown) is right-aligned while
-    the action pills below are centered — align the header to match the pills.
+  - **9010 nit (RESOLVED v0.10.267):** the B-pill header/pills misalignment is moot
+    now that the pill is a single horizontal bottom bar (all items on one row).
 
 Notable landings since the snapshot below: full sync layer 2010–2050; derived-dirty
 B for lines/layout + styles wiring; the **image-library-unlisted fix** (v0.10.240:

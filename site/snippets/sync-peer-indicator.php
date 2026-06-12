@@ -301,27 +301,28 @@ endif;
 if ($role === 'B'):
 ?>
 <style>
+  /* Horizontal bar glued to the bottom edge (survives editor scroll). Keeps the
+     calm dark bg + outline; only the layout flipped column→row to stop eating
+     vertical space. Order L→R: lock+timer · hint · Back B→A · Prolong · Re-freeze. */
   #sync-b-pill{
-    position:fixed; right:8px; bottom:8px; z-index:9999;
+    position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:9999;
     font:600 12px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;
-    background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
-    border-radius:8px; padding:6px 8px; box-sizing:border-box;
-    display:flex; flex-direction:column; align-items:flex-end; gap:6px;
-    max-width:min(15rem,80vw); text-align:right;
+    background:#2a2a2a; color:#fff; border:1px solid #3d3d3d; border-bottom:none;
+    border-radius:10px 10px 0 0; padding:7px 14px; box-sizing:border-box;
+    display:flex; flex-direction:row; align-items:center; gap:14px;
+    max-width:96vw;
     transition:background-color .15s, border-color .15s, color .15s;
   }
-  #sync-b-pill .sbp-head{ display:flex; align-items:center; gap:6px; }
-  #sync-b-pill .sbp-ico{ font-size:14px; line-height:1; }
+  #sync-b-pill .sbp-head{ display:flex; align-items:center; gap:7px; white-space:nowrap; }
+  #sync-b-pill .sbp-ico{ font-size:15px; line-height:1; }
   #sync-b-pill .sbp-label{ white-space:nowrap; }
   #sync-b-pill .sbp-timer{ color:#ffe08a; font-variant-numeric:tabular-nums; }
   /* Unlocked / pending-backprop → amber chrome so the rare writable state
      never blends into the editor. Frozen-clean → calm dark. */
   #sync-b-pill.is-unlocked{ border-color:#6a5a1f; background:#2e2818; }
   #sync-b-pill.is-pending{ border-color:#6a5a1f; background:#2e2818; }
-  #sync-b-pill .sbp-warn{ color:#f5c518; line-height:1.4; max-width:14rem; }
-  /* Actions stacked, flush right — keeps the pill narrow (the resting frozen
-     state is then just two short right-aligned rows). */
-  #sync-b-pill .sbp-actions{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  /* Actions in a horizontal cluster on the right of the bar. */
+  #sync-b-pill .sbp-actions{ display:flex; flex-direction:row; align-items:center; gap:8px; }
   /* Touch-first: ≥40px tall tap targets, icon+label. */
   #sync-b-pill button{
     font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
@@ -355,9 +356,11 @@ if ($role === 'B'):
   #sync-b-pill button.sbp-red-light:hover{ background:#371f1b; border-color:#bd5747; }
   #sync-b-pill button.sbp-red-full{ background:#b53326; border-color:#b53326; color:#fff; }
   #sync-b-pill button.sbp-red-full:hover{ background:#c93a2b; border-color:#c93a2b; }
-  /* Little state hint under the Back B→A pill — parallels L/A's hint text. */
+  /* State hint — now an inline bar item between the lock+timer and the actions
+     (parallels L/A's hint text). Single line; wraps only if the viewport is tiny. */
   #sync-b-pill .sbp-hint{ font:600 11px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;
-    text-align:right; max-width:14rem; margin-top:-2px; }
+    white-space:nowrap; max-width:22rem; }
+  #sync-b-pill .sbp-hint[hidden]{ display:none; }
   #sync-b-pill .sbp-hint.sbh-gray{ color:#c4c4c4; }
   #sync-b-pill .sbp-hint.sbh-amber{ color:#ffd966; }
   #sync-b-pill .sbp-hint.sbh-red{ color:#ff8d7a; }
@@ -401,7 +404,7 @@ if ($role === 'B'):
     <span class="sbp-label" data-role="label">B · checking…</span>
     <span class="sbp-timer" data-role="timer"></span>
   </div>
-  <div class="sbp-warn" data-role="warn" hidden></div>
+  <div class="sbp-hint" data-role="hint" hidden></div>
   <div class="sbp-actions" data-role="actions"></div>
 </div>
 
@@ -445,7 +448,7 @@ if ($role === 'B'):
   var ico   = pill.querySelector('[data-role="ico"]');
   var label = pill.querySelector('[data-role="label"]');
   var timer = pill.querySelector('[data-role="timer"]');
-  var warn  = pill.querySelector('[data-role="warn"]');
+  var hint  = pill.querySelector('[data-role="hint"]');
   var acts  = pill.querySelector('[data-role="actions"]');
 
   var dur   = document.getElementById('sync-b-modal');
@@ -464,7 +467,6 @@ if ($role === 'B'):
   var HOURS = [1, 2, 4];
   var st = null;             // last /sync/b-status payload
   var localSecs = null;      // locally-ticked secondsRemaining
-  var alerted = false;       // one-shot near-timeout flag (per unlock episode)
   var durMode = 'unlock';    // 'unlock' | 'prolong'
   var picked = 2;            // selected chip hours
   var busy = false;
@@ -514,52 +516,49 @@ if ($role === 'B'):
     // unknown / unreachable — don't claim "in sync"; can't compare.
     return { btn:'', hint:'A unreachable — can’t compare', hc:'sbh-gray' };
   }
-  function appendBack(){
-    var v = backVisual();
-    acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));
-    acts.appendChild(mkHint(v.hint, v.hc));
-  }
-  function mkHint(text, hc){
-    var d = document.createElement('div');
-    d.className = 'sbp-hint ' + hc;
-    d.textContent = text;
-    return d;
+  // The single inline hint slot (between lock+timer and the actions cluster).
+  function setHint(text, hc){
+    hint.textContent = text || '';
+    hint.className = 'sbp-hint' + (hc ? ' ' + hc : '');
+    hint.hidden = !text;
   }
 
-  // ── render the pill from `st` ──────────────────────────────────────────
+  // ── render the bar from `st` ───────────────────────────────────────────
+  // Horizontal order L→R: lock+timer · hint · Back B→A · Prolong · Re-freeze.
   function render(){
     pill.classList.remove('is-unlocked', 'is-pending');
     acts.innerHTML = '';
-    warn.hidden = true; warn.textContent = '';
+    setHint('', '');
     timer.textContent = '';
     if (!st){ setHead('🔒', 'B'); return; }
 
     var diverged = !!st.dirty;                     // on-disk: B is ahead of A (direction==='ahead')
     var bpDone   = !!st.backPropDoneSinceUnlock;    // server re-freeze gate (unchanged)
+    var v        = backVisual();
 
     if (st.frozen && !diverged){
-      // Resting state (the 99% case) — compact, calm. Carries the (a/b) hint
-      // for parity with L/A's "in sync" line.
+      // Resting state (the 99% case). Hint carries the (a/b) "in sync" line.
       setHead('🔒', 'B frozen');
+      setHint(v.hint, v.hc);
       acts.appendChild(mkBtn('Unlock to edit', 'sbp-primary', openUnlock));
-      acts.appendChild((function(){ var v = backVisual(); return mkHint(v.hint, v.hc); })());
       return;
     }
     if (st.frozen && diverged){
       // Re-locked (auto or manual) but B still holds edits A lacks — recoverable.
+      // The hint becomes the danger line (why Back B→A matters here).
       pill.classList.add('is-pending');
       setHead('⚠️', st.autoLockedAt ? 'B re-locked' : 'B frozen');
-      warn.hidden = false;
-      warn.textContent = 'B has edits A doesn’t — Back B→A before the next Publish overwrites them.';
-      appendBack();                       // styled per d/e + hint
+      setHint('B has unpushed edits — Back B→A before the next Publish overwrites them.', 'sbh-red');
+      acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));
       acts.appendChild(mkBtn('Unlock again', '', openUnlock));
       return;
     }
-    // Unlocked — the open-lock icon already says so; show only the countdown.
+    // Unlocked — open-lock icon + countdown carry the state; no detail text.
     pill.classList.add('is-unlocked');
     setHead('🔓', '');
     timer.textContent = fmtLeft(localSecs);
-    appendBack();                         // Back B→A FIRST, styled per the 5-state table
+    setHint(v.hint, v.hc);
+    acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));   // FIRST action (encourage pushing to A)
     acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
     // Re-freeze gate is UNCHANGED for now (server pendingBackProp); struck-through
     // while inhibited so the block reads as deliberate, not broken. Gate semantics
@@ -568,12 +567,6 @@ if ($role === 'B'):
     rf.disabled = !bpDone;
     rf.title = bpDone ? 'Re-freeze B' : 'Back B→A first — then B can re-freeze';
     acts.appendChild(rf);
-    // Timeout warning reconstructed here (not just set in tick) so a buffer-driven
-    // re-render — ed:dirty-changed → render() — doesn't drop an active warning.
-    if (localSecs != null && localSecs > 0 && localSecs <= 600){
-      warn.hidden = false;
-      warn.textContent = 'B re-locks in ' + fmtLeft(localSecs) + ' — Prolong to keep editing.';
-    }
   }
   function setHead(icon, text){
     ico.textContent = icon;
@@ -592,7 +585,6 @@ if ($role === 'B'):
   function adopt(j){
     st = j;
     localSecs = (j && typeof j.secondsRemaining === 'number') ? j.secondsRemaining : null;
-    if (!j || j.frozen) alerted = false;     // reset alert when not in an open window
     render();
   }
   function poll(){
@@ -605,12 +597,7 @@ if ($role === 'B'):
   function tick(){
     if (st && !st.frozen && localSecs != null){
       localSecs = Math.max(0, localSecs - 1);
-      timer.textContent = fmtLeft(localSecs);
-      if (!alerted && localSecs > 0 && localSecs <= 600){    // 10-minute warning
-        alerted = true;
-        warn.hidden = false;
-        warn.textContent = 'B re-locks in ' + fmtLeft(localSecs) + ' — Prolong to keep editing.';
-      }
+      timer.textContent = fmtLeft(localSecs);   // the countdown IS the timeout signal (no detail text)
       if (localSecs === 0) poll();   // window lapsed → confirm the re-lock with the server
     }
     // While UNLOCKED, refresh on-disk divergence every ~5s as a safety net (also
@@ -666,7 +653,7 @@ if ($role === 'B'):
       .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
       .then(function(j){
         busy=false; dGo.disabled=false;
-        if (j && j.ok){ alerted=false; adopt(j); dur.hidden=true; }
+        if (j && j.ok){ adopt(j); dur.hidden=true; }
         else { dGo.disabled=false; alert((j && j.error) || 'Action failed.'); }
       })
       .catch(function(){ busy=false; dGo.disabled=false; alert('Network error.'); });
