@@ -343,6 +343,24 @@ if ($role === 'B'):
     opacity:.9; cursor:default; text-decoration:line-through;
     color:#c9b97a; border-color:#6a5a1f; background:#2c2814;
   }
+  /* Back B→A pill — five visual states off two axes (on-disk direction ×
+     unsaved editor buffer). "light" = amber/red TEXT+OUTLINE on dark; "full"
+     = saturated amber/red BACKGROUND (a stronger call-to-action / stronger
+     stop). See render()'s backVisual() for the state→class mapping. */
+  #sync-b-pill button.sbp-amber-light{ background:#2e2818; border-color:#8a7420; color:#ffd966; }
+  #sync-b-pill button.sbp-amber-light:hover{ background:#372f17; border-color:#a78a26; }
+  #sync-b-pill button.sbp-amber-full{ background:#f5c518; border-color:#f5c518; color:#1a1500; }
+  #sync-b-pill button.sbp-amber-full:hover{ background:#ffd233; border-color:#ffd233; }
+  #sync-b-pill button.sbp-red-light{ background:#2c1a17; border-color:#a04a3c; color:#ff9d8c; }
+  #sync-b-pill button.sbp-red-light:hover{ background:#371f1b; border-color:#bd5747; }
+  #sync-b-pill button.sbp-red-full{ background:#b53326; border-color:#b53326; color:#fff; }
+  #sync-b-pill button.sbp-red-full:hover{ background:#c93a2b; border-color:#c93a2b; }
+  /* Little state hint under the Back B→A pill — parallels L/A's hint text. */
+  #sync-b-pill .sbp-hint{ font:600 11px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;
+    text-align:right; max-width:14rem; margin-top:-2px; }
+  #sync-b-pill .sbp-hint.sbh-gray{ color:#c4c4c4; }
+  #sync-b-pill .sbp-hint.sbh-amber{ color:#ffd966; }
+  #sync-b-pill .sbp-hint.sbh-red{ color:#ff8d7a; }
 
   .sb-modal{ position:fixed; inset:0; z-index:10001; display:flex;
     align-items:center; justify-content:center;
@@ -464,6 +482,48 @@ if ($role === 'B'):
     return ss + 's';
   }
 
+  // Unsaved in-editor buffer? Same signal L/A read — defined in dev-editor.js;
+  // absent during early boot → treat as clean. This is the SECOND axis (the
+  // editor save-button state), distinct from on-disk divergence.
+  function isDirty(){
+    try { return typeof window.edHasUnsavedData === 'function' && !!window.edHasUnsavedData(); }
+    catch (e) { return false; }
+  }
+
+  // Back B→A visual = f(on-disk direction, unsaved buffer). Five states:
+  //   a) equal  & clean → gray,        "in sync with A"
+  //   b) equal  & dirty → light amber, "save before pushing to A"
+  //   c) A>B  (behind)  → full red,    "A is ahead — do not push"  (push would clobber A)
+  //   d) B>A  & clean   → full amber,  "data ready to push to A"   (the call to action)
+  //   e) B>A  & dirty   → light red,   "save before pushing to A"  (saved part pushable, but buffer would be left behind)
+  // "light" = coloured text+outline on dark; "full" = saturated background.
+  // Hint colours per the spec: a gray, b/d/e amber, c red.
+  function backVisual(){
+    var dir = st && st.direction;        // 'equal' | 'ahead'(B>A) | 'behind'(A>B) | 'unknown'
+    var buf = isDirty();
+    if (dir === 'behind')                                                       // c
+      return { btn:'sbp-red-full',   hint:'A is ahead — do not push',  hc:'sbh-red'   };
+    if (dir === 'ahead')                                                        // d / e
+      return buf ? { btn:'sbp-red-light',   hint:'save before pushing to A', hc:'sbh-amber' }
+                 : { btn:'sbp-amber-full',  hint:'data ready to push to A',  hc:'sbh-amber' };
+    if (dir === 'equal')                                                        // a / b
+      return buf ? { btn:'sbp-amber-light', hint:'save before pushing to A', hc:'sbh-amber' }
+                 : { btn:'',                hint:'in sync with A',           hc:'sbh-gray'  };
+    // unknown / unreachable — don't claim "in sync"; can't compare.
+    return { btn:'', hint:'A unreachable — can’t compare', hc:'sbh-gray' };
+  }
+  function appendBack(){
+    var v = backVisual();
+    acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));
+    acts.appendChild(mkHint(v.hint, v.hc));
+  }
+  function mkHint(text, hc){
+    var d = document.createElement('div');
+    d.className = 'sbp-hint ' + hc;
+    d.textContent = text;
+    return d;
+  }
+
   // ── render the pill from `st` ──────────────────────────────────────────
   function render(){
     pill.classList.remove('is-unlocked', 'is-pending');
@@ -472,22 +532,24 @@ if ($role === 'B'):
     timer.textContent = '';
     if (!st){ setHead('🔒', 'B'); return; }
 
-    var dirty  = !!st.dirty;                      // direction === 'ahead' of A
-    var bpDone = !!st.backPropDoneSinceUnlock;     // server re-freeze gate (unchanged)
+    var diverged = !!st.dirty;                     // on-disk: B is ahead of A (direction==='ahead')
+    var bpDone   = !!st.backPropDoneSinceUnlock;    // server re-freeze gate (unchanged)
 
-    if (st.frozen && !dirty){
-      // Resting state (the 99% case) — compact, calm.
+    if (st.frozen && !diverged){
+      // Resting state (the 99% case) — compact, calm. Carries the (a/b) hint
+      // for parity with L/A's "in sync" line.
       setHead('🔒', 'B frozen');
       acts.appendChild(mkBtn('Unlock to edit', 'sbp-primary', openUnlock));
+      acts.appendChild((function(){ var v = backVisual(); return mkHint(v.hint, v.hc); })());
       return;
     }
-    if (st.frozen && dirty){
+    if (st.frozen && diverged){
       // Re-locked (auto or manual) but B still holds edits A lacks — recoverable.
       pill.classList.add('is-pending');
       setHead('⚠️', st.autoLockedAt ? 'B re-locked' : 'B frozen');
       warn.hidden = false;
       warn.textContent = 'B has edits A doesn’t — Back B→A before the next Publish overwrites them.';
-      acts.appendChild(mkBtn('Back B→A', 'sbp-primary', openBackprop));
+      appendBack();                       // styled per d/e + hint
       acts.appendChild(mkBtn('Unlock again', '', openUnlock));
       return;
     }
@@ -495,17 +557,21 @@ if ($role === 'B'):
     pill.classList.add('is-unlocked');
     setHead('🔓', '');
     timer.textContent = fmtLeft(localSecs);
-    // Back B→A is the FIRST affordance (encourage pushing to A); amber the
-    // moment B is dirty (ahead of A).
-    acts.appendChild(mkBtn('Back B→A', dirty ? 'sbp-primary' : '', openBackprop));
+    appendBack();                         // Back B→A FIRST, styled per the 5-state table
     acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
     // Re-freeze gate is UNCHANGED for now (server pendingBackProp); struck-through
     // while inhibited so the block reads as deliberate, not broken. Gate semantics
-    // (should this key on `dirty` instead?) are the pending lock-mechanism talk.
+    // (should this key on divergence instead?) are the pending lock-mechanism talk.
     var rf = mkBtn('Re-freeze', 'sbp-danger sbp-refreeze', doRefreeze);
     rf.disabled = !bpDone;
     rf.title = bpDone ? 'Re-freeze B' : 'Back B→A first — then B can re-freeze';
     acts.appendChild(rf);
+    // Timeout warning reconstructed here (not just set in tick) so a buffer-driven
+    // re-render — ed:dirty-changed → render() — doesn't drop an active warning.
+    if (localSecs != null && localSecs > 0 && localSecs <= 600){
+      warn.hidden = false;
+      warn.textContent = 'B re-locks in ' + fmtLeft(localSecs) + ' — Prolong to keep editing.';
+    }
   }
   function setHead(icon, text){
     ico.textContent = icon;
@@ -545,10 +611,10 @@ if ($role === 'B'):
       }
       if (localSecs === 0) poll();   // window lapsed → confirm the re-lock with the server
     }
-    // While UNLOCKED, refresh divergence every ~5s so Back B→A turns amber within
-    // a few seconds of a save (the 30s baseline below is plenty for the frozen
-    // resting pill). Back B→A tracks SAVED divergence from A — not the unsaved
-    // editor buffer — so it lights AFTER a save, not while the save button is up.
+    // While UNLOCKED, refresh on-disk divergence every ~5s as a safety net (also
+    // catches A-side changes via a Publish). The instant signals are the editor
+    // events wired below: ed:editor-saved → poll (divergence may now differ),
+    // ed:dirty-changed → render (buffer axis: light-amber/light-red flips live).
     if (st && !st.frozen){
       if (++pollAccum >= 5){ pollAccum = 0; poll(); }
     } else {
@@ -559,6 +625,11 @@ if ($role === 'B'):
   setInterval(poll, 30000);
   window.addEventListener('focus', poll);
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+  // Editor axis (same events L's pill listens to): a save moves B's on-disk
+  // state (re-poll to recompute direction); a buffer dirty/clean flip repaints
+  // the Back B→A pill instantly (light-amber/light-red) without a round-trip.
+  window.addEventListener('ed:editor-saved', poll);
+  window.addEventListener('ed:dirty-changed', render);
   poll();
 
   // ── duration modal (unlock / prolong) ──────────────────────────────────

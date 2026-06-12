@@ -259,22 +259,34 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   L↔A use, just A as the peer. `dirty = direction === 'ahead'`. Fail-soft: A
   unreachable/unconfigured → `direction:'unknown'`, `peerReached:false`, UI shows no
   amber (won't guess). **Dependency:** needs A in B's `sync.peers` map (config, same
-  plumbing L has; B/A same host). The pill colours off `dirty`: **Back B→A goes amber
-  the moment B is ahead of A**; **Re-freeze is struck-through (line-through, not
-  greyed) while inhibited** to read as deliberate. **GATE UNCHANGED:** the re-freeze
-  *enable* still keys on the server `pendingBackProp`/`backPropDoneSinceUnlock` (409
-  gate from S2a) — NOT yet on `dirty`. So a freshly-unlocked-unedited B currently
-  shows non-amber Back B→A but a struck-through Re-freeze (server forces a back-prop
-  after any unlock). That transient mismatch is INTENTIONALLY deferred to the
-  **lock-mechanism / safe-unlock discussion** (next): decide whether the gate should
-  read `dirty` (== direction) so "nothing changed ⇒ re-freeze freely". **Deferred
-  [ui]:** compact the crowded bottom-right affordances in the 9000 [ui] band.
-  **v0.10.264 poll fix:** the B-pill polled `/sync/b-status` only every 30s and
-  wasn't nudged by a save, so amber Back B→A could lag up to 30s after a save.
-  Now polls every ~5s while UNLOCKED (counter in `tick()`); 30s baseline kept for
-  the frozen resting pill. (Reminder of the layering that confused the bug report:
-  amber tracks SAVED divergence from A, NOT the unsaved editor buffer the save
-  button reflects — amber lights *after* Save, not while the save button is up.)
+  plumbing L has; B/A same host). **Dependency:** needs A in B's `sync.peers` map.
+  **v0.10.265 — Back B→A is a 5-STATE pill off TWO axes** (superseding the earlier
+  one-axis `dirty===ahead`→amber). Axis 1 = on-disk `direction` (server poll).
+  Axis 2 = unsaved editor BUFFER — the SAME signal L/A use: `window.edHasUnsavedData()`
+  + repaint on `ed:dirty-changed`, re-poll on `ed:editor-saved`. (This was the whole
+  point of the correction: B is the L-analog; the buffer axis already existed, B just
+  wasn't reading it.) "light" = coloured text+outline on dark; "full" = saturated bg:
+  a) equal & clean → gray, "in sync with A"; b) equal & dirty → light-amber, "save
+  before pushing to A"; c) A>B (behind) → **full-red, "A is ahead — do not push"**
+  (push would clobber A's newer content); d) B>A & clean → **full-amber, "data ready
+  to push to A"** (the call-to-action); e) B>A & dirty → light-red, "save before
+  pushing to A" (the saved part is pushable but the buffer would be left behind).
+  Each state carries a little hint line under the pill, mirroring L/A's hint text
+  (hint colour: gray / amber / red per spec). `backVisual()` in the snippet is the
+  single state→class map; `appendBack()` renders button+hint in both the unlocked
+  and frozen-dirty branches. Unreachable A (`direction:'unknown'`) → gray pill, hint
+  "A unreachable — can't compare" (won't false-claim "in sync"). **Re-freeze is
+  struck-through (line-through, not greyed) while inhibited** to read as deliberate.
+  **GATE UNCHANGED:** re-freeze *enable* still keys on the server
+  `pendingBackProp`/`backPropDoneSinceUnlock` (409 gate from S2a) — NOT on the
+  divergence axis. So a freshly-unlocked-unedited B shows a gray "in sync" Back B→A
+  but a struck-through Re-freeze (server forces a back-prop after any unlock). That
+  transient mismatch is INTENTIONALLY deferred to the **lock-mechanism / safe-unlock
+  discussion** (next): decide whether the gate should read the divergence axis so
+  "nothing changed ⇒ re-freeze freely". **Deferred [ui]:** compact the crowded
+  bottom-right affordances in the 9000 [ui] band. **v0.10.264 poll fix:** while
+  UNLOCKED the pill re-polls every ~5s (safety net + catches A-side Publishes); 30s
+  baseline kept for the frozen resting pill.
   ▶ **Lock-mechanism discussion** (gate-on-dirty? unlock safety) — NEXT, before S3. ·
   ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
   pendingBackProp/dirty). · 2090 "Published: <date>" snippet · 2095 holistic protocol
