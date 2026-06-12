@@ -352,7 +352,13 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   origin; reworking it *is* UI work, not a [conv] slice) · **9030 rename "Lines"
   mode → "Draw"** (the current name is an artifact of the initial path; "Draw" is
   its real semantics — do it as part of the UI pass so labels/ids/docs move
-  together). · **9040 icon audit/refresh** (self-hosted icon library; first
+  together). · **9050 layout-mode undo** (lines & styles have snapshot undo
+  → derived-dirty clears on undo-to-baseline; LAYOUT has a baseline + derived
+  dirty but NO undo stack, so Cmd-Z can't walk layout content back to [0] and
+  the buffer-dirty axis stays lit. Diagnosed while testing the B pill: the
+  "undo doesn't return to non-dirty on B" report was THIS, not any L↔B
+  divergence — re-test the B buffer axis once layout undo exists.) ·
+  **9040 icon audit/refresh** (self-hosted icon library; first
   concrete nit logged: the B-pill *unlocked* glyph reads as a *closed* lock —
   needs a clearly-open-lock icon; touch-target sizing per global icon rule) ·
   10010 `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback
