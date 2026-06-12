@@ -216,8 +216,19 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   into a closed-by-default `<details>` "⟳ Auto snapshots (N)" folder (friendly
   "Pre-sync snapshot (from <role>)" labels, raw name on hover). Disk stays FLAT —
   pure presentation; Load/Delete still target real names. **→ 2070 done** (live
-  UI check pending next deploy). ▶ 2080 B-freeze + unlock + B→A
-  back-prop · 2090 "Published: <date>" snippet · 2095 holistic protocol review.
+  UI check pending next deploy). ◐ **2080 B-freeze + unlock + B→A back-prop** —
+  **Slice 1 (v0.10.260): write-route freeze enforcement.** Until now B was only
+  Panel-session-gated against the public; a logged-in author could still POST
+  edits to B. New sync-plugin helpers `sync_role()`, `sync_b_is_frozen()`
+  (fail-closed: role B + no explicit `frozen===false` in state.json ⇒ frozen, so
+  a fresh B is frozen with no migration), `sync_assert_writable()` (423 Locked).
+  Guard wired into the 5 `/dev/*` routes that mutate B's SERVED content
+  (editor/save, library/load = snapshot RESTORE, page upload/delete-image,
+  workshop use-image). NOT on `/sync/*` — A→B propagate (`POST /sync/propagate`,
+  bearer-gated) must keep writing B while frozen; that's the only sanctioned way
+  B changes. ▶ Slice 2 (unlock/refreeze + mandatory B→A back-prop + B banner),
+  Slice 3 (cross-node unlock indicators + A/L publish-block). · 2090 "Published:
+  <date>" snippet · 2095 holistic protocol review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
