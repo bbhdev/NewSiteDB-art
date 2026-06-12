@@ -280,8 +280,14 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   Each state carries a little hint line under the pill, mirroring L/A's hint text
   (hint colour: gray / amber / red per spec). `backVisual()` in the snippet is the
   single state→class map; `appendBack()` renders button+hint in both the unlocked
-  and frozen-dirty branches. Unreachable A (`direction:'unknown'`) → gray pill, hint
-  "A unreachable — can't compare" (won't false-claim "in sync"). **Re-freeze is
+  and frozen-dirty branches. Unknown direction (`direction:'unknown'`) → gray pill.
+  **v0.10.269 — the hint no longer over-asserts "A unreachable":** that state collapses
+  FIVE causes (not-configured / no-peer-URL / curl-missing / HTTP-or-timeout / bad-shape)
+  and is often just a transient/slow fetch — notably a single-worker dev server that
+  can't answer B's nested `/sync/state` in time. Hint is now "can't compare with A —
+  rechecking" (sets the retry expectation); `sync_b_status()` passes the raw `peerError`
+  (+ HTTP code) through and the client shows it in the hint's tooltip (`title`). Still
+  won't false-claim "in sync". **Re-freeze is
   struck-through (line-through, not greyed) while inhibited** to read as deliberate.
   **GATE — v0.10.268, RESOLVED in the lock-mechanism discussion:** re-freeze *enable*
   now keys on the **divergence axis** (`diverged = direction==='ahead'`), the SAME

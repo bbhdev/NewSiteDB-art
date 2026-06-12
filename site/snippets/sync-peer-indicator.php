@@ -515,13 +515,21 @@ if ($role === 'B'):
     if (dir === 'equal')                                                        // a / b
       return buf ? { btn:'sbp-amber-light', hint:'save before pushing to A', hc:'sbh-amber' }
                  : { btn:'',                hint:'in sync with A',           hc:'sbh-gray'  };
-    // unknown / unreachable — don't claim "in sync"; can't compare.
-    return { btn:'', hint:'A unreachable — can’t compare', hc:'sbh-gray' };
+    // unknown — THIS poll couldn't read A's state. Do NOT assert "unreachable":
+    // the cause may be a transient/slow fetch (e.g. a single-worker dev server
+    // that can't answer B's nested /sync/state in time), a missing peer URL, or
+    // a bad response — not A being down. "rechecking" sets the right expectation
+    // (the 5s/30s poll retries); the raw reason rides in the tooltip.
+    return { btn:'', hint:'can’t compare with A — rechecking', hc:'sbh-gray',
+             title: (st && st.peerError) ? ('Last A check: ' + st.peerError) : '' };
   }
   // The single inline hint slot (between lock+timer and the actions cluster).
-  function setHint(text, hc){
+  // `title` = optional hover tooltip (used to expose the raw peer-fetch error
+  // behind an "unknown" state without cluttering the bar).
+  function setHint(text, hc, title){
     hint.textContent = text || '';
     hint.className = 'sbp-hint' + (hc ? ' ' + hc : '');
+    if (title) hint.title = title; else hint.removeAttribute('title');
     hint.hidden = !text;
   }
 
@@ -540,7 +548,7 @@ if ($role === 'B'):
     if (st.frozen && !diverged){
       // Resting state (the 99% case). Hint carries the (a/b) "in sync" line.
       setHead('🔒', 'B frozen');
-      setHint(v.hint, v.hc);
+      setHint(v.hint, v.hc, v.title);
       acts.appendChild(mkBtn('Unlock to edit', 'sbp-primary', openUnlock));
       return;
     }
@@ -558,7 +566,7 @@ if ($role === 'B'):
     pill.classList.add('is-unlocked');
     setHead('🔓', '');
     timer.textContent = fmtLeft(localSecs);
-    setHint(v.hint, v.hc);
+    setHint(v.hint, v.hc, v.title);
     acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));   // FIRST action (encourage pushing to A)
     acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
     // Re-freeze gate now keys on the DIVERGENCE axis (direction==='ahead'), the

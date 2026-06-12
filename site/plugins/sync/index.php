@@ -327,6 +327,7 @@ function sync_b_status(): array
     // report 'unknown' and the UI declines to nag (no amber) rather than guess.
     $fields['direction']   = 'unknown';
     $fields['peerReached'] = false;
+    $fields['peerError']   = null;          // WHY the fetch failed (diagnostic; surfaced in the hint tooltip)
     if (sync_role() === 'B') {
         $peer = sync_fetch_peer_state('A');
         if (!empty($peer['ok']) && is_array($peer['state'] ?? null)) {
@@ -336,6 +337,12 @@ function sync_b_status(): array
             );
             $fields['direction']   = $cmp['direction'];
             $fields['peerReached'] = true;
+        } else {
+            // Keep the underlying reason so the UI can stop collapsing five
+            // distinct causes (not-configured / no-peer-URL / curl-missing /
+            // HTTP-or-timeout / bad-shape) into a single false "unreachable".
+            $fields['peerError'] = (string)($peer['error'] ?? 'unknown error')
+                . ($peer['code'] ? ' (HTTP ' . $peer['code'] . ')' : '');
         }
     }
     $fields['dirty'] = ($fields['direction'] === 'ahead');
