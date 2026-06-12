@@ -186,8 +186,29 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
-  3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ▶ 3070 library
-  repositioning · 3080 library propagation · 3090 "All" mode.
+  3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ✅ **3065 fold STYLES
+  into the unified save** (the save *action*, distinct from the already-done dirty
+  *signal*) — **code-complete v0.10.247/248, awaiting user editor-validation.**
+  One Save button + Cmd-S now write lines+layout+**typography** in a single
+  `/dev/editor/save` POST → a full L→A→B push is one action. **Slice A (v0.10.247,
+  server):** extracted `deco_save_typography()` (one validator+writer, in
+  `deco/index.php`); `/dev/editor/save` accepts a third optional `styles` section
+  and echoes the normalised tokens; curl-proven. **Slice B (v0.10.248, client):**
+  `styles` participant promoted to a full member (`wants:typographyDirty` +
+  gather/apply); `'styles'` appended to coordinator ORDER; `reflectSaveButton()`
+  now lights the shared header button for dirty typography (reads the participant's
+  `dirty()` off the bus — NOT the `typographyDirty` binding, which is in TDZ at the
+  boot-time first call); the standalone "Save styles" button removed from
+  `editor.php` + its wiring; `saveTypography()` reduced to a `__edUnifiedSave()`
+  alias. Precedent that justified it: `deco_save_lines()` already writes the
+  site-wide palette through this seam, so "site-wide ⇒ separate" was never real.
+  **Deferred (not regressions):** legacy `/dev/draw/typography` POST route +
+  `draw.php`'s own button are now caller-less → small cleanup slice (route GET +
+  GET `/usage` still used). Known cosmetic edge from the pre-6c two-scope button
+  model: typography dirty while in Layout mode (layout clean) may not light the
+  button until 6c merges the engines; the dirty SIGNAL stays correct so a push is
+  never silently incomplete. · ▶ 3070 library repositioning ·
+  3080 library propagation · 3090 "All" mode.
 - **`[workshop]` 4000** — ✅ 4010/4011/4020/4030/4050/4060 (all landed).
 - **`[dirty]` 5000** — ✅ **EPIC COMPLETE** (user-validated v0.10.246): 5010 lines
   (B) · 5020 layout (B) · 5030 styles (3a wiring + **3b derived-dirty, v0.10.245**
