@@ -360,10 +360,33 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   auto-lock / out-of-band change; the A-side-publish race is Slice 3's publish guard.)**
   ✓ **Lock-mechanism discussion** — DONE (v0.10.268): re-freeze gate keys on divergence,
   allow-on-unknown; details in the GATE block above. ·
-  ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
-  pendingBackProp/dirty — and migrate pendingBackProp off the look-only false-positive
-  to divergence, per the carried follow-up). · 2090 "Published: <date>" snippet · 2095 holistic protocol
-  review.
+  ✅ **Slice 3** (A/L block A→B publish + "B unlocked/ahead" banner) — **DONE
+  v0.10.279, server lint-clean; awaiting live validation.** The carried
+  "migrate pendingBackProp off the look-only false-positive to divergence"
+  follow-up was settled FIRST (v0.10.278, item-1 cleanup): the false-positive
+  fields are GONE and the guard keys on the real `dirty`/`direction` signal, so
+  Slice 3 reads divergence directly — no migration left to do. **Shape:**
+  `sync_b_publish_guard($toRole)` (sync/index.php) GETs B's unauthenticated
+  `/sync/b-status` and returns `{applicable,reachable,frozen,unlocked,ahead,
+  block,error}`; `block = unlocked || ahead`. **ONE guard, BOTH paths:** injected
+  inside `sync_propagate_to_peer()` (the single funnel for A's direct
+  `/sync/push/B` AND the relayed `/sync/relay-push/B`), so a real publish is
+  refused **409** (`{ok:false,code:409,bGuard,error}`) when B is unlocked/ahead,
+  unless `force=1`. The refusal returns BEFORE the tarball build → blocking is
+  cheap. A dry-run never blocks but still carries `bGuard` so the UI previews the
+  banner. **Allow-on-unknown:** unreachable B does NOT fail closed (publishing
+  snapshots B first = recoverable; B-down is exactly when a restore-publish is
+  wanted) — the UI shows an amber "couldn't verify" note instead. **force
+  threading:** `get('force')` on `/sync/push/B`, `/sync/relay-push/B`, and
+  `/sync/push-via/A/B`; `sync_request_relay_push(...,$force)` forwards it down the
+  relay; all three routes now honour the guard's 409 via `$result['code'] ?? 502`.
+  **Client (sync-peer-indicator.php):** A-branch shows the banner PROACTIVELY in
+  its B dry-run preview (red ⛔ block / amber ⚠ unverified) and, when blocked,
+  relabels confirm to a red **"Publish anyway"** (`force=1`); L-branch (no B
+  dry-run step — push-then-confirm) surfaces it REACTIVELY on the cheap 409 from
+  `/sync/push-via/A/B`, then offers the same escape hatch. Both also re-handle a
+  fresh 409 on the real call (B's state can change between preview and publish).
+  · 2090 "Published: <date>" snippet · 2095 holistic protocol review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·

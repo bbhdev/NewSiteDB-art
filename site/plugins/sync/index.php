@@ -1720,17 +1720,126 @@ function sync_build_propagate_tarball(): array
 }
 
 /**
+ * Publish guard for the A→B leg (Slice 3 / 2080). B is frozen-by-default and an
+ * A→B publish OVERWRITES B wholesale. If B is currently UNLOCKED (someone may be
+ * editing it directly) or AHEAD of A (holds break-glass edits not yet
+ * back-propagated to A), the publish would clobber that live work. This helper
+ * asks B for its own computed status — the unauthenticated informational
+ * GET /sync/b-status, the SAME verdict B's pill shows (lazy-lock-aware `frozen`,
+ * `direction`/`dirty`) — and distils a go/stop signal. It runs on A (the only
+ * node that ever propagates to B), so the fetch is a fast same-host call.
+ *
+ * Only meaningful when $toRole === 'B' (only B has a freeze). For any other
+ * destination returns a not-applicable, non-blocking struct.
+ *
+ * ALLOW-ON-UNKNOWN: an unreachable B does NOT fail closed (block === false). The
+ * overwrite snapshots B first (recoverable), a node that's down is exactly when a
+ * restore-publish may be wanted, and a transient blip shouldn't make B
+ * unpublishable. `reachable === false` is surfaced so the UI shows an honest
+ * "couldn't verify B's lock state" note rather than a false all-clear — mirrors
+ * the L-side peerSnapshotFailed honesty and the re-freeze allow-on-unknown rule.
+ * (Contrast the re-freeze gate, which allow-on-unknown because relocking only
+ * SHRINKS B's editable surface; here the action is the destructive one, but the
+ * pre-overwrite snapshot is what makes allow-on-unknown still safe.)
+ *
+ * Returns: applicable, reachable, frozen(?bool), unlocked(bool), ahead(bool),
+ *   secondsRemaining(?int), block(bool = unlocked||ahead, false if N/A or
+ *   unreachable), error(?string).
+ */
+function sync_b_publish_guard(string $toRole): array
+{
+    $base = [
+        'applicable' => false, 'reachable' => false, 'frozen' => null,
+        'unlocked' => false, 'ahead' => false, 'secondsRemaining' => null,
+        'block' => false, 'error' => null,
+    ];
+    if ($toRole !== 'B') {
+        return $base;   // not applicable — only B has a freeze
+    }
+    $sync  = option('sync');
+    $peers = (is_array($sync) && is_array($sync['peers'] ?? null)) ? $sync['peers'] : [];
+    if (empty($peers['B']) || !function_exists('curl_init')) {
+        return ['applicable' => true] + array_merge($base, [
+            'error' => 'no peer URL for B or curl unavailable',
+        ]);
+    }
+    // Unauthenticated info GET — b-status carries no secret, so no bearer needed.
+    $url = rtrim((string) $peers['B'], '/') . '/sync/b-status';
+    $ch  = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_HTTPHEADER     => ['User-Agent: NewSiteDB-art-sync/' . (option('version') ?? 'dev')],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT        => 5,
+        CURLOPT_FOLLOWLOCATION => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    $bs   = ($resp !== false) ? json_decode((string) $resp, true) : null;
+    if ($code !== 200 || !is_array($bs)) {
+        return ['applicable' => true] + array_merge($base, [
+            'error' => $err !== '' ? $err : ('HTTP ' . $code),
+        ]);
+    }
+    $frozen   = (bool) ($bs['frozen'] ?? true);
+    $unlocked = $frozen === false;
+    $ahead    = !empty($bs['dirty']);   // direction === 'ahead'
+    return [
+        'applicable'       => true,
+        'reachable'        => true,
+        'frozen'           => $frozen,
+        'unlocked'         => $unlocked,
+        'ahead'            => $ahead,
+        'secondsRemaining' => $bs['secondsRemaining'] ?? null,
+        'block'            => $unlocked || $ahead,
+        'error'            => null,
+    ];
+}
+
+/**
+ * Human-readable reason for a tripped A→B publish guard (used in the 409 body
+ * and as the modal banner copy). Distinguishes the three blocking shapes so the
+ * author knows the right remedy (back-prop vs. just re-freeze).
+ */
+function sync_b_guard_message(array $g): string
+{
+    $ahead    = !empty($g['ahead']);
+    $unlocked = !empty($g['unlocked']);
+    if ($ahead && $unlocked) {
+        return 'B is unlocked and holds edits A does not have. Publishing now would '
+             . 'overwrite them. Push B → A (back-propagate) and re-freeze B first, or '
+             . 'publish anyway to discard B’s edits.';
+    }
+    if ($ahead) {
+        return 'B holds edits A does not have (not yet back-propagated). Publishing now '
+             . 'would overwrite them. Push B → A first, or publish anyway to discard them.';
+    }
+    if ($unlocked) {
+        return 'B is currently unlocked for direct editing — publishing now could '
+             . 'overwrite live edits. Re-freeze B first, or publish anyway.';
+    }
+    return 'B publish guard tripped.';
+}
+
+/**
  * Push this node's content/ to $toRole's /sync/propagate endpoint.
  * $dryRun=true asks the peer to report what WOULD be replaced without
  * snapshotting or swapping (for the editor confirm/preview).
  *
- * Returns the peer's decoded JSON response with two fields added:
+ * $force=true bypasses the A→B publish guard (the explicit "publish anyway,
+ * I accept overwriting B's live edits" escape hatch); ignored for non-B
+ * destinations and for dry-runs (which never block).
+ *
+ * Returns the peer's decoded JSON response with these fields added:
  *   'httpCode' — the HTTP status from the peer
  *   'sent'     — ['bytes'=>int,'files'=>int] actually uploaded
- * On a local/transport failure returns ['ok'=>false,'error'=>…[,'code']].
- * Never throws.
+ *   'bGuard'   — the B publish-guard struct, when $toRole === 'B' (so the UI can
+ *                preview the banner even on a clean dry-run)
+ * On a local/transport failure returns ['ok'=>false,'error'=>…[,'code']]. A
+ * guard block returns ['ok'=>false,'code'=>409,'bGuard'=>…]. Never throws.
  */
-function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
+function sync_propagate_to_peer(string $toRole, bool $dryRun = false, bool $force = false): array
 {
     $sync = option('sync');
     if (!is_array($sync) || empty($sync['secret'])) {
@@ -1751,6 +1860,24 @@ function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
     }
     if (!function_exists('curl_init')) {
         return ['ok' => false, 'error' => 'curl not available'];
+    }
+
+    // ── A→B publish guard (Slice 3) ───────────────────────────────────────
+    // Consult B's lock/divergence state BEFORE the (expensive) tarball build +
+    // overwrite. A dry-run never blocks — it just carries the guard so the UI can
+    // preview the banner. A real publish is refused 409 when B is unlocked or
+    // ahead, UNLESS $force (explicit "publish anyway" escape hatch). Both the
+    // direct /sync/push/B (on A) and the relayed /sync/relay-push/B funnel through
+    // here, so the guard lives in ONE place and both paths inherit it. Non-B
+    // destinations (L→A) get a not-applicable struct and sail through.
+    $bGuard = sync_b_publish_guard($toRole);
+    if ($bGuard['applicable'] && !$dryRun && $bGuard['block'] && !$force) {
+        return [
+            'ok'     => false,
+            'code'   => 409,
+            'error'  => sync_b_guard_message($bGuard),
+            'bGuard' => $bGuard,
+        ];
     }
 
     $built = sync_build_propagate_tarball();
@@ -1808,6 +1935,9 @@ function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
     }
     $decoded['httpCode'] = $code;
     $decoded['sent']     = ['bytes' => $size, 'files' => $built['files']];
+    if ($bGuard['applicable']) {
+        $decoded['bGuard'] = $bGuard;   // carry B's lock state to the UI (dry-run + real)
+    }
     return $decoded;
 }
 
@@ -1830,7 +1960,7 @@ function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
  * of THIS L→via relay call. On a local/transport failure returns
  * ['ok'=>false,'error'=>…[,'code']]. Never throws.
  */
-function sync_request_relay_push(string $viaRole, string $toRole, bool $dryRun = false): array
+function sync_request_relay_push(string $viaRole, string $toRole, bool $dryRun = false, bool $force = false): array
 {
     $sync = option('sync');
     if (!is_array($sync) || empty($sync['secret'])) {
@@ -1851,8 +1981,13 @@ function sync_request_relay_push(string $viaRole, string $toRole, bool $dryRun =
     if (!function_exists('curl_init')) {
         return ['ok' => false, 'error' => 'curl not available'];
     }
+    // dryRun and force both forward to the via-node's relay-push, which in turn
+    // hands force to its own sync_propagate_to_peer (B-publish guard escape hatch).
+    $qs = [];
+    if ($dryRun) { $qs[] = 'dryRun=1'; }
+    if ($force)  { $qs[] = 'force=1'; }
     $url = rtrim($viaUrl, '/') . '/sync/relay-push/' . rawurlencode($toRole)
-         . ($dryRun ? '?dryRun=1' : '');
+         . ($qs ? '?' . implode('&', $qs) : '');
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,

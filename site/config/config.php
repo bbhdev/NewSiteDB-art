@@ -3198,14 +3198,19 @@ HTML;
           );
         }
         $dryRun = (bool) get('dryRun');
-        $result = sync_propagate_to_peer($toRole, $dryRun);
+        // force=1 — the explicit "publish anyway" escape hatch for the A→B
+        // guard (Slice 3): bypass the unlocked/ahead block on B. Ignored for
+        // non-B destinations and dry-runs.
+        $force  = (bool) get('force');
+        $result = sync_propagate_to_peer($toRole, $dryRun, $force);
 
         // Map a local/transport failure to 502 (bad upstream); a peer
         // that answered keeps the peer's own ok/error verbatim at 200 so
-        // the client can read the structured result either way.
+        // the client can read the structured result either way. An explicit
+        // code (e.g. the guard's 409) is honoured ahead of the 502 default.
         $status = 200;
         if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
-          $status = 502;
+          $status = $result['code'] ?? 502;
         }
         return new Kirby\Http\Response(
           json_encode($result, JSON_UNESCAPED_SLASHES),
@@ -3298,10 +3303,13 @@ HTML;
       'action'  => function (string $toRole) {
         if ($gate = sync_authorize_request()) return $gate;
         $dryRun = (bool) get('dryRun');
-        $result = sync_propagate_to_peer($toRole, $dryRun);
+        // force=1 rides the relay too: L → A's relay-push/B carries it so A's
+        // own A→B guard can be overridden by the same "publish anyway" intent.
+        $force  = (bool) get('force');
+        $result = sync_propagate_to_peer($toRole, $dryRun, $force);
         $status = 200;
         if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
-          $status = 502;
+          $status = $result['code'] ?? 502;   // honour the guard's 409
         }
         return new Kirby\Http\Response(
           json_encode($result, JSON_UNESCAPED_SLASHES),
@@ -3341,11 +3349,12 @@ HTML;
           );
         }
         $dryRun = (bool) get('dryRun');
-        $result = sync_request_relay_push($viaRole, $toRole, $dryRun);
+        $force  = (bool) get('force');   // "publish anyway" → forwarded down the relay
+        $result = sync_request_relay_push($viaRole, $toRole, $dryRun, $force);
         $status = 200;
         if (($result['ok'] ?? false) !== true
             && !isset($result['httpCode']) && !isset($result['relayHttpCode'])) {
-          $status = 502;
+          $status = $result['code'] ?? 502;   // honour the guard's 409 through the relay
         }
         return new Kirby\Http\Response(
           json_encode($result, JSON_UNESCAPED_SLASHES),

@@ -133,6 +133,19 @@ if ($role === 'A'):
     border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.4;
   }
   .sync-prop-modal .spm-body .spm-unsaved b{ color:#ffe08a; }
+  /* 2070 Slice 3a — B-state publish guard. Red block banner when B is unlocked
+     or ahead of A (publishing would clobber B's own edits); amber "warn" when
+     B's lock state couldn't be verified (allow-on-unknown — we don't fail
+     closed, but we say so). */
+  .sync-prop-modal .spm-body .spm-guard{
+    color:#ffb3a6; background:#2e1714; border:1px solid #7a2f26;
+    border-radius:6px; padding:9px 11px; margin-bottom:10px; line-height:1.45;
+  }
+  .sync-prop-modal .spm-body .spm-guard b{ color:#ffd2c8; }
+  .sync-prop-modal .spm-body .spm-guard.warn{
+    color:#f5c518; background:#2e2818; border-color:#6a5a1f;
+  }
+  .sync-prop-modal .spm-body .spm-guard.warn b{ color:#ffe08a; }
   .sync-prop-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
   .sync-prop-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
     padding:8px 13px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
@@ -141,6 +154,9 @@ if ($role === 'A'):
   .sync-prop-modal .spm-confirm{ background:#f5c518; color:#1c1c1c; }
   .sync-prop-modal .spm-confirm:hover{ background:#ffd23b; }
   .sync-prop-modal .spm-confirm:disabled{ opacity:.45; cursor:default; }
+  /* Publish-anyway escape hatch — danger fill, mirrors L's pull-danger confirm. */
+  .sync-prop-modal .spm-confirm.danger{ background:#c0392b; color:#fff; }
+  .sync-prop-modal .spm-confirm.danger:hover{ background:#e04a3a; }
 </style>
 
 <button id="sync-publish-btn" class="sync-prop-btn" type="button"
@@ -176,6 +192,7 @@ if ($role === 'A'):
   var mCancel  = modal.querySelector('[data-role="cancel"]');
   var mBack    = modal.querySelector('[data-role="backdrop"]');
   var busy     = false;
+  var forced   = false;   // Slice 3a — B-guard escape hatch armed this open
 
   function esc(s){ return String(s).replace(/[&<>]/g, function(c){
     return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
@@ -214,12 +231,49 @@ if ($role === 'A'):
     } catch (e) {}
     return '';
   }
+  // Slice 3a — B-state guard banner from the dry-run's `bGuard` (server probed
+  // B's /sync/b-status). Returns '' when B is safe to overwrite (frozen, equal).
+  //   block (unlocked / B-ahead) → RED banner; publishing clobbers B's own edits.
+  //   !reachable                 → amber WARN banner (allow-on-unknown: we don't
+  //                                fail closed, but we say we couldn't verify).
+  function guardBanner(g){
+    if (!g || !g.applicable) return '';
+    if (g.block){
+      var why = (g.ahead && g.unlocked) ? 'is <b>unlocked and holds edits A doesn’t have</b>'
+              : g.ahead                 ? 'holds <b>edits A doesn’t have</b> (B is ahead)'
+              :                           'is currently <b>unlocked for direct editing</b>';
+      return '<div class="spm-guard">⛔ <b>B ' + why + '.</b> '
+        + 'Publishing A → B would <b>overwrite B’s own edits</b>. '
+        + 'Back-propagate B → A and re-freeze B first — or use <b>Publish anyway</b> to '
+        + 'discard B’s edits (B is snapshotted, so it’s recoverable).</div>';
+    }
+    if (!g.reachable){
+      return '<div class="spm-guard warn">⚠ Couldn’t verify B’s lock state'
+        + (g.error ? ' (' + esc(g.error) + ')' : '') + '. '
+        + 'Publishing is allowed but unverified — if B was unlocked, its edits would be overwritten.</div>';
+    }
+    return '';
+  }
+  // Arm/disarm the escape hatch: a blocking guard turns the confirm into a
+  // red "Publish anyway" (force=1); otherwise the normal amber confirm.
+  function armForce(block){
+    forced = !!block;
+    if (block){
+      mConfirm.textContent = 'Publish anyway';
+      mConfirm.classList.add('danger');
+    } else {
+      mConfirm.textContent = 'Publish to B';
+      mConfirm.classList.remove('danger');
+    }
+  }
   function resetModal(){
     mConfirm.style.display = '';
     mConfirm.textContent = 'Publish to B';
+    mConfirm.classList.remove('danger');
     mConfirm.disabled = true;
     mCancel.textContent = 'Cancel';
     mCancel.disabled = false;
+    forced = false;
   }
   function closeModal(){ if (busy) return; resetModal(); modal.hidden = true; }
 
@@ -235,27 +289,40 @@ if ($role === 'A'):
         if (!j || !j.ok){ showError(errMsg(j, 'dry-run failed')); return; }
         var w = j.wouldReplace || {};
         var sent = (j.sent && j.sent.bytes != null) ? fmtBytes(j.sent.bytes) : '?';
+        var g = j.bGuard;
         mBody.innerHTML =
-          unsavedNote()
+          guardBanner(g)
+          + unsavedNote()
           + 'This will <span class="spm-warn">overwrite the PUBLIC site (B)</span> with A’s content:<br>'
           + '<b>' + (w.pages||0) + '</b> pages · <b>' + (w.files||0) + '</b> files · '
           + fmtBytes(w.bytes) + ' <span style="opacity:.8">(' + sent + ' gzipped on the wire)</span>.<br>'
           + 'A snapshot of B’s current content is taken first.';
+        armForce(g && g.block);   // blocking guard → red "Publish anyway" (force)
         mConfirm.disabled = false;
       })
       .catch(function(){ busy = false; showError('network error'); });
   }
 
-  // Step 2 — real publish.
+  // Step 2 — real publish. `force=1` only when the dry-run armed the escape
+  // hatch (B unlocked / ahead) and the author chose "Publish anyway".
   function doPublish(){
     if (busy || mConfirm.disabled) return;
     busy = true;
     mConfirm.disabled = true; mCancel.disabled = true;
-    mConfirm.textContent = 'Publishing…';
+    mConfirm.textContent = forced ? 'Publishing anyway…' : 'Publishing…';
     mBody.textContent = 'Publishing A → B…';
-    fetch('/sync/push/B', { method:'POST', cache:'no-store' })
+    fetch('/sync/push/B' + (forced ? '?force=1' : ''), { method:'POST', cache:'no-store' })
       .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
       .then(function(j){
+        // Defense-in-depth: the server can still 409 with a fresh bGuard (B's
+        // state changed between dry-run and now). Re-arm the escape hatch and
+        // let the author confirm again rather than dead-ending.
+        if (j && j.code === 409 && j.bGuard){
+          busy = false; mCancel.disabled = false;
+          mBody.innerHTML = guardBanner(j.bGuard);
+          armForce(true); mConfirm.disabled = false;
+          return;
+        }
         busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
         mConfirm.style.display = 'none';
         if (!j || !j.ok){ showError(errMsg(j, 'publish failed')); return; }
@@ -812,6 +879,16 @@ if ($role !== 'L') return;
     border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.4;
   }
   .sync-prop-modal .spm-body .spm-unsaved b{ color:#ffe08a; }
+  /* 2070 Slice 3b — B-state publish guard (same red/amber as A's branch). */
+  .sync-prop-modal .spm-body .spm-guard{
+    color:#ffb3a6; background:#2e1714; border:1px solid #7a2f26;
+    border-radius:6px; padding:9px 11px; margin-bottom:10px; line-height:1.45;
+  }
+  .sync-prop-modal .spm-body .spm-guard b{ color:#ffd2c8; }
+  .sync-prop-modal .spm-body .spm-guard.warn{
+    color:#f5c518; background:#2e2818; border-color:#6a5a1f;
+  }
+  .sync-prop-modal .spm-body .spm-guard.warn b{ color:#ffe08a; }
   .sync-prop-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
   .sync-prop-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
     padding:8px 13px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
@@ -1520,6 +1597,7 @@ if ($role !== 'L') return;
     var qBack    = publishModal.querySelector('[data-role="backdrop"]');
     var qBusy    = false;
     var qStaged  = false;   // L→A done this open → A→B confirm armed
+    var qForced  = false;   // Slice 3b — B-guard escape hatch armed this open
 
     function qErrMsg(j, fallback){
       if (!j) return fallback;
@@ -1532,13 +1610,46 @@ if ($role !== 'L') return;
       qBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg).replace(/\n/g, '<br>') + '</span>';
       qConfirm.disabled = true;
     }
+    // Slice 3b — B-state guard banner from the relayed `bGuard` (A probed B's
+    // /sync/b-status). Mirrors the A-branch guardBanner(): red when B is
+    // unlocked/ahead (publish clobbers B's edits), amber when unverifiable.
+    function qGuardBanner(g){
+      if (!g || !g.applicable) return '';
+      if (g.block){
+        var why = (g.ahead && g.unlocked) ? 'is <b>unlocked and holds edits A doesn’t have</b>'
+                : g.ahead                 ? 'holds <b>edits A doesn’t have</b> (B is ahead)'
+                :                           'is currently <b>unlocked for direct editing</b>';
+        return '<div class="spm-guard">⛔ <b>B ' + why + '.</b> '
+          + 'Publishing would <b>overwrite B’s own edits</b>. Back-propagate B → A and '
+          + 're-freeze B first — or use <b>Publish anyway</b> to discard B’s edits '
+          + '(B is snapshotted, so it’s recoverable).</div>';
+      }
+      if (!g.reachable){
+        return '<div class="spm-guard warn">⚠ Couldn’t verify B’s lock state'
+          + (g.error ? ' (' + esc(g.error) + ')' : '') + '. '
+          + 'Publishing is allowed but unverified — if B was unlocked, its edits would be overwritten.</div>';
+      }
+      return '';
+    }
+    function qArmForce(block){
+      qForced = !!block;
+      if (block){
+        qConfirm.textContent = 'Publish anyway';
+        qConfirm.classList.add('danger');
+      } else {
+        qConfirm.textContent = 'Publish to B';
+        qConfirm.classList.remove('danger');
+      }
+    }
     function qReset(){
       qConfirm.style.display = '';
       qConfirm.textContent = 'Publish to B';
+      qConfirm.classList.remove('danger');
       qConfirm.disabled = true;
       qCancel.textContent = 'Cancel';
       qCancel.disabled = false;
       qStaged = false;
+      qForced = false;
     }
     function qClose(){ if (qBusy) return; qReset(); publishModal.hidden = true; }
 
@@ -1574,16 +1685,27 @@ if ($role !== 'L') return;
         .catch(function(){ qBusy = false; qShowError('network error during L → A push'); });
     }
 
-    // Step 2 (on confirm) — signal A to publish itself A→B.
+    // Step 2 (on confirm) — signal A to publish itself A→B. `force=1` only when
+    // the B-guard already blocked once this open and the author chose "Publish
+    // anyway"; A forwards it down to its own A→B guard.
     function qPublish(){
       if (qBusy || qConfirm.disabled || !qStaged) return;
       qBusy = true;
       qConfirm.disabled = true; qCancel.disabled = true;
-      qConfirm.textContent = 'Publishing…';
+      qConfirm.textContent = qForced ? 'Publishing anyway…' : 'Publishing…';
       qBody.textContent = 'Asking A to publish A → B…';
-      fetch('/sync/push-via/A/B', { method:'POST', cache:'no-store' })
+      fetch('/sync/push-via/A/B' + (qForced ? '?force=1' : ''), { method:'POST', cache:'no-store' })
         .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
         .then(function(j){
+          // B-guard block (Slice 3b): A refused A→B with 409 (B unlocked/ahead)
+          // and the verdict relayed back. The refusal is cheap (no tarball was
+          // built), so re-arm the escape hatch and let the author confirm again.
+          if (j && j.code === 409 && j.bGuard){
+            qBusy = false; qCancel.disabled = false;
+            qBody.innerHTML = qGuardBanner(j.bGuard);
+            qArmForce(true); qConfirm.disabled = false;
+            return;
+          }
           qBusy = false; qCancel.disabled = false; qCancel.textContent = 'Close';
           qConfirm.style.display = 'none';
           if (!j || !j.ok){ qShowError(qErrMsg(j, 'publish A → B failed')); return; }
