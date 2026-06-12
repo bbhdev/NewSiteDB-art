@@ -164,7 +164,7 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 
 ---
 
-## 📍 Current frontier (v0.10.243)
+## 📍 Current frontier (v0.10.254)
 
 > The long prose block immediately below this section is a **historical
 > snapshot (~v0.10.96–136 era)** — accurate for the typography / text-marks
@@ -180,8 +180,20 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   first mirror). Note: B mirror within 1040 still pending.
 - **`[sync]` 2000** — ✅ 2010 node id · 2020 activity/handshake · 2030 per-page
   `_sync` stamps + diff manifest · 2040 secret sidecar · 2041 L→A push · 2042
-  A→L pull · 2050 direction-detection UI (ahead/behind + nuclear modal).
-  ▶ 2060 publish A→B · 2070 snapshot retention · 2080 B-freeze + unlock + B→A
+  A→L pull · 2050 direction-detection UI (ahead/behind + nuclear modal). ✅
+  **2060 publish A→B — CODE-COMPLETE v0.10.252–254, NOT yet validated** (the
+  buttons fire real pushes to live A/B; validate on the real nodes). Built as
+  3 slices: **(1, v0.10.252)** Panel-auth gate on the same-origin local
+  triggers `/sync/push`+`/sync/pull` for public nodes (they sit outside the
+  `/dev/*` 403 gate) — open on L, 403 on A/B without a session. **(2,
+  v0.10.253)** "Publish → B" button + dry-run/confirm modal on A's editor →
+  `/sync/push/B`. **(3, v0.10.254)** L signals A→B: new bearer-gated
+  `/sync/relay-push/<to>` (runs the receiver's own push; on A = A→B) + L-local
+  `/sync/push-via/<via>/<to>` trigger + `sync_request_relay_push()` helper; L's
+  "Publish → B" is ONE button with a confirm — real L→A, show A's state, then
+  confirm → A→B. **Provenance rule (drove the whole design): B is only ever
+  written by A; no physical L→B. Because A→B always runs after L→A, B can never
+  lead a stale A.** ▶ 2070 snapshot retention · 2080 B-freeze + unlock + B→A
   back-prop · 2090 "Published: <date>" snippet · 2095 holistic protocol review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
