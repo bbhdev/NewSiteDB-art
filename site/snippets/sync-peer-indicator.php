@@ -288,6 +288,346 @@ if ($role === 'A'):
 return;  // A: informational pill + Publish A→B control. No push/pull (L-only).
 endif;
 
+/* ── 2080 S2b — B freeze / unlock control (PUBLIC node only) ───────────────
+   B is frozen by default (server: sync_assert_writable → 423 on every /dev/*
+   write). This pill is the author's surface to UNLOCK B for a bounded window,
+   BACK-PROPAGATE B→A (mandatory), and RE-FREEZE (gated behind the back-prop).
+   Drives off GET /sync/b-status; every mutation is a Panel-gated
+   POST /sync/{unlock,prolong,backprop,refreeze}-b (S2a). Self-contained CSS/JS,
+   same convention as the A/L branches. COMPACT in the common (frozen) state —
+   just "🔒 B" + Unlock; the action cluster only appears while unlocked (rare),
+   keeping the bottom-right corner light. Touch-first sizing per the tablet
+   north star. */
+if ($role === 'B'):
+?>
+<style>
+  #sync-b-pill{
+    position:fixed; right:8px; bottom:8px; z-index:9999;
+    font:600 12px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;
+    background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
+    border-radius:8px; padding:7px 10px; box-sizing:border-box;
+    display:flex; flex-direction:column; gap:7px; max-width:min(20rem,92vw);
+    transition:background-color .15s, border-color .15s, color .15s;
+  }
+  #sync-b-pill .sbp-head{ display:flex; align-items:center; gap:7px; }
+  #sync-b-pill .sbp-ico{ font-size:14px; line-height:1; }
+  #sync-b-pill .sbp-label{ white-space:nowrap; }
+  #sync-b-pill .sbp-timer{ color:#ffe08a; font-variant-numeric:tabular-nums; }
+  /* Unlocked / pending-backprop → amber chrome so the rare writable state
+     never blends into the editor. Frozen-clean → calm dark. */
+  #sync-b-pill.is-unlocked{ border-color:#6a5a1f; background:#2e2818; }
+  #sync-b-pill.is-pending{ border-color:#6a5a1f; background:#2e2818; }
+  #sync-b-pill .sbp-warn{ color:#f5c518; line-height:1.4; }
+  #sync-b-pill .sbp-actions{ display:flex; flex-wrap:wrap; gap:6px; }
+  /* Touch-first: ≥40px tall tap targets, icon+label. */
+  #sync-b-pill button{
+    font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+    min-height:40px; padding:0 12px; border-radius:7px; cursor:pointer;
+    background:#343434; color:#fff; border:1px solid #4a4a4a;
+    display:inline-flex; align-items:center; gap:6px;
+    transition:background-color .12s, border-color .12s, opacity .12s;
+  }
+  #sync-b-pill button:hover{ background:#3d3d3d; border-color:#585858; }
+  #sync-b-pill button:disabled{ opacity:.5; cursor:default; }
+  #sync-b-pill button.sbp-primary{ background:#3a3212; border-color:#6a5a1f; color:#ffe08a; }
+  #sync-b-pill button.sbp-primary:hover{ background:#463c16; border-color:#8a7420; }
+  #sync-b-pill button.sbp-danger{ border-color:#7a3a30; }
+
+  .sb-modal{ position:fixed; inset:0; z-index:10001; display:flex;
+    align-items:center; justify-content:center;
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
+  .sb-modal[hidden]{ display:none; }
+  .sb-modal .sb-back{ position:absolute; inset:0; background:rgba(0,0,0,.6); }
+  .sb-modal .sb-panel{ position:relative; width:min(440px,92vw);
+    background:#202020; border:1px solid #3a3a3a; border-radius:12px;
+    box-shadow:0 12px 40px rgba(0,0,0,.55); color:#ececec; padding:18px; }
+  .sb-modal .sb-title{ font-size:15px; font-weight:600; color:#fff; margin-bottom:8px; }
+  .sb-modal .sb-title b{ color:#f5c518; }
+  .sb-modal .sb-body{ color:#cfcfcf; min-height:38px; }
+  .sb-modal .sb-body b{ color:#fff; }
+  .sb-modal .sb-body .sb-w{ color:#ff8d7a; }
+  .sb-modal .sb-body .sb-ok{ color:#7ddca0; }
+  .sb-chips{ display:flex; gap:10px; margin:14px 0 4px; }
+  .sb-chips button{ flex:1; min-height:52px; border-radius:9px;
+    background:#2a2a2a; border:1px solid #3d3d3d; color:#fff;
+    font:600 15px/1 -apple-system,BlinkMacSystemFont,sans-serif; cursor:pointer;
+    transition:background-color .12s, border-color .12s; }
+  .sb-chips button:hover{ background:#333; border-color:#4a4a4a; }
+  .sb-chips button.sel{ background:#3a3212; border-color:#8a7420; color:#ffe08a; }
+  .sb-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+  .sb-actions button{ min-height:40px; padding:0 14px; border-radius:7px; cursor:pointer;
+    font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+    background:#2c2c2c; color:#ddd; border:1px solid #3d3d3d; }
+  .sb-actions button.sb-go{ background:#3a3212; border-color:#6a5a1f; color:#ffe08a; }
+  .sb-actions button.sb-go:hover{ background:#463c16; }
+  .sb-actions button:disabled{ opacity:.5; cursor:default; }
+</style>
+
+<div id="sync-b-pill" role="status" aria-live="polite">
+  <div class="sbp-head">
+    <span class="sbp-ico" data-role="ico">🔒</span>
+    <span class="sbp-label" data-role="label">B · checking…</span>
+    <span class="sbp-timer" data-role="timer"></span>
+  </div>
+  <div class="sbp-warn" data-role="warn" hidden></div>
+  <div class="sbp-actions" data-role="actions"></div>
+</div>
+
+<!-- Unlock / Prolong duration modal (chips) -->
+<div id="sync-b-modal" class="sb-modal" hidden role="dialog" aria-modal="true" aria-label="Unlock B">
+  <div class="sb-back" data-role="back"></div>
+  <div class="sb-panel">
+    <div class="sb-title" data-role="title">Unlock&nbsp;<b>B</b> for editing</div>
+    <div class="sb-body" data-role="body">
+      Editing B directly is rare — B’s content normally arrives via
+      <b>Publish (A → B)</b>. Pick how long to keep it unlocked; it re-locks
+      automatically when the time is up (you can prolong it any time).
+    </div>
+    <div class="sb-chips" data-role="chips"></div>
+    <div class="sb-actions">
+      <button type="button" data-role="cancel">Cancel</button>
+      <button type="button" class="sb-go" data-role="go">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<!-- Back-propagate B → A modal (dry-run preview → confirm) -->
+<div id="sync-b-bp-modal" class="sb-modal" hidden role="dialog" aria-modal="true" aria-label="Back-propagate B to A">
+  <div class="sb-back" data-role="back"></div>
+  <div class="sb-panel">
+    <div class="sb-title">Back-propagate&nbsp;<b>B → A</b></div>
+    <div class="sb-body" data-role="body">Checking what would change on A…</div>
+    <div class="sb-actions">
+      <button type="button" data-role="cancel">Cancel</button>
+      <button type="button" class="sb-go" data-role="confirm" disabled>Send B → A</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var pill = document.getElementById('sync-b-pill');
+  if (!pill) return;
+  var ico   = pill.querySelector('[data-role="ico"]');
+  var label = pill.querySelector('[data-role="label"]');
+  var timer = pill.querySelector('[data-role="timer"]');
+  var warn  = pill.querySelector('[data-role="warn"]');
+  var acts  = pill.querySelector('[data-role="actions"]');
+
+  var dur   = document.getElementById('sync-b-modal');
+  var dBack = dur.querySelector('[data-role="back"]');
+  var dTitle= dur.querySelector('[data-role="title"]');
+  var dChips= dur.querySelector('[data-role="chips"]');
+  var dGo   = dur.querySelector('[data-role="go"]');
+  var dCancel = dur.querySelector('[data-role="cancel"]');
+
+  var bp    = document.getElementById('sync-b-bp-modal');
+  var bBack = bp.querySelector('[data-role="back"]');
+  var bBody = bp.querySelector('[data-role="body"]');
+  var bConfirm = bp.querySelector('[data-role="confirm"]');
+  var bCancel  = bp.querySelector('[data-role="cancel"]');
+
+  var HOURS = [1, 2, 4];
+  var st = null;             // last /sync/b-status payload
+  var localSecs = null;      // locally-ticked secondsRemaining
+  var alerted = false;       // one-shot near-timeout flag (per unlock episode)
+  var durMode = 'unlock';    // 'unlock' | 'prolong'
+  var picked = 2;            // selected chip hours
+  var busy = false;
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>]/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
+  function fmtBytes(n){ if (n == null) return '?';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+    return (n/1048576).toFixed(2) + ' MB'; }
+  function fmtLeft(s){
+    if (s == null) return '';
+    if (s <= 0) return '0m';
+    var h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = s%60;
+    if (h > 0) return h + 'h' + (m<10?'0':'') + m + 'm';
+    if (m > 0) return m + 'm' + (ss<10?'0':'') + ss + 's';
+    return ss + 's';
+  }
+
+  // ── render the pill from `st` ──────────────────────────────────────────
+  function render(){
+    pill.classList.remove('is-unlocked', 'is-pending');
+    acts.innerHTML = '';
+    warn.hidden = true; warn.textContent = '';
+    timer.textContent = '';
+    if (!st){ ico.textContent='🔒'; label.textContent='B · …'; return; }
+
+    if (st.frozen && !st.pendingBackProp){
+      // Common case — compact, calm.
+      ico.textContent = '🔒';
+      label.textContent = 'B · frozen';
+      acts.appendChild(mkBtn('Unlock to edit', 'sbp-primary', openUnlock));
+      return;
+    }
+    if (st.frozen && st.pendingBackProp){
+      // Auto-locked (or re-frozen) but edits not yet on A — recoverable.
+      pill.classList.add('is-pending');
+      ico.textContent = '⚠️';
+      label.textContent = st.autoLockedAt ? 'B · re-locked' : 'B · frozen';
+      warn.hidden = false;
+      warn.textContent = 'Edits made on B are not yet on A. Back-propagate so the next Publish won’t overwrite them.';
+      acts.appendChild(mkBtn('Back-propagate B → A', 'sbp-primary', openBackprop));
+      acts.appendChild(mkBtn('Unlock again', '', openUnlock));
+      return;
+    }
+    // Unlocked.
+    pill.classList.add('is-unlocked');
+    ico.textContent = '🔓';
+    label.textContent = 'B · unlocked';
+    timer.textContent = fmtLeft(localSecs);
+    var bpDone = st.backPropDoneSinceUnlock;
+    acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
+    acts.appendChild(mkBtn('Back-propagate B → A', bpDone ? '' : 'sbp-primary', openBackprop));
+    var rf = mkBtn('Re-freeze', 'sbp-danger', doRefreeze);
+    rf.disabled = !bpDone;
+    rf.title = bpDone ? 'Re-freeze B (back-prop done)' : 'Back-propagate to A first';
+    acts.appendChild(rf);
+  }
+  function mkBtn(text, cls, fn){
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = text;
+    if (cls) b.className = cls;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  // ── status poll + local countdown ──────────────────────────────────────
+  function adopt(j){
+    st = j;
+    localSecs = (j && typeof j.secondsRemaining === 'number') ? j.secondsRemaining : null;
+    if (!j || j.frozen) alerted = false;     // reset alert when not in an open window
+    render();
+  }
+  function poll(){
+    fetch('/sync/b-status', { cache:'no-store' })
+      .then(function(r){ return r.json().catch(function(){ return null; }); })
+      .then(function(j){ if (j) adopt(j); })
+      .catch(function(){ /* leave last-known state */ });
+  }
+  function tick(){
+    if (st && !st.frozen && localSecs != null){
+      localSecs = Math.max(0, localSecs - 1);
+      timer.textContent = fmtLeft(localSecs);
+      if (!alerted && localSecs > 0 && localSecs <= 600){    // 10-minute warning
+        alerted = true;
+        warn.hidden = false;
+        warn.textContent = 'B re-locks in ' + fmtLeft(localSecs) + ' — Prolong to keep editing.';
+      }
+      if (localSecs === 0) poll();   // window lapsed → confirm the re-lock with the server
+    }
+  }
+  setInterval(tick, 1000);
+  setInterval(poll, 30000);
+  window.addEventListener('focus', poll);
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+  poll();
+
+  // ── duration modal (unlock / prolong) ──────────────────────────────────
+  function buildChips(){
+    dChips.innerHTML = '';
+    HOURS.forEach(function(h){
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = h + 'h';
+      if (h === picked) b.className = 'sel';
+      b.addEventListener('click', function(){
+        picked = h;
+        Array.prototype.forEach.call(dChips.children, function(c){ c.className = ''; });
+        b.className = 'sel';
+      });
+      dChips.appendChild(b);
+    });
+  }
+  function openUnlock(){ durMode='unlock'; picked=2;
+    dTitle.innerHTML = 'Unlock&nbsp;<b>B</b> for editing';
+    dGo.textContent = 'Unlock'; buildChips(); dur.hidden=false; }
+  function openProlong(){ durMode='prolong'; picked=2;
+    dTitle.innerHTML = 'Prolong&nbsp;<b>B</b> unlock';
+    dGo.textContent = 'Prolong'; buildChips(); dur.hidden=false; }
+  function durClose(){ if (busy) return; dur.hidden=true; }
+  dCancel.addEventListener('click', durClose);
+  dBack.addEventListener('click', durClose);
+  dGo.addEventListener('click', function(){
+    if (busy) return; busy = true; dGo.disabled = true;
+    var url = durMode === 'unlock' ? '/sync/unlock-b' : '/sync/prolong-b';
+    fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' },
+                 body: JSON.stringify({ hours: picked }) })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
+      .then(function(j){
+        busy=false; dGo.disabled=false;
+        if (j && j.ok){ alerted=false; adopt(j); dur.hidden=true; }
+        else { dGo.disabled=false; alert((j && j.error) || 'Action failed.'); }
+      })
+      .catch(function(){ busy=false; dGo.disabled=false; alert('Network error.'); });
+  });
+
+  // ── back-propagate modal (dry-run → confirm) ───────────────────────────
+  var bpStaged = false;
+  function bpReset(){ bpStaged=false; bConfirm.disabled=true;
+    bBody.innerHTML = 'Checking what would change on A…'; }
+  function openBackprop(){
+    bpReset(); bp.hidden=false;
+    fetch('/sync/backprop-b?dryRun=1', { method:'POST' })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
+      .then(function(j){
+        if (!j || (j.ok === false && !j.wouldReplace)){
+          bBody.innerHTML = '<span class="sb-w">'+esc((j && j.error) || 'dry-run failed')+'</span>'; return;
+        }
+        var w = j.wouldReplace || {};
+        bBody.innerHTML =
+          'This overwrites <b>A</b>’s content with <b>B</b>’s — the mandatory step '
+          + 'before re-freezing. A snapshots itself first.<br><br>'
+          + 'Would replace on A: <b>'+(w.pages!=null?w.pages:'?')+'</b> pages, <b>'
+          + (w.files!=null?w.files:'?')+'</b> files ('+fmtBytes(w.bytes)+').';
+        bpStaged=true; bConfirm.disabled=false;
+      })
+      .catch(function(){ bBody.innerHTML = '<span class="sb-w">Network error.</span>'; });
+  }
+  function bpClose(){ if (busy) return; bp.hidden=true; }
+  bCancel.addEventListener('click', bpClose);
+  bBack.addEventListener('click', bpClose);
+  bConfirm.addEventListener('click', function(){
+    if (busy || bConfirm.disabled || !bpStaged) return;
+    busy=true; bConfirm.disabled=true; bBody.innerHTML='Sending B → A…';
+    fetch('/sync/backprop-b', { method:'POST' })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
+      .then(function(j){
+        busy=false;
+        if (j && j.ok){
+          bBody.innerHTML = '<span class="sb-ok">Done — A now matches B. You can re-freeze.</span>';
+          if (j.bStatus) adopt(j.bStatus); else poll();
+          setTimeout(function(){ bp.hidden=true; }, 1100);
+        } else {
+          bConfirm.disabled=false;
+          bBody.innerHTML = '<span class="sb-w">'+esc((j && j.error) || 'back-propagate failed')+'</span>';
+        }
+      })
+      .catch(function(){ busy=false; bConfirm.disabled=false;
+        bBody.innerHTML = '<span class="sb-w">Network error.</span>'; });
+  });
+
+  // ── re-freeze (gated) ──────────────────────────────────────────────────
+  function doRefreeze(){
+    if (busy) return; busy=true;
+    fetch('/sync/refreeze-b', { method:'POST' })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
+      .then(function(j){ busy=false;
+        if (j && j.ok){ adopt(j); }
+        else { if (j && j.bStatus) adopt(j.bStatus); alert((j && j.error) || 'Re-freeze failed.'); }
+      })
+      .catch(function(){ busy=false; alert('Network error.'); });
+  }
+})();
+</script>
+<?php
+return;  // B: freeze/unlock control. No L↔A push/pull pill.
+endif;
+
 if ($role !== 'L') return;
 ?>
 <div id="sync-peer-indicator"

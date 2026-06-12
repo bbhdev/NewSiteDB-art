@@ -241,8 +241,17 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   since) survives auto-lock → drives S3's publish-block. State fields (additive,
   no schema bump): frozen, unlockedAt, unlockExpiresAt, unlockHours,
   lastBackPropAt, autoLockedAt. Validated by a 14-check isolation lifecycle test.
-  ▶ **Slice 2b** (B editor UI — unlock panel w/ hours picker, live countdown,
-  near-timeout alert @10min, Prolong, Back-propagate, gated Re-freeze) ·
+  ✅ **Slice 2b (v0.10.262): B editor UI** — a bottom-right pill in
+  `sync-peer-indicator.php` (B-branch, parallels the A/L branches). Frozen state is
+  compact (🔒 "B · frozen" + one "Unlock to edit" button); unlocking opens a modal
+  with **preset duration chips (1h/2h/4h, default 2h)** — presets are safe because
+  the author can Prolong. Unlocked state shows 🔓 + a live 1s countdown, ＋Prolong,
+  Back-propagate B→A, and a **Re-freeze button disabled until back-prop has run**
+  (mirrors the server 409 gate). A one-shot amber "re-locks soon — Prolong?" warning
+  fires at ≤10min remaining. Status polled every 30s + on focus/visibility. Touch
+  targets ≥40px (chips 52px) for the tablet phase. Back-prop modal does dry-run
+  preview (wouldReplace pages/files/bytes) → confirm. **Deferred [ui] note:** the
+  bottom-right affordances are getting crowded — compact them in the 9000 [ui] band.
   ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
   pendingBackProp). · 2090 "Published: <date>" snippet · 2095 holistic protocol
   review.
