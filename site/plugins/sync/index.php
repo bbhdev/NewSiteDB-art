@@ -769,7 +769,66 @@ function sync_pre_propagate_snapshot(string $fromRole): array
         json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n"
     );
 
-    return ['ok' => true, 'name' => $name, 'files' => $counts['files'], 'bytes' => $counts['bytes']];
+    // S7 / 2070 — enforce retention right after adding this snapshot, so the
+    // auto-snapshot history can't grow without bound. Best-effort: a prune
+    // failure must never fail the snapshot (and thus the propagate) it rode in
+    // on, so we ignore its result here beyond surfacing it for observability.
+    $prune = sync_prune_auto_snapshots();
+
+    return ['ok' => true, 'name' => $name, 'files' => $counts['files'],
+            'bytes' => $counts['bytes'], 'pruned' => $prune['pruned'] ?? []];
+}
+
+/**
+ * S7 / 2070 — retention. Keep only the most recent $keep (default 30)
+ * auto-pre-propagate snapshots in THIS node's library/, deleting older ones.
+ * Each node maintains its own library/, so "per node" is automatic. Manual
+ * snapshots are NEVER touched and don't count toward the limit.
+ *
+ * Identification is deliberately conservative: a directory is pruned ONLY
+ * when BOTH (a) its name carries the 'auto-pre-propagate-' prefix AND (b) its
+ * meta.json kind === 'auto-pre-propagate'. Anything we cannot positively
+ * confirm as auto is KEPT — so a corrupt/missing meta can at worst leak a
+ * stale auto snapshot (harmless), never delete a manual one.
+ *
+ * Best-effort, never throws. Returns
+ *   ['ok'=>true,'kept'=>int,'pruned'=>[names]]  or  ['ok'=>false,'error'=>…].
+ */
+function sync_prune_auto_snapshots(int $keep = 30): array
+{
+    $libRoot = sync_project_root() . '/library';
+    if (!is_dir($libRoot)) return ['ok' => true, 'kept' => 0, 'pruned' => []];
+
+    $items = @scandir($libRoot);
+    if ($items === false) return ['ok' => false, 'error' => 'cannot read library/'];
+
+    $auto = [];   // name => savedAt (chronological sort key, ISO-8601 string)
+    foreach ($items as $e) {
+        if ($e === '.' || $e === '..' || $e[0] === '.') continue;
+        if (strncmp($e, 'auto-pre-propagate-', 19) !== 0) continue;   // (a) name gate
+        $dir = $libRoot . '/' . $e;
+        if (!is_dir($dir)) continue;
+        $metaPath = $dir . '/meta.json';
+        if (!is_file($metaPath)) continue;
+        $meta = json_decode((string) @file_get_contents($metaPath), true);
+        if (!is_array($meta) || ($meta['kind'] ?? null) !== 'auto-pre-propagate') continue; // (b) kind gate
+        // savedAt is always written for autos (date('c')); fall back to the
+        // name (which embeds the UTC stamp) only if it's somehow absent.
+        $auto[$e] = (string) ($meta['savedAt'] ?? $e);
+    }
+
+    if (count($auto) <= $keep) {
+        return ['ok' => true, 'kept' => count($auto), 'pruned' => []];
+    }
+
+    arsort($auto);                              // newest first (savedAt desc)
+    $stale  = array_slice(array_keys($auto), $keep);
+    $pruned = [];
+    foreach ($stale as $name) {
+        sync_rrmdir($libRoot . '/' . $name);
+        if (!is_dir($libRoot . '/' . $name)) $pruned[] = $name;
+    }
+    return ['ok' => true, 'kept' => $keep, 'pruned' => $pruned];
 }
 
 /** Verbatim recursive copy (keeps dotfiles; no exclusions). Used to
