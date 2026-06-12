@@ -1339,3 +1339,79 @@ function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
     $decoded['sent']     = ['bytes' => $size, 'files' => $built['files']];
     return $decoded;
 }
+
+/**
+ * Remote-trigger a peer's OWN propagate (publish epic, Slice 3 / 2060).
+ *
+ * Runs on THIS node (L). Authenticated by the shared secret, it asks
+ * $viaRole to push ITS content to $toRole — i.e. L calls A's
+ * /sync/relay-push/B so that A (the single physical source of B's
+ * content) publishes A→B. No bytes leave L here; the content travels
+ * A→B on the via-node. This is the "additional trigger living on A"
+ * that lets finished-on-L work reach the public site WITHOUT a physical
+ * L→B (which would give B a second provenance and risk B leading a stale
+ * A). The mandatory order is enforced by the caller: L→A first (so A is
+ * current), then this relay.
+ *
+ * Returns the via-node's relayed result (which is its own
+ * sync_propagate_to_peer($toRole) output — peer B's /sync/propagate
+ * verdict with httpCode + sent), plus 'relayHttpCode' = the HTTP status
+ * of THIS L→via relay call. On a local/transport failure returns
+ * ['ok'=>false,'error'=>…[,'code']]. Never throws.
+ */
+function sync_request_relay_push(string $viaRole, string $toRole, bool $dryRun = false): array
+{
+    $sync = option('sync');
+    if (!is_array($sync) || empty($sync['secret'])) {
+        return ['ok' => false, 'error' => 'sync not configured'];
+    }
+    $secret = (string) $sync['secret'];
+    $peers  = is_array($sync['peers'] ?? null) ? $sync['peers'] : [];
+    if (!in_array($viaRole, sync_known_roles(), true)) {
+        return ['ok' => false, 'error' => 'unknown via role: ' . $viaRole];
+    }
+    if (!in_array($toRole, sync_known_roles(), true)) {
+        return ['ok' => false, 'error' => 'unknown destination role: ' . $toRole];
+    }
+    $viaUrl = (string) ($peers[$viaRole] ?? '');
+    if ($viaUrl === '') {
+        return ['ok' => false, 'error' => "no peer URL configured for {$viaRole}"];
+    }
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'error' => 'curl not available'];
+    }
+    $url = rtrim($viaUrl, '/') . '/sync/relay-push/' . rawurlencode($toRole)
+         . ($dryRun ? '?dryRun=1' : '');
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => '',
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $secret,
+            'User-Agent: NewSiteDB-art-sync/' . (option('version') ?? 'dev'),
+            'Expect:',
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        // The via-node builds AND uploads its own tarball to $toRole while
+        // this call blocks, so allow the same 120s ceiling as a direct push.
+        CURLOPT_TIMEOUT        => 120,
+        CURLOPT_FOLLOWLOCATION => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    if ($resp === false) {
+        return ['ok' => false, 'code' => $code,
+                'error' => 'relay request failed: ' . ($err !== '' ? $err : 'unknown transport error')];
+    }
+    $decoded = json_decode((string) $resp, true);
+    if (!is_array($decoded)) {
+        return ['ok' => false, 'code' => $code, 'error' => 'non-JSON response from ' . $viaRole,
+                'body' => substr((string) $resp, 0, 300)];
+    }
+    $decoded['relayHttpCode'] = $code;
+    return $decoded;
+}

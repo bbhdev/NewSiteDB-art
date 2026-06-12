@@ -329,6 +329,10 @@ if ($role !== 'L') return;
   #sync-push-btn{ bottom:34px; }
   #sync-pull-btn{ bottom:68px; border-color:#5a3a3a; }
   #sync-pull-btn:hover{ background:#3a2a2a; border-color:#7a4a4a; }
+  /* 2060 — "Publish to B" (L → A → B). Third stacked control, amber-tinted
+     border like A's publish button since it ends at the PUBLIC site. */
+  #sync-publish-btn{ bottom:102px; border-color:#6a5a1f; }
+  #sync-publish-btn:hover{ background:#343012; border-color:#8a7420; }
 
   /* z-index 10001 (was 10000) so the push/pull modals layer ABOVE the
      S5.2 nuclear overlay (10000) — the nuclear "Pull A → L now" button
@@ -493,6 +497,37 @@ if ($role !== 'L') return;
     <div class="snuc-actions">
       <button type="button" class="snuc-pull"   data-role="pull">Pull&nbsp;A → L&nbsp;now</button>
       <button type="button" class="snuc-escape" data-role="escape">I know what I’m doing — let me edit anyway</button>
+    </div>
+  </div>
+</div>
+
+<?php /* 2060 — "Publish to B" control (publish epic, Slice 3). One button,
+        with a confirm step (the user's chosen flow). Clicking runs a REAL
+        L→A push first (A is staging, snapshotted), shows A's resulting
+        state, and only on the explicit confirm signals A to publish itself
+        A→B (the public site) via /sync/push-via/A/B → A's bearer-gated
+        /sync/relay-push/B. There is NO physical L→B: B's content always
+        comes from A, so it can never lead a stale A. The L→A-then-confirm
+        ordering puts the eyeball/commit moment exactly before going
+        public. */ ?>
+<button id="sync-publish-btn" class="sync-prop-btn" type="button"
+        title="Publish to B — pushes L → A, then publishes A → the PUBLIC site (B)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/>
+  </svg>
+  <span>Publish&nbsp;→&nbsp;B</span>
+</button>
+
+<div id="sync-publish-modal" class="sync-prop-modal" hidden role="dialog" aria-modal="true" aria-label="Publish to the public site B">
+  <div class="spm-backdrop" data-role="backdrop"></div>
+  <div class="spm-panel">
+    <div class="spm-title">Publish&nbsp;<b>L → A → B</b></div>
+    <div class="spm-body" data-role="body">Pushing L → A…</div>
+    <div class="spm-actions">
+      <button type="button" class="spm-cancel"  data-role="cancel">Cancel</button>
+      <button type="button" class="spm-confirm" data-role="confirm" disabled>Publish to B</button>
     </div>
   </div>
 </div>
@@ -1011,6 +1046,114 @@ if ($role !== 'L') return;
       if (e.key === 'Escape'){ e.preventDefault(); pClose(); }
       else if (e.key === 'Enter' && !pConfirm.disabled && pConfirm.style.display !== 'none'){
         e.preventDefault(); pDoPull();
+      }
+    });
+  }
+
+  // ── 2060 — "Publish to B" control (L → A → B) ─────────────────────
+  // One button, confirm step before going public. On click: a REAL L→A
+  // push (A is staging + snapshotted), then the modal shows A's resulting
+  // state; only the explicit confirm signals A to publish A→B via
+  // /sync/push-via/A/B (→ A's bearer-gated /sync/relay-push/B). No L→B —
+  // B's content always comes from A. Reuses esc()/fmtBytes()/poll() from
+  // this closure.
+  var publishBtn   = document.getElementById('sync-publish-btn');
+  var publishModal = document.getElementById('sync-publish-modal');
+  if (publishBtn && publishModal) {
+    var qBody    = publishModal.querySelector('[data-role="body"]');
+    var qConfirm = publishModal.querySelector('[data-role="confirm"]');
+    var qCancel  = publishModal.querySelector('[data-role="cancel"]');
+    var qBack    = publishModal.querySelector('[data-role="backdrop"]');
+    var qBusy    = false;
+    var qStaged  = false;   // L→A done this open → A→B confirm armed
+
+    function qErrMsg(j, fallback){
+      if (!j) return fallback;
+      var m = j.error || fallback;
+      if (j.code){ m += ' (HTTP ' + j.code + ')'; }
+      if (j.body){ var snip = String(j.body).replace(/\s+/g,' ').trim().slice(0,120); if (snip) m += '\n'+snip; }
+      return m;
+    }
+    function qShowError(msg){
+      qBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg).replace(/\n/g, '<br>') + '</span>';
+      qConfirm.disabled = true;
+    }
+    function qReset(){
+      qConfirm.style.display = '';
+      qConfirm.textContent = 'Publish to B';
+      qConfirm.disabled = true;
+      qCancel.textContent = 'Cancel';
+      qCancel.disabled = false;
+      qStaged = false;
+    }
+    function qClose(){ if (qBusy) return; qReset(); publishModal.hidden = true; }
+
+    // Step 1 (on open) — REAL L→A push, then present A's resulting state.
+    function qStart(){
+      var wasDirty = false;
+      try { wasDirty = (typeof window.edHasUnsavedData === 'function') && window.edHasUnsavedData(); } catch (e) {}
+      qBusy = true; qReset();
+      qBody.textContent = 'Pushing L → A…';
+      publishModal.hidden = false;
+      fetch('/sync/push/A', { method:'POST', cache:'no-store' })
+        .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+        .then(function(j){
+          qBusy = false;
+          if (!j || !j.ok){ qShowError(qErrMsg(j, 'L → A push failed')); return; }
+          poll();   // A just changed — refresh the peer pill
+          var r = j.replaced || {};
+          var unsaved = wasDirty
+            ? '<div class="spm-unsaved">⚠ You had <b>unsaved edits</b> — only saved-to-disk content '
+              + 'reached A, so it won’t reach B either. Cancel, save, and Publish again to include them.</div>'
+            : '';
+          qBody.innerHTML =
+            unsaved
+            + '<span class="spm-ok">✓ Pushed L → A.</span> A now has '
+            + '<b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
+            + '<div class="spm-unsaved" style="margin-top:10px;">Confirm to <b>publish A → B</b> '
+            + '(the <b>PUBLIC</b> site). B is snapshotted first. '
+            + '<a href="https://newsitedbart.bbh.fr" target="_blank" rel="noopener" '
+            + 'style="color:#ffe08a;text-decoration:underline;">Open A to check ↗</a></div>';
+          qConfirm.disabled = false;
+          qStaged = true;
+        })
+        .catch(function(){ qBusy = false; qShowError('network error during L → A push'); });
+    }
+
+    // Step 2 (on confirm) — signal A to publish itself A→B.
+    function qPublish(){
+      if (qBusy || qConfirm.disabled || !qStaged) return;
+      qBusy = true;
+      qConfirm.disabled = true; qCancel.disabled = true;
+      qConfirm.textContent = 'Publishing…';
+      qBody.textContent = 'Asking A to publish A → B…';
+      fetch('/sync/push-via/A/B', { method:'POST', cache:'no-store' })
+        .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+        .then(function(j){
+          qBusy = false; qCancel.disabled = false; qCancel.textContent = 'Close';
+          qConfirm.style.display = 'none';
+          if (!j || !j.ok){ qShowError(qErrMsg(j, 'publish A → B failed')); return; }
+          var r = j.replaced || {};
+          qBody.innerHTML =
+            '<span class="spm-ok">✓ Published to B (public).</span><br>'
+            + 'B now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
+            + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b>';
+        })
+        .catch(function(){
+          qBusy = false; qCancel.disabled = false; qCancel.textContent = 'Close';
+          qConfirm.style.display = 'none'; qShowError('network error during publish');
+        });
+    }
+
+    publishBtn.addEventListener('click', qStart);
+    qConfirm.addEventListener('click', qPublish);
+    qCancel.addEventListener('click', qClose);
+    qBack.addEventListener('click', qClose);
+    document.addEventListener('keydown', function(e){
+      if (publishModal.hidden) return;
+      if (e.key === 'Escape'){ e.preventDefault(); qClose(); }
+      else if (e.key === 'Enter' && !qConfirm.disabled && qConfirm.style.display !== 'none'){
+        e.preventDefault(); qPublish();
       }
     });
   }

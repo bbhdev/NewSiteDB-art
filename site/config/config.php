@@ -3077,6 +3077,86 @@ HTML;
           'application/json', $status
         );
       }
+    ],
+
+    /*
+     * POST /sync/relay-push/<toRole>[?dryRun=1] — REMOTE publish trigger
+     * (publish epic, Slice 3 / 2060). Runs ON the receiving node (A).
+     *
+     * BEARER-GATED (unlike /sync/push and /sync/pull, which are
+     * same-origin local triggers): this is a CROSS-NODE call. A
+     * secret-holding peer (L) asks THIS node to push ITS OWN content to
+     * <toRole>. The bytes travel from THIS node — on A, relay-push/B runs
+     * A→B. This is how "finished on L, publish to B" reaches the public
+     * site WITHOUT a physical L→B: L pushes L→A first (so A is current),
+     * then calls A's /sync/relay-push/B so A — the single physical source
+     * of B's content — publishes A→B. B therefore only ever has one
+     * provenance (A) and can never lead a stale A.
+     *
+     * Returns this node's sync_propagate_to_peer(<toRole>) result verbatim
+     * (the destination's /sync/propagate verdict + httpCode + sent), so the
+     * caller reads the same {ok,replaced,snapshot} shape as a direct push.
+     */
+    [
+      'pattern' => 'sync/relay-push/(:any)',
+      'method'  => 'POST',
+      'action'  => function (string $toRole) {
+        if ($gate = sync_authorize_request()) return $gate;
+        $dryRun = (bool) get('dryRun');
+        $result = sync_propagate_to_peer($toRole, $dryRun);
+        $status = 200;
+        if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
+          $status = 502;
+        }
+        return new Kirby\Http\Response(
+          json_encode($result, JSON_UNESCAPED_SLASHES),
+          'application/json', $status
+        );
+      }
+    ],
+
+    /*
+     * POST /sync/push-via/<viaRole>/<toRole>[?dryRun=1] — LOCAL trigger
+     * that fires a peer's relay-push (publish epic, Slice 3 / 2060).
+     *
+     * Runs ON the requesting node (L). Same-origin editor trigger, so —
+     * like /sync/push and /sync/pull — it carries no bearer of its own;
+     * the secret rides the OUTBOUND relay call this route makes (via
+     * sync_request_relay_push) to <viaRole>'s bearer-gated
+     * /sync/relay-push/<toRole>. It is the route L's "Publish to B" button
+     * calls AFTER its L→A push, to have A publish A→B. Open on L; the same
+     * v0.10.252 public-node guard applies (Panel session required on A/B)
+     * so it can't be fired unauthenticated where the node is public.
+     */
+    [
+      'pattern' => 'sync/push-via/(:any)/(:any)',
+      'method'  => 'POST',
+      'action'  => function (string $viaRole, string $toRole) {
+        $sync = option('sync');
+        if (!is_array($sync) || empty($sync['secret'])) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'sync not configured']),
+            'application/json', 503
+          );
+        }
+        if (($sync['role'] ?? null) !== 'L' && kirby()->user() === null) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'forbidden']),
+            'application/json', 403
+          );
+        }
+        $dryRun = (bool) get('dryRun');
+        $result = sync_request_relay_push($viaRole, $toRole, $dryRun);
+        $status = 200;
+        if (($result['ok'] ?? false) !== true
+            && !isset($result['httpCode']) && !isset($result['relayHttpCode'])) {
+          $status = 502;
+        }
+        return new Kirby\Http\Response(
+          json_encode($result, JSON_UNESCAPED_SLASHES),
+          'application/json', $status
+        );
+      }
     ]
   ]
 ];
