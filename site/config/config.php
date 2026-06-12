@@ -2987,6 +2987,21 @@ HTML;
             'application/json', 503
           );
         }
+        // SECURITY (v0.10.252) — local-trigger gate on public nodes.
+        // /sync/push is a SAME-ORIGIN editor trigger: the secret-bearing
+        // request is the OUTBOUND one this route makes to the peer, so the
+        // trigger itself carries no bearer. On L (local authoring box, no
+        // public URL) that is fine. On a PUBLIC node (A/B) an
+        // unauthenticated caller could otherwise fire a push at will — so
+        // require a Panel session there, mirroring the /dev/* host gate.
+        // Bearer-gated machine-to-machine routes (/sync/propagate,
+        // /sync/export, /sync/relay-push) are deliberately NOT covered here.
+        if (($sync['role'] ?? null) !== 'L' && kirby()->user() === null) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'forbidden']),
+            'application/json', 403
+          );
+        }
         $dryRun = (bool) get('dryRun');
         $result = sync_propagate_to_peer($toRole, $dryRun);
 
@@ -3035,6 +3050,17 @@ HTML;
           return new Kirby\Http\Response(
             json_encode(['ok' => false, 'error' => 'sync not configured']),
             'application/json', 503
+          );
+        }
+        // SECURITY (v0.10.252) — local-trigger gate on public nodes.
+        // Same rationale as /sync/push above: a same-origin editor trigger
+        // with no bearer of its own (the secret rides the OUTBOUND fetch to
+        // the peer's /sync/export). Open on L; require a Panel session on a
+        // public node (A/B) so it can't be fired unauthenticated.
+        if (($sync['role'] ?? null) !== 'L' && kirby()->user() === null) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'forbidden']),
+            'application/json', 403
           );
         }
         $dryRun = (bool) get('dryRun');
