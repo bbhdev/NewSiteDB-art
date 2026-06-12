@@ -305,11 +305,12 @@ if ($role === 'B'):
     position:fixed; right:8px; bottom:8px; z-index:9999;
     font:600 12px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;
     background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
-    border-radius:8px; padding:7px 10px; box-sizing:border-box;
-    display:flex; flex-direction:column; gap:7px; max-width:min(20rem,92vw);
+    border-radius:8px; padding:6px 8px; box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:flex-end; gap:6px;
+    max-width:min(15rem,80vw); text-align:right;
     transition:background-color .15s, border-color .15s, color .15s;
   }
-  #sync-b-pill .sbp-head{ display:flex; align-items:center; gap:7px; }
+  #sync-b-pill .sbp-head{ display:flex; align-items:center; gap:6px; }
   #sync-b-pill .sbp-ico{ font-size:14px; line-height:1; }
   #sync-b-pill .sbp-label{ white-space:nowrap; }
   #sync-b-pill .sbp-timer{ color:#ffe08a; font-variant-numeric:tabular-nums; }
@@ -317,8 +318,10 @@ if ($role === 'B'):
      never blends into the editor. Frozen-clean → calm dark. */
   #sync-b-pill.is-unlocked{ border-color:#6a5a1f; background:#2e2818; }
   #sync-b-pill.is-pending{ border-color:#6a5a1f; background:#2e2818; }
-  #sync-b-pill .sbp-warn{ color:#f5c518; line-height:1.4; }
-  #sync-b-pill .sbp-actions{ display:flex; flex-wrap:wrap; gap:6px; }
+  #sync-b-pill .sbp-warn{ color:#f5c518; line-height:1.4; max-width:14rem; }
+  /* Actions stacked, flush right — keeps the pill narrow (the resting frozen
+     state is then just two short right-aligned rows). */
+  #sync-b-pill .sbp-actions{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
   /* Touch-first: ≥40px tall tap targets, icon+label. */
   #sync-b-pill button{
     font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
@@ -332,6 +335,14 @@ if ($role === 'B'):
   #sync-b-pill button.sbp-primary{ background:#3a3212; border-color:#6a5a1f; color:#ffe08a; }
   #sync-b-pill button.sbp-primary:hover{ background:#463c16; border-color:#8a7420; }
   #sync-b-pill button.sbp-danger{ border-color:#7a3a30; }
+  /* Re-freeze, while gated by un-back-propagated B edits, is STRUCK THROUGH —
+     an unusual treatment chosen on purpose to read as "intentionally inhibited",
+     not merely greyed-out-broken. Higher specificity than the generic :disabled
+     rule, so it stays legible (not faded to .5) while clearly non-actionable. */
+  #sync-b-pill button.sbp-refreeze:disabled{
+    opacity:.9; cursor:default; text-decoration:line-through;
+    color:#c9b97a; border-color:#6a5a1f; background:#2c2814;
+  }
 
   .sb-modal{ position:fixed; inset:0; z-index:10001; display:flex;
     align-items:center; justify-content:center;
@@ -347,6 +358,7 @@ if ($role === 'B'):
   .sb-modal .sb-body b{ color:#fff; }
   .sb-modal .sb-body .sb-w{ color:#ff8d7a; }
   .sb-modal .sb-body .sb-ok{ color:#7ddca0; }
+  .sb-modal .sb-body .sb-hint{ color:#ffe08a; }
   .sb-chips{ display:flex; gap:10px; margin:14px 0 4px; }
   .sb-chips button{ flex:1; min-height:52px; border-radius:9px;
     background:#2a2a2a; border:1px solid #3d3d3d; color:#fff;
@@ -382,6 +394,8 @@ if ($role === 'B'):
       Editing B directly is rare — B’s content normally arrives via
       <b>Publish (A → B)</b>. Pick how long to keep it unlocked; it re-locks
       automatically when the time is up (you can prolong it any time).
+      <br><br><b class="sb-hint">When you’re done, Back&nbsp;B→A before re-freezing.</b>
+      Otherwise the next Publish (A → B) overwrites the edits you make here.
     </div>
     <div class="sb-chips" data-role="chips"></div>
     <div class="sb-actions">
@@ -456,38 +470,47 @@ if ($role === 'B'):
     acts.innerHTML = '';
     warn.hidden = true; warn.textContent = '';
     timer.textContent = '';
-    if (!st){ ico.textContent='🔒'; label.textContent='B · …'; return; }
+    if (!st){ setHead('🔒', 'B'); return; }
 
-    if (st.frozen && !st.pendingBackProp){
-      // Common case — compact, calm.
-      ico.textContent = '🔒';
-      label.textContent = 'B · frozen';
+    var dirty  = !!st.dirty;                      // direction === 'ahead' of A
+    var bpDone = !!st.backPropDoneSinceUnlock;     // server re-freeze gate (unchanged)
+
+    if (st.frozen && !dirty){
+      // Resting state (the 99% case) — compact, calm.
+      setHead('🔒', 'B frozen');
       acts.appendChild(mkBtn('Unlock to edit', 'sbp-primary', openUnlock));
       return;
     }
-    if (st.frozen && st.pendingBackProp){
-      // Auto-locked (or re-frozen) but edits not yet on A — recoverable.
+    if (st.frozen && dirty){
+      // Re-locked (auto or manual) but B still holds edits A lacks — recoverable.
       pill.classList.add('is-pending');
-      ico.textContent = '⚠️';
-      label.textContent = st.autoLockedAt ? 'B · re-locked' : 'B · frozen';
+      setHead('⚠️', st.autoLockedAt ? 'B re-locked' : 'B frozen');
       warn.hidden = false;
-      warn.textContent = 'Edits made on B are not yet on A. Back-propagate so the next Publish won’t overwrite them.';
-      acts.appendChild(mkBtn('Back-propagate B → A', 'sbp-primary', openBackprop));
+      warn.textContent = 'B has edits A doesn’t — Back B→A before the next Publish overwrites them.';
+      acts.appendChild(mkBtn('Back B→A', 'sbp-primary', openBackprop));
       acts.appendChild(mkBtn('Unlock again', '', openUnlock));
       return;
     }
-    // Unlocked.
+    // Unlocked — the open-lock icon already says so; show only the countdown.
     pill.classList.add('is-unlocked');
-    ico.textContent = '🔓';
-    label.textContent = 'B · unlocked';
+    setHead('🔓', '');
     timer.textContent = fmtLeft(localSecs);
-    var bpDone = st.backPropDoneSinceUnlock;
+    // Back B→A is the FIRST affordance (encourage pushing to A); amber the
+    // moment B is dirty (ahead of A).
+    acts.appendChild(mkBtn('Back B→A', dirty ? 'sbp-primary' : '', openBackprop));
     acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
-    acts.appendChild(mkBtn('Back-propagate B → A', bpDone ? '' : 'sbp-primary', openBackprop));
-    var rf = mkBtn('Re-freeze', 'sbp-danger', doRefreeze);
+    // Re-freeze gate is UNCHANGED for now (server pendingBackProp); struck-through
+    // while inhibited so the block reads as deliberate, not broken. Gate semantics
+    // (should this key on `dirty` instead?) are the pending lock-mechanism talk.
+    var rf = mkBtn('Re-freeze', 'sbp-danger sbp-refreeze', doRefreeze);
     rf.disabled = !bpDone;
-    rf.title = bpDone ? 'Re-freeze B (back-prop done)' : 'Back-propagate to A first';
+    rf.title = bpDone ? 'Re-freeze B' : 'Back B→A first — then B can re-freeze';
     acts.appendChild(rf);
+  }
+  function setHead(icon, text){
+    ico.textContent = icon;
+    label.textContent = text;
+    label.style.display = text ? '' : 'none';
   }
   function mkBtn(text, cls, fn){
     var b = document.createElement('button');

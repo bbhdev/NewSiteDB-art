@@ -241,19 +241,37 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   since) survives auto-lock → drives S3's publish-block. State fields (additive,
   no schema bump): frozen, unlockedAt, unlockExpiresAt, unlockHours,
   lastBackPropAt, autoLockedAt. Validated by a 14-check isolation lifecycle test.
-  ✅ **Slice 2b (v0.10.262): B editor UI** — a bottom-right pill in
-  `sync-peer-indicator.php` (B-branch, parallels the A/L branches). Frozen state is
-  compact (🔒 "B · frozen" + one "Unlock to edit" button); unlocking opens a modal
-  with **preset duration chips (1h/2h/4h, default 2h)** — presets are safe because
-  the author can Prolong. Unlocked state shows 🔓 + a live 1s countdown, ＋Prolong,
-  Back-propagate B→A, and a **Re-freeze button disabled until back-prop has run**
-  (mirrors the server 409 gate). A one-shot amber "re-locks soon — Prolong?" warning
-  fires at ≤10min remaining. Status polled every 30s + on focus/visibility. Touch
-  targets ≥40px (chips 52px) for the tablet phase. Back-prop modal does dry-run
-  preview (wouldReplace pages/files/bytes) → confirm. **Deferred [ui] note:** the
-  bottom-right affordances are getting crowded — compact them in the 9000 [ui] band.
+  ✅ **Slice 2b (v0.10.262 layout, v0.10.263 compact pass): B editor UI** — a
+  bottom-right pill in `sync-peer-indicator.php` (B-branch, parallels A/L). Compact +
+  **flush-right stacked** (resting frozen state is just `🔒 B frozen` + "Unlock to
+  edit"). Unlocking opens a modal with **preset duration chips (1h/2h/4h, default
+  2h)** — presets are safe because the author can Prolong — and a **strong amber hint
+  ("Back B→A before re-freezing")**. Unlocked state: open-lock icon carries the state
+  (no "unlocked" word), `🔓 <countdown>`, then actions in order **Back B→A · ＋Prolong
+  · Re-freeze**. Back B→A is FIRST (encourage pushing to A). A 10-min one-shot
+  "re-locks soon" warning fires near timeout. Touch targets ≥40px (chips 52px).
+  Back-prop modal: dry-run preview (wouldReplace pages/files/bytes) → confirm.
+  **DIRTY signal = the canonical one (v0.10.263 correction).** Earlier draft computed
+  a bespoke `dirty` from `lastBackPropAt ?? unlockedAt` baselines — reverted. B is the
+  same binary as L/A and the divergence eval already exists: `sync_b_status()` now
+  attaches `direction` (ahead/behind/equal) by running `sync_direction_between()` over
+  `lastActivityAt`, fetched from A via `sync_fetch_peer_state('A')` — the SAME path
+  L↔A use, just A as the peer. `dirty = direction === 'ahead'`. Fail-soft: A
+  unreachable/unconfigured → `direction:'unknown'`, `peerReached:false`, UI shows no
+  amber (won't guess). **Dependency:** needs A in B's `sync.peers` map (config, same
+  plumbing L has; B/A same host). The pill colours off `dirty`: **Back B→A goes amber
+  the moment B is ahead of A**; **Re-freeze is struck-through (line-through, not
+  greyed) while inhibited** to read as deliberate. **GATE UNCHANGED:** the re-freeze
+  *enable* still keys on the server `pendingBackProp`/`backPropDoneSinceUnlock` (409
+  gate from S2a) — NOT yet on `dirty`. So a freshly-unlocked-unedited B currently
+  shows non-amber Back B→A but a struck-through Re-freeze (server forces a back-prop
+  after any unlock). That transient mismatch is INTENTIONALLY deferred to the
+  **lock-mechanism / safe-unlock discussion** (next): decide whether the gate should
+  read `dirty` (== direction) so "nothing changed ⇒ re-freeze freely". **Deferred
+  [ui]:** compact the crowded bottom-right affordances in the 9000 [ui] band.
+  ▶ **Lock-mechanism discussion** (gate-on-dirty? unlock safety) — NEXT, before S3. ·
   ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
-  pendingBackProp). · 2090 "Published: <date>" snippet · 2095 holistic protocol
+  pendingBackProp/dirty). · 2090 "Published: <date>" snippet · 2095 holistic protocol
   review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·

@@ -317,7 +317,29 @@ function sync_b_status(): array
         $state['unlockExpiresAt'] = null;
         sync_state_write($state);
     }
-    return sync_b_status_fields($state);
+    $fields = sync_b_status_fields($state);
+
+    // Divergence vs A — the SAME ahead/behind/equal evaluation L and A run on
+    // their own pills (sync_direction_between over lastActivityAt), just with A
+    // as the peer. `dirty` ("B holds edits A does not have") is direction ===
+    // 'ahead'. This is the canonical signal, not a B-specific reinvention.
+    // Fail-soft: if A has no peer URL or is unreachable we cannot tell, so we
+    // report 'unknown' and the UI declines to nag (no amber) rather than guess.
+    $fields['direction']   = 'unknown';
+    $fields['peerReached'] = false;
+    if (sync_role() === 'B') {
+        $peer = sync_fetch_peer_state('A');
+        if (!empty($peer['ok']) && is_array($peer['state'] ?? null)) {
+            $cmp = sync_direction_between(
+                $state['lastActivityAt'] ?? null,
+                $peer['state']['lastActivityAt'] ?? null
+            );
+            $fields['direction']   = $cmp['direction'];
+            $fields['peerReached'] = true;
+        }
+    }
+    $fields['dirty'] = ($fields['direction'] === 'ahead');
+    return $fields;
 }
 
 /**
