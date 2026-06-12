@@ -5074,6 +5074,44 @@ why and what replaced it.) This unblocks first deployment but does NOT
 replace Phase 3 — endpoint-by-endpoint auth audit, MIME validation,
 and role distinction are all still pending.
 
+**Update (v0.10.274–277): Panel auth hardened — email channel + mandatory
+2FA on A/B (VALIDATED LIVE on A, 2026-06-12).** The Kirby Panel is the real
+security boundary (the lock is only an accident guard); this batch made that
+boundary strong.
+- **Email transport (v0.10.275).** Infomaniak disables PHP `mail()`
+  (`disable_functions`), so Kirby mail needs **authenticated SMTP**. Credentials
+  live in a per-node **`site/config/email.secret.php`** sidecar — gitignored AND
+  rsync-excluded (host `config.*.php` files are TRACKED, so secrets must never
+  go there), provisioned per node via sftp from `email.secret.example.php`.
+  config.php loads it: `$emailConfig = @include …/email.secret.php` →
+  `'email' => $emailConfig`. Infomaniak: `mail.infomaniak.com`, port **587 +
+  security `'tls'`** (Kirby/PHPMailer's token for STARTTLS — NOT the literal
+  `'STARTTLS'`, which is unrecognized and silently downgrades to opportunistic
+  auto-TLS), or 465 + `'ssl'`.
+- **Proof route (v0.10.274).** `GET /dev/email-test` (auth-gated, 403 if no
+  user) sends a test mail and returns JSON {ok,role,transport,from,to,sentAt}.
+  Used to prove delivery on A and B **before** flipping 2FA — lockout-safe order.
+  Confirmed delivered x2 on both nodes.
+- **Role-gated 2FA (v0.10.277).** In config.php:
+  `'methods' => ($syncRole === 'L') ? ['password'] : ['password' => ['2fa' => true]]`
+  — mandatory 2FA on **A/B**, off on **L** (localhost dev). The 2FA-code email
+  `from` is pinned to the authenticated SMTP mailbox
+  (`$authOptions['challenge'] = ['email' => ['from' => $emailFrom]]` where
+  `$emailFrom = email.transport.username`) so DKIM/SPF signing applies and codes
+  don't land in spam. **Latent-lockout caveat:** an A/B node with 2FA on but NO
+  `email.secret.php` can't send the code → no login. Always prove email first.
+- **UI-LOCATION GOTCHA (cost me a wrong diagnosis).** The TOTP enrollment
+  affordance is **NOT** under an avatar dropdown / "Your account" as the bundled
+  `kirby/src/Panel/User.php` source suggested — that vendored source diverges
+  from the Panel build running on **Kirby 5.4.2**. On the live Panel it's under
+  a small **gear icon → pop-up menu → "set up one-time codes"** (next-to-last
+  item) on the account view. Enrolled + tested there on A. When the bundled
+  `kirby/` source disagrees with live Panel behaviour, **trust the live Panel.**
+- **Still pending:** run the same logout→login(emailed code)→enroll-TOTP test on
+  **B** to confirm (identical config + same host + email already proven on B, so
+  high confidence). The per-route `dev/draw/*` auth audit + MIME validation from
+  the original Phase-3 list remain open.
+
 ### Parked: Panel IP allowlist via dynamic DNS
 
 Idea floated during the v0.10.x security batch, **not needed now,
