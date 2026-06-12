@@ -18,6 +18,12 @@
 #                                     # (Enter alone = DEFAULT_TARGET). With -y
 #                                     # or no TTY, omitting falls back to
 #                                     # DEFAULT_TARGET non-interactively.
+#                                     # The picker also offers a final
+#                                     # "all targets" entry: deploy to every
+#                                     # TARGET in sequence with NO dry run and a
+#                                     # SINGLE confirmation — the convenience for
+#                                     # "deploy A then B" in one go. Normal
+#                                     # deploys only (not --bootstrap/--host-config).
 #   -y, --yes                         # skip the confirmation prompt
 #   --no-delete                       # upload/update only, never remove server files
 #   --bootstrap                       # ONE-TIME: also push editor-written content
@@ -75,6 +81,7 @@ DELETE="--delete"
 SKIP_ICLOUD_CHECK=0
 BOOTSTRAP=0
 HOST_CONFIG_ONLY=0
+ALL_MODE=0
 TARGET=""
 for arg in "$@"; do
   case "$arg" in
@@ -84,7 +91,7 @@ for arg in "$@"; do
     --host-config)        HOST_CONFIG_ONLY=1 ;;
     --skip-icloud-check)  SKIP_ICLOUD_CHECK=1 ;;
     -h|--help)
-      sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
+      sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//; s/^#//'
       exit 0 ;;
     -*) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
     *)
@@ -135,45 +142,68 @@ if [ -z "$TARGET" ]; then
       fi
       _i=$((_i + 1))
     done
+    # One synthetic entry past the real targets = "all of them", the
+    # round-trip convenience (real transfer to every target, no dry run,
+    # one confirmation). See the ALL_MODE block near the deploy tail.
+    _all_idx=$(( ${#_targets[@]} + 1 ))
+    printf '  %d) all targets — %s  (no dry run, one confirmation)\n' \
+      "$_all_idx" "$(printf '%s + ' "${_targets[@]}" | sed 's/ + $//')" >&2
     printf 'Enter number [%s]: ' "$_default_idx" >&2
     read -r _sel
     [ -z "$_sel" ] && _sel="$_default_idx"
     case "$_sel" in
       *[!0-9]*|'') echo "✗ Not a valid number: '$_sel'" >&2; exit 2 ;;
     esac
-    if [ "$_sel" -lt 1 ] || [ "$_sel" -gt "${#_targets[@]}" ]; then
-      echo "✗ Selection out of range: $_sel (1–${#_targets[@]})" >&2; exit 2
+    if [ "$_sel" -lt 1 ] || [ "$_sel" -gt "$_all_idx" ]; then
+      echo "✗ Selection out of range: $_sel (1–$_all_idx)" >&2; exit 2
     fi
-    TARGET="${_targets[$((_sel - 1))]}"
-    echo "▶ Selected: $TARGET" >&2
+    if [ "$_sel" -eq "$_all_idx" ]; then
+      ALL_MODE=1
+      echo "▶ Selected: ALL targets ($TARGETS) — no dry run" >&2
+    else
+      TARGET="${_targets[$((_sel - 1))]}"
+      echo "▶ Selected: $TARGET" >&2
+    fi
   else
     TARGET="$DEFAULT_TARGET"
   fi
 fi
 
-# Verify the target name is in the declared TARGETS list (catches typos
-# even when resolve_target has a stray branch the list doesn't mention).
-known=0
-for t in $TARGETS; do
-  [ "$t" = "$TARGET" ] && { known=1; break; }
-done
-if [ "$known" -ne 1 ]; then
-  echo "✗ Unknown target: '$TARGET'" >&2
-  echo "  Known targets: $TARGETS" >&2
+# 'all targets' is a normal-deploy convenience; it must not piggy-back on
+# the deliberate single-target special modes (each has its own safety flow).
+if [ "$ALL_MODE" -eq 1 ] && { [ "$BOOTSTRAP" -eq 1 ] || [ "$HOST_CONFIG_ONLY" -eq 1 ]; }; then
+  echo "✗ 'all targets' is incompatible with --bootstrap and --host-config" >&2
+  echo "  (those are deliberate single-target operations)." >&2
   exit 2
 fi
 
-REMOTE_HOST=""
-REMOTE_PATH=""
-if ! resolve_target "$TARGET"; then
-  echo "✗ resolve_target('$TARGET') failed — add a case branch in deploy.env." >&2
-  exit 1
+# Single-target resolution. Skipped entirely in ALL_MODE, where each target
+# is resolved inside the deploy loop near the tail.
+if [ "$ALL_MODE" -ne 1 ]; then
+  # Verify the target name is in the declared TARGETS list (catches typos
+  # even when resolve_target has a stray branch the list doesn't mention).
+  known=0
+  for t in $TARGETS; do
+    [ "$t" = "$TARGET" ] && { known=1; break; }
+  done
+  if [ "$known" -ne 1 ]; then
+    echo "✗ Unknown target: '$TARGET'" >&2
+    echo "  Known targets: $TARGETS" >&2
+    exit 2
+  fi
+
+  REMOTE_HOST=""
+  REMOTE_PATH=""
+  if ! resolve_target "$TARGET"; then
+    echo "✗ resolve_target('$TARGET') failed — add a case branch in deploy.env." >&2
+    exit 1
+  fi
+  if [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_PATH" ]; then
+    echo "✗ resolve_target('$TARGET') did not set REMOTE_HOST and REMOTE_PATH." >&2
+    exit 1
+  fi
+  echo "▶ Target: $TARGET  →  $REMOTE_HOST:$REMOTE_PATH"
 fi
-if [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_PATH" ]; then
-  echo "✗ resolve_target('$TARGET') did not set REMOTE_HOST and REMOTE_PATH." >&2
-  exit 1
-fi
-echo "▶ Target: $TARGET  →  $REMOTE_HOST:$REMOTE_PATH"
 
 # ── --host-config: SCP one file + curl-verify gate, then exit ─────────
 # The host-scoped Kirby config (site/config/config.<SERVER_NAME>.php) is
@@ -321,6 +351,54 @@ if [ "$BOOTSTRAP" -ne 1 ]; then
 fi
 
 SRC="$PROJECT_ROOT/"
+
+# Real transfer to whatever REMOTE_HOST/REMOTE_PATH currently resolve to:
+# the code mirror, then the comment-stripped .htaccess. Shared by the
+# single-target path and the ALL_MODE loop so the two never drift apart.
+do_transfer() {
+  local dest="$REMOTE_HOST:$REMOTE_PATH/"
+  echo "▶ DEPLOYING … → $dest"
+  rsync "${COMMON[@]}" "$SRC" "$dest"
+  echo "▶ Pushing stripped .htaccess …"
+  rsync -az -h -i --no-owner --no-group \
+      "$STAGED_HTACCESS" "$REMOTE_HOST:$REMOTE_PATH/.htaccess"
+  echo "✓ Deploy complete → $REMOTE_HOST:$REMOTE_PATH"
+}
+
+# ── ALL_MODE: one real transfer per TARGET, NO dry run, ONE confirmation ──
+# The "deploy A then B" round-trip collapsed into a single action. Bootstrap
+# and host-config are excluded upstream, so COMMON here is always the normal
+# code mirror (content filtered out). Order follows TARGETS — staging first,
+# public last — and any single resolve/transfer failure aborts before the
+# remaining targets rather than leaving a half-done set silently.
+if [ "$ALL_MODE" -eq 1 ]; then
+  # shellcheck disable=SC2206  # intentional word-split of the space list
+  _all=($TARGETS)
+  echo "▶ ALL-TARGETS deploy (no dry run) — ${#_all[@]} targets: ${_all[*]}"
+  echo "        mirror=${DELETE:-off}; .htaccess sent per target (comments stripped)"
+  if [ "$ASSUME_YES" -ne 1 ]; then
+    printf 'Deploy to ALL %d targets above — REAL transfer, NO dry run? [y/N] ' "${#_all[@]}"
+    read -r reply
+    case "$reply" in
+      [yY]|[yY][eE][sS]) ;;
+      *) echo "Aborted — nothing was changed on any server."; exit 0 ;;
+    esac
+  fi
+  for t in "${_all[@]}"; do
+    REMOTE_HOST=""; REMOTE_PATH=""
+    if ! resolve_target "$t" || [ -z "$REMOTE_HOST" ] || [ -z "$REMOTE_PATH" ]; then
+      echo "✗ resolve_target('$t') failed/incomplete — aborting before remaining targets." >&2
+      exit 1
+    fi
+    echo "─────────────────────────────────────────────────────────────────"
+    echo "▶ Target: $t  →  $REMOTE_HOST:$REMOTE_PATH"
+    do_transfer
+  done
+  echo "✓ All ${#_all[@]} targets deployed."
+  exit 0
+fi
+
+# ── Single-target: dry run → confirm → transfer ───────────────────────
 DEST="$REMOTE_HOST:$REMOTE_PATH/"
 
 if [ "$BOOTSTRAP" -eq 1 ]; then
@@ -366,9 +444,4 @@ if [ "$ASSUME_YES" -ne 1 ]; then
   fi
 fi
 
-echo "▶ DEPLOYING …"
-rsync "${COMMON[@]}" "$SRC" "$DEST"
-echo "▶ Pushing stripped .htaccess …"
-rsync -az -h -i --no-owner --no-group \
-    "$STAGED_HTACCESS" "$REMOTE_HOST:$REMOTE_PATH/.htaccess"
-echo "✓ Deploy complete."
+do_transfer

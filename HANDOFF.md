@@ -3172,10 +3172,20 @@ changed — these versions are infrastructure only.
 **What landed:**
 
 - **`deploy/deploy.sh`** — rsync-over-SSH delta mirror with
-  `--delete-after --delay-updates` and a `--exclude-from` file. Always
-  runs a dry-run first and prompts for confirmation before the real
-  transfer. Flags: `-y` skip prompt, `--no-delete` upload-only,
-  `--skip-icloud-check` bypass the pre-check.
+  `--delete-after --delay-updates` and a `--exclude-from` file. A
+  single-target deploy always runs a dry-run first and prompts for
+  confirmation before the real transfer. Flags: `-y` skip prompt,
+  `--no-delete` upload-only, `--skip-icloud-check` bypass the pre-check.
+  **All-targets convenience (v0.10.281-era):** the interactive target
+  picker offers a final extra entry past the real targets — "all targets"
+  — which deploys to every TARGET in sequence (TARGETS order: staging
+  first, public last) with **NO per-target dry run** and **ONE** up-front
+  confirmation. It collapses the repeated "deploy A then B" round-trip into
+  one action. ALL_MODE is normal-deploy-only: it's refused upstream if
+  combined with `--bootstrap` or `--host-config` (each is a deliberate
+  single-target op with its own safety flow). The real transfer (code
+  mirror + stripped `.htaccess`) lives in one `do_transfer()` shared by both
+  the single-target and all-targets paths so they can't drift.
 - **iCloud-placeholder pre-check** (v0.9.1) — project lives in iCloud
   Drive. With "Optimize Mac Storage" on, macOS can evict files to
   dataless placeholder stubs; rsync would stall or skip them silently.
