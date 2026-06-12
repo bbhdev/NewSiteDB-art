@@ -12,6 +12,14 @@
 # privileged L. See config.php "$syncRole" block for full rationale.
 /site/config/sync.role.php
 
+# Email transport sidecar (v0.10.275).
+# Per-node SMTP credentials for Kirby mail (2FA codes, password resets) —
+# Infomaniak disables PHP mail(), so authenticated SMTP is mandatory. The
+# host configs are tracked, so creds CANNOT live there; this gitignored,
+# rsync-excluded sidecar is their only safe home. Provisioned per node via
+# sftp from email.secret.example.php. See config.php "$emailConfig" block.
+/site/config/email.secret.php
+
 /site/accounts/*
 !/site/accounts/index.html
 /site/cache/*

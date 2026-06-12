@@ -165,6 +165,31 @@ if (!in_array($syncRole, ['L', 'A', 'B'], true)) {
     die('Server role undefined');
 }
 
+/*
+ * Email transport — read from gitignored sidecar (v0.10.275).
+ *
+ * Infomaniak shared hosting DISABLES PHP mail() (it lands in
+ * disable_functions — confirmed by /dev/email-test reporting
+ * "Call to undefined function ... mail()"). So every node that must send
+ * mail — 2FA codes and password resets ride on this — needs authenticated
+ * SMTP (mail.infomaniak.com:465 SSL, auth = a real mailbox).
+ *
+ * Those credentials are secret, and the host configs (config.<host>.php) are
+ * TRACKED in git — so the transport array lives in a per-node sidecar
+ * site/config/email.secret.php that is gitignored AND rsync-excluded, exactly
+ * like sync.secret.php. Provisioned per node via sftp; see
+ * email.secret.example.php for the shape.
+ *
+ * Missing / unreadable / wrong-shape sidecar → empty array → Kirby falls back
+ * to its default mail() transport (broken on Infomaniak, but that's the
+ * pre-provisioning state, and /dev/email-test reports it cleanly rather than
+ * failing silently).
+ */
+$emailConfig = @include __DIR__ . '/email.secret.php';
+if (!is_array($emailConfig)) {
+    $emailConfig = [];
+}
+
 return [
   /*
    * App version (semver). Read from the /VERSION file at the repo
@@ -198,6 +223,15 @@ return [
   'thumbs' => [
     'quality' => 82,
   ],
+
+  /*
+   * Email transport (v0.10.275). Sourced from the gitignored per-node
+   * email.secret.php sidecar (see the $emailConfig block above). Empty
+   * until a node is provisioned → Kirby's default mail() transport (which
+   * Infomaniak disables, so unprovisioned nodes can't send — by design,
+   * surfaced via /dev/email-test).
+   */
+  'email' => $emailConfig,
 
   /*
    * Sync layer — node identity + shared-secret auth (v0.10.140, Slice S1).
@@ -580,9 +614,11 @@ return [
           );
         }
 
-        // From must sit on the sending domain or SPF / the host MTA reject it.
+        // From must be the authenticated SMTP mailbox (or an authorized alias)
+        // or Infomaniak rejects the send; fall back to noreply@<host> only when
+        // no SMTP username is configured (the broken default-transport state).
         $host      = parse_url($kirby->url(), PHP_URL_HOST) ?: 'localhost';
-        $from      = 'noreply@' . $host;
+        $from      = option('email.transport.username') ?: ('noreply@' . $host);
         $transport = option('email.transport.type', 'mail()');
         $now       = date('c');
 

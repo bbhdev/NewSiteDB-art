@@ -72,6 +72,15 @@ Thumbs.db
 # site/config/config.php "$syncRole" block for the full rationale.
 /site/config/sync.role.php
 
+# ── Email transport sidecar — per-node, never push, never delete ──────
+# v0.10.275. Per-node SMTP credentials for Kirby mail (2FA codes, password
+# resets); Infomaniak disables PHP mail(), so authenticated SMTP is required.
+# Host configs are tracked in git, so creds live here instead — gitignored
+# and rsync-excluded so a deploy can never overwrite or remove the production
+# mailbox password. Provisioned per node via sftp from email.secret.example.php.
+# See site/config/config.php "$emailConfig" block for the full rationale.
+/site/config/email.secret.php
+
 # ── Server-owned web-server config — never push, never delete ─────────
 # .user.ini is host-managed (PHP version selector, memory_limit, …);
 # Infomaniak's Manager rewrites it on certain admin actions, so we
