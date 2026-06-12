@@ -189,11 +189,12 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ▶ 3070 library
   repositioning · 3080 library propagation · 3090 "All" mode.
 - **`[workshop]` 4000** — ✅ 4010/4011/4020/4030/4050/4060 (all landed).
-- **`[dirty]` 5000** — ✅ **EPIC COMPLETE** (pending user validation of 3b in the
-  editor): 5010 lines (B) · 5020 layout (B) · 5030 styles (3a wiring + **3b
-  derived-dirty, v0.10.245** — typographyDirty now = signature(state.typography)
-  vs on-disk baseline, so a manual revert clears it; closes the "same save
-  behavior in all 4 modes" objective) · 5040 images (RESOLVED — was a
+- **`[dirty]` 5000** — ✅ **EPIC COMPLETE** (user-validated v0.10.246): 5010 lines
+  (B) · 5020 layout (B) · 5030 styles (3a wiring + **3b derived-dirty, v0.10.245**
+  — typographyDirty now = signature(state.typography) vs on-disk baseline, so a
+  manual revert clears it; **v0.10.246** follow-up: a clean revert also clears the
+  per-card .is-modified amber outline, not just the Save button; closes the "same
+  save behavior in all 4 modes" objective) · 5040 images (RESOLVED — was a
   propagate-location bug, not a dirty gap; see the unified-dirty memory's
   2026-06-11 correction).
 - **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
