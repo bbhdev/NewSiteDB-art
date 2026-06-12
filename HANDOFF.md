@@ -281,6 +281,31 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   `peerSnapshotFailed` → muted "couldn't verify A at unlock". The v0.10.269 peerError
   tooltip is no longer fed (status does no fetch) — left harmless. **Dependency:** needs
   A in B's `sync.peers` map (config; B/A same host) — but only consulted at unlock now.
+  **v0.10.273 — ROBUST BASELINE (fixes the v0.10.272 "save → gray" bug).** The
+  symptom: unlock B, edit, save → pill stays GRAY "in sync" instead of full-amber
+  "ready to push". Root cause (found by reading B's raw `state.json`, not the
+  endpoints — they HID the deciding field): `peerSnapshotAt` was **absent** from the
+  state, because the live unlock+backprop on B happened *before* v0.10.272 was
+  deployed — the new READ path (status) was staring at a baseline the old WRITE path
+  never wrote. `sync_b_status()` then hit `array_key_exists(...) === false` and
+  **force-returned `'equal'`** → gray on an edited B. Same trap fires for ANY missing
+  snapshot: A unreachable at unlock, or a `sync_b_record_backprop()` that wrote
+  `peerSnapshotAt = lastActivityAt ?? null` when `lastActivityAt` was null (push on a
+  no-edit session). Masking an edited B as "in sync" is the *dangerous* direction.
+  **Fix:** all divergence now flows through one pure helper **`sync_b_direction_from_state($state)`**
+  (the single source of truth for `sync_b_status` AND the `sync_b_refreeze` gate — they
+  can't disagree). It keys on a baseline = the LATEST of {`peerSnapshotAt`,
+  `lastBackPropAt`, and `unlockedAt` *while unlocked*}, all on the one shared A/B clock
+  (same Infomaniak host — clock skew ruled out by the user; a `server_timestamp.php`
+  on each node exists to measure delta if A/B ever split servers, at which point fold a
+  tolerance INTO this helper). B is `ahead` iff `lastActivityAt` is later than that
+  baseline. `behind` is reported ONLY from a present `peerSnapshotAt` strictly newer than
+  B's activity (the one thing a local-only signal can't infer — so the unlock-time A
+  snapshot is KEPT, for `behind` detection + as the preferred baseline). Degrades safely:
+  a frozen never-unlocked mirror → `equal`; an edited unlocked B can NEVER read a false
+  `equal` even with no snapshot. `sync_b_record_backprop()` no longer overwrites the
+  snapshot with null (`lastBackPropAt` is itself a baseline floor now). This **self-heals
+  the stale pre-deploy session** without a re-unlock. Verified by a 10-case unit pass.
   **v0.10.265 — Back B→A is a 5-STATE pill off TWO axes** (superseding the earlier
   one-axis `dirty===ahead`→amber). Axis 1 = on-disk `direction` (server poll).
   Axis 2 = unsaved editor BUFFER — the SAME signal L/A use: `window.edHasUnsavedData()`

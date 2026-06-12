@@ -299,6 +299,74 @@ function sync_b_status_fields(array $state): array
 }
 
 /**
+ * Pure divergence of B vs A from a state array — no I/O, no live fetch. The
+ * single source of truth for the status poll (sync_b_status), the re-freeze
+ * gate (sync_b_refreeze), and — through them — the client pill. "The code is
+ * the same everywhere": one function, so the gate and the indicator can never
+ * disagree.
+ *
+ * The question: has B had author activity since it was last KNOWN in sync with
+ * A? That in-sync moment is the LATEST of three markers, any of which may be
+ * absent:
+ *   - peerSnapshotAt  — A's lastActivityAt captured at unlock (v0.10.272). The
+ *                       only marker that can prove A was ALREADY ahead at unlock,
+ *                       so it alone yields 'behind'.
+ *   - lastBackPropAt  — the last B→A push; A adopted B's content, so it's a
+ *                       sync point.
+ *   - unlockedAt      — but ONLY while actually unlocked: a fresh unlock starts
+ *                       from a freshly-published mirror (B == A), so the unlock
+ *                       instant is a valid in-sync baseline. (Ignored once frozen
+ *                       so a re-locked session with unpushed edits still reads
+ *                       'ahead' rather than being reset to its own unlock time.)
+ *
+ * This is the robustness fix (v0.10.273): the prior code keyed solely on
+ * peerSnapshotAt and force-returned 'equal' whenever it was absent/null —
+ * masking an edited B as "in sync" (the dangerous direction) for a session
+ * unlocked before the snapshot feature shipped, or any unlock where A was
+ * unreachable. With unlockedAt/lastBackPropAt as always-present fallbacks, an
+ * edited unlocked B can never read a false 'equal'. Shared A/B clock (same
+ * Infomaniak host) makes cross-marker comparison sound; if A/B ever split
+ * across servers, fold a clock-delta tolerance in here (one place).
+ *
+ * Safe degradation: a frozen, never-unlocked, never-pushed mirror (no markers
+ * at all) reads 'equal'. 'behind' is reported ONLY from a present snapshot
+ * strictly newer than B's activity — we never fail-closed to 'behind' on a
+ * missing snapshot (the A→B publish guard is the anti-clobber layer, not this).
+ */
+function sync_b_direction_from_state(array $state): string
+{
+    $toTs = function ($v) {
+        if ($v === null || $v === '') return false;
+        $t = strtotime((string) $v);
+        return $t === false ? false : $t;
+    };
+    $localT = $toTs($state['lastActivityAt'] ?? null);
+    if ($localT === false) {
+        return 'equal';   // B never recorded local activity → resting mirror
+    }
+    $snapT = $toTs($state['peerSnapshotAt'] ?? null);   // A's stamp at unlock
+    // A was genuinely ahead at unlock and B hasn't surpassed it yet.
+    if ($snapT !== false && $snapT > $localT) {
+        return 'behind';
+    }
+    $markers = [
+        $snapT,
+        $toTs($state['lastBackPropAt'] ?? null),
+        (($state['frozen'] ?? true) === false) ? $toTs($state['unlockedAt'] ?? null) : false,
+    ];
+    $baseline = false;
+    foreach ($markers as $t) {
+        if ($t !== false && ($baseline === false || $t > $baseline)) {
+            $baseline = $t;
+        }
+    }
+    if ($baseline === false) {
+        return 'equal';   // frozen, never unlocked, never pushed → resting mirror
+    }
+    return $localT > $baseline ? 'ahead' : 'equal';
+}
+
+/**
  * Read B's unlock/freeze status for the editor poll + cross-node reads.
  * Does the lazy auto-lock HOUSEKEEPING: if the window has lapsed while the
  * state still says frozen=false, persist frozen=true + stamp autoLockedAt
@@ -319,26 +387,19 @@ function sync_b_status(): array
     }
     $fields = sync_b_status_fields($state);
 
-    // Divergence vs A — compared against the SNAPSHOT of A's lastActivityAt taken
-    // ONCE at unlock (v0.10.272), NOT a live per-poll fetch. Rationale: B-editing
-    // is a declared fallback and A is not concurrently changed during a B session,
-    // so re-querying A every poll learns nothing — it only burned the dev server's
-    // worker pool on a blocking cURL inside the hot status path (the "can't compare
-    // with A" starvation seen in testing). The snapshot is captured in
-    // sync_b_unlock(), refreshed to local on a successful Push B→A
-    // (sync_b_record_backprop), and cleared on a clean re-freeze. With no snapshot
-    // on record (frozen, never unlocked this cycle) B is the converged published
-    // mirror of A → 'equal'. `dirty` ("B holds edits A does not have") is
-    // direction === 'ahead'. The A→B-publish-while-B-ahead race this used to chase
-    // belongs to Slice 3's publish guard (block at the source), not B's poll.
-    $snapAt = array_key_exists('peerSnapshotAt', $state) ? $state['peerSnapshotAt'] : false;
-    if ($snapAt === false) {
-        $fields['direction'] = 'equal';        // no active baseline ⇒ resting mirror
-    } else {
-        $cmp = sync_direction_between($state['lastActivityAt'] ?? null, $snapAt);
-        $fields['direction'] = $cmp['direction'];
-    }
-    $fields['peerSnapshotAt']      = ($snapAt === false) ? null : $snapAt;
+    // Divergence vs A — computed locally (no live per-poll fetch) by
+    // sync_b_direction_from_state(), the shared source of truth. It keys on a
+    // robust baseline = the LATEST of {A-snapshot from unlock, lastBackPropAt,
+    // unlockedAt-while-unlocked} so an edited B can never read a false 'equal'
+    // even when the unlock-time A snapshot is absent (session predating the
+    // snapshot feature, or A unreachable at unlock — see v0.10.273 note on the
+    // helper). The snapshot is still captured in sync_b_unlock() and advanced on
+    // a Push B→A (sync_b_record_backprop) — it's what enables 'behind' detection
+    // and is preferred when present. `dirty` ("B holds edits A does not have") is
+    // direction === 'ahead'. The A→B-publish-while-B-ahead race belongs to Slice
+    // 3's publish guard (block at the source), not B's poll.
+    $fields['direction']           = sync_b_direction_from_state($state);
+    $fields['peerSnapshotAt']      = $state['peerSnapshotAt'] ?? null;
     $fields['peerSnapshotTakenAt'] = $state['peerSnapshotTakenAt'] ?? null;
     $fields['peerSnapshotFailed']  = !empty($state['peerSnapshotFailed']);  // couldn't reach A at unlock
     $fields['dirty'] = ($fields['direction'] === 'ahead');
@@ -416,9 +477,16 @@ function sync_b_record_backprop(): void
     $state = sync_state_read();
     $state['lastBackPropAt'] = date('c');
     // A adopts B's (source) stamp on a propagate, so B == A now. Advance the
-    // session snapshot to local (v0.10.272) → divergence reads 'equal' again,
-    // and further edits this session correctly re-read as 'ahead'.
-    $state['peerSnapshotAt']     = $state['lastActivityAt'] ?? null;
+    // session snapshot to local so divergence reads 'equal' again and further
+    // edits re-read as 'ahead'. Guard against a NULL lastActivityAt (a push on a
+    // session with no recorded local edit): writing null here used to STRAND the
+    // baseline (the bug behind the v0.10.272 "save → gray" report). lastBackPropAt
+    // set just above is itself a baseline floor in sync_b_direction_from_state, so
+    // the divergence is correct regardless — but we still avoid overwriting a good
+    // snapshot with null.
+    if (!empty($state['lastActivityAt'])) {
+        $state['peerSnapshotAt'] = $state['lastActivityAt'];
+    }
     $state['peerSnapshotFailed'] = false;
     sync_state_write($state);
 }
@@ -446,13 +514,12 @@ function sync_b_refreeze(): array
     }
     $state  = sync_state_read();
     $fields = sync_b_status_fields($state);
-    // Confirmed B-ahead only — compared against the session SNAPSHOT (v0.10.272),
-    // the same baseline the status poll / pill use. No live fetch here either:
-    // a session that never queried A (snapshot null) can't be proven ahead, so we
-    // allow re-freeze (don't fail-closed — re-freeze isn't the anti-clobber layer).
-    $snapAt = array_key_exists('peerSnapshotAt', $state) ? $state['peerSnapshotAt'] : null;
-    $aheadOfA = $snapAt !== null
-        && sync_direction_between($state['lastActivityAt'] ?? null, $snapAt)['direction'] === 'ahead';
+    // Confirmed B-ahead only — via the SAME robust baseline the status poll / pill
+    // use (sync_b_direction_from_state), so the client re-freeze gate and this
+    // server gate can never disagree. No live fetch here either. 'equal'/'behind'
+    // both ALLOW re-freeze (re-freeze isn't the anti-clobber layer — the A→B
+    // publish guard is — and relocking only shrinks B's editable surface).
+    $aheadOfA = sync_b_direction_from_state($state) === 'ahead';
     if ($aheadOfA) {
         return [
             'ok'    => false,
