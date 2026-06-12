@@ -266,7 +266,6 @@ function sync_ping_peer(string $peerUrl, string $secret, string $role, string $a
     $resp = curl_exec($ch);
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
-    curl_close($ch);
     $ok = $code === 200 && $resp !== false;
     // Diagnostic — surfaces failures that are otherwise invisible due
     // to the fire-and-forget contract. Goes to PHP error log; for
@@ -518,7 +517,6 @@ function sync_fetch_peer_state(string $role): array
     $resp = curl_exec($ch);
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
-    curl_close($ch);
     if ($code !== 200 || $resp === false) {
         return ['ok' => false, 'error' => $err !== '' ? $err : ('HTTP ' . $code), 'code' => $code];
     }
@@ -1117,7 +1115,6 @@ function sync_pull_from_peer(string $fromRole, bool $dryRun = false): array
     $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $ctype = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
     $err   = curl_error($ch);
-    curl_close($ch);
 
     if ($resp === false) {
         return ['ok' => false, 'code' => $code,
@@ -1324,7 +1321,6 @@ function sync_propagate_to_peer(string $toRole, bool $dryRun = false): array
     $resp = curl_exec($ch);
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
-    curl_close($ch);
 
     if ($resp === false) {
         return ['ok' => false, 'code' => $code,
@@ -1401,7 +1397,6 @@ function sync_request_relay_push(string $viaRole, string $toRole, bool $dryRun =
     $resp = curl_exec($ch);
     $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
-    curl_close($ch);
 
     if ($resp === false) {
         return ['ok' => false, 'code' => $code,
