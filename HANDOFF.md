@@ -300,10 +300,15 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   publish guard / `pendingBackProp` is), and relocking shrinks B's public-editable
   surface — the safe direction. **Why not fail-closed on unknown:** would double-guard
   the same risk at two layers with inconsistent signals; the real backstop lives on
-  A's publish path. **Carried follow-up:** `pendingBackProp` (A's S3 publish guard)
-  still has the same look-only false-positive — make it divergence-based too in Slice
-  3. The server `backPropDoneSinceUnlock` field stays (S3 reads it); only the *client
-  re-freeze gate* stopped reading it. (The earlier "compact the crowded bottom-right
+  A's publish path. **v0.10.271 — the SERVER re-freeze route (`sync_b_refreeze`) now
+  matches:** it was still 409-ing on `pendingBackProp` (true after ANY unlock), so once
+  the client gate stopped blocking (v0.10.268) a not-ahead B showed an enabled Re-freeze
+  button the server then rejected — client says go, server says no. `sync_b_refreeze`
+  now computes direction itself (fetch A + `sync_direction_between`) and refuses ONLY on
+  confirmed `'ahead'`. **Carried follow-up (still S3):** `pendingBackProp` is STILL the
+  signal for A's A→B *publish* guard and still has the look-only false-positive there —
+  migrate that to divergence in Slice 3. The field stays emitted; only the re-freeze
+  route (client + server) stopped gating on it. (The earlier "compact the crowded bottom-right
   affordances" deferral is DONE — see the v0.10.267 horizontal bar above.)
   **v0.10.264 poll fix:** while
   UNLOCKED the pill re-polls every ~5s (safety net + catches A-side Publishes); 30s
