@@ -532,6 +532,104 @@ return [
     ],
 
     /*
+     * GET dev/email-test[?to=<addr>] — prove the email channel works on THIS
+     * node before 2FA is made mandatory (2FA's challenge + password-reset
+     * fallback ride on email; a node that can't send mail is a lockout waiting
+     * to happen). Kirby ships NO "send test" affordance, so this is it.
+     *
+     * Sends one plain-text message to the logged-in author's address (the
+     * inbox that will receive 2FA codes), or to ?to= for an ad-hoc check.
+     *
+     * Auth: requires a Panel session. The host-scoped 403 gate already blocks
+     * anonymous /dev/* on A and B, but L carries no such gate — so we re-check
+     * kirby()->user() here too (defense-in-depth; a test mailer must never be
+     * anonymously triggerable).
+     *
+     * Transport: no `email` option block is configured yet, so this exercises
+     * Kirby's DEFAULT transport — PHP mail(). A green result means PHP ACCEPTED
+     * the message for delivery, NOT that it landed: the real test is the inbox
+     * (check spam). If mail() doesn't deliver on Infomaniak, the next step is an
+     * authenticated-SMTP sidecar (email.secret.php — gitignored, like
+     * sync.secret.php, since host configs are tracked and must not hold creds).
+     */
+    [
+      'pattern' => 'dev/email-test',
+      'method'  => 'GET',
+      'action'  => function () {
+        $kirby = kirby();
+        if ($kirby->user() === null) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'forbidden']),
+            'application/json', 403
+          );
+        }
+        $sync = option('sync');
+        $role = is_array($sync) && !empty($sync['role']) ? (string)$sync['role'] : 'L';
+
+        // Recipient: the author's own address by default; ?to= overrides.
+        // Validate up front so a malformed value fails here, not deep in the
+        // mailer with an opaque error.
+        $to = trim((string) (get('to') ?? ''));
+        if ($to === '') {
+          $to = (string) $kirby->user()->email();
+        }
+        if (filter_var($to, FILTER_VALIDATE_EMAIL) === false) {
+          return new Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'Invalid recipient address: ' . $to], JSON_UNESCAPED_SLASHES),
+            'application/json', 400
+          );
+        }
+
+        // From must sit on the sending domain or SPF / the host MTA reject it.
+        $host      = parse_url($kirby->url(), PHP_URL_HOST) ?: 'localhost';
+        $from      = 'noreply@' . $host;
+        $transport = option('email.transport.type', 'mail()');
+        $now       = date('c');
+
+        try {
+          $kirby->email([
+            'from'    => $from,
+            'to'      => $to,
+            'subject' => 'Kirby email test — ' . $role . ' (' . $host . ')',
+            'body'    => "Kirby email-transport test.\n\n"
+                       . 'Node role: '  . $role . "\n"
+                       . 'Host: '       . $host . "\n"
+                       . 'Transport: '  . $transport . "\n"
+                       . 'App version: '. (option('version') ?? '?') . "\n"
+                       . 'Sent: '       . $now . "\n\n"
+                       . "If this reached your inbox, the email channel works — 2FA "
+                       . "codes and password resets will be deliverable to this address.\n",
+          ]);
+        } catch (\Throwable $e) {
+          return new Kirby\Http\Response(
+            json_encode([
+              'ok'        => false,
+              'role'      => $role,
+              'transport' => $transport,
+              'from'      => $from,
+              'to'        => $to,
+              'error'     => $e->getMessage(),
+            ], JSON_UNESCAPED_SLASHES),
+            'application/json', 502
+          );
+        }
+
+        return new Kirby\Http\Response(
+          json_encode([
+            'ok'        => true,
+            'role'      => $role,
+            'transport' => $transport,
+            'from'      => $from,
+            'to'        => $to,
+            'sentAt'    => $now,
+            'note'      => 'Accepted for delivery — now confirm it ARRIVES in the inbox (check spam). mail()=true does not guarantee delivery.',
+          ], JSON_UNESCAPED_SLASHES),
+          'application/json'
+        );
+      },
+    ],
+
+    /*
      * Snapshot library — local backup/restore of content/.
      *
      *   GET  dev/draw/library/list   → { ok, schemaVersion, snapshots: [...] }
