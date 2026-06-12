@@ -1619,10 +1619,16 @@ HTML;
 
         $hasLines  = isset($body['lines'])  && is_array($body['lines']);
         $hasLayout = isset($body['layout']) && is_array($body['layout']);
+        // v0.10.247 ([conv] 3065): typography (site-wide element styles) now
+        // rides this same atomic POST as a third optional section — no separate
+        // "Save styles" request. Written via deco_save_typography() to
+        // content/_shared/typography-tokens.json, the same site-wide _shared
+        // pattern as the palette that the lines section already writes here.
+        $hasStyles = isset($body['styles']) && is_array($body['styles']);
 
-        if (!$hasLines && !$hasLayout) {
+        if (!$hasLines && !$hasLayout && !$hasStyles) {
           return new Kirby\Http\Response(
-            json_encode(['ok' => false, 'error' => 'Nothing to save: provide a lines and/or layout section.']),
+            json_encode(['ok' => false, 'error' => 'Nothing to save: provide a lines, layout and/or styles section.']),
             'application/json',
             400
           );
@@ -1647,6 +1653,22 @@ HTML;
           $yb['page'] = $page;          // inject shared target page
           $res = deco_save_layout($yb);
           $out['layout'] = $res['ok'] ? ['ok' => true] : ['ok' => false, 'error' => $res['error']];
+          if (!$res['ok']) {
+            $out['ok'] = false;
+            if ($code === 200) $code = $res['code'] ?? 400;  // first failure wins
+          }
+        }
+
+        // Styles section is site-wide — no `page` injection (the helper
+        // ignores it, writing content/_shared/typography-tokens.json). Echo
+        // back the server-normalised tokens so the client adopts the clamped
+        // set as its new on-disk baseline, exactly as the standalone
+        // /dev/draw/typography POST route did.
+        if ($hasStyles) {
+          $res = deco_save_typography($body['styles']);
+          $out['styles'] = $res['ok']
+            ? ['ok' => true, 'tokens' => $res['tokens']]
+            : ['ok' => false, 'error' => $res['error']];
           if (!$res['ok']) {
             $out['ok'] = false;
             if ($code === 200) $code = $res['code'] ?? 400;  // first failure wins

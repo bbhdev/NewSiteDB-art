@@ -254,6 +254,121 @@ function deco_load_typography(string $contentDir): array
 }
 
 /**
+ * Element-styles (typography) save — extracted (v0.10.247, [conv] 3065) from the
+ * former inline dev/draw/typography POST so the unified save seam
+ * (dev/editor/save) can write site-wide typography in the SAME atomic request as
+ * lines+layout+palette — exactly as deco_save_lines() already writes the
+ * site-wide palette through that seam. Both the legacy route and the seam
+ * delegate here, so there is ONE validator + writer.
+ *
+ * $body: { tokens: [ {id,name,family,sizePx,weight,lineHeight,letterSpacingPx,
+ *          italic,color,isDefault}, … ] }. Writes content/_shared/typography-
+ *          tokens.json atomically (tmp + rename).
+ *
+ * Validation is format-only + numeric CLAMPS, matching deco_typography_css()'s
+ * sanitiser (so a hand-edited/buggy POST can't inject CSS), plus the one-layer
+ * totality invariants: ≥1 token, exactly one default, and that default carries a
+ * concrete colour (it is the root fallback and cannot itself inherit).
+ *
+ * Returns ['ok'=>true,'tokens'=>$clean,'count'=>N] on success, or
+ *         ['ok'=>false,'error'=>…,'code'=>4xx/5xx] — the same array shape
+ *         deco_save_lines()/deco_save_layout() use, so the seam routes it
+ *         uniformly.
+ */
+function deco_save_typography(array $body): array
+{
+    $raw = isset($body['tokens']) && is_array($body['tokens']) ? $body['tokens'] : null;
+    if ($raw === null) {
+        return ['ok' => false, 'error' => 'Missing or invalid "tokens" array in body.', 'code' => 400];
+    }
+
+    $clamp = function ($v, $lo, $hi, $def) {
+        if (!is_numeric($v)) return $def;
+        $v = (float) $v;
+        return max($lo, min($hi, $v));
+    };
+    $clean   = [];
+    $seenIds = [];
+    foreach ($raw as $t) {
+        if (!is_array($t)) {
+            return ['ok' => false, 'error' => 'Each token must be an object.', 'code' => 400];
+        }
+        $id = isset($t['id']) ? (string) $t['id'] : '';
+        if (!preg_match('/^[a-z0-9_-]{1,64}$/', $id)) {
+            return ['ok' => false, 'error' => 'Invalid token id: "' . $id . '" (lowercase a-z, 0-9, _ or -, 1-64 chars).', 'code' => 400];
+        }
+        if (isset($seenIds[$id])) {
+            return ['ok' => false, 'error' => 'Duplicate token id: "' . $id . '".', 'code' => 400];
+        }
+        $seenIds[$id] = true;
+
+        $name = isset($t['name']) ? trim((string) $t['name']) : '';
+        if ($name === '' || mb_strlen($name) > 64 || !preg_match("/^[\p{L}\p{N} _.,'()\[\]\\-]+$/u", $name)) {
+            return ['ok' => false, 'error' => 'Invalid token name for "' . $id . '".', 'code' => 400];
+        }
+
+        $family = isset($t['family']) ? trim((string) $t['family']) : '';
+        if ($family !== '' && !preg_match("/^[A-Za-z0-9 '_-]{1,64}$/", $family)) {
+            return ['ok' => false, 'error' => 'Invalid font family for "' . $id . '".', 'code' => 400];
+        }
+
+        // Colour: optional palette-ID reference. Empty/absent → null (inherit).
+        // Format-only check; membership NOT enforced — a dangling ref degrades
+        // gracefully (no colour emitted → inherit), like a dangling typographyId.
+        $colorRaw = isset($t['color']) ? trim((string) $t['color']) : '';
+        if ($colorRaw !== '' && !preg_match('/^[a-z0-9_-]{1,64}$/', $colorRaw)) {
+            return ['ok' => false, 'error' => 'Invalid colour ref for "' . $id . '" (palette id: lowercase a-z, 0-9, _ or -).', 'code' => 400];
+        }
+
+        $clean[] = [
+            'id'              => $id,
+            'name'            => $name,
+            'family'          => $family,
+            'sizePx'          => $clamp($t['sizePx']          ?? null, 1.0,   400.0, 16.0),
+            'weight'          => (int) $clamp($t['weight']     ?? null, 100,   900,   400),
+            'lineHeight'      => $clamp($t['lineHeight']       ?? null, 0.5,   4.0,   1.4),
+            'letterSpacingPx' => $clamp($t['letterSpacingPx']  ?? null, -20.0, 50.0,  0.0),
+            'italic'          => !empty($t['italic']),
+            'color'           => $colorRaw !== '' ? $colorRaw : null,
+            'isDefault'       => !empty($t['isDefault']),
+        ];
+    }
+
+    // Totality (A2): the one-layer model forbids an "undefined style".
+    if (count($clean) === 0) {
+        return ['ok' => false, 'error' => 'At least one element style is required (there is no “undefined style”).', 'code' => 400];
+    }
+    $defaults = array_values(array_filter($clean, function ($t) { return $t['isDefault']; }));
+    if (count($defaults) === 0) {
+        return ['ok' => false, 'error' => 'One element style must be marked as the default.', 'code' => 400];
+    }
+    if (count($defaults) > 1) {
+        return ['ok' => false, 'error' => 'Only one element style can be the default.', 'code' => 400];
+    }
+    if ($defaults[0]['color'] === null) {
+        return ['ok' => false, 'error' => 'The default style “' . $defaults[0]['name'] . '” must have a colour (it is the root fallback and cannot inherit).', 'code' => 400];
+    }
+
+    $sharedDir  = kirby()->root('content') . '/_shared';
+    $tokensPath = $sharedDir . '/typography-tokens.json';
+    if (!is_dir($sharedDir) && !mkdir($sharedDir, 0755, true)) {
+        return ['ok' => false, 'error' => 'Could not create _shared directory.', 'code' => 500];
+    }
+    $payload = [
+        'schemaVersion' => 1,
+        'tokens'        => $clean,
+        'savedAt'       => date('c'),
+        'count'         => count($clean),
+    ];
+    $tmpPath = $tokensPath . '.tmp';
+    $bytes   = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+    if (@file_put_contents($tmpPath, $bytes) === false || !@rename($tmpPath, $tokensPath)) {
+        return ['ok' => false, 'error' => 'Failed to write typography-tokens.json.', 'code' => 500];
+    }
+    return ['ok' => true, 'tokens' => $clean, 'count' => count($clean)];
+}
+
+/**
  * Emit one CSS rule per token — `.ty-<id> { … }` — as a plain string
  * (no <style> wrapper; the caller wraps it). Both the editor template
  * and the runtime template call this with the same token list, so a
