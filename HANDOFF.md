@@ -456,6 +456,27 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   propagate-location bug, not a dirty gap; see the unified-dirty memory's
   2026-06-11 correction).
 - **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
+  · ▶ **6020 snippet rect-block — a general "snippet" placement primitive**
+  (registered 2026-06-12, not started). **Concept:** a *snippet* is a small,
+  self-contained affordance designed to be dropped anywhere the design requires —
+  the round button (`c-button.php`), the elliptical button (`e-button.php`), the
+  `published-date.php` badge, and more to come. The Deco-appropriate structure
+  for placing them is a **new rect-block type: `snippet`.** Authoring a
+  snippet-rect-block opens a **picker listing all registered snippets**; the
+  chosen one renders at that rect-block's position. **Work involved:** (a) define
+  the `snippet` rect-block type in the Deco block model + its editor authoring UI
+  (the picker); (b) build/maintain a **registry enumerating the existing
+  snippets** in `site/snippets/` that are *placeable* (excludes structural
+  partials like `header`/`footer`/`lines-layer` — needs a placeable-vs-structural
+  distinction, e.g. a manifest or a naming/marker convention); (c) render the
+  selected snippet from the rect-block runtime. **Note on `published-date`
+  (deliberate, not a contradiction):** it is wired into `footer.php` today AND
+  belongs there — but the snippet *principle* is general and SUBSUMES it, so the
+  pub-date badge is also one of the registry's listed snippets. "Lives in the
+  footer by default" and "is a placeable snippet" coexist. **Why parked here, not
+  built now:** raised mid-2090 to avoid losing the idea; building it now would
+  zig-zag the sync epic. Pick up under the 6000 editor pillar after the sync
+  epic's 2095 review.
 - **`[cleanup]` 7000** — ▶ 7010 media/ cache prune (low urgency, near project end).
 - **Forward epics, registered not started** — 8010 `[backgrounds]` · **9000 `[ui]`**
   (starts by refining editor UI, then studies tablet/phone deltas): 9010 general
