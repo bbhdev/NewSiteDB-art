@@ -269,6 +269,12 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   **lock-mechanism / safe-unlock discussion** (next): decide whether the gate should
   read `dirty` (== direction) so "nothing changed ⇒ re-freeze freely". **Deferred
   [ui]:** compact the crowded bottom-right affordances in the 9000 [ui] band.
+  **v0.10.264 poll fix:** the B-pill polled `/sync/b-status` only every 30s and
+  wasn't nudged by a save, so amber Back B→A could lag up to 30s after a save.
+  Now polls every ~5s while UNLOCKED (counter in `tick()`); 30s baseline kept for
+  the frozen resting pill. (Reminder of the layering that confused the bug report:
+  amber tracks SAVED divergence from A, NOT the unsaved editor buffer the save
+  button reflects — amber lights *after* Save, not while the save button is up.)
   ▶ **Lock-mechanism discussion** (gate-on-dirty? unlock safety) — NEXT, before S3. ·
   ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
   pendingBackProp/dirty). · 2090 "Published: <date>" snippet · 2095 holistic protocol
@@ -334,8 +340,13 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   origin; reworking it *is* UI work, not a [conv] slice) · **9030 rename "Lines"
   mode → "Draw"** (the current name is an artifact of the initial path; "Draw" is
   its real semantics — do it as part of the UI pass so labels/ids/docs move
-  together). · 10010 `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback
+  together). · **9040 icon audit/refresh** (self-hosted icon library; first
+  concrete nit logged: the B-pill *unlocked* glyph reads as a *closed* lock —
+  needs a clearly-open-lock icon; touch-target sizing per global icon rule) ·
+  10010 `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback
   edit on B) · 13010 `[behaviors]` idea backlog.
+  - **9010 nit logged:** B-pill header (lock + countdown) is right-aligned while
+    the action pills below are centered — align the header to match the pills.
 
 Notable landings since the snapshot below: full sync layer 2010–2050; derived-dirty
 B for lines/layout + styles wiring; the **image-library-unlisted fix** (v0.10.240:

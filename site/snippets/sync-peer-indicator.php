@@ -533,6 +533,7 @@ if ($role === 'B'):
       .then(function(j){ if (j) adopt(j); })
       .catch(function(){ /* leave last-known state */ });
   }
+  var pollAccum = 0;
   function tick(){
     if (st && !st.frozen && localSecs != null){
       localSecs = Math.max(0, localSecs - 1);
@@ -543,6 +544,15 @@ if ($role === 'B'):
         warn.textContent = 'B re-locks in ' + fmtLeft(localSecs) + ' — Prolong to keep editing.';
       }
       if (localSecs === 0) poll();   // window lapsed → confirm the re-lock with the server
+    }
+    // While UNLOCKED, refresh divergence every ~5s so Back B→A turns amber within
+    // a few seconds of a save (the 30s baseline below is plenty for the frozen
+    // resting pill). Back B→A tracks SAVED divergence from A — not the unsaved
+    // editor buffer — so it lights AFTER a save, not while the save button is up.
+    if (st && !st.frozen){
+      if (++pollAccum >= 5){ pollAccum = 0; poll(); }
+    } else {
+      pollAccum = 0;
     }
   }
   setInterval(tick, 1000);
