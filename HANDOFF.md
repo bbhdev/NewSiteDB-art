@@ -218,8 +218,14 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   overlay (`.pe-overlay` z:2147483647) was occluding the push/pull modal — fixed by
   `isolation: isolate` on `.pe-canvas-surface`, confining that ceiling to the canvas
   stacking context (above rects, below app modals at 10000+) rather than raising
-  modal z. · ▶ 3070 library repositioning ·
-  3080 library propagation · 3090 "All" mode.
+  modal z. · ▶ ~~3070 library repositioning~~ **RECLASSIFIED → 9020 (folded into
+  the [ui] rework, 2026-06-12)** — analysis showed the snapshot/"library" UI is
+  only a *symptom*: the whole project's initial path turned around the **draw**
+  section (the mode still *named* "Lines" is semantically "Draw"; rename pending in
+  9000), so 3070 is structure-behind-the-UI and can't be sliced apart from the UI
+  rework. · ▶ 3080 library propagation · 3090 "All" mode (both stay in [conv] for
+  now; revisit whether they also belong under the [ui]/draw-structure rework once
+  9020 scopes it).
 - **`[workshop]` 4000** — ✅ 4010/4011/4020/4030/4050/4060 (all landed).
 - **`[dirty]` 5000** — ✅ **EPIC COMPLETE** (user-validated v0.10.246): 5010 lines
   (B) · 5020 layout (B) · 5030 styles (3a wiring + **3b derived-dirty, v0.10.245**
@@ -231,10 +237,15 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   2026-06-11 correction).
 - **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
 - **`[cleanup]` 7000** — ▶ 7010 media/ cache prune (low urgency, near project end).
-- **Forward epics, registered not started** — 8010 `[backgrounds]` · 9010 `[ui]`
-  (starts by refining editor UI, then studies tablet/phone deltas) · 10010
-  `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback edit on B) ·
-  13010 `[behaviors]` idea backlog.
+- **Forward epics, registered not started** — 8010 `[backgrounds]` · **9000 `[ui]`**
+  (starts by refining editor UI, then studies tablet/phone deltas): 9010 general
+  editor-UI refinement · **9020 draw/library structure rework** (absorbs former
+  3070 — the snapshot/"library" UI is a symptom of the project's draw-centric
+  origin; reworking it *is* UI work, not a [conv] slice) · **9030 rename "Lines"
+  mode → "Draw"** (the current name is an artifact of the initial path; "Draw" is
+  its real semantics — do it as part of the UI pass so labels/ids/docs move
+  together). · 10010 `[tablet]` · 11010 `[phone]` · 12010 `[bedit]` (safe fallback
+  edit on B) · 13010 `[behaviors]` idea backlog.
 
 Notable landings since the snapshot below: full sync layer 2010–2050; derived-dirty
 B for lines/layout + styles wiring; the **image-library-unlisted fix** (v0.10.240:
