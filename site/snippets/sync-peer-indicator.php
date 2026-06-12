@@ -301,11 +301,13 @@ endif;
 if ($role === 'B'):
 ?>
 <style>
-  /* Horizontal bar glued to the bottom edge (survives editor scroll). Keeps the
-     calm dark bg + outline; only the layout flipped column→row to stop eating
-     vertical space. Order L→R: lock+timer · hint · Back B→A · Prolong · Re-freeze. */
+  /* Horizontal bar glued to the bottom-right corner (survives editor scroll).
+     Flush right rather than centred so it reads as a status strip, not a
+     modal banner — less intrusive over the canvas. Keeps the calm dark bg +
+     outline; layout is row not column to stop eating vertical space.
+     Order L→R: lock+timer · hint · Back B→A · Prolong · Re-freeze. */
   #sync-b-pill{
-    position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:9999;
+    position:fixed; right:14px; bottom:0; z-index:9999;
     font:600 12px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;
     background:#2a2a2a; color:#fff; border:1px solid #3d3d3d; border-bottom:none;
     border-radius:10px 10px 0 0; padding:7px 14px; box-sizing:border-box;
@@ -533,7 +535,6 @@ if ($role === 'B'):
     if (!st){ setHead('🔒', 'B'); return; }
 
     var diverged = !!st.dirty;                     // on-disk: B is ahead of A (direction==='ahead')
-    var bpDone   = !!st.backPropDoneSinceUnlock;    // server re-freeze gate (unchanged)
     var v        = backVisual();
 
     if (st.frozen && !diverged){
@@ -560,12 +561,17 @@ if ($role === 'B'):
     setHint(v.hint, v.hc);
     acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));   // FIRST action (encourage pushing to A)
     acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
-    // Re-freeze gate is UNCHANGED for now (server pendingBackProp); struck-through
-    // while inhibited so the block reads as deliberate, not broken. Gate semantics
-    // (should this key on divergence instead?) are the pending lock-mechanism talk.
+    // Re-freeze gate now keys on the DIVERGENCE axis (direction==='ahead'), the
+    // same signal the Back B→A pill reads — "the code is the same everywhere".
+    // It blocks ONLY on a confirmed B-ahead (you'd relock unsent edits that the
+    // next A→B Publish would clobber). equal / behind / unknown all allow it:
+    // re-freeze isn't the anti-clobber layer (A's publish guard is), so on an
+    // unreachable A we don't fail-closed — relocking shrinks B's public-editable
+    // surface, the safe direction. Struck-through while inhibited so the block
+    // reads as deliberate, not broken.
     var rf = mkBtn('Re-freeze', 'sbp-danger sbp-refreeze', doRefreeze);
-    rf.disabled = !bpDone;
-    rf.title = bpDone ? 'Re-freeze B' : 'Back B→A first — then B can re-freeze';
+    rf.disabled = diverged;
+    rf.title = diverged ? 'Back B→A first — then B can re-freeze' : 'Re-freeze B';
     acts.appendChild(rf);
   }
   function setHead(icon, text){

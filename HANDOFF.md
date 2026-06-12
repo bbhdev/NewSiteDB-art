@@ -247,8 +247,10 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   edit"). Unlocking opens a modal with **preset duration chips (1h/2h/4h, default
   2h)** — presets are safe because the author can Prolong — and a **strong amber hint
   ("Back B→A before re-freezing")**. **v0.10.267 — the pill is now a HORIZONTAL BAR
-  glued to the bottom edge** (`left:50%`/`translateX(-50%)`/`bottom:0`), not a
-  flush-right stacked column — the column + detail text was too vertically greedy.
+  glued to the bottom edge**, not a flush-right stacked column — the column + detail
+  text was too vertically greedy. **v0.10.268 — flush-RIGHT** (`right:14px;bottom:0`),
+  not centred (`left:50%`/`translateX(-50%)`), so it reads as a status strip rather
+  than a modal banner — less intrusive over the canvas.
   Same calm-dark bg + outline (amber when unlocked). Order L→R: **lock+timer · hint ·
   Back B→A · ＋Prolong · Re-freeze**. The hint is one inline slot (the 5-state Back
   B→A line; in frozen-dirty it becomes the red danger line). The timeout DETAIL text
@@ -281,20 +283,30 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   and frozen-dirty branches. Unreachable A (`direction:'unknown'`) → gray pill, hint
   "A unreachable — can't compare" (won't false-claim "in sync"). **Re-freeze is
   struck-through (line-through, not greyed) while inhibited** to read as deliberate.
-  **GATE UNCHANGED:** re-freeze *enable* still keys on the server
-  `pendingBackProp`/`backPropDoneSinceUnlock` (409 gate from S2a) — NOT on the
-  divergence axis. So a freshly-unlocked-unedited B shows a gray "in sync" Back B→A
-  but a struck-through Re-freeze (server forces a back-prop after any unlock). That
-  transient mismatch is INTENTIONALLY deferred to the **lock-mechanism / safe-unlock
-  discussion** (next): decide whether the gate should read the divergence axis so
-  "nothing changed ⇒ re-freeze freely". (The earlier "compact the crowded
-  bottom-right affordances" deferral is DONE — see the v0.10.267 horizontal bar
-  above.) **v0.10.264 poll fix:** while
+  **GATE — v0.10.268, RESOLVED in the lock-mechanism discussion:** re-freeze *enable*
+  now keys on the **divergence axis** (`diverged = direction==='ahead'`), the SAME
+  signal the Back B→A pill reads — "the code is the same everywhere". `rf.disabled =
+  diverged` (was `!backPropDoneSinceUnlock`). It blocks ONLY on a confirmed B-ahead
+  (relocking would strand unsent edits the next A→B Publish clobbers). **equal /
+  behind / unknown all ALLOW it** — so freshly-unlocked-unedited B re-freezes freely
+  (kills the old false-positive where look-only forced a pointless back-prop), and an
+  unreachable A does NOT fail-closed: re-freeze isn't the anti-clobber layer (A's
+  publish guard / `pendingBackProp` is), and relocking shrinks B's public-editable
+  surface — the safe direction. **Why not fail-closed on unknown:** would double-guard
+  the same risk at two layers with inconsistent signals; the real backstop lives on
+  A's publish path. **Carried follow-up:** `pendingBackProp` (A's S3 publish guard)
+  still has the same look-only false-positive — make it divergence-based too in Slice
+  3. The server `backPropDoneSinceUnlock` field stays (S3 reads it); only the *client
+  re-freeze gate* stopped reading it. (The earlier "compact the crowded bottom-right
+  affordances" deferral is DONE — see the v0.10.267 horizontal bar above.)
+  **v0.10.264 poll fix:** while
   UNLOCKED the pill re-polls every ~5s (safety net + catches A-side Publishes); 30s
   baseline kept for the frozen resting pill.
-  ▶ **Lock-mechanism discussion** (gate-on-dirty? unlock safety) — NEXT, before S3. ·
+  ✓ **Lock-mechanism discussion** — DONE (v0.10.268): re-freeze gate keys on divergence,
+  allow-on-unknown; details in the GATE block above. ·
   ▶ **Slice 3** (A/L block A→B publish + banner while B unlocked, via
-  pendingBackProp/dirty). · 2090 "Published: <date>" snippet · 2095 holistic protocol
+  pendingBackProp/dirty — and migrate pendingBackProp off the look-only false-positive
+  to divergence, per the carried follow-up). · 2090 "Published: <date>" snippet · 2095 holistic protocol
   review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
