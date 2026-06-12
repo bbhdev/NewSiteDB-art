@@ -388,8 +388,10 @@ if ($role === 'B'):
   .sb-actions button{ min-height:40px; padding:0 14px; border-radius:7px; cursor:pointer;
     font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
     background:#2c2c2c; color:#ddd; border:1px solid #3d3d3d; }
-  .sb-actions button.sb-go{ background:#3a3212; border-color:#6a5a1f; color:#ffe08a; }
-  .sb-actions button.sb-go:hover{ background:#463c16; }
+  /* Full-amber confirm, matching L/A's .spm-confirm — the primary action in
+     every sync dialog reads the same across nodes. */
+  .sb-actions button.sb-go{ background:#f5c518; border-color:#f5c518; color:#1c1c1c; }
+  .sb-actions button.sb-go:hover{ background:#ffd23b; border-color:#ffd23b; }
   .sb-actions button:disabled{ opacity:.5; cursor:default; }
 </style>
 
