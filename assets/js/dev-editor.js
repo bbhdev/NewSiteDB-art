@@ -1321,21 +1321,22 @@
   let _dirty = false;
   let _saving = false;
   function reflectSaveButton() {
-    // v0.10.248 ([conv] 3065): the shared header Save button now also lights for
-    // dirty typography (Styles mode no longer has its own "Save styles" button —
-    // one Save writes everything). We read the styles participant's dirty() off
-    // the save bus rather than the `typographyDirty` binding directly: this fn is
-    // first called at boot, BEFORE `let typographyDirty` initialises, so a direct
-    // reference would throw (TDZ). The participant is registered later still, so
-    // by the time it exists typographyDirty is safely initialised; until then the
-    // guard yields false. (Layout drives this same button from its own scope.)
-    let stylesDirty = false;
+    // The shared header #save-btn is the SAME button every mode uses, so it must
+    // reflect the UNION of every save participant's dirtiness (lines + layout +
+    // styles), not just this scope's. Showing it grey while ANY mode has unsaved
+    // work is the app telling the user a falsehood ("nothing to save") — and the
+    // downstream cost is a push that silently drops that work. window.edHasUnsaved
+    // Data() (Section 3) IS that union — the same function the sync push dialog
+    // trusts — so the button and the push warning can never disagree. We OR it
+    // with local `_dirty` for the boot window before the coordinator/participants
+    // exist (then edHasUnsavedData is absent and the guard makes it a no-op).
+    // (Layout's syncSaveButton mirrors this; v0.10.249, [conv] 3065 follow-up.)
+    let _anyDirty = _dirty;
     try {
-      const _b = window.__edSaveBus;
-      const _sp = _b && _b.participants && _b.participants.styles;
-      if (_sp && typeof _sp.dirty === 'function') stylesDirty = !!_sp.dirty();
+      if (typeof window.edHasUnsavedData === 'function' && window.edHasUnsavedData()) {
+        _anyDirty = true;
+      }
     } catch (e) {}
-    const _anyDirty = _dirty || stylesDirty;
     if (saveBtn) {
       saveBtn.disabled = _saving || !_anyDirty;
       saveBtn.classList.toggle('is-dirty', _anyDirty && !_saving);
@@ -19543,10 +19544,22 @@
   function markDirty()  { recomputeDirty();             syncSaveButton(); writeStatus(); }
   function markClean()  { dirty = false; captureSavedBaseline(); syncSaveButton(); writeStatus(); }
   function syncSaveButton() {
+    // Union dirtiness — see lines' reflectSaveButton (v0.10.249, [conv] 3065
+    // follow-up). The shared #save-btn must light if lines OR layout OR styles
+    // has unsaved work; reflecting only layout's `dirty` here meant that, in
+    // Layout mode, dirty typography (or unsaved lines) showed a grey button —
+    // a "nothing to save" lie. OR local `dirty` for the pre-coordinator boot
+    // window where edHasUnsavedData() isn't defined yet.
+    let anyDirty = dirty;
+    try {
+      if (typeof window.edHasUnsavedData === 'function' && window.edHasUnsavedData()) {
+        anyDirty = true;
+      }
+    } catch (e) {}
     const btn = document.getElementById('save-btn');
     if (btn) {
-      btn.disabled = saving || !dirty;
-      btn.classList.toggle('is-dirty', dirty && !saving);
+      btn.disabled = saving || !anyDirty;
+      btn.classList.toggle('is-dirty', anyDirty && !saving);
     }
     // v0.10.235: feed the layout dirty axis to the sync pill (see lines'
     // reflectSaveButton). Guarded — global defined later in Section 3.

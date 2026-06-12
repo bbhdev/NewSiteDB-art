@@ -3872,6 +3872,19 @@ button.pe-save.is-flash {
 
 .pe-canvas-surface {
   position: relative;
+  /* v0.10.249: form a stacking context for the whole canvas. The selection
+     overlay (.pe-overlay) parks at the 32-bit z ceiling so it beats any rect
+     no matter how author-Z evolves — but a `position:relative` surface with
+     z-index:auto is NOT a stacking context, so that ceiling escaped into the
+     ROOT context and painted OVER app-level modals (the push/pull confirm at
+     z:10001, the nuclear overlay at 10000). `isolation: isolate` confines the
+     ceiling to THIS subtree: the overlay still wins over every rect, but the
+     entire canvas — content + chrome — now stacks as one unit BELOW the app-UI
+     / dialog tier (pills 9999, modals 10000+). So a modal always occludes the
+     selection handles, while the in-canvas "chrome beats rects" guarantee is
+     untouched. (This is the holistic dialog-vs-canvas-Z fix, not a per-modal
+     patch.) */
+  isolation: isolate;
   background: #fafafa;
   color: #222;
   margin: 0 auto;
@@ -3950,7 +3963,12 @@ button.pe-save.is-flash {
      chrome must win over any rect no matter how the stacking evolves (rects
      use DOM order + a 999 manipulation lift today, but author-managed Z could
      grow that later); parking the overlay at the ceiling makes it unconditional
-     rather than a magic number a future rect z-index could overtake. */
+     rather than a magic number a future rect z-index could overtake.
+     NB: this ceiling is CONFINED to .pe-canvas-surface's stacking context
+     (isolation:isolate, v0.10.249) — so it beats rects but NOT app-level
+     modals/pills (z 9999+), which live in the root context above the canvas.
+     Do not "fix" a modal-occlusion bug by raising app z-index past this; the
+     surface isolation is what keeps the tiers ordered. */
   z-index: 2147483647;
 }
 .pe-overlay-box {
