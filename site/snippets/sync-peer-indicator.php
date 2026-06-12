@@ -81,8 +81,211 @@ if ($role === 'A'):
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
 })();
 </script>
+
+<?php /* ── 2060 — "Publish A → B" control (publish epic, Slice 2) ──────────
+        A is the SINGLE physical source of B's content (provenance rule:
+        B is only ever written by A; there is no L→B). This button is the
+        local trigger for that A→B propagate. It mirrors L's "Push L → A"
+        flow exactly (dry-run preview → confirm → real push) but targets
+        /sync/push/B. The route is reachable here because A's editor lives
+        under the Panel-gated /dev surface, so the same-origin fetch carries
+        the session cookie and clears the v0.10.252 public-node guard.
+
+        Self-contained on purpose: the CSS below duplicates the minimal
+        button+modal rules from L's branch rather than hoisting shared CSS,
+        keeping L's validated UI untouched (the informational pill above is
+        already duplicated the same way). Only the classes this control needs
+        are included — no nuclear overlay, no is-ahead/is-behind tinting. */ ?>
+<style>
+  .sync-prop-btn{
+    position:fixed; right:8px; bottom:34px; z-index:9999;
+    font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+    background:#2a2a2a; color:#fff; border:1px solid #3d3d3d;
+    padding:7px 11px; border-radius:6px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px;
+    min-width:6.5rem; justify-content:flex-start; box-sizing:border-box;
+    transition:background-color .15s, border-color .15s;
+  }
+  .sync-prop-btn:hover{ background:#343434; border-color:#4a4a4a; }
+  .sync-prop-btn:disabled{ opacity:.55; cursor:default; }
+  .sync-prop-btn svg{ width:14px; height:14px; display:block; }
+  /* Publishing to the PUBLIC site is the heaviest action this node offers —
+     give the button a steady amber tint so it never blends into chrome. */
+  #sync-publish-btn{ border-color:#6a5a1f; }
+  #sync-publish-btn:hover{ background:#343012; border-color:#8a7420; }
+
+  .sync-prop-modal{ position:fixed; inset:0; z-index:10001;
+    display:flex; align-items:center; justify-content:center;
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; }
+  .sync-prop-modal[hidden]{ display:none; }
+  .sync-prop-modal .spm-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.6); }
+  .sync-prop-modal .spm-panel{ position:relative; width:min(420px,92vw);
+    background:#202020; border:1px solid #3a3a3a; border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.55); color:#ececec; padding:18px 18px 14px; }
+  .sync-prop-modal .spm-title{ font-size:15px; font-weight:600; color:#fff; margin-bottom:10px; }
+  .sync-prop-modal .spm-title b{ color:#f5c518; }
+  .sync-prop-modal .spm-body{ color:#cfcfcf; min-height:42px; }
+  .sync-prop-modal .spm-body b{ color:#fff; }
+  .sync-prop-modal .spm-body .spm-warn{ color:#ff8d7a; }
+  .sync-prop-modal .spm-body .spm-ok{ color:#7ddca0; }
+  .sync-prop-modal .spm-body .spm-unsaved{
+    color:#f5c518; background:#2e2818; border:1px solid #6a5a1f;
+    border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.4;
+  }
+  .sync-prop-modal .spm-body .spm-unsaved b{ color:#ffe08a; }
+  .sync-prop-modal .spm-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .sync-prop-modal button{ font:600 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+    padding:8px 13px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
+  .sync-prop-modal .spm-cancel{ background:#2e2e2e; color:#ddd; border-color:#444; }
+  .sync-prop-modal .spm-cancel:hover{ background:#383838; }
+  .sync-prop-modal .spm-confirm{ background:#f5c518; color:#1c1c1c; }
+  .sync-prop-modal .spm-confirm:hover{ background:#ffd23b; }
+  .sync-prop-modal .spm-confirm:disabled{ opacity:.45; cursor:default; }
+</style>
+
+<button id="sync-publish-btn" class="sync-prop-btn" type="button"
+        title="Publish A → B — copies A's content to the PUBLIC site (B is snapshotted first)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 19V5M5 12l7-7 7 7"/>
+  </svg>
+  <span>Publish&nbsp;→&nbsp;B</span>
+</button>
+
+<div id="sync-publish-modal" class="sync-prop-modal" hidden role="dialog" aria-modal="true" aria-label="Publish content to B">
+  <div class="spm-backdrop" data-role="backdrop"></div>
+  <div class="spm-panel">
+    <div class="spm-title">Publish&nbsp;<b>A → B</b></div>
+    <div class="spm-body" data-role="body">Checking what would change on B…</div>
+    <div class="spm-actions">
+      <button type="button" class="spm-cancel"  data-role="cancel">Cancel</button>
+      <button type="button" class="spm-confirm" data-role="confirm" disabled>Publish to B</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // Self-contained publish flow — mirrors L's push closure but targets B
+  // via /sync/push/B. A→B is the only physical path that writes B.
+  var pubBtn   = document.getElementById('sync-publish-btn');
+  var modal    = document.getElementById('sync-publish-modal');
+  if (!pubBtn || !modal) return;
+  var mBody    = modal.querySelector('[data-role="body"]');
+  var mConfirm = modal.querySelector('[data-role="confirm"]');
+  var mCancel  = modal.querySelector('[data-role="cancel"]');
+  var mBack    = modal.querySelector('[data-role="backdrop"]');
+  var busy     = false;
+
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
+  function fmtBytes(n){
+    if (n == null) return '?';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+    return (n/1048576).toFixed(2) + ' MB';
+  }
+  function showError(msg){
+    mBody.innerHTML = '<span class="spm-warn">✗ ' + esc(msg).replace(/\n/g, '<br>') + '</span>';
+    mConfirm.disabled = true;
+  }
+  function errMsg(j, fallback){
+    if (!j) return fallback;
+    var m = j.error || fallback;
+    if (j.code){
+      m += ' (HTTP ' + j.code + ')';
+      if (j.code === 404) m += ' — B has no /sync/propagate route; deploy current code to B.';
+    }
+    if (j.body){
+      var snip = String(j.body).replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (snip) m += '\n' + snip;
+    }
+    return m;
+  }
+  // Unsaved-editor-data warning — a publish sends A's content AS ON DISK;
+  // unsaved in-editor edits on A wouldn't travel to B.
+  function unsavedNote(){
+    try {
+      if (typeof window.edHasUnsavedData === 'function' && window.edHasUnsavedData()) {
+        return '<div class="spm-unsaved">⚠ You have <b>local unsaved data</b> on A. '
+          + 'Publishing sends only what’s saved to disk — unsaved edits won’t reach B. '
+          + 'Save first to include them.</div>';
+      }
+    } catch (e) {}
+    return '';
+  }
+  function resetModal(){
+    mConfirm.style.display = '';
+    mConfirm.textContent = 'Publish to B';
+    mConfirm.disabled = true;
+    mCancel.textContent = 'Cancel';
+    mCancel.disabled = false;
+  }
+  function closeModal(){ if (busy) return; resetModal(); modal.hidden = true; }
+
+  // Step 1 — dry-run preview (what would change on B; no snapshot, no swap).
+  function preview(){
+    busy = true; resetModal();
+    mBody.textContent = 'Checking what would change on B…';
+    modal.hidden = false;
+    fetch('/sync/push/B?dryRun=1', { method:'POST', cache:'no-store' })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+      .then(function(j){
+        busy = false;
+        if (!j || !j.ok){ showError(errMsg(j, 'dry-run failed')); return; }
+        var w = j.wouldReplace || {};
+        var sent = (j.sent && j.sent.bytes != null) ? fmtBytes(j.sent.bytes) : '?';
+        mBody.innerHTML =
+          unsavedNote()
+          + 'This will <span class="spm-warn">overwrite the PUBLIC site (B)</span> with A’s content:<br>'
+          + '<b>' + (w.pages||0) + '</b> pages · <b>' + (w.files||0) + '</b> files · '
+          + fmtBytes(w.bytes) + ' <span style="opacity:.8">(' + sent + ' gzipped on the wire)</span>.<br>'
+          + 'A snapshot of B’s current content is taken first.';
+        mConfirm.disabled = false;
+      })
+      .catch(function(){ busy = false; showError('network error'); });
+  }
+
+  // Step 2 — real publish.
+  function doPublish(){
+    if (busy || mConfirm.disabled) return;
+    busy = true;
+    mConfirm.disabled = true; mCancel.disabled = true;
+    mConfirm.textContent = 'Publishing…';
+    mBody.textContent = 'Publishing A → B…';
+    fetch('/sync/push/B', { method:'POST', cache:'no-store' })
+      .then(function(r){ return r.json().catch(function(){ return { ok:false, error:'bad response' }; }); })
+      .then(function(j){
+        busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
+        mConfirm.style.display = 'none';
+        if (!j || !j.ok){ showError(errMsg(j, 'publish failed')); return; }
+        var r = j.replaced || {};
+        mBody.innerHTML =
+          '<span class="spm-ok">✓ Published to B (public).</span><br>'
+          + 'B now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
+          + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b>';
+      })
+      .catch(function(){
+        busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
+        mConfirm.style.display = 'none'; showError('network error during publish');
+      });
+  }
+
+  pubBtn.addEventListener('click', preview);
+  mConfirm.addEventListener('click', doPublish);
+  mCancel.addEventListener('click', closeModal);
+  mBack.addEventListener('click', closeModal);
+  document.addEventListener('keydown', function(e){
+    if (modal.hidden) return;
+    if (e.key === 'Escape'){ e.preventDefault(); closeModal(); }
+    else if (e.key === 'Enter' && !mConfirm.disabled && mConfirm.style.display !== 'none'){
+      e.preventDefault(); doPublish();
+    }
+  });
+})();
+</script>
 <?php
-return;  // A shows only the informational pill — no push/pull controls.
+return;  // A: informational pill + Publish A→B control. No push/pull (L-only).
 endif;
 
 if ($role !== 'L') return;
