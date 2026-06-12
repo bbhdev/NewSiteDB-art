@@ -204,7 +204,16 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   "Publish → B" is ONE button with a confirm — real L→A, show A's state, then
   confirm → A→B. **Provenance rule (drove the whole design): B is only ever
   written by A; no physical L→B. Because A→B always runs after L→A, B can never
-  lead a stale A.** ▶ 2070 snapshot retention · 2080 B-freeze + unlock + B→A
+  lead a stale A.** ◐ **2070 snapshot retention** — S7 first slice (v0.10.213)
+  shipped per-snapshot/batch DELETE + the snapshots panel. **Slice 1 (v0.10.258):
+  auto-retention** — `sync_prune_auto_snapshots($keep=30)` runs at the tail of
+  `sync_pre_propagate_snapshot()`, keeping the newest 30 `auto-pre-propagate`
+  snapshots in THIS node's `library/`. Conservative gating: prune only when BOTH
+  name-prefix AND meta `kind==='auto-pre-propagate'` match — manual snapshots
+  never touched/counted; unconfirmable (corrupt-meta) autos kept. ▶ **Slice 2:**
+  surface `kind`/`fromRole` in `dev/draw/library/list` + label auto-vs-manual in
+  the panel (list currently returns only name/savedAt/appVersion/schemaVersion).
+  · 2080 B-freeze + unlock + B→A
   back-prop · 2090 "Published: <date>" snippet · 2095 holistic protocol review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
