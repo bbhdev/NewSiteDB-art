@@ -431,14 +431,14 @@ if ($role === 'B'):
 </div>
 
 <!-- Back-propagate B → A modal (dry-run preview → confirm) -->
-<div id="sync-b-bp-modal" class="sb-modal" hidden role="dialog" aria-modal="true" aria-label="Back-propagate B to A">
+<div id="sync-b-bp-modal" class="sb-modal" hidden role="dialog" aria-modal="true" aria-label="Push B to A">
   <div class="sb-back" data-role="back"></div>
   <div class="sb-panel">
-    <div class="sb-title">Back-propagate&nbsp;<b>B → A</b></div>
+    <div class="sb-title">Push&nbsp;<b>B → A</b></div>
     <div class="sb-body" data-role="body">Checking what would change on A…</div>
     <div class="sb-actions">
       <button type="button" data-role="cancel">Cancel</button>
-      <button type="button" class="sb-go" data-role="confirm" disabled>Send B → A</button>
+      <button type="button" class="sb-go" data-role="confirm" disabled>Push B → A</button>
     </div>
   </div>
 </div>
@@ -557,8 +557,8 @@ if ($role === 'B'):
       // The hint becomes the danger line (why Back B→A matters here).
       pill.classList.add('is-pending');
       setHead('⚠️', st.autoLockedAt ? 'B re-locked' : 'B frozen');
-      setHint('B has unpushed edits — Back B→A before the next Publish overwrites them.', 'sbh-red');
-      acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));
+      setHint('B has unpushed edits — Push B→A before the next Publish overwrites them.', 'sbh-red');
+      acts.appendChild(mkBtn('Push B→A', v.btn, openBackprop));
       acts.appendChild(mkBtn('Unlock again', '', openUnlock));
       return;
     }
@@ -567,7 +567,7 @@ if ($role === 'B'):
     setHead('🔓', '');
     timer.textContent = fmtLeft(localSecs);
     setHint(v.hint, v.hc, v.title);
-    acts.appendChild(mkBtn('Back B→A', v.btn, openBackprop));   // FIRST action (encourage pushing to A)
+    acts.appendChild(mkBtn('Push B→A', v.btn, openBackprop));   // FIRST action (encourage pushing to A)
     acts.appendChild(mkBtn('＋ Prolong', '', openProlong));
     // Re-freeze gate now keys on the DIVERGENCE axis (direction==='ahead'), the
     // same signal the Back B→A pill reads — "the code is the same everywhere".
@@ -579,7 +579,7 @@ if ($role === 'B'):
     // reads as deliberate, not broken.
     var rf = mkBtn('Re-freeze', 'sbp-danger sbp-refreeze', doRefreeze);
     rf.disabled = diverged;
-    rf.title = diverged ? 'Back B→A first — then B can re-freeze' : 'Re-freeze B';
+    rf.title = diverged ? 'Push B→A first — then B can re-freeze' : 'Re-freeze B';
     acts.appendChild(rf);
   }
   function setHead(icon, text){
@@ -700,7 +700,7 @@ if ($role === 'B'):
   bBack.addEventListener('click', bpClose);
   bConfirm.addEventListener('click', function(){
     if (busy || bConfirm.disabled || !bpStaged) return;
-    busy=true; bConfirm.disabled=true; bBody.innerHTML='Sending B → A…';
+    busy=true; bConfirm.disabled=true; bBody.innerHTML='Pushing B → A…';
     fetch('/sync/backprop-b', { method:'POST' })
       .then(function(r){ return r.json().catch(function(){ return { ok:false }; }); })
       .then(function(j){
