@@ -682,6 +682,9 @@ return [
       'pattern' => 'dev/draw/library/load',
       'method'  => 'POST',
       'action'  => function () {
+        // B-freeze guard (2080 S1): loading a snapshot OVERWRITES content/,
+        // so it is a content write — refuse on the frozen public node.
+        if ($resp = sync_assert_writable()) return $resp;
         $body = kirby()->request()->body()->toArray();
         $name = isset($body['name']) ? trim((string)$body['name']) : '';
         // v0.8.319: mirror the save endpoint's loosened validation —
@@ -1474,6 +1477,9 @@ HTML;
       'pattern' => 'dev/editor/save',
       'method'  => 'POST',
       'action'  => function () {
+        // B-freeze guard (2080 S1): refuse direct content writes on the
+        // frozen public node. Must precede the activity stamp below.
+        if ($resp = sync_assert_writable()) return $resp;
         sync_record_activity_and_notify();
 
         $body = kirby()->request()->body()->toArray();
@@ -1742,6 +1748,8 @@ HTML;
       'pattern' => 'dev/page/upload-image',
       'method'  => 'POST',
       'action'  => function () {
+        // B-freeze guard (2080 S1): page-image upload mutates served content.
+        if ($resp = sync_assert_writable()) return $resp;
         $kirby = kirby();
         $json  = function ($data, int $code = 200) {
           return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
@@ -1906,6 +1914,8 @@ HTML;
       'pattern' => 'dev/page/delete-image',
       'method'  => 'POST',
       'action'  => function () {
+        // B-freeze guard (2080 S1): page-image deletion mutates served content.
+        if ($resp = sync_assert_writable()) return $resp;
         $kirby = kirby();
         $json  = function ($data, int $code = 200) {
           return new Kirby\Http\Response(json_encode($data), 'application/json', $code);
@@ -2074,6 +2084,9 @@ HTML;
       'pattern' => 'dev/image-workshop/use-image',
       'method'  => 'POST',
       'action'  => function () {
+        // B-freeze guard (2080 S1): "Use this" copies a workshop image into a
+        // page's image library — a served-content mutation.
+        if ($resp = sync_assert_writable()) return $resp;
         $kirby = kirby();
         $json  = function ($data, int $code = 200) {
           return new Kirby\Http\Response(json_encode($data), 'application/json', $code);

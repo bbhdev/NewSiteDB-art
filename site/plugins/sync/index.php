@@ -184,6 +184,71 @@ function sync_state_write(array $state): bool
 }
 
 /**
+ * This node's sync role ('L' | 'A' | 'B'), defaulting to 'L'. Reads the
+ * sync block as one array and indexes it — option('sync.role') dot-
+ * resolution is unreliable on some installs (see sync_record_local_activity
+ * for the empirical note). Single source of truth for role-gated logic.
+ */
+function sync_role(): string
+{
+    $sync = option('sync');
+    return is_array($sync) && !empty($sync['role']) ? (string) $sync['role'] : 'L';
+}
+
+/**
+ * Is the PUBLIC node (B) currently frozen against direct author edits?
+ *
+ * Only B has a freeze concept — L and A are first-class edit surfaces and
+ * always return false here. B is **frozen by default**: its served content
+ * is defined entirely by the last A → B propagate, so direct authoring on B
+ * is the rare unlock-B case (work-item 2080, Slice 2). The freeze is lifted
+ * only when state.json carries an explicit `frozen === false` (written by the
+ * unlock route). A missing/legacy field therefore reads as frozen — fail
+ * CLOSED, which is the safe default for the public site.
+ *
+ * NB: this guards ONLY the /dev/* author-write routes (see
+ * sync_assert_writable). It must NOT gate the machine-to-machine /sync/*
+ * routes — A → B propagate is the SANCTIONED way B's content changes and
+ * has to keep working while B is frozen; that is the entire point.
+ */
+function sync_b_is_frozen(): bool
+{
+    if (sync_role() !== 'B') {
+        return false;
+    }
+    $state = sync_state_read();
+    return ($state['frozen'] ?? true) !== false;
+}
+
+/**
+ * Author-write guard for the public node. Returns a 423 (Locked) Response
+ * when this node is B and frozen; null when the write may proceed. Call it
+ * at the TOP of every /dev/* route that mutates served content (editor save,
+ * snapshot RESTORE, image upload/delete, workshop → page transfer) — before
+ * any activity stamp or side effect. Read-only views (GET /dev/draw etc.)
+ * and the bearer-gated /sync/* machine routes are intentionally NOT guarded.
+ */
+function sync_assert_writable(): ?\Kirby\Http\Response
+{
+    if (!sync_b_is_frozen()) {
+        return null;
+    }
+    return new \Kirby\Http\Response(
+        json_encode([
+            'ok'     => false,
+            'frozen' => true,
+            'role'   => 'B',
+            'error'  => 'B is the public site and is frozen. Content reaches B '
+                      . 'only via Publish (A → B). To edit B directly, unlock '
+                      . 'it first (rare — requires back-propagating to A before '
+                      . 're-freezing).',
+        ], JSON_UNESCAPED_SLASHES),
+        'application/json',
+        423
+    );
+}
+
+/**
  * Bump lastActivityAt to "now" (ISO 8601 with timezone offset) and
  * stamp lastActivityBy with the current node's role. Called from
  * every /dev/* save route handler that represents human authoring
