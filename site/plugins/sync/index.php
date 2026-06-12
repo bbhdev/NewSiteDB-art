@@ -260,12 +260,23 @@ function sync_b_clamp_hours($hours): float
 
 /**
  * Build the client-facing unlock/freeze summary from a state array (pure).
- * `pendingBackProp` is the load-bearing field for the cross-node publish
- * guard (2080 S3): true when an unlock happened and no B→A back-propagate
- * has run SINCE it — i.e. B holds edits A does not have, so an A→B publish
- * would clobber them. Survives an auto-lock (unlockedAt/lastBackPropAt are
- * deliberately NOT cleared on auto-lock) so the "B is ahead" warning persists
- * until the author either back-propagates or does a clean gated re-freeze.
+ * Carries the timer/lock bookkeeping only — frozen, unlockedAt, expiry,
+ * secondsRemaining, lastBackPropAt (informational), autoLockedAt. It does NOT
+ * carry a divergence verdict: "is B ahead of A?" is answered once, robustly, by
+ * sync_b_direction_from_state() and attached as `direction`/`dirty` in
+ * sync_b_status().
+ *
+ * History (v0.10.273→.277 cleanup): this function used to also emit
+ * `pendingBackProp` (= an unlock happened with no back-prop since) and
+ * `backPropDoneSinceUnlock`. Those were a LOOK-ONLY proxy for "B holds edits A
+ * lacks" — but they fired after a no-edit "just looking" unlock too, a false
+ * positive. Every real consumer (the re-freeze gate sync_b_refreeze(), the
+ * client Back B→A pill, the status poll) was migrated to `direction === 'ahead'`,
+ * which keys on actual content activity vs the unlock-time baseline and never
+ * false-fires. The dead fields were then removed (no consumer remained anywhere
+ * in the app). unlockedAt/lastBackPropAt are still NOT cleared on auto-lock, so
+ * the divergence baseline — and thus the persisted "B is ahead" warning — survives
+ * a re-lock.
  */
 function sync_b_status_fields(array $state): array
 {
@@ -278,23 +289,15 @@ function sync_b_status_fields(array $state): array
     if ($exp !== null && ($t = strtotime((string) $exp)) !== false) {
         $secs = max(0, $t - time());
     }
-    $bpDone = false;
-    if ($unlockedAt !== null && $lastBP !== null) {
-        $lb = strtotime((string) $lastBP);
-        $ua = strtotime((string) $unlockedAt);
-        $bpDone = $lb !== false && $ua !== false && $lb >= $ua;
-    }
     return [
-        'role'                    => sync_role(),
-        'frozen'                  => $frozen,
-        'unlockedAt'              => $unlockedAt,
-        'unlockExpiresAt'         => $exp,
-        'unlockHours'             => $state['unlockHours'] ?? null,
-        'secondsRemaining'        => $secs,
-        'lastBackPropAt'          => $lastBP,
-        'backPropDoneSinceUnlock' => $bpDone,
-        'pendingBackProp'         => $unlockedAt !== null && !$bpDone,
-        'autoLockedAt'            => $state['autoLockedAt'] ?? null,
+        'role'             => sync_role(),
+        'frozen'           => $frozen,
+        'unlockedAt'       => $unlockedAt,
+        'unlockExpiresAt'  => $exp,
+        'unlockHours'      => $state['unlockHours'] ?? null,
+        'secondsRemaining' => $secs,
+        'lastBackPropAt'   => $lastBP,
+        'autoLockedAt'     => $state['autoLockedAt'] ?? null,
     ];
 }
 
@@ -371,8 +374,8 @@ function sync_b_direction_from_state(array $state): string
  * Does the lazy auto-lock HOUSEKEEPING: if the window has lapsed while the
  * state still says frozen=false, persist frozen=true + stamp autoLockedAt
  * (and null the spent expiry) so on-disk state matches the pure decision.
- * unlockedAt/lastBackPropAt are intentionally preserved so pendingBackProp
- * still surfaces a B-ahead divergence after an auto-lock.
+ * unlockedAt/lastBackPropAt are intentionally preserved so the divergence calc
+ * (sync_b_direction_from_state) still surfaces a B-ahead state after an auto-lock.
  */
 function sync_b_status(): array
 {
@@ -469,8 +472,8 @@ function sync_b_prolong($hours): array
 
 /**
  * Stamp lastBackPropAt = now. Called ONLY after a successful real (non-dry)
- * B→A back-propagate, so re-freeze gating and pendingBackProp can tell that
- * the edits made during THIS unlock have reached A.
+ * B→A back-propagate, so the re-freeze gate and the divergence calc can tell
+ * that the edits made during THIS unlock have reached A.
  */
 function sync_b_record_backprop(): void
 {
@@ -501,11 +504,13 @@ function sync_b_record_backprop(): void
  * the anti-clobber layer (the publish guard is), and with no snapshot on record we
  * don't fail-closed (relocking shrinks B's public-editable surface, the safe way).
  *
- * Was gated on `pendingBackProp` (unlock-on-record + no back-prop since), but
- * that fires after ANY unlock — even a look-only one with no edits — so once
- * the client gate stopped blocking (v0.10.268) the user could click through to
- * a spurious 409. Divergence is the truth both gates now share. On success,
- * clears the whole unlock bookkeeping so B returns to a clean default-frozen state.
+ * Was gated on the old `pendingBackProp` field (unlock-on-record + no back-prop
+ * since), but that fired after ANY unlock — even a look-only one with no edits —
+ * so once the client gate stopped blocking (v0.10.268) the user could click
+ * through to a spurious 409. Divergence is the truth both gates now share, and
+ * pendingBackProp has since been removed entirely (v0.10.27x — see
+ * sync_b_status_fields). On success, clears the whole unlock bookkeeping so B
+ * returns to a clean default-frozen state.
  */
 function sync_b_refreeze(): array
 {
