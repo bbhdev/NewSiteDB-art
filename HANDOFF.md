@@ -386,23 +386,29 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   dry-run step — push-then-confirm) surfaces it REACTIVELY on the cheap 409 from
   `/sync/push-via/A/B`, then offers the same escape hatch. Both also re-handle a
   fresh 409 on the real call (B's state can change between preview and publish).
-  ✅ **2090 "Published: <date>" snippet** — **DONE v0.10.280, awaiting live
-  validation on B.** Informational public badge confirming the last A→B publish
-  landed. Data: a NEW `lastPropagateAt` field (+`lastPropagateFrom`) on the
-  destination's sync state, stamped at REAL `now()` in
-  `sync_record_propagate_receipt` — deliberately distinct from `lastActivityAt`,
-  which adopts the SOURCE's authoring stamp for the equal-reading logic and would
-  mis-report the publish moment. Additive + null default → `sync_state_read`'s
-  `array_replace` backfills old state files, so NO `SYNC_STATE_SCHEMA` bump.
-  Snippet `site/snippets/published-date.php` self-gates to role B AND to "a
-  propagate has run" (emits nothing on L/A or a never-published B — no "out of
-  date" warning, since B-behind-A is by design); reads `lastPropagateAt`, prints
-  "Published: j M Y, H:i" in a low-key `.site-published` element with a
-  placeholder style the author can restyle/move. Wired as the default into
-  `footer.php` (the only `snippet('footer')` consumer is `home.php`, so it shows
-  at the home-page foot — exactly where the author checks a publish); other
-  templates can include `snippet('published-date')` directly. · 2095 holistic
-  protocol review.
+  ✅ **2090 "Published: <date>" snippet** — **DONE v0.10.280; renders-everywhere
+  revision v0.10.281, awaiting live validation.** Informational badge confirming
+  the last propagate landed. Data: a NEW `lastPropagateAt` field
+  (+`lastPropagateFrom`) on the destination's sync state, stamped at REAL `now()`
+  in `sync_record_propagate_receipt` — deliberately distinct from
+  `lastActivityAt`, which adopts the SOURCE's authoring stamp for the
+  equal-reading logic and would mis-report the moment. Additive + null default →
+  `sync_state_read`'s `array_replace` backfills old state files, so NO
+  `SYNC_STATE_SCHEMA` bump. Snippet `site/snippets/published-date.php` gates ONLY
+  on "a propagate has landed" (`lastPropagateAt` non-null) — **NO node
+  restriction** (v0.10.281: dropped the earlier `role==='B'` gate — it blocked
+  seeing the badge on L, where the work is done, and bought nothing; the
+  dirty-state spec's "B-only" was about never surfacing a lag/"out of date"
+  WARNING to the public, which this badge does not do, not about where it may
+  render). On B the field is literally "published"; on A it's "last L→A push or
+  B→A back-prop"; on L "last A→L pull" (so L shows it after its first pull) — one
+  shared "Published: j M Y, H:i" label, precise on the public node and a
+  dev-readout elsewhere (per-node wording is a trivial role-branch if wanted).
+  Low-key `.site-published` element with a placeholder style the author can
+  restyle/move. Wired as the default into `footer.php` (the only
+  `snippet('footer')` consumer is `home.php`, so it shows at the home-page foot);
+  other templates can include `snippet('published-date')` directly. · 2095
+  holistic protocol review.
   Topology + operations + role-sidecar detail live in the sync memory files.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
