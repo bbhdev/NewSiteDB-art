@@ -98,6 +98,13 @@ function sync_default_state(): array
         'schemaVersion'  => SYNC_STATE_SCHEMA,
         'lastActivityAt' => null,
         'lastActivityBy' => null,
+        // 2090 — the real wall-clock instant the last propagate LANDED on this
+        // node, distinct from lastActivityAt (which adopts the SOURCE's authoring
+        // stamp for the equal-reading logic). B's public "Published: <date>"
+        // badge reads this. Additive + null default → sync_state_read backfills
+        // old state files, so no SYNC_STATE_SCHEMA bump.
+        'lastPropagateAt'   => null,
+        'lastPropagateFrom' => null,
         'peerStamps'     => [
             'L' => null,
             'A' => null,
@@ -1401,6 +1408,11 @@ function sync_record_propagate_receipt(string $fromRole, ?string $srcActivityAt 
     $state = sync_state_read();
     $state['lastActivityAt'] = $now;
     $state['lastActivityBy'] = $fromRole . '-propagate';
+    // 2090 — stamp the ACTUAL landing time (real now()), separate from the
+    // source-adopted $now above. On B this is the A→B publish instant the public
+    // "Published: <date>" badge surfaces; on A/L it's harmless extra state.
+    $state['lastPropagateAt']   = date('c');
+    $state['lastPropagateFrom'] = $fromRole;
     sync_state_write($state);
     return $now;
 }
