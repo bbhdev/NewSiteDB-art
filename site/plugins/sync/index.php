@@ -216,8 +216,222 @@ function sync_b_is_frozen(): bool
     if (sync_role() !== 'B') {
         return false;
     }
+    return sync_b_frozen_from_state(sync_state_read());
+}
+
+/**
+ * PURE freeze decision over a given state array — no I/O, no persist.
+ * Frozen when EITHER the explicit `frozen` field is anything other than a
+ * literal false (default-frozen / fail-closed), OR the unlock window has
+ * lapsed (`unlockExpiresAt` in the past). The lapsed-window arm is the
+ * **lazy auto-lock** (2080 S2a): B has no reliable cron on shared hosting,
+ * so instead of a timer firing server-side, every freeze check treats an
+ * expired window as frozen. The instant anyone attempts a write past expiry,
+ * the guard refuses — equivalent to an active re-lock, without a daemon.
+ * sync_b_status() does the on-disk housekeeping (persist frozen=true +
+ * autoLockedAt) so polls and cross-node reads converge.
+ */
+function sync_b_frozen_from_state(array $state): bool
+{
+    if (($state['frozen'] ?? true) !== false) {
+        return true;
+    }
+    $exp = $state['unlockExpiresAt'] ?? null;
+    if ($exp !== null) {
+        $t = strtotime((string) $exp);
+        if ($t !== false && time() >= $t) {
+            return true;   // window lapsed → effectively frozen
+        }
+    }
+    return false;
+}
+
+/**
+ * Clamp a requested unlock duration to a sane band: 15 min … 24 h. A
+ * zero/garbage value floors to 15 min (never an indefinite unlock); an
+ * over-long request caps at a day (the public site should not sit writable
+ * for longer without a deliberate re-unlock).
+ */
+function sync_b_clamp_hours($hours): float
+{
+    $h = is_numeric($hours) ? (float) $hours : 0.0;
+    return max(0.25, min(24.0, $h));
+}
+
+/**
+ * Build the client-facing unlock/freeze summary from a state array (pure).
+ * `pendingBackProp` is the load-bearing field for the cross-node publish
+ * guard (2080 S3): true when an unlock happened and no B→A back-propagate
+ * has run SINCE it — i.e. B holds edits A does not have, so an A→B publish
+ * would clobber them. Survives an auto-lock (unlockedAt/lastBackPropAt are
+ * deliberately NOT cleared on auto-lock) so the "B is ahead" warning persists
+ * until the author either back-propagates or does a clean gated re-freeze.
+ */
+function sync_b_status_fields(array $state): array
+{
+    $frozen     = sync_b_frozen_from_state($state);
+    $exp        = $state['unlockExpiresAt'] ?? null;
+    $unlockedAt = $state['unlockedAt'] ?? null;
+    $lastBP     = $state['lastBackPropAt'] ?? null;
+
+    $secs = null;
+    if ($exp !== null && ($t = strtotime((string) $exp)) !== false) {
+        $secs = max(0, $t - time());
+    }
+    $bpDone = false;
+    if ($unlockedAt !== null && $lastBP !== null) {
+        $lb = strtotime((string) $lastBP);
+        $ua = strtotime((string) $unlockedAt);
+        $bpDone = $lb !== false && $ua !== false && $lb >= $ua;
+    }
+    return [
+        'role'                    => sync_role(),
+        'frozen'                  => $frozen,
+        'unlockedAt'              => $unlockedAt,
+        'unlockExpiresAt'         => $exp,
+        'unlockHours'             => $state['unlockHours'] ?? null,
+        'secondsRemaining'        => $secs,
+        'lastBackPropAt'          => $lastBP,
+        'backPropDoneSinceUnlock' => $bpDone,
+        'pendingBackProp'         => $unlockedAt !== null && !$bpDone,
+        'autoLockedAt'            => $state['autoLockedAt'] ?? null,
+    ];
+}
+
+/**
+ * Read B's unlock/freeze status for the editor poll + cross-node reads.
+ * Does the lazy auto-lock HOUSEKEEPING: if the window has lapsed while the
+ * state still says frozen=false, persist frozen=true + stamp autoLockedAt
+ * (and null the spent expiry) so on-disk state matches the pure decision.
+ * unlockedAt/lastBackPropAt are intentionally preserved so pendingBackProp
+ * still surfaces a B-ahead divergence after an auto-lock.
+ */
+function sync_b_status(): array
+{
     $state = sync_state_read();
-    return ($state['frozen'] ?? true) !== false;
+    if (sync_role() === 'B'
+        && ($state['frozen'] ?? true) === false
+        && sync_b_frozen_from_state($state)) {
+        $state['frozen']          = true;
+        $state['autoLockedAt']    = date('c');
+        $state['unlockExpiresAt'] = null;
+        sync_state_write($state);
+    }
+    return sync_b_status_fields($state);
+}
+
+/**
+ * Unlock B for direct editing for a clamped number of hours. Records the
+ * unlock instant + computed expiry and RESETS lastBackPropAt (a fresh unlock
+ * starts with no back-prop credit — the author must back-propagate the new
+ * edits before a clean re-freeze). Role-guarded: only B has a freeze.
+ */
+function sync_b_unlock($hours): array
+{
+    if (sync_role() !== 'B') {
+        return ['ok' => false, 'code' => 400, 'error' => 'Only the public node (B) can be unlocked.'];
+    }
+    $h     = sync_b_clamp_hours($hours);
+    $now   = time();
+    $state = sync_state_read();
+    $state['frozen']          = false;
+    $state['unlockedAt']      = date('c', $now);
+    $state['unlockHours']     = $h;
+    $state['unlockExpiresAt'] = date('c', $now + (int) round($h * 3600));
+    $state['lastBackPropAt']  = null;
+    $state['autoLockedAt']    = null;
+    sync_state_write($state);
+    return ['ok' => true] + sync_b_status_fields($state);
+}
+
+/**
+ * Extend B's unlock window to now + clamped hours (the author "prolongs" the
+ * session, e.g. when the near-timeout alert fires or proactively mid-work).
+ * Refuses if B is currently frozen (nothing to prolong — re-unlock instead).
+ */
+function sync_b_prolong($hours): array
+{
+    if (sync_role() !== 'B') {
+        return ['ok' => false, 'code' => 400, 'error' => 'Only the public node (B) has an unlock window.'];
+    }
+    $state = sync_state_read();
+    if (sync_b_frozen_from_state($state)) {
+        return ['ok' => false, 'code' => 409, 'error' => 'B is frozen — nothing to prolong. Unlock it again instead.'];
+    }
+    $h   = sync_b_clamp_hours($hours);
+    $now = time();
+    $state['unlockHours']     = $h;
+    $state['unlockExpiresAt'] = date('c', $now + (int) round($h * 3600));
+    sync_state_write($state);
+    return ['ok' => true] + sync_b_status_fields($state);
+}
+
+/**
+ * Stamp lastBackPropAt = now. Called ONLY after a successful real (non-dry)
+ * B→A back-propagate, so re-freeze gating and pendingBackProp can tell that
+ * the edits made during THIS unlock have reached A.
+ */
+function sync_b_record_backprop(): void
+{
+    $state = sync_state_read();
+    $state['lastBackPropAt'] = date('c');
+    sync_state_write($state);
+}
+
+/**
+ * Re-freeze B. GATED (2080 S2a, two-step UX): if an unlock is on record
+ * (`unlockedAt` set) but no B→A back-propagate has run since it, refuse with
+ * 409 — the author must back-propagate first, or those edits die on the next
+ * A→B publish. On success, clears the whole unlock bookkeeping so B returns
+ * to a clean default-frozen state.
+ */
+function sync_b_refreeze(): array
+{
+    if (sync_role() !== 'B') {
+        return ['ok' => false, 'code' => 400, 'error' => 'Only the public node (B) is freezable.'];
+    }
+    $state  = sync_state_read();
+    $fields = sync_b_status_fields($state);
+    if ($fields['pendingBackProp']) {
+        return [
+            'ok'    => false,
+            'code'  => 409,
+            'error' => 'Back-propagate B → A before re-freezing — B holds edits A '
+                     . 'does not have, and the next A → B publish would overwrite them.',
+        ] + $fields;
+    }
+    $state['frozen']          = true;
+    $state['unlockedAt']      = null;
+    $state['unlockHours']     = null;
+    $state['unlockExpiresAt'] = null;
+    $state['lastBackPropAt']  = null;
+    $state['autoLockedAt']    = null;
+    sync_state_write($state);
+    return ['ok' => true] + sync_b_status_fields($state);
+}
+
+/**
+ * Shared gate for the B-unlock MUTATOR routes (unlock / prolong / backprop /
+ * refreeze). Two checks: (1) role must be 'B' — these are meaningless on L/A;
+ * (2) a Panel session is required, because they are author actions on a
+ * PUBLIC node (same v0.10.252 rationale as the /sync/push public-node gate).
+ * Returns a Response to short-circuit, or null to proceed.
+ */
+function sync_b_panel_guard(): ?\Kirby\Http\Response
+{
+    if (sync_role() !== 'B') {
+        return new \Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'This action applies only to the public node (B).']),
+            'application/json', 400
+        );
+    }
+    if (kirby()->user() === null) {
+        return new \Kirby\Http\Response(
+            json_encode(['ok' => false, 'error' => 'forbidden']),
+            'application/json', 403
+        );
+    }
+    return null;
 }
 
 /**

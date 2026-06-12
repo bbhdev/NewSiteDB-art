@@ -3177,6 +3177,99 @@ HTML;
           'application/json', $status
         );
       }
+    ],
+
+    /*
+     * ── B-unlock state machine (2080 Slice 2a) ────────────────────────
+     *
+     * B is the public node, frozen by default (sync_b_is_frozen +
+     * sync_assert_writable, Slice 1). Direct editing on B is a rare,
+     * discouraged edge case that requires UNLOCKING B for a bounded window,
+     * editing, BACK-PROPAGATING B→A (so A — the single source for A→B
+     * publishes — has the edits), then RE-FREEZING. The re-freeze is GATED
+     * behind a successful back-prop (two-step UX, user's call 2026-06-12).
+     *
+     * The window auto-expires: sync_b_frozen_from_state treats a lapsed
+     * unlockExpiresAt as frozen (lazy auto-lock — no cron on shared hosting).
+     *
+     * GATING: all four mutators are author actions on a PUBLIC node, so they
+     * require a Panel session (same rationale as /sync/push's v0.10.252 gate)
+     * AND role === 'B'. b-status is an informational GET (no secret in it),
+     * read by B's own editor poll and — in Slice 3 — by A/L to block A→B
+     * publish while B is unlocked.
+     */
+    [
+      'pattern' => 'sync/b-status',
+      'method'  => 'GET',
+      'action'  => function () {
+        return new Kirby\Http\Response(
+          json_encode(sync_b_status(), JSON_UNESCAPED_SLASHES),
+          'application/json', 200
+        );
+      }
+    ],
+    [
+      'pattern' => 'sync/unlock-b',
+      'method'  => 'POST',
+      'action'  => function () {
+        if ($r = sync_b_panel_guard()) return $r;
+        $body  = kirby()->request()->body()->toArray();
+        $res   = sync_b_unlock($body['hours'] ?? null);
+        return new Kirby\Http\Response(
+          json_encode($res, JSON_UNESCAPED_SLASHES),
+          'application/json', $res['ok'] ? 200 : ($res['code'] ?? 400)
+        );
+      }
+    ],
+    [
+      'pattern' => 'sync/prolong-b',
+      'method'  => 'POST',
+      'action'  => function () {
+        if ($r = sync_b_panel_guard()) return $r;
+        $body  = kirby()->request()->body()->toArray();
+        $res   = sync_b_prolong($body['hours'] ?? null);
+        return new Kirby\Http\Response(
+          json_encode($res, JSON_UNESCAPED_SLASHES),
+          'application/json', $res['ok'] ? 200 : ($res['code'] ?? 400)
+        );
+      }
+    ],
+    [
+      'pattern' => 'sync/backprop-b',
+      'method'  => 'POST',
+      'action'  => function () {
+        if ($r = sync_b_panel_guard()) return $r;
+        // The mandatory B→A leg. Reuses the same transport as every other
+        // propagate; A (destination) takes its own pre-propagate snapshot.
+        // ?dryRun=1 → preview ("would replace N on A"), no stamp. On a real
+        // success, stamp lastBackPropAt so the re-freeze gate opens.
+        $dryRun = (bool) get('dryRun');
+        $result = sync_propagate_to_peer('A', $dryRun);
+        if (!$dryRun && ($result['ok'] ?? false) === true) {
+          sync_b_record_backprop();
+        }
+        $result['bStatus'] = sync_b_status_fields(sync_state_read());
+        $status = 200;
+        if (($result['ok'] ?? false) !== true && !isset($result['httpCode'])) {
+          $status = 502;
+        }
+        return new Kirby\Http\Response(
+          json_encode($result, JSON_UNESCAPED_SLASHES),
+          'application/json', $status
+        );
+      }
+    ],
+    [
+      'pattern' => 'sync/refreeze-b',
+      'method'  => 'POST',
+      'action'  => function () {
+        if ($r = sync_b_panel_guard()) return $r;
+        $res = sync_b_refreeze();
+        return new Kirby\Http\Response(
+          json_encode($res, JSON_UNESCAPED_SLASHES),
+          'application/json', $res['ok'] ? 200 : ($res['code'] ?? 400)
+        );
+      }
     ]
   ]
 ];
