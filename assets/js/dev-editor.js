@@ -12420,6 +12420,27 @@
   // (expandedTypoIds removed in the 3a Step-2 redesign — the sidebar list no
   // longer has a per-row collapsible editor; editing is in the floating panel.)
   let typographyDirty = false;
+  // ── Styles derived-dirty (v0.10.245, 5030 slice 3b) ───────────────────
+  // typographyDirty is DERIVED, mirroring the lines/layout "approach B"
+  // signal: dirty ⇔ the live styles projection differs from the on-disk
+  // baseline. The projection is EXACTLY what saveTypography POSTs — the
+  // `tokens` array (state.typography) — so a false-clean can't omit a
+  // persisted field and silently let a sync push ship stale styles (the
+  // hard rule from the unified-dirty memo). savedTypoSig is captured at load
+  // and after each successful save; recomputeTypoDirty() compares against it.
+  // This replaces the old sticky boolean so a manual revert (edit a field
+  // then type the original value back; or add-then-delete a token) settles
+  // back to clean. Typography has no undo/snapshot funnel, so the single
+  // chokepoint markTypographyDirty() — called AFTER every mutation — does
+  // the recompute inline (the sig is cheap + pure over state.typography,
+  // unlike lines' decomposeForSave, so no separate optimistic flag needed).
+  let savedTypoSig = null;
+  function typoContentSig() { return stableStringify(state.typography || []); }
+  function captureTypoBaseline() { savedTypoSig = typoContentSig(); }
+  function recomputeTypoDirty() {
+    if (savedTypoSig === null) { typographyDirty = true; return; }
+    typographyDirty = (typoContentSig() !== savedTypoSig);
+  }
   // Esc handler for the standalone element-style Edit panel (v0.10.164).
   // Held so closeElementStylePanel can detach it; only one panel open at once.
   let esPanelKeyHandler = null;
@@ -12531,10 +12552,14 @@
     }
   }
   function markTypographyDirty() {
-    typographyDirty = true;
-    // The single top "Save styles" button reflects dirtiness (filled amber).
+    // Derived (5030 slice 3b): recompute against the on-disk baseline rather
+    // than sticking true, so reverting an edit clears the signal. Every call
+    // site mutates state.typography BEFORE calling this, so the sig is fresh.
+    recomputeTypoDirty();
+    // The single top "Save styles" button reflects dirtiness (filled amber
+    // when dirty, plain when a revert settled it back to clean).
     const btn = document.getElementById('save-typography-btn');
-    if (btn) { btn.classList.add('is-dirty'); btn.textContent = 'Save styles'; }
+    if (btn) { btn.classList.toggle('is-dirty', typographyDirty); btn.textContent = 'Save styles'; }
     // The standalone Edit panel's Save button (class ed-typo-edit-save) tracks
     // dirty/clean too, so saving is reachable right where the author is editing.
     // (The v0.10.122 sticky save BAR and the per-row inline save were removed in
@@ -12963,6 +12988,10 @@
       Object.keys(modifiedTypoIds).forEach(function (k) { delete modifiedTypoIds[k]; });
       rebuildTypographyClientCss();
       renderTypographyList();
+      // 5030 slice 3b: the just-saved (server-normalised) tokens ARE the new
+      // on-disk baseline — capture before clearing so a later edit-then-revert
+      // compares against what actually landed on disk.
+      captureTypoBaseline();
       clearTypographyDirty();
       if (btn) { btn.disabled = false; btn.textContent = 'Saved.'; }
       setTimeout(function () {
@@ -16933,9 +16962,10 @@
   // a push made with dirty typography would ship the LAST-SAVED typography
   // file and silently drop the in-editor style edits, while the post-push
   // indicator falsely read "in sync" — the same gap the lines/layout dirty
-  // signals already close. (Derived-dirty B for typography — so a manual
-  // revert clears it — is the follow-up slice 3b; this only routes the
-  // existing typographyDirty boolean into the unified signal.)
+  // signals already close. (Slice 3b, v0.10.245: typographyDirty is now
+  // DERIVED from a content signature — see recomputeTypoDirty near its
+  // declaration — so a manual revert clears it, matching lines/layout. This
+  // dirty() just forwards that derived value.)
   _saveBus.participants.styles = {
     wants: function () { return false; },        // never part of the unified POST
     dirty: function () { return !!typographyDirty; },
@@ -18259,6 +18289,7 @@
   setActiveTool('select');
   snapshot();
   captureSavedBaseline(); // v0.10.234: loaded state == on-disk baseline for derived-dirty
+  captureTypoBaseline();  // v0.10.245 (5030 slice 3b): same for styles/typography
   renderAll();
   centerOnPage();
 
