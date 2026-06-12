@@ -14,7 +14,10 @@
 #
 #   <target>                          # one of the names listed in deploy.env's
 #                                     # TARGETS (e.g. newsitedbart.bbh.fr).
-#                                     # Omit to use DEFAULT_TARGET.
+#                                     # Omit for an interactive numbered picker
+#                                     # (Enter alone = DEFAULT_TARGET). With -y
+#                                     # or no TTY, omitting falls back to
+#                                     # DEFAULT_TARGET non-interactively.
 #   -y, --yes                         # skip the confirmation prompt
 #   --no-delete                       # upload/update only, never remove server files
 #   --bootstrap                       # ONE-TIME: also push editor-written content
@@ -110,7 +113,43 @@ command -v rsync >/dev/null || { echo "✗ rsync not found in PATH" >&2; exit 1;
 command -v resolve_target >/dev/null \
   || { echo "✗ resolve_target() not defined in deploy.env" >&2; exit 1; }
 
-[ -z "$TARGET" ] && TARGET="$DEFAULT_TARGET"
+# No positional target given. Interactively, present a numbered menu of
+# TARGETS and let the user pick (Enter alone = DEFAULT_TARGET). The chosen
+# name then flows through exactly as if it had been typed on the CLI — the
+# known-target check, dry-run, and confirmation below all still apply. When
+# non-interactive (-y set, or stdin is not a TTY, e.g. a pipe/cron), fall
+# back to DEFAULT_TARGET silently so unattended runs are unaffected.
+if [ -z "$TARGET" ]; then
+  if [ "$ASSUME_YES" -ne 1 ] && [ -t 0 ]; then
+    # shellcheck disable=SC2206  # intentional word-split of the space list
+    _targets=($TARGETS)
+    _default_idx=1
+    echo "Select a deploy target:" >&2
+    _i=1
+    for _t in "${_targets[@]}"; do
+      if [ "$_t" = "$DEFAULT_TARGET" ]; then
+        printf '  %d) %s  (default)\n' "$_i" "$_t" >&2
+        _default_idx="$_i"
+      else
+        printf '  %d) %s\n' "$_i" "$_t" >&2
+      fi
+      _i=$((_i + 1))
+    done
+    printf 'Enter number [%s]: ' "$_default_idx" >&2
+    read -r _sel
+    [ -z "$_sel" ] && _sel="$_default_idx"
+    case "$_sel" in
+      *[!0-9]*|'') echo "✗ Not a valid number: '$_sel'" >&2; exit 2 ;;
+    esac
+    if [ "$_sel" -lt 1 ] || [ "$_sel" -gt "${#_targets[@]}" ]; then
+      echo "✗ Selection out of range: $_sel (1–${#_targets[@]})" >&2; exit 2
+    fi
+    TARGET="${_targets[$((_sel - 1))]}"
+    echo "▶ Selected: $TARGET" >&2
+  else
+    TARGET="$DEFAULT_TARGET"
+  fi
+fi
 
 # Verify the target name is in the declared TARGETS list (catches typos
 # even when resolve_target has a stray branch the list doesn't mention).
