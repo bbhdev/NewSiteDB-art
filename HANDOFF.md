@@ -131,13 +131,13 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 | 4000 | `[workshop]` | image workshop |
 | 5000 | `[dirty]` | unified dirty/save signal (derived, approach B) |
 | 6000 | `[editor]` | the editor itself — a core pillar (interaction, dialogs, modes) |
-| 7000 | `[cleanup]` | maintenance / cache pruning / tech-debt |
 | 8000 | `[backgrounds]` | site backgrounds — processing + editor + runtime |
 | 9000 | `[ui]` | cross-cutting UI / design system — flows down to tablet + phone |
 | 10000 | `[tablet]` | iPad first-class editing layer (standing constraint) |
 | 11000 | `[phone]` | smartphone demo mode (reduced from tablet) |
 | 12000 | `[bedit]` | safe fallback editing on B (cross-links 2080) |
 | 13000 | `[behaviors]` | new behavior-type ideas (backlog) |
+| 20000 | `[cleanup]` | maintenance / cache pruning / tech-debt — runs last, at project end |
 
 **Rosetta — legacy → canonical (frozen, do not extend):**
 
@@ -156,7 +156,7 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 | dirty lines (B) · layout (B) | 5010 · 5020 |
 | dirty styles (#36) · images (#37) | 5030 · 5040 |
 | editor dialogs (#33) | 6010 |
-| media cleanup (#39) | 7010 |
+| media cleanup (#39) | 20010 |
 
 > NOTE: sync's canonical order (S5→S6→S7→S8→S9 = 2050→2090) fixes a tracker
 > wart — S8/S9 were *filed* before S6/S7, so creation-order lied about sequence.
@@ -508,23 +508,6 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   built now:** raised mid-2090 to avoid losing the idea; building it now would
   zig-zag the sync epic. Pick up under the 6000 editor pillar after the sync
   epic's 2095 review.
-- **`[cleanup]` 7000** — ▶ 7010 media/ cache prune (low urgency, near project end).
-  · ▶ **7020 end-of-project cruft sweep** (registered 2026-06-13, not started, run
-  near project end). **Why:** the iterative test cycles accrete cruft — stray
-  content folders (`content/3_imagepage/`, `4_test-page-2/`, `5_test-page-3/`,
-  `6_test/`, `medium/`, `narrow/`, `wide/`, `_shared/`, scratch `images/`,
-  `_sync.json` sidecars), orphaned/test images, throwaway Kirby pages and
-  vignettes used to exercise a feature once, and any other leftover files/dirs
-  that aren't load-bearing. **Scope:** remove *everything that is test/throwaway*,
-  keeping ONLY (a) the Kirby infrastructure proper (`kirby/`, `site/` —
-  templates/blueprints/plugins/snippets/config, `index.php`, `.htaccess`, the
-  genuine production content pages) and (b) a clean Deco (the editor assets +
-  the real authored pages it edits, no scratch batches or test canvases).
-  **Discipline:** this is a *deletion* pass over user data — inventory first,
-  classify each path test-vs-keep, get the user's confirmation on the kill-list
-  before deleting (content is gitignored, so deletions aren't git-recoverable).
-  Deferred to end-of-project because the test pages are still useful scaffolding
-  while features are in flight.
 - **Forward epics, registered not started** — 8010 `[backgrounds]` · **9000 `[ui]`**
   (starts by refining editor UI, then studies tablet/phone deltas): 9010 general
   editor-UI refinement · **9020 draw/library structure rework** (absorbs former
@@ -545,6 +528,25 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   edit on B) · 13010 `[behaviors]` idea backlog.
   - **9010 nit (RESOLVED v0.10.267):** the B-pill header/pills misalignment is moot
     now that the pill is a single horizontal bottom bar (all items on one row).
+- **`[cleanup]` 20000** (band moved 7000→20000, 2026-06-13 — cleanup runs LAST, at
+  project end; 7000 was mid-sequence and lied about ordering. Wide gap left for
+  future intermediary epics). — ▶ 20010 media/ cache prune (low urgency).
+  · ▶ **20020 end-of-project cruft sweep** (registered 2026-06-13, not started).
+  **Why:** the iterative test cycles accrete cruft — stray content folders
+  (`content/3_imagepage/`, `4_test-page-2/`, `5_test-page-3/`, `6_test/`,
+  `medium/`, `narrow/`, `wide/`, `_shared/`, scratch `images/`, `_sync.json`
+  sidecars), orphaned/test images, throwaway Kirby pages and vignettes used to
+  exercise a feature once, and any other leftover files/dirs that aren't
+  load-bearing. **Scope:** remove *everything that is test/throwaway*, keeping
+  ONLY (a) the Kirby infrastructure proper (`kirby/`, `site/` —
+  templates/blueprints/plugins/snippets/config, `index.php`, `.htaccess`, the
+  genuine production content pages) and (b) a clean Deco (the editor assets +
+  the real authored pages it edits, no scratch batches or test canvases).
+  **Discipline:** this is a *deletion* pass over user data — inventory first,
+  classify each path test-vs-keep, get the user's confirmation on the kill-list
+  before deleting (content is gitignored, so deletions aren't git-recoverable).
+  Deferred to end-of-project because the test pages are still useful scaffolding
+  while features are in flight.
 
 Notable landings since the snapshot below: full sync layer 2010–2050; derived-dirty
 B for lines/layout + styles wiring; the **image-library-unlisted fix** (v0.10.240:
