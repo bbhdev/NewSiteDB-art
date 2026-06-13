@@ -487,8 +487,29 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   propagate-location bug, not a dirty gap; see the unified-dirty memory's
   2026-06-11 correction).
 - **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
-  · ▶ **6020 snippet rect-block — a general "snippet" placement primitive**
-  (registered 2026-06-12, not started). **Concept:** a *snippet* is a small,
+  · **6020 snippet rect-block — a general "snippet" placement primitive**
+  (registered 2026-06-12). **✅ Slice 1 DONE (v0.11.6, 2026-06-13, awaiting user
+  validation):** new rect `kind` `snippet` wired end-to-end — pick → store →
+  render. Registry is a CODE helper `deco_placeable_snippets()` (deco plugin),
+  NOT `content/_shared/snippets.json` (content/*.json is gitignored by design →
+  a content-side registry would never be tracked; the placeable set ships with
+  the app). Editor picker (`openSnippetPicker`, reuses the image-picker chrome)
+  enumerates it; the SAVE validator + the RUNTIME both whitelist against it —
+  and unlike the image/typographyId bindings (which may dangle), the `snippet`
+  value's EXISTENCE is enforced, because it feeds `snippet()` at runtime (a
+  forged body must not render a structural partial / missing file). Additive
+  `snippet` field on rects (null default, NOT a schema bump). Slice 1 lists
+  ONLY `published-date` — the one param-free snippet — by explicit user choice
+  ("step by step, test bit by bit"). Validation caveat: published-date renders
+  only after a propagate has landed on the node (on L: after the first pull);
+  before that the runtime rect is empty though the editor shows the binding.
+  · ▶ **Slice 2 (next):** per-snippet PARAMETER authoring — the registry
+  declares each snippet's param schema (name/type/default/label); the inspector
+  renders fields; `r.snippetParams` stored; runtime passes `snippet(id, params)`
+  with escaping. THIS is what makes c-/e-/rr-button usable (inert without
+  href/title/label). · ▶ **Slice 3:** polish — richer canvas preview, picker
+  descriptions, placeable-vs-structural enforcement convention.
+  · — Original concept (retained): a *snippet* is a small,
   self-contained affordance designed to be dropped anywhere the design requires —
   the round button (`c-button.php`), the elliptical button (`e-button.php`), the
   `published-date.php` badge, and more to come. The Deco-appropriate structure
