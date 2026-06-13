@@ -364,6 +364,21 @@ return [
     'menu' => function ($kirby) {
       $base = $kirby->url();
       return [
+        // v0.11.2 — prominent "go to the live site" link. The Panel's two
+        // built-in root affordances (the 'site' entry below + the sidebar
+        // header title "NewSiteDB Art") BOTH land on the Panel home; neither
+        // opens the front-end runtime. The top-right "open" icon does, but
+        // it's a minor affordance and the header title isn't reachable from
+        // config (it's baked into the compiled k-panel-menu SPA component —
+        // repointing it would need a fragile JS plugin override). So clone
+        // the runtime link as a labeled sidebar entry instead: an ABSOLUTE
+        // URL (with host) the Panel SPA treats as external → same-tab nav to
+        // the front end, exactly like the dev-tool entries below.
+        'view-site' => [
+          'label' => 'View site',
+          'icon'  => 'open',
+          'link'  => $base,
+        ],
         'site',
         'languages',
         'users',
