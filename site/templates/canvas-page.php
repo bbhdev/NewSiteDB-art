@@ -115,6 +115,16 @@ if (function_exists('deco_placeable_snippets')) {
     }
 }
 
+// v0.11.7 — image-kind content. The per-page image library is the child page
+// with slug 'images' (content/<page>/images/, auto-provisioned by the
+// page.create:after hook). Resolved via childrenAndDrafts() — the same lookup
+// the dev/page/images API route uses — so a rect's bare `image` filename maps
+// to a real File→url() here exactly as it does in the editor's bind picker. A
+// dangling/absent binding resolves to null → kind stub, graceful like the
+// dangling-snippet path. (Slice 1 of canvas-page only stubbed image rects;
+// this is the deferred "attach real image content" step.)
+$imgPageNode = $page->childrenAndDrafts()->findBy('slug', 'images');
+
 ?>
 <!doctype html>
 <html lang="en">
@@ -138,6 +148,15 @@ if (function_exists('deco_placeable_snippets')) {
   </style>
 </head>
 <body class="canvas-page-body">
+  <?php /* 6020/runtime consolidation (v0.11.7): the canvas IS the page. The
+          scroll-driven lines render as a fixed full-viewport background layer
+          (#lines-layer, z-index:0, pointer-events:none — see style.css), exactly
+          as on the flowing site pages. The rect canvas below sits above it in a
+          z-index:1 column. Lines and rects are independent layers (the editor
+          authors them in separate modes), so no coordinate reconciliation: the
+          lines scale to the viewport, the rects occupy a pageW-wide centred
+          column — the same lines-behind-content model home.php always used. */ ?>
+  <?php snippet('lines-layer') ?>
   <div class="canvas-page"
        data-page-id="<?= esc($page->id()) ?>"
        data-class="<?= esc($primaryClassId) ?>"
@@ -172,19 +191,37 @@ if (function_exists('deco_placeable_snippets')) {
     // dangling/unknown ref → null → kind stub, graceful like a dangling image.
     $snip  = ($kind === 'snippet' && isset($r['snippet']) && is_string($r['snippet'])
               && isset($snippetIds[$r['snippet']])) ? $r['snippet'] : null;
+    // v0.11.7: bound image → resolved File url, mirroring the editor's bind
+    // render. data-fit (cover|contain) drives object-fit; focusX/focusY (0–100,
+    // default 50) drive object-position so a cover-crop shows the chosen region.
+    $imgFile = null;
+    if ($kind === 'image' && $imgPageNode !== null
+        && isset($r['image']) && is_string($r['image']) && $r['image'] !== '') {
+        $imgFile = $imgPageNode->image($r['image']); // null if the filename is gone
+    }
+    $imgUrl  = ($imgFile && $imgFile->exists()) ? $imgFile->url() : null;
+    $imgFit  = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
+    $imgFX   = isset($r['focusX']) ? max(0, min(100, (int) $r['focusX'])) : 50;
+    $imgFY   = isset($r['focusY']) ? max(0, min(100, (int) $r['focusY'])) : 50;
     $rectClass = 'rect rect--' . esc($kind) . ($tyId ? ' ty-' . esc($tyId) : '')
                . ($text !== null ? ' has-text' : '')
-               . ($snip !== null ? ' has-snippet' : '');
+               . ($snip !== null ? ' has-snippet' : '')
+               . ($imgUrl !== null ? ' has-image' : '');
 ?>
     <div class="<?= $rectClass ?>"
          data-rect-id="<?= esc($rid) ?>"
          <?php if ($chId): ?>data-chapter="<?= esc($chId) ?>"<?php endif; ?>
          <?php if ($chNm): ?>data-chapter-name="<?= esc($chNm) ?>"<?php endif; ?>
+         <?php if ($imgUrl !== null): ?>data-fit="<?= esc($imgFit) ?>"<?php endif; ?>
          style="position: absolute;
                 left: <?= $x ?>px; top: <?= $y ?>px;
                 width: <?= $w ?>px; height: <?= $h ?>px;">
       <?php if ($snip !== null): ?>
       <?php snippet($snip) /* 6020 Slice 1: render the bound placeable snippet at this rect's position. */ ?>
+      <?php elseif ($imgUrl !== null): ?>
+      <img class="rect-img" src="<?= esc($imgUrl) ?>" alt="<?= esc($imgFile->alt()->value() ?? '') ?>"
+           style="object-position: <?= $imgFX ?>% <?= $imgFY ?>%;"
+           draggable="false" loading="lazy">
       <?php elseif ($text !== null): ?>
       <div class="rect-text"><?php
         // TS1/TS3: render derived runs — a link run as <a class="mk-link …"
@@ -218,6 +255,17 @@ if (function_exists('deco_placeable_snippets')) {
     </div>
 <?php endforeach; ?>
   </div>
+<?php /* "Published: <date>" badge — same gated snippet the flowing footer emits;
+        renders nothing until the first propagate has landed (lastPropagateAt). */ ?>
+<?php snippet('published-date') ?>
+<?php /* Animation stack — identical to footer.php. app.js reads #lines-data
+        (emitted by lines-layer above) and renders the scroll-driven lines; the
+        scatter-button wiring no-ops on a page without [data-scatter-btn]. */ ?>
+<script src="<?= url('assets/js/gsap.min.js') ?>?v=<?= $v ?>"></script>
+<script src="<?= url('assets/js/ScrollTrigger.min.js') ?>?v=<?= $v ?>"></script>
+<script src="<?= url('assets/js/Draggable.min.js') ?>?v=<?= $v ?>"></script>
+<script src="<?= url('assets/js/InertiaPlugin.min.js') ?>?v=<?= $v ?>"></script>
+<script src="<?= url('assets/js/app.js') ?>?v=<?= $v ?>"></script>
 <!-- v<?= $v ?> · class=<?= esc($primaryClassId) ?> · canvas=<?= $pageW ?>×<?= $totalH ?>px (pageH floor=<?= $pageH ?>) · <?= count($rects) ?> rect(s) -->
 </body>
 </html>

@@ -488,9 +488,29 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   2026-06-11 correction).
 - **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
   · **6020 snippet rect-block — a general "snippet" placement primitive**
-  (registered 2026-06-12). **✅ Slice 1 DONE (v0.11.6, 2026-06-13, awaiting user
-  validation):** new rect `kind` `snippet` wired end-to-end — pick → store →
-  render. Registry is a CODE helper `deco_placeable_snippets()` (deco plugin),
+  (registered 2026-06-12). **✅ Slice 1 DONE + runtime VALIDATED (v0.11.7,
+  2026-06-13):** new rect `kind` `snippet` wired end-to-end — pick → store →
+  render — and the published-date snippet confirmed rendering at its rect
+  position on the live front end.
+  ⚠️ **Runtime rect-rendering gap found & fixed while validating step 4
+  (v0.11.7):** the rect-render loop lived ONLY in `canvas-page.php`, but NO
+  content page used that template (home → `home` template, others → `default`),
+  so authored rects of EVERY kind (image/text/drilldown/snippet) rendered on no
+  live page — a pre-existing gap, not snippet-specific. Fix (user chose
+  "consolidate into canvas"): `canvas-page.php` is now the real Deco runtime — it
+  emits `lines-layer` (fixed z:0 background) + the gsap/app.js stack +
+  `published-date`, with the rect canvas in a z:1 column above (lines & rects are
+  independent LAYERS — the editor authors them in separate modes — so no
+  coordinate reconciliation, same lines-behind-content model as the flowing
+  pages). Image-kind rects, only STUBBED in canvas-page Slice 1, now render real
+  `<img>` content (per-page library via `childrenAndDrafts()->findBy('slug',
+  'images')->image(fn)->url()`, object-fit from `data-fit`, object-position from
+  focusX/focusY) — mirroring the editor bind. Dangling image filename / unknown
+  snippet / unimplemented kind (drilldown) → graceful kind stub. Pages are routed
+  by switching their content file (`home.txt`→`canvas-page.txt`); `home.php`
+  template kept on disk untouched (demo buttons preserved, fully reversible) —
+  they return as PLACED snippets once Slice 2 lands param authoring. Registry is a
+  CODE helper `deco_placeable_snippets()` (deco plugin),
   NOT `content/_shared/snippets.json` (content/*.json is gitignored by design →
   a content-side registry would never be tracked; the placeable set ships with
   the app). Editor picker (`openSnippetPicker`, reuses the image-picker chrome)
