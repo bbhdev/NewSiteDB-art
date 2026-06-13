@@ -21432,6 +21432,11 @@
             if (placeMode) placeImageRect(newName);
             else           setRectImage(rectId, newName);
             closeImagePicker();
+            // The upload advanced L's clock (on-disk content moved forward);
+            // the bind/place is a separate unsaved layout edit. Nudge the sync
+            // pill to re-poll now so the 'ahead' axis reflects immediately, not
+            // on the next 60s poll. See delete-image for the rationale.
+            try { window.dispatchEvent(new Event('ed:editor-saved')); } catch (e) {}
           });
         })
         .catch(function (err) {
@@ -24140,6 +24145,9 @@
           closeUpload();
           setStatus('Added ' + j.filename + (j.resizedTo ? (' (resized to ' + j.resizedTo + 'px)') : ''));
           loaded = false; usage = null; load();   // refresh library + usage
+          // On-disk content moved forward (clock advanced) → nudge the sync
+          // pill to re-poll now, not on the next 60s tick. See delete-image.
+          try { window.dispatchEvent(new Event('ed:editor-saved')); } catch (e) {}
         })
         .catch(function (err) {
           var addBody = document.getElementById('ed-upload-add');
@@ -24253,6 +24261,13 @@
           closeDelete();
           setStatus('Deleted ' + j.filename);
           loaded = false; usage = null; load();
+          // The delete is an immediate on-disk write that advanced L's clock
+          // (propagate-scope content change), so L is now AHEAD of A. Nudge the
+          // sync pill to re-poll NOW — the same 'on-disk content moved forward'
+          // signal a save fires (ed:editor-saved → poll). Without this the
+          // Push-L→A amber only lit on the next 60s poll, which read as a
+          // spontaneous, no-user-action state change (confusing UX).
+          try { window.dispatchEvent(new Event('ed:editor-saved')); } catch (e) {}
         }).catch(function (err) {
           goBtn.disabled = false; goBtn.textContent = (count > 0 ? 'Delete anyway' : 'Delete');
           var st = document.getElementById('ed-del-err');
