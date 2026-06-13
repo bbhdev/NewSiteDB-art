@@ -549,6 +549,30 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   built now:** raised mid-2090 to avoid losing the idea; building it now would
   zig-zag the sync epic. Pick up under the 6000 editor pillar after the sync
   epic's 2095 review.
+  · **6030 Lines↔Layout capability convergence — Lines' text/image blocks gain
+  Layout's full styles + image resize** (registered 2026-06-13). **Direction is
+  deliberate and one-way:** Layout rect-blocks are CLASSICAL content in the
+  author's mental model — static, scroll-with-page is CORRECT by design. The
+  behaviorful, less-classical objects (scroll-driven motion, off-canvas slide-in,
+  draggable) live in **Lines**, which already has text & image block kinds. So
+  the convergence runs Lines ← Layout (Lines' text/image gain Layout's richness),
+  NOT the reverse. ⛔ **Explicitly NOT wanted (resolved 2026-06-13):** giving
+  Layout rect-blocks motion / off-canvas placement / a viewport-static flag /
+  draggable. The original "do rects move on scroll like lines?" question resolved
+  to "rects are intentionally classical/static; author behaviorful text/images in
+  Lines instead." Do not re-raise rect motion. **Precise current gap (verified in
+  app.js):** Lines TEXT blocks read only `fontFamily` + `fontSize` + `fill`
+  (app.js ~387/1084/980) — NO typography tokens (`.ty-<id>`) and NO style marks
+  (the TS1–TS4 strong/em/underline/link/color-run system); Lines IMAGE blocks read
+  only SVG `preserveAspectRatio` (slice/fill/meet, app.js ~835) — NO cover/contain
+  + focal point (focusX/focusY object-position) and NO resize. Layout's text/image
+  rect-blocks already have ALL of this (the typography token + marks engine; image
+  fit + focusX/focusY + the `maxLongEdge` downscale hook). The goal: an author
+  placing a text or image object in Lines should reach the same styling + image
+  controls they get in Layout. **How: TBD — user has ideas; discuss before
+  building** (e.g. share the engine: Layout's typography/marks emitter and
+  image-fit/focus model are candidates to reuse, but Lines renders into an SVG —
+  `<text>`/`<image>` — vs Layout's HTML, so the rendering target differs).
 - **Forward epics, registered not started** — 8010 `[backgrounds]` · **9000 `[ui]`**
   (starts by refining editor UI, then studies tablet/phone deltas): 9010 general
   editor-UI refinement · **9020 draw/library structure rework** (absorbs former
