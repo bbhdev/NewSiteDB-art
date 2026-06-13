@@ -208,6 +208,10 @@ $rects = array_map(function ($r) {
     }
     if (!array_key_exists('typographyId', $r)) $r['typographyId'] = null;
     if (!array_key_exists('marks', $r) || !is_array($r['marks'])) $r['marks'] = [];
+    // 6020 Slice 1: snippet binding — carried (null) on all kinds for
+    // grep-ability + a stable dirty baseline (the editor only sets it on
+    // snippet rects). Additive within schema v3.
+    if (!array_key_exists('snippet', $r)) $r['snippet'] = null;
     return $r;
 }, $rects);
 $rectsSchemaVersion = 3;
@@ -256,6 +260,8 @@ $payload = json_encode([
   'schemaVersion'      => $rectsSchemaVersion,
   'chapters'           => $chapters,
   'rects'              => $rects,
+  // 6020 Slice 1: registry of placeable snippets the snippet-rect picker lists.
+  'snippets'           => deco_placeable_snippets(),
 ], JSON_UNESCAPED_SLASHES);
 // Harden the inline JSON against </script> breakout (same as page.php).
 $payload = str_replace('<', '\\u003c', $payload);
@@ -281,6 +287,7 @@ $payload = str_replace('<', '\\u003c', $payload);
       --pe-kind-text:       #cfe4ff;
       --pe-kind-image:      #ffe7b8;
       --pe-kind-drilldown:  #e6d4ff;
+      --pe-kind-snippet:    #c8f0d8;
     }
   </style>
   <style id="ed-mode-css">
@@ -743,6 +750,7 @@ $payload = str_replace('<', '\\u003c', $payload);
         <option value="text">+ Text</option>
         <option value="image">+ Image</option>
         <option value="drilldown">+ Drilldown</option>
+        <option value="snippet">+ Snippet</option>
       </select>
     </label>
     <button type="button" id="place-image-btn" class="pe-create-btn"

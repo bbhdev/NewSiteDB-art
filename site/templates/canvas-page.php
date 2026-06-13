@@ -104,6 +104,17 @@ foreach ($typography as $t) {
     if (is_array($t) && isset($t['id'])) $typoIds[(string) $t['id']] = true;
 }
 
+// 6020 Slice 1: placeable-snippet whitelist. A snippet-kind rect only renders
+// its bound snippet when the id is in this set — the load-bearing guard that a
+// dangling/forged `snippet` value can never feed snippet() a structural partial
+// or a missing file. Dangling → stub fallback, graceful like a dangling image.
+$snippetIds = [];
+if (function_exists('deco_placeable_snippets')) {
+    foreach (deco_placeable_snippets() as $s) {
+        if (is_array($s) && isset($s['id'])) $snippetIds[(string) $s['id']] = true;
+    }
+}
+
 ?>
 <!doctype html>
 <html lang="en">
@@ -122,6 +133,7 @@ foreach ($typography as $t) {
       --cp-kind-text:       #cfe4ff;
       --cp-kind-image:      #ffe7b8;
       --cp-kind-drilldown:  #e6d4ff;
+      --cp-kind-snippet:    #c8f0d8;
     }
   </style>
 </head>
@@ -155,8 +167,14 @@ foreach ($typography as $t) {
     // single esc($text), identical to the pre-TS1 output.
     $marks = ($kind === 'text' && isset($r['marks']) && is_array($r['marks']))
               ? $r['marks'] : [];
+    // 6020 Slice 1: a snippet-kind rect renders a registered placeable snippet.
+    // Resolved only when the bound id is whitelisted (see $snippetIds); a
+    // dangling/unknown ref → null → kind stub, graceful like a dangling image.
+    $snip  = ($kind === 'snippet' && isset($r['snippet']) && is_string($r['snippet'])
+              && isset($snippetIds[$r['snippet']])) ? $r['snippet'] : null;
     $rectClass = 'rect rect--' . esc($kind) . ($tyId ? ' ty-' . esc($tyId) : '')
-               . ($text !== null ? ' has-text' : '');
+               . ($text !== null ? ' has-text' : '')
+               . ($snip !== null ? ' has-snippet' : '');
 ?>
     <div class="<?= $rectClass ?>"
          data-rect-id="<?= esc($rid) ?>"
@@ -165,7 +183,9 @@ foreach ($typography as $t) {
          style="position: absolute;
                 left: <?= $x ?>px; top: <?= $y ?>px;
                 width: <?= $w ?>px; height: <?= $h ?>px;">
-      <?php if ($text !== null): ?>
+      <?php if ($snip !== null): ?>
+      <?php snippet($snip) /* 6020 Slice 1: render the bound placeable snippet at this rect's position. */ ?>
+      <?php elseif ($text !== null): ?>
       <div class="rect-text"><?php
         // TS1/TS3: render derived runs — a link run as <a class="mk-link …"
         // href>, a styled run as <span class="mk-…">, a plain run as escaped

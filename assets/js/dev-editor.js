@@ -19404,6 +19404,21 @@
     // v0.10.75 (Slice 3a): `typographyId` — the typography token a text
     // rect renders with. Additive within schema v3, null default.
     if (r && typeof r === 'object' && !('typographyId' in r)) r.typographyId = null;
+    // 6020 Slice 1: `snippet` — the placeable snippet a snippet-kind rect
+    // renders. Additive within schema v3, null default. Defaulted here so the
+    // dirty baseline matches gather()'s projection (a freshly-loaded page that
+    // predates the field reads clean, not dirty).
+    if (r && typeof r === 'object' && !('snippet' in r)) r.snippet = null;
+  });
+
+  // 6020 Slice 1: registry of placeable snippets (from the payload). The
+  // snippet picker enumerates this; snippetById indexes it for label lookup
+  // in the selection panel + canvas. [] when absent (older payload) — the
+  // picker then shows its empty state.
+  const snippetCatalog = Array.isArray(state.snippets) ? state.snippets : [];
+  const snippetById = {};
+  snippetCatalog.forEach(function (s) {
+    if (s && s.id) snippetById[s.id] = s;
   });
 
   // Typography tokens (Slice 3a). The site-wide type styles a text rect
@@ -19653,7 +19668,10 @@
   const DEFAULT_SIZE = {
     'text':       { w: 400, h: 80 },
     'image':      { w: 300, h: 200 },
-    'drilldown':  { w: 320, h: 100 }
+    'drilldown':  { w: 320, h: 100 },
+    // 6020 Slice 1: snippet rects start compact — most placeable snippets
+    // (badges, buttons) are small affordances the author then positions.
+    'snippet':    { w: 240, h: 80 }
   };
 
   // New rect's spawn position. Stacked offsets so successive adds
@@ -19688,7 +19706,9 @@
       image:     null,
       fit:       'cover',
       focusX:    50,
-      focusY:    50
+      focusY:    50,
+      // 6020 Slice 1: snippet binding (null until the author picks one).
+      snippet:   null
     };
     state.rects.push(rect);
     selectedId = rect.id;
@@ -19919,6 +19939,20 @@
     const next = (filename == null || filename === '') ? null : String(filename);
     if (r.image === next) return;
     r.image = next;
+    markDirty();
+    render();
+  }
+
+  // 6020 Slice 1: snippet binding for snippet-kind rects. id '' / null clears
+  // the binding (rect falls back to its stub). Unknown ids are ignored (the
+  // picker only offers registry ids; the save validator rejects others anyway).
+  function setRectSnippet(rectId, snippetId) {
+    const r = state.rects.find(function (x) { return x.id === rectId; });
+    if (!r) return;
+    const next = (snippetId == null || snippetId === '') ? null
+               : (snippetById[snippetId] ? String(snippetId) : r.snippet);
+    if (r.snippet === next) return;
+    r.snippet = next;
     markDirty();
     render();
   }
@@ -21541,6 +21575,82 @@
     if (imageLibrary === null) loadImageLibrary().then(renderPickerBody);
   }
 
+  // 6020 Slice 1: snippet picker. Reuses the image-picker overlay/modal chrome
+  // (.pe-picker* classes) + closeImagePicker()/pickerKeydown for Esc + the
+  // shared `pickerEl` (only one picker open at a time). Unlike images the
+  // catalog is already in memory (from the payload), so there's no async load,
+  // no upload, no refresh — just a list of registered placeable snippets.
+  function openSnippetPicker(rectId) {
+    closeImagePicker();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pe-picker-overlay';
+    overlay.addEventListener('click', function (ev) {
+      if (ev.target === overlay) closeImagePicker();
+    });
+
+    const modal = document.createElement('div');
+    modal.className = 'pe-picker';
+    overlay.appendChild(modal);
+
+    const head = document.createElement('div');
+    head.className = 'pe-picker-head';
+    const title = document.createElement('h3');
+    title.className = 'pe-picker-title';
+    title.textContent = 'Choose snippet';
+    head.appendChild(title);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'pe-picker-close';
+    close.title = 'Close (Esc)';
+    close.textContent = '×';
+    close.addEventListener('click', closeImagePicker);
+    head.appendChild(close);
+    modal.appendChild(head);
+
+    const bodyWrap = document.createElement('div');
+    bodyWrap.className = 'pe-picker-body';
+    modal.appendChild(bodyWrap);
+
+    if (!snippetCatalog.length) {
+      const m = document.createElement('div');
+      m.className = 'pe-empty';
+      m.textContent = 'No placeable snippets are registered.';
+      bodyWrap.appendChild(m);
+    } else {
+      const list = document.createElement('div');
+      list.className = 'pe-snippet-list';
+      const r = state.rects.find(function (x) { return x.id === rectId; });
+      snippetCatalog.forEach(function (s) {
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'pe-snippet-cell';
+        if (r && r.snippet === s.id) cell.classList.add('is-current');
+        const name = document.createElement('span');
+        name.className = 'pe-snippet-cell-label';
+        name.textContent = s.label || s.id;
+        cell.appendChild(name);
+        if (s.description) {
+          const desc = document.createElement('span');
+          desc.className = 'pe-snippet-cell-desc';
+          desc.textContent = s.description;
+          cell.appendChild(desc);
+        }
+        cell.addEventListener('click', function () {
+          setRectSnippet(rectId, s.id);
+          closeImagePicker();
+        });
+        list.appendChild(cell);
+      });
+      bodyWrap.appendChild(list);
+    }
+
+    document.body.appendChild(overlay);
+    pickerEl = overlay;
+    document.body.classList.add('pe-picker-open');
+    document.addEventListener('keydown', pickerKeydown, true);
+  }
+
   // ────────────────────────────────────────────────────────────────
   // Page-picker: switch target page by reloading with new ?page=.
   // ────────────────────────────────────────────────────────────────
@@ -22115,6 +22225,19 @@
       }
     }
 
+    // 6020 Slice 1: snippet rects show their snippet's name on the canvas (the
+    // editor doesn't render the live snippet — that's the front-end's job; here
+    // the author just needs to see WHICH snippet sits at this position). A
+    // binding whose id left the registry is flagged like a missing image.
+    if (rect.kind === 'snippet' && rect.snippet) {
+      const meta = snippetById[rect.snippet];
+      const sn = document.createElement('span');
+      sn.className = 'pe-rect-snippet' + (meta ? '' : ' is-missing');
+      sn.textContent = (meta ? (meta.label || meta.id) : ('⚠ unknown: ' + rect.snippet));
+      el.appendChild(sn);
+      el.classList.add('has-snippet');
+    }
+
     const label = document.createElement('span');
     label.className = 'pe-rect-label';
     label.textContent = rect.kind || '?';
@@ -22630,6 +22753,56 @@
       layer.appendChild(b);
     });
     body.appendChild(row('Layer', layer));
+
+    // 6020 Slice 1: snippet binding — only for snippet-kind rects. Mirrors the
+    // image-bind UI: when bound, show the snippet's label + Change/Unbind; when
+    // unbound, a "Choose snippet…" button. A binding whose id is no longer in
+    // the registry is flagged so the author notices (runtime degrades to stub).
+    if (r.kind === 'snippet') {
+      const bind = document.createElement('div');
+      bind.className = 'pe-snippet-bind';
+
+      if (r.snippet) {
+        const meta  = snippetById[r.snippet];
+        const card  = document.createElement('div');
+        card.className = 'pe-snippet-bound' + (meta ? '' : ' is-missing');
+        const name = document.createElement('span');
+        name.className = 'pe-snippet-bound-name';
+        name.textContent = meta ? (meta.label || meta.id) : r.snippet;
+        name.title = r.snippet;
+        card.appendChild(name);
+        const sub = document.createElement('span');
+        sub.className = 'pe-snippet-bound-sub';
+        sub.textContent = meta ? (meta.description || r.snippet)
+                               : 'not a registered snippet';
+        card.appendChild(sub);
+        bind.appendChild(card);
+
+        const acts = document.createElement('div');
+        acts.className = 'pe-snippet-bind-actions';
+        const change = document.createElement('button');
+        change.type = 'button';
+        change.className = 'pe-create-btn';
+        change.textContent = 'Change…';
+        change.addEventListener('click', function () { openSnippetPicker(r.id); });
+        const unbind = document.createElement('button');
+        unbind.type = 'button';
+        unbind.className = 'pe-image-unbind';
+        unbind.textContent = 'Unbind';
+        unbind.addEventListener('click', function () { setRectSnippet(r.id, null); });
+        acts.appendChild(change);
+        acts.appendChild(unbind);
+        bind.appendChild(acts);
+      } else {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pe-create-btn pe-image-bind-open';
+        btn.textContent = 'Choose snippet…';
+        btn.addEventListener('click', function () { openSnippetPicker(r.id); });
+        bind.appendChild(btn);
+      }
+      body.appendChild(row('Snippet', bind));
+    }
 
     // Image binding (step 4b) — only for image-kind rects. Shows the
     // current binding with a thumb + filename and Change/Unbind, or a

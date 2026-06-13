@@ -89,4 +89,17 @@ body.canvas-page-body {
 .rect--text       { background: var(--cp-kind-text); }
 .rect--image      { background: var(--cp-kind-image); }
 .rect--drilldown  { background: var(--cp-kind-drilldown); }
+.rect--snippet    { background: var(--cp-kind-snippet); }
 .rect--unknown    { background: #eeeeee; }
+
+/* 6020 Slice 1: a snippet rect with a RESOLVED binding renders a live snippet
+   at its position. Strip the editor-parity chrome (border/background/padding)
+   so only the snippet's own markup shows — the rect becomes a bare positioned
+   container. An UNBOUND/dangling snippet rect lacks .has-snippet and keeps the
+   stub + kind background (so the author still sees an empty placeholder). */
+.rect.has-snippet {
+  border: none;
+  background: transparent;
+  padding: 0;
+  overflow: visible;
+}

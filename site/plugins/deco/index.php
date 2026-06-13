@@ -990,6 +990,40 @@ function deco_save_lines(array $body): array
  *   full shape, normalises, and writes content/<pageId>/rects.json
  *   atomically (always as schemaVersion 3).
  */
+/**
+ * 6020 Slice 1 — registry of PLACEABLE snippets.
+ *
+ * A *placeable* snippet is a small, self-contained affordance an author may drop
+ * into a page via a `snippet`-kind rect-block — as opposed to STRUCTURAL partials
+ * (header/footer/lines-layer/sync-peer-indicator), which are page scaffolding and
+ * must never appear in the picker. This list is the single source of truth: the
+ * editor's snippet picker enumerates it, and the runtime whitelists against it so
+ * a forged rects.json can never coax `snippet()` into rendering a non-placeable
+ * (or non-existent) partial.
+ *
+ * It lives in CODE, not in content/*.json (which is gitignored by design): the
+ * set of placeable snippets ships with the app, not with a page's data.
+ *
+ * Each entry: `id` (the snippet() name = file basename under site/snippets/),
+ * `label` (picker title), `description` (one-line picker hint).
+ *
+ * Slice 1 lists only `published-date` — the one snippet that needs NO author
+ * parameters, so the whole pick→store→render pipeline is exercised end-to-end
+ * with a snippet that renders correctly on zero inputs. The button snippets
+ * (c-/e-/rr-button) require href/title/label and arrive in Slice 2, alongside
+ * per-snippet parameter authoring.
+ */
+function deco_placeable_snippets(): array
+{
+    return [
+        [
+            'id'          => 'published-date',
+            'label'       => 'Published date',
+            'description' => 'Badge showing when this node last received a propagate.',
+        ],
+    ];
+}
+
 function deco_save_layout(array $body): array
 {
     $kirby = kirby();
@@ -1041,7 +1075,11 @@ function deco_save_layout(array $body): array
     // narrowing the validator here closes the back door (a direct POST
     // of a deco-mount rect is now rejected). Not a schema bump — kind
     // is a tolerated free string on read, so old data still parses.
-    $allowedKinds = ['text', 'image', 'drilldown'];
+    // 6020 Slice 1: 'snippet' joins the allowed kinds — a rect that renders a
+    // registered placeable snippet at its position. Kept a tolerated free
+    // string on READ (the editor coerces/ignores unknowns), but the SAVE
+    // validator is the authoritative whitelist.
+    $allowedKinds = ['text', 'image', 'drilldown', 'snippet'];
     $rectIds      = [];
     foreach ($rects as $r) {
         if (!is_array($r)) return $fail('Rect entry is not an object.');
@@ -1138,6 +1176,21 @@ function deco_save_layout(array $body): array
                 return $fail('Rect typographyId must be a token slug or null.');
             }
         }
+        // 6020 Slice 1 (schema v3, additive): optional `snippet` field — the
+        // id (file basename) of a PLACEABLE snippet a snippet-kind rect renders.
+        // Validated against the deco_placeable_snippets() registry: existence
+        // here IS enforced (unlike the image/typographyId bindings, which may
+        // dangle and degrade), because the value feeds snippet() at runtime —
+        // restricting it to the known-placeable set is the load-bearing guard
+        // that a forged body can't render a structural partial or a missing
+        // file. null/missing both fine (an unbound snippet rect → runtime stub).
+        // Additive within schema v3 with a null default → NOT a schema bump.
+        if (isset($r['snippet']) && $r['snippet'] !== null) {
+            $placeable = array_column(deco_placeable_snippets(), 'id');
+            if (!is_string($r['snippet']) || !in_array($r['snippet'], $placeable, true)) {
+                return $fail('Rect snippet must be a registered placeable snippet id or null.');
+            }
+        }
         // v0.10.82 (Slice T1): optional `text` field — plain-text body
         // content for a text rect (textarea-authored, multiline). Stored
         // verbatim (whitespace/newlines preserved); the runtime renders
@@ -1229,6 +1282,10 @@ function deco_save_layout(array $body): array
         $r['chapterId'] = $r['chapterId'] ?? null;
         $r['note']      = (isset($r['note']) && $r['note'] !== '') ? $r['note'] : null;
         $r['image']     = (isset($r['image']) && $r['image'] !== '') ? $r['image'] : null;
+        // 6020 Slice 1: snippet binding — empty string → null (unambiguous
+        // on-disk shape, mirrors `image`). Already validated against the
+        // placeable registry above; here we only canonicalise null.
+        $r['snippet']   = (isset($r['snippet']) && $r['snippet'] !== '') ? $r['snippet'] : null;
         $r['fit']       = (isset($r['fit']) && $r['fit'] === 'contain') ? 'contain' : 'cover';
         // v0.10.50: image focus — clamp to int 0..100, default 50.
         foreach (['focusX', 'focusY'] as $fk) {

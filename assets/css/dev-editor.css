@@ -4700,7 +4700,29 @@ body.pe-picker-open .pe-overlay { display: none; }
 .pe-rect--text       { background: var(--pe-kind-text); }
 .pe-rect--image      { background: var(--pe-kind-image); }
 .pe-rect--drilldown  { background: var(--pe-kind-drilldown); }
+.pe-rect--snippet    { background: var(--pe-kind-snippet); }
 .pe-rect--unknown    { background: #eeeeee; }
+
+/* 6020 Slice 1: snippet name shown on the canvas (the editor doesn't render
+   the live snippet — see renderRect). Centred chip so the author sees which
+   snippet sits here. .is-missing flags a binding that left the registry. */
+.pe-rect-snippet {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 12px);
+  padding: 0.15rem 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #2a2208;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.pe-rect-snippet.is-missing { color: #ff7766; background: rgba(36, 27, 27, 0.85); }
 
 /* Resize handles ─────────────────────────────────────────────
    Eight handles on the selected rect: four corners + four edge
@@ -5194,6 +5216,62 @@ input.pe-geom-input::-webkit-inner-spin-button {
 .pe-image-bound-sub { font-size: 0.7rem; color: #9a9a9a; }
 .pe-image-bound.is-missing .pe-image-bound-sub { color: #ff7766; }
 .pe-image-bind-actions { display: flex; gap: 0.4rem; }
+
+/* 6020 Slice 1: snippet binding (selection panel) — same visual language as
+   the image bind, minus the thumbnail. */
+.pe-snippet-bind {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+.pe-snippet-bound {
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  min-width: 0;
+}
+.pe-snippet-bound.is-missing { border-color: #5a2c2c; background: #241b1b; }
+.pe-snippet-bound-name {
+  font-size: 0.8rem;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-snippet-bound-sub { font-size: 0.7rem; color: #9a9a9a; }
+.pe-snippet-bound.is-missing .pe-snippet-bound-sub { color: #ff7766; }
+.pe-snippet-bind-actions { display: flex; gap: 0.4rem; }
+
+/* 6020 Slice 1: snippet picker body — a vertical list of registered placeable
+   snippets (reuses the .pe-picker* overlay/modal chrome). */
+.pe-snippet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pe-snippet-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  text-align: left;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  color: #f0f0f0;
+  cursor: pointer;
+}
+.pe-snippet-cell:hover { border-color: #6a6a6a; background: #262626; }
+.pe-snippet-cell.is-current { border-color: var(--accent, #f5c518); }
+.pe-snippet-cell-label { font-size: 0.9rem; font-weight: 600; }
+.pe-snippet-cell-desc  { font-size: 0.78rem; color: #b0b0b0; }
 .pe-image-unbind {
   background: #241b1b;
   color: #ff8a7a;
