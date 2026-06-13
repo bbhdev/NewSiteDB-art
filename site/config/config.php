@@ -363,22 +363,11 @@ return [
   'panel' => [
     'menu' => function ($kirby) {
       $base = $kirby->url();
+      // Menu = two groups, separated by '-': the KIRBY group (built-in
+      // areas: site/languages/users/system) and the DECO group (editor,
+      // image workshop, runtime). "Runtime" sits last in the Deco group as
+      // the rendered Deco output.
       return [
-        // v0.11.2 — prominent "go to the live site" link. The Panel's two
-        // built-in root affordances (the 'site' entry below + the sidebar
-        // header title "NewSiteDB Art") BOTH land on the Panel home; neither
-        // opens the front-end runtime. The top-right "open" icon does, but
-        // it's a minor affordance and the header title isn't reachable from
-        // config (it's baked into the compiled k-panel-menu SPA component —
-        // repointing it would need a fragile JS plugin override). So clone
-        // the runtime link as a labeled sidebar entry instead: an ABSOLUTE
-        // URL (with host) the Panel SPA treats as external → same-tab nav to
-        // the front end, exactly like the dev-tool entries below.
-        'view-site' => [
-          'label' => 'View site',
-          'icon'  => 'open',
-          'link'  => $base,
-        ],
         'site',
         'languages',
         'users',
@@ -404,6 +393,22 @@ return [
           'label' => 'Image workshop',
           'icon'  => 'images',
           'link'  => 'pages/dev+image-workshop',
+        ],
+        // v0.11.2 / moved + relabeled v0.11.3 — jump to the live front-end
+        // runtime (the rendered Deco output). The Panel's built-in root
+        // affordances (the 'site' entry + the sidebar header title
+        // "NewSiteDB Art") both land on the Panel home; neither opens the
+        // runtime. The top-right "open" icon does, but it's minor, and the
+        // header title isn't reachable from config (baked into the compiled
+        // k-panel-menu SPA component — repointing it would need a fragile JS
+        // plugin override, not worth it for minor UI). So clone the runtime
+        // link as a labeled entry, last in the Deco group. ABSOLUTE URL
+        // ($kirby->url()) → the Panel SPA treats it as external and does a
+        // same-tab navigation to the front end, like the dev-tool entries.
+        'runtime' => [
+          'label' => 'Runtime',
+          'icon'  => 'open',
+          'link'  => $base,
         ],
       ];
     },
