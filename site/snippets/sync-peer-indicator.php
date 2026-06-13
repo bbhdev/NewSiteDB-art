@@ -949,6 +949,13 @@ if ($role !== 'L') return;
      no extra screen space. */
   .sync-prop-btn.is-ahead{ background:#e8b22b; color:#1c1c1c; border-color:#caa01f; }
   .sync-prop-btn.is-ahead:hover{ background:#f3bf32; border-color:#d8ad22; }
+  /* Ahead BUT the editor still holds unsaved work: a push now is premature —
+     the unsaved buffer wouldn't travel. Muted hollow-amber (dark bg, amber
+     text+outline) reads as "attention, but not the filled call-to-action of
+     .is-ahead": save first, then push. Same amber hue as the pill, one
+     intensity down — mirrors the A-side Back-B→A "save before pushing" state. */
+  .sync-prop-btn.is-ahead-pending{ background:#2a2a2a; color:#f5c518; border-color:#6a5a1f; }
+  .sync-prop-btn.is-ahead-pending:hover{ background:#343012; border-color:#8a7420; }
   /* Mirror of .is-ahead for the opposite direction: when A is ahead, the
      Pull (A → L) button — the action to take — turns red fill. */
   .sync-prop-btn.is-behind{ background:#c0392b; color:#fff; border-color:#c0392b; }
@@ -1226,6 +1233,7 @@ if ($role !== 'L') return;
   // (unreachable / legacy) poll() owns the label and this is a no-op.
   function renderPill() {
     var dir = lastDirection;
+    var d   = isDirty();
     if (dir === 'behind') {
       // A is ahead — the dangerous state. Red pill + the S5.2 nuclear modal
       // block the editor. Dominates regardless of local dirty.
@@ -1234,15 +1242,31 @@ if ($role !== 'L') return;
       // L is ahead = unpropagated saved work. Persistent amber until a push
       // converges to 'equal'. If ALSO dirty, name the extra unsaved work so
       // the user knows a save-then-push (not just push) is needed.
-      setLabel(isDirty() ? "you're ahead + unsaved work"
-                         : "you're ahead — push when done", 'ahead');
+      setLabel(d ? "you're ahead + unsaved work"
+                 : "you're ahead — push when done", 'ahead');
     } else if (dir === 'equal') {
       // On disk L and A match. If the editor holds unsaved edits, surface
       // them in amber rather than the calm "in sync" — saving is the next
       // step before the on-disk state actually matches what's on screen.
-      var d = isDirty();
       setLabel(d ? 'unsaved changes' : 'in sync', d ? 'ahead' : 'ok');
     }
+    // Drive the action-button glow from the SAME (direction, dirty) the pill
+    // text uses — so it updates live on every edit, not only on the 60s poll,
+    // and mirrors the A-side Back-B→A control's five-state logic (backVisual):
+    //   • full amber (.is-ahead)         = ahead AND clean — push now ships
+    //     everything; the genuine call to action.
+    //   • muted hollow amber (.is-ahead-pending) = ahead BUT the editor holds
+    //     unsaved work — a push now is premature (the buffer wouldn't travel),
+    //     so the next step is SAVE, not push.
+    // This was the bug: the glow was direction-only + poll-only, so a post-save
+    // edit left the button full-amber ("push now") when it should read "save
+    // first". renderPill() runs on both poll() and 'ed:dirty-changed', so the
+    // transition is now instant in both directions.
+    if (pushBtnEl) {
+      pushBtnEl.classList.toggle('is-ahead',         dir === 'ahead' && !d);
+      pushBtnEl.classList.toggle('is-ahead-pending', dir === 'ahead' &&  d);
+    }
+    if (pullBtnEl) pullBtnEl.classList.toggle('is-behind', dir === 'behind');
   }
 
   function poll() {
@@ -1252,7 +1276,7 @@ if ($role !== 'L') return;
         if (!j || !j.ok || !j.state) {
           setLabel('A unreachable', 'error');
           lastDirection = null;
-          if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
+          if (pushBtnEl) { pushBtnEl.classList.remove('is-ahead'); pushBtnEl.classList.remove('is-ahead-pending'); }
           if (pullBtnEl) pullBtnEl.classList.remove('is-behind');
           return;
         }
@@ -1262,11 +1286,12 @@ if ($role !== 'L') return;
         // pull); 'equal' = converged. Fall back to the old recency check
         // only if a stale server somehow omits `direction`.
         var dir = j.direction;
-        var ahead = (dir === 'ahead');
-        var behind = (dir === 'behind');
         if (dir === 'ahead' || dir === 'behind' || dir === 'equal') {
           lastDirection = dir;
-          renderPill();   // pill = f(direction, local dirty)
+          // pill = f(direction, local dirty); renderPill() also owns the
+          // Push/Pull button glow now (S5.3 folded in — it must react to the
+          // dirty axis, not just the polled direction).
+          renderPill();
         } else {
           // Legacy/unknown shape — preserve prior behaviour. No known
           // direction, so renderPill() can't help; paint directly here.
@@ -1275,17 +1300,15 @@ if ($role !== 'L') return;
           var age = ageSeconds(iso);
           var state = (age !== null && age <= WARN_THRESHOLD_SECONDS) ? 'warn' : 'ok';
           setLabel('A active ' + relTime(iso), state);
+          // No known direction → no glow.
+          if (pushBtnEl) { pushBtnEl.classList.remove('is-ahead'); pushBtnEl.classList.remove('is-ahead-pending'); }
+          if (pullBtnEl) pullBtnEl.classList.remove('is-behind');
         }
-        // S5.3 — mirror the direction onto the action buttons: Push glows
-        // amber when L is ahead, Pull glows red when A is ahead. Each reverts
-        // to calm dark once that direction no longer holds.
-        if (pushBtnEl) pushBtnEl.classList.toggle('is-ahead', ahead);
-        if (pullBtnEl) pullBtnEl.classList.toggle('is-behind', behind);
         applyNuclear(j);   // S5.2 — block the editor when A is ahead
       })
       .catch(function () {
         setLabel('A unreachable', 'error');
-        if (pushBtnEl) pushBtnEl.classList.remove('is-ahead');
+        if (pushBtnEl) { pushBtnEl.classList.remove('is-ahead'); pushBtnEl.classList.remove('is-ahead-pending'); }
         if (pullBtnEl) pullBtnEl.classList.remove('is-behind');
       });
   }
