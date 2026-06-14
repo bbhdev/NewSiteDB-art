@@ -113,6 +113,18 @@ if ($role === 'A'):
      give the button a steady amber tint so it never blends into chrome. */
   #sync-publish-btn{ border-color:#6a5a1f; }
   #sync-publish-btn:hover{ background:#343012; border-color:#8a7420; }
+  /* 2060 — two-tier "work to publish" glow, driven client-side (no A↔B probe):
+       • is-pub-dirty (LIGHT amber) = unsaved editor work on A — save first;
+       • is-pub-ready (FULL amber)  = a save happened since the last publish —
+         A holds content B doesn't have yet; this is the call to action.
+     Calm (neither class) = nothing saved-and-unpublished this session. Same
+     amber hues as B's Back-B→A pill (sbp-amber-light / -full) so the propagate
+     controls read identically across nodes. NB the "ready" state is a SESSION
+     signal (resets on reload); the real A-vs-B state isn't tracked server-side. */
+  #sync-publish-btn.is-pub-dirty{ background:#2e2818; color:#ffd966; border-color:#8a7420; }
+  #sync-publish-btn.is-pub-dirty:hover{ background:#372f17; border-color:#a78a26; }
+  #sync-publish-btn.is-pub-ready{ background:#f5c518; color:#1a1500; border-color:#f5c518; }
+  #sync-publish-btn.is-pub-ready:hover{ background:#ffd233; border-color:#ffd233; }
 
   .sync-prop-modal{ position:fixed; inset:0; z-index:10001;
     display:flex; align-items:center; justify-content:center;
@@ -193,6 +205,25 @@ if ($role === 'A'):
   var mBack    = modal.querySelector('[data-role="backdrop"]');
   var busy     = false;
   var forced   = false;   // Slice 3a — B-guard escape hatch armed this open
+
+  // 2060 — two-tier publish glow (client session signal; see CSS note).
+  //   light amber = unsaved editor work (save before publishing);
+  //   full amber  = a save happened since the last publish (A holds content B
+  //                 doesn't have yet — the call to action);
+  //   calm        = nothing saved-and-unpublished this session.
+  // savedSincePublish is intentionally session-scoped: a true A-vs-B compare
+  // isn't tracked server-side, so we arm "ready" off the save we just observed
+  // and disarm it when a publish completes. Resets on reload (re-arms on edit).
+  var savedSincePublish = false;
+  function isDirty(){
+    try { return typeof window.edHasUnsavedData === 'function' && !!window.edHasUnsavedData(); }
+    catch (e) { return false; }
+  }
+  function paintGlow(){
+    var dirty = isDirty();
+    pubBtn.classList.toggle('is-pub-dirty', dirty);
+    pubBtn.classList.toggle('is-pub-ready', !dirty && savedSincePublish);
+  }
 
   function esc(s){ return String(s).replace(/[&<>]/g, function(c){
     return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
@@ -331,6 +362,8 @@ if ($role === 'A'):
           '<span class="spm-ok">✓ Published to B (public).</span><br>'
           + 'B now has <b>' + (r.pages||0) + '</b> pages · <b>' + (r.files||0) + '</b> files.<br>'
           + 'Snapshot: <b>' + esc(j.snapshot || '?') + '</b>';
+        // A and B now match (this session): drop the "ready" glow back to calm.
+        savedSincePublish = false; paintGlow();
       })
       .catch(function(){
         busy = false; mCancel.disabled = false; mCancel.textContent = 'Close';
@@ -342,6 +375,12 @@ if ($role === 'A'):
   mConfirm.addEventListener('click', doPublish);
   mCancel.addEventListener('click', closeModal);
   mBack.addEventListener('click', closeModal);
+  // Glow axis — the same editor events L's push button and B's back button
+  // listen to: a buffer dirty/clean flip repaints (light amber on/off); a save
+  // arms "ready" (full amber). No poll, no A↔B network probe.
+  window.addEventListener('ed:dirty-changed', paintGlow);
+  window.addEventListener('ed:editor-saved', function(){ savedSincePublish = true; paintGlow(); });
+  paintGlow();   // initial paint — calm on a fresh load
   document.addEventListener('keydown', function(e){
     if (modal.hidden) return;
     if (e.key === 'Escape'){ e.preventDefault(); closeModal(); }
