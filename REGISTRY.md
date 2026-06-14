@@ -11,9 +11,43 @@
 >
 > Read BOTH this file and `HANDOFF.md` at session start.
 >
-> Frontier: **v0.11.7**, 2026-06-14.
+> **Frontier beacon:** `v0.11.7` · 2026-06-14 · branch `claude/moving-lines-animation-jvDgl`.
+> Update this line whenever the registry's authoritative branch or version advances —
+> it is the cross-device staleness tripwire (see Multi-device protocol below).
 
 ---
+
+## 🔀 Multi-device protocol (why this matters — read on any device switch)
+
+**Root cause of cross-device divergence: branch-per-session.** Each Claude Code
+cloud/web session works on its OWN auto-created `claude/<session-slug>` branch.
+Two sessions = two branches, even for the "same" project. On 2026-06-14 an iPad
+session (`…sync-convergence-gxliye`) and this Mac session
+(`…moving-lines-animation-jvDgl`) **both forked from yesterday's tip** (`659022f`)
+and never shared a branch. The iPad rebuilt a REGISTRY.md from the yesterday base,
+structurally blind to the 4–5 commits already on the other branch that same
+afternoon. The staleness was guaranteed by branch isolation — not merely by a
+stale verbal reference. **You did not fork git; the harness did, per session.**
+
+**The discipline that actually prevents it:**
+
+1. **One home branch for registry/planning edits.** Doc-only registry changes
+   should land on a single, known branch (this one until told otherwise). Don't
+   let two device sessions each grow their own registry — they cannot both be true.
+2. **Fetch-first on every device switch.** A new device session's FIRST move:
+   `git fetch --all && git branch -avv` — see which `claude/*` branches exist and
+   which is newest. The session's "memory" of where things were is NOT authority;
+   origin is.
+3. **Frontier beacon is the tripwire.** The beacon line above is git-tracked, so
+   it travels with the file. If a device opens a REGISTRY.md whose beacon names an
+   older date/version/branch than `origin` has, it is stale — stop and pull/rebase
+   onto the home branch before editing.
+4. **Memory files are NOT a reliable cross-device channel** — they live under
+   `~/.claude` (per-machine), so a beacon kept only in memory may never reach
+   another device. The authoritative beacon is THIS git-tracked line.
+5. **Converge session branches promptly.** Treat `claude/*` branches as ephemeral:
+   merge/rebase the keep-worthy work onto the home branch and let the rest die,
+   so "latest" has one address.
 
 ## 🧭 Numbering convention (single coherent scheme, v0.10.242; hundreds-tier amendment 2026-06-14)
 
