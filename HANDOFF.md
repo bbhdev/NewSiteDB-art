@@ -488,11 +488,11 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   2026-06-11 correction).
 - **`[editor]` 6000** — ▶ 6010 dialog key-defaults + JS-vs-Panel consistency (deferred).
   · **6020 snippet rect-block — a general "snippet" placement primitive**
-  (registered 2026-06-12). **✅ Slice 1 DONE + runtime VALIDATED (v0.11.7,
+  (registered 2026-06-12). **✅ 6021 DONE + runtime VALIDATED (v0.11.7,
   2026-06-13):** new rect `kind` `snippet` wired end-to-end — pick → store →
   render — and the published-date snippet confirmed rendering at its rect
   position on the live front end.
-  ⚠️ **Runtime rect-rendering gap found & fixed while validating step 4
+  ⚠️ **Runtime rect-rendering gap found & fixed while validating 6021's step 4
   (v0.11.7):** the rect-render loop lived ONLY in `canvas-page.php`, but NO
   content page used that template (home → `home` template, others → `default`),
   so authored rects of EVERY kind (image/text/drilldown/snippet) rendered on no
@@ -509,7 +509,7 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   snippet / unimplemented kind (drilldown) → graceful kind stub. Pages are routed
   by switching their content file (`home.txt`→`canvas-page.txt`); `home.php`
   template kept on disk untouched (demo buttons preserved, fully reversible) —
-  they return as PLACED snippets once Slice 2 lands param authoring. Registry is a
+  they return as PLACED snippets once 6022 lands param authoring. Registry is a
   CODE helper `deco_placeable_snippets()` (deco plugin),
   NOT `content/_shared/snippets.json` (content/*.json is gitignored by design →
   a content-side registry would never be tracked; the placeable set ships with
@@ -518,16 +518,16 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   and unlike the image/typographyId bindings (which may dangle), the `snippet`
   value's EXISTENCE is enforced, because it feeds `snippet()` at runtime (a
   forged body must not render a structural partial / missing file). Additive
-  `snippet` field on rects (null default, NOT a schema bump). Slice 1 lists
+  `snippet` field on rects (null default, NOT a schema bump). 6021 lists
   ONLY `published-date` — the one param-free snippet — by explicit user choice
   ("step by step, test bit by bit"). Validation caveat: published-date renders
   only after a propagate has landed on the node (on L: after the first pull);
   before that the runtime rect is empty though the editor shows the binding.
-  · ▶ **Slice 2 (next):** per-snippet PARAMETER authoring — the registry
+  · ▶ **6022 (next):** per-snippet PARAMETER authoring — the registry
   declares each snippet's param schema (name/type/default/label); the inspector
   renders fields; `r.snippetParams` stored; runtime passes `snippet(id, params)`
   with escaping. THIS is what makes c-/e-/rr-button usable (inert without
-  href/title/label). · ▶ **Slice 3:** polish — richer canvas preview, picker
+  href/title/label). · ▶ **6023:** polish — richer canvas preview, picker
   descriptions, placeable-vs-structural enforcement convention.
   · — Original concept (retained): a *snippet* is a small,
   self-contained affordance designed to be dropped anywhere the design requires —
