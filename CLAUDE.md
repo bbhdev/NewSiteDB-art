@@ -44,6 +44,25 @@ The two are joined by the canonical ID. Never keep a second copy of the status
 list in HANDOFF (it would drift). `project-hierarchy.csv` at the repo root maps
 every file/dir to its role.
 
+## Home branch & multi-device startup (auto-surfaced — no human memory required)
+
+**The home/rendezvous branch is `main`** — it is also GitHub's *default* branch,
+so a fresh clone on ANY device (Mac or iPad) checks it out automatically. The
+user is NOT expected to remember the branch name; this file states it, and this
+file is read on every session. If you find yourself on any other branch
+(e.g. a `claude/<slug>` working branch a cloud session auto-spawned), that branch
+must be rebased/merged back onto `main` — origin's `main` is the single truth.
+
+**On session start, before substantive work:** `git fetch && git pull` on `main`,
+then read the two docs above. Origin is authority; a session's recollection of
+"where things were" is not. **On a device switch** the leaving device must
+`git push` on `main` (the push IS the handoff — there is no background sync; the
+Mac is not a server, but `origin` is one both devices reach). Things that do NOT
+cross devices: `~/.claude` memory files (per-machine) and uncommitted working-tree
+edits — promote anything that must travel into the git-tracked docs and commit it.
+
+Full rationale + the why → REGISTRY.md › "Multi-device protocol".
+
 ## Behavioral rule
 
 When acting on an assumption that's BOTH (a) central to the current subject
