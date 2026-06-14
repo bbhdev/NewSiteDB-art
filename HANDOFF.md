@@ -120,9 +120,12 @@ misframed). This scheme replaces all of them with ONE addressing axis.
    would have nowhere to live. (This amends the original "×10 off the band"
    habit, which wasted the entire hundreds digit — a loss of addressing domain.)
    A genuinely small, childless item may still take a tens slot directly off the
-   band. **Grandfathered:** the existing tens-off-band items (`6010/6020/6030`,
+   band. **Grandfathered:** the existing tens-off-band items (`6010/6020`,
    `2040/2041/2042`, etc.) keep their IDs unchanged — the hundreds tier is
-   forward-looking only, not a retroactive renumber.
+   forward-looking only, not a retroactive renumber. (Exception by choice: an
+   UNSTARTED tens item later judged major MAY be promoted to a hundreds slot —
+   `6030`→`6500` was done 2026-06-14 — but this is a deliberate per-item call,
+   not a sweep.)
 4. **Genuine deep subdivision → dotted decimals:** when the integer tiers are
    exhausted, go dotted — `6121.1`, `6121.2`, then `6121.2.a`, `6121.2.b`. A
    child never renumbers its parent; the parent closes only when its children do.
@@ -567,35 +570,6 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   built now:** raised mid-2090 to avoid losing the idea; building it now would
   zig-zag the sync epic. Pick up under the 6000 editor pillar after the sync
   epic's 2095 review.
-  · **6030 Lines↔Layout capability convergence — Lines' text/image blocks gain
-  Layout's full styles + image resize** (registered 2026-06-13). **Direction is
-  deliberate and one-way:** Layout rect-blocks are CLASSICAL content in the
-  author's mental model — static, scroll-with-page is CORRECT by design. The
-  behaviorful, less-classical objects (scroll-driven motion, off-canvas slide-in,
-  draggable) live in **Lines**, which already has text & image block kinds. So
-  the convergence runs Lines ← Layout (Lines' text/image gain Layout's richness),
-  NOT the reverse. ⛔ **Explicitly NOT wanted (resolved 2026-06-13):** giving
-  Layout rect-blocks motion / off-canvas placement / a viewport-static flag /
-  draggable. The original "do rects move on scroll like lines?" question resolved
-  to "rects are intentionally classical/static; author behaviorful text/images in
-  Lines instead." Do not re-raise rect motion. **Precise current gap (verified in
-  app.js):** Lines TEXT blocks read only `fontFamily` + `fontSize` + `fill`
-  (app.js ~387/1084/980) — NO typography tokens (`.ty-<id>`) and NO style marks
-  (the TS1–TS4 strong/em/underline/link/color-run system); Lines IMAGE blocks read
-  only SVG `preserveAspectRatio` (slice/fill/meet, app.js ~835) — NO cover/contain
-  + focal point (focusX/focusY object-position) and NO resize. Layout's text/image
-  rect-blocks already have ALL of this (the typography token + marks engine; image
-  fit + focusX/focusY + the `maxLongEdge` downscale hook). The goal: an author
-  placing a text or image object in Lines should reach the same styling + image
-  controls they get in Layout. **How: TBD — user has ideas; discuss before
-  building** (e.g. share the engine: Layout's typography/marks emitter and
-  image-fit/focus model are candidates to reuse, but Lines renders into an SVG —
-  `<text>`/`<image>` — vs Layout's HTML, so the rendering target differs).
-  **NOTE:** this 6030 entry IS the user's "medium-big" note (layout text styles
-  usable by Line objects + workshop-resized images usable by Line image blocks) —
-  already registered, no duplicate. Being medium-big it may grow children; if it
-  sprouts a real sub-tree it should be PROMOTED to a hundreds slot (e.g. 6500) per
-  the hundreds-tier convention, rather than crammed into 6031/6032.
 - **6000-band items registered 2026-06-14 (from the user's notes; not started).**
   Smalls take tens slots, major subtasks take hundreds slots (room for children):
   · **6040 — layout image-rect "Change → upload" bypasses workshop resize.**
@@ -651,6 +625,34 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
     finger anywhere to rotate) — plus Confirm / Cancel (Enter / Esc). Touch parity
     is required (this is a tablet-first interaction). The rotate MATH already
     exists in behaviors; the new work is the post-draw authoring affordance.
+  · **6500 `[editor]` — Lines↔Layout capability convergence (major; was 6030,
+    promoted to a hundreds slot 2026-06-14 because it is medium-big with a real
+    sub-tree).** Lines' text/image blocks gain Layout's full styles + image
+    resize. **Direction is deliberate and one-way:** Layout rect-blocks are
+    CLASSICAL content in the author's mental model — static, scroll-with-page is
+    CORRECT by design. The behaviorful, less-classical objects (scroll-driven
+    motion, off-canvas slide-in, draggable) live in **Lines**, which already has
+    text & image block kinds. So the convergence runs Lines ← Layout (Lines'
+    text/image gain Layout's richness), NOT the reverse. ⛔ **Explicitly NOT
+    wanted (resolved 2026-06-13):** giving Layout rect-blocks motion / off-canvas
+    placement / a viewport-static flag / draggable. The original "do rects move on
+    scroll like lines?" question resolved to "rects are intentionally
+    classical/static; author behaviorful text/images in Lines instead." Do not
+    re-raise rect motion. **Precise current gap (verified in app.js):** Lines TEXT
+    blocks read only `fontFamily` + `fontSize` + `fill` (app.js ~387/1084/980) —
+    NO typography tokens (`.ty-<id>`) and NO style marks (the TS1–TS4
+    strong/em/underline/link/color-run system); Lines IMAGE blocks read only SVG
+    `preserveAspectRatio` (slice/fill/meet, app.js ~835) — NO cover/contain +
+    focal point (focusX/focusY object-position) and NO resize. Layout's
+    text/image rect-blocks already have ALL of this (the typography token + marks
+    engine; image fit + focusX/focusY + the `maxLongEdge` downscale hook). The
+    goal: an author placing a text or image object in Lines should reach the same
+    styling + image controls they get in Layout. **How: TBD — user has ideas;
+    discuss before building** (e.g. share the engine: Layout's typography/marks
+    emitter and image-fit/focus model are candidates to reuse, but Lines renders
+    into an SVG — `<text>`/`<image>` — vs Layout's HTML, so the render target
+    differs). Children TBD: e.g. 6510 text styles (typography token + marks) into
+    Lines text, 6520 image fit/focus/resize into Lines image.
 - **`[i18n]` 7000 — bilingual / multilingual sites (BIG, registered 2026-06-14,
   not started).** Many sites need to be bilingual; the first real site will be.
   Two very different sizes of work: the **UI affordance** (a language switch) is
