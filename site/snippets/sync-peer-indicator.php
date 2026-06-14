@@ -854,9 +854,23 @@ if ($role !== 'L') return;
             font:11px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;
             background:#2a2a2a;color:#fff;
             padding:4px 8px;border-radius:4px;
+            display:inline-flex;align-items:center;gap:7px;
             pointer-events:none;user-select:none;
             transition:background-color 0.2s, color 0.2s;">
   <span data-role="label">A: …</span>
+  <?php /* 2110 — trust-the-user override. Loading a snapshot bumps L's
+          activity stamp, so the server reads L 'ahead' of A even when the
+          loaded state is identical to A. Only the user knows it's equal, so
+          this lets them force the pill calm (and kill the Push glow) without
+          touching the sync state. Shown only on a CLEAN 'ahead'; pointer-
+          events:auto so it stays clickable inside the pointer-events:none
+          pill. Toggles to an undo once forced. */ ?>
+  <button type="button" data-role="mark-synced" hidden
+          title="This machine's content matches A — silence the push suggestion (resets on reload or your next edit)"
+          style="pointer-events:auto;cursor:pointer;white-space:nowrap;
+                 font:600 10px/1 -apple-system,BlinkMacSystemFont,sans-serif;
+                 background:#3a3414;color:#f5c518;border:1px solid #6a5a1f;
+                 padding:4px 8px;border-radius:4px;">✓&nbsp;in&nbsp;sync</button>
 </div>
 
 <?php /* S4b.4 — primary in-app "Push L → A" control + dark confirm modal.
@@ -1248,11 +1262,18 @@ if ($role !== 'L') return;
   // Likewise the Pull button turns red fill when A is ahead ('behind').
   var pushBtnEl = document.getElementById('sync-push-btn');
   var pullBtnEl = document.getElementById('sync-pull-btn');
+  var markBtn   = el.querySelector('[data-role="mark-synced"]');
 
   // Last direction seen by poll() ('ahead' | 'behind' | 'equal' | null).
   // The Pull dialog reads it to warn when L is ahead — pulling then
   // overwrites L's newer, unpropagated work with A's older content.
   var lastDirection = null;
+
+  // 2110 — trust-the-user "mark in sync" override. In-memory only (resets on
+  // reload, by design — see the markup comment). When true, a CLEAN 'ahead'
+  // is rendered calm and the Push glow is suppressed. renderPill() cancels it
+  // the moment any real signal appears (dirty edit, 'behind', or convergence).
+  var forcedEqual = false;
 
   // Is the editor holding unsaved in-memory changes? Defined in dev-editor.js
   // Section 3; may be absent during early boot → treat as clean.
@@ -1273,10 +1294,20 @@ if ($role !== 'L') return;
   function renderPill() {
     var dir = lastDirection;
     var d   = isDirty();
+    // 2110 — cancel the trust-the-user override the moment any REAL signal
+    // appears: a fresh in-editor edit (dirty), A pulling ahead ('behind'), or
+    // a genuine convergence (direction no longer 'ahead'). The override only
+    // ever masks a CLEAN, on-disk-only 'ahead' — the snapshot-load artefact.
+    if (forcedEqual && (dir !== 'ahead' || d)) forcedEqual = false;
     if (dir === 'behind') {
       // A is ahead — the dangerous state. Red pill + the S5.2 nuclear modal
       // block the editor. Dominates regardless of local dirty.
       setLabel('A is ahead — pull before editing', 'error');
+    } else if (dir === 'ahead' && forcedEqual) {
+      // User asserted "this equals A" (e.g. just loaded a matching snapshot).
+      // Render calm — the server still reads 'ahead' by timestamp, but the
+      // human knows the content matches, so don't nag with the push CTA.
+      setLabel('in sync (marked)', 'ok');
     } else if (dir === 'ahead') {
       // L is ahead = unpropagated saved work. Persistent amber until a push
       // converges to 'equal'. If ALSO dirty, name the extra unsaved work so
@@ -1302,10 +1333,21 @@ if ($role !== 'L') return;
     // first". renderPill() runs on both poll() and 'ed:dirty-changed', so the
     // transition is now instant in both directions.
     if (pushBtnEl) {
-      pushBtnEl.classList.toggle('is-ahead',         dir === 'ahead' && !d);
+      // forcedEqual suppresses the full-amber CTA (the whole point); the
+      // pending/hollow state can't co-occur with it (forcedEqual is cleared
+      // whenever d is true), so it needs no guard.
+      pushBtnEl.classList.toggle('is-ahead',         dir === 'ahead' && !d && !forcedEqual);
       pushBtnEl.classList.toggle('is-ahead-pending', dir === 'ahead' &&  d);
     }
     if (pullBtnEl) pullBtnEl.classList.toggle('is-behind', dir === 'behind');
+    // 2110 — the override affordance is offered ONLY on a clean 'ahead' (the
+    // false-positive shape). Once forced, the same button becomes an undo so
+    // the user can revert a mis-click or re-expose the real state.
+    if (markBtn) {
+      var canMark = dir === 'ahead' && !d;
+      markBtn.hidden = !canMark;
+      if (canMark) markBtn.innerHTML = forcedEqual ? '↺&nbsp;ahead?' : '✓&nbsp;in&nbsp;sync';
+    }
   }
 
   function poll() {
@@ -1369,6 +1411,14 @@ if ($role !== 'L') return;
   //     the direction we already know (no server round-trip needed).
   window.addEventListener('ed:editor-saved', poll);
   window.addEventListener('ed:dirty-changed', renderPill);
+
+  // 2110 — "mark in sync" toggle. Pure client state (forcedEqual); no server
+  // call. renderPill() does all the work — it shows/hides this button and
+  // flips its label, and self-cancels the override on any real signal.
+  if (markBtn) markBtn.addEventListener('click', function () {
+    forcedEqual = !forcedEqual;
+    renderPill();
+  });
 
   // ── S4b.4 — "Push L → A" control ──────────────────────────────────
   // Two-step: a dry-run preview (no snapshot, no swap) populates the

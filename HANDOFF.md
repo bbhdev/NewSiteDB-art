@@ -413,6 +413,26 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   check in /delete (`dirname($targetReal) !== $libRootReal`, config.php:1080–84),
   not the string filter — the filter is the first line, realpath is the wall.
   All three routes kept byte-identical so a name that saves always loads/deletes.
+  · **2110 — "mark in sync" trust-the-user override (✅ v0.11.10, awaiting live
+  validation).** PROBLEM: loading a snapshot rewrites `content/`, which fires
+  `sync_record_local_activity()` and bumps L's `lastActivityAt` to now — so the
+  pure-timestamp `sync_direction_between()` reads L 'ahead' of A even when the
+  loaded snapshot is byte-identical to A. The protocol has NO cross-node content
+  signature, only timestamps, so the system can't know it's equal; only the user
+  can. DECISION (client-only, NOT a server mark-equal): a small `data-role=
+  "mark-synced"` toggle on the L pill, shown ONLY on a clean 'ahead' (the exact
+  false-positive shape — `dir==='ahead' && !isDirty()`). Click sets a JS
+  `forcedEqual` flag → renderPill() renders 'in sync (marked)' calm and drops the
+  Push `.is-ahead` glow. **Why client-only and not a `/sync/mark-equal` route that
+  rewrites L's stamp:** persisting it would violate the load-bearing invariant
+  "`lastActivityAt` advances IFF propagate-scope content changed" and could mask a
+  REAL later 'ahead' across a reload — dragging a UX convenience into the sync
+  contract, the exact complexity we're avoiding. The override is in-memory: it
+  self-cancels on any real signal (a dirty edit, A going 'behind', or genuine
+  convergence) and is gone on reload, so the honest timestamp truth always
+  reasserts and the user re-affirms only if they still mean it. Toggles to an
+  '↺ ahead?' undo once forced. All in `sync-peer-indicator.php` L-branch; zero
+  server change.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
   3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ✅ **3065 fold STYLES
