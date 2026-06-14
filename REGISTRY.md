@@ -11,7 +11,7 @@
 >
 > Read BOTH this file and `HANDOFF.md` at session start.
 >
-> **Frontier beacon:** `v0.11.7` · 2026-06-14 · branch `claude/moving-lines-animation-jvDgl`.
+> **Frontier beacon:** `v0.11.7` · 2026-06-14 · branch `main` (the home/rendezvous branch).
 > Update this line whenever the registry's authoritative branch or version advances —
 > it is the cross-device staleness tripwire (see Multi-device protocol below).
 
@@ -31,13 +31,25 @@ stale verbal reference. **You did not fork git; the harness did, per session.**
 
 **The discipline that actually prevents it:**
 
-1. **One home branch for registry/planning edits.** Doc-only registry changes
-   should land on a single, known branch (this one until told otherwise). Don't
-   let two device sessions each grow their own registry — they cannot both be true.
+0. **`main` is the home/rendezvous branch (since 2026-06-14).** Every device and
+   every session works on `main` — branch off it for risky work, merge back
+   promptly. A cloud session left alone SPAWNS its own `claude/<slug>` branch, so
+   on the iPad the explicit first instruction must be: *"checkout `main`, pull,
+   read REGISTRY + HANDOFF."* (This replaced the disposable session-slug branch
+   `…moving-lines-animation-jvDgl`, renamed to `main`.)
+1. **One home branch for registry/planning edits** — `main`. Don't let two device
+   sessions each grow their own registry; they cannot both be true.
 2. **Fetch-first on every device switch.** A new device session's FIRST move:
-   `git fetch --all && git branch -avv` — see which `claude/*` branches exist and
-   which is newest. The session's "memory" of where things were is NOT authority;
-   origin is.
+   `git fetch --all && git checkout main && git pull`. The session's "memory" of
+   where things were is NOT authority; origin is.
+
+**Mac → iPad handoff (the only safe path — git is the sole bridge; the Mac is not
+a server, but `origin` is one both devices reach):**
+- *Leaving the Mac:* promote anything that must travel into `REGISTRY.md` /
+  `HANDOFF.md` (memory files under `~/.claude` and uncommitted edits do NOT cross —
+  WIP-commit them), then `git push` on `main`. The push IS the handoff.
+- *On the iPad:* checkout `main`, pull, read the two docs, confirm the frontier
+  beacon matches. *Returning to the Mac:* `git pull` on `main` BEFORE resuming.
 3. **Frontier beacon is the tripwire.** The beacon line above is git-tracked, so
    it travels with the file. If a device opens a REGISTRY.md whose beacon names an
    older date/version/branch than `origin` has, it is stale — stop and pull/rebase
