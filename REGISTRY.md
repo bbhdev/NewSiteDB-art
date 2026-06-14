@@ -159,7 +159,8 @@ Deep rationale for any item → `HANDOFF.md`, under the same ID.
 - **2010** ✅ node id · **2020** ✅ activity/handshake · **2030** ✅ per-page `_sync` stamps + diff manifest
 - **2040** ✅ secret sidecar · **2041** ✅ L→A push · **2042** ✅ A→L pull
 - **2050** ✅ direction-detection UI (ahead/behind + nuclear modal)
-- **2060** ◐ publish A→B — transport validated (dry-run); real non-dry publish still pending
+- **2060** ◐ publish A→B — transport validated (dry-run); real non-dry publish still pending. Publish→B button now carries the two-tier amber glow (dirty=light, saved-since-publish=full), session-scoped — *awaiting live validation on A*
+- **2061** ▶ robust Publish→B glow — real A-vs-B compare that survives reload (needs a server publish-stamp + a cheap A-vs-B read; 2060's glow is a session signal only)
 - **2070** ✅ snapshot retention (auto-retention + display folder) — *live UI check pending*
 - **2080** ✅ B-freeze + unlock + B→A back-prop (all slices) — *awaiting live validation*
 - **2090** ✅ "Published: \<date>" snippet — *awaiting live validation*

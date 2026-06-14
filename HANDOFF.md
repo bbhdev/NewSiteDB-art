@@ -151,7 +151,21 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   "Publish → B" is ONE button with a confirm — real L→A, show A's state, then
   confirm → A→B. **Provenance rule (drove the whole design): B is only ever
   written by A; no physical L→B. Because A→B always runs after L→A, B can never
-  lead a stale A.** ◐ **2070 snapshot retention** — S7 first slice (v0.10.213)
+  lead a stale A.** **Publish→B glow (v0.11.8):** the A-side button was wired for
+  click→preview→publish but, unlike L's Push→A (`.is-ahead`/`-pending`) and B's
+  Back-B→A (`backVisual`), carried NO dirty/ahead glow — edit-then-save on A left
+  it visually inert. Added the same two-tier amber (B's exact `sbp-amber-light`/
+  `-full` hues): `is-pub-dirty` (light) = unsaved editor work → save first;
+  `is-pub-ready` (full) = a save happened since the last publish → A holds content
+  B lacks. Driven client-side off the editor events L/B already consume
+  (`ed:dirty-changed`→repaint, `ed:editor-saved`→arm; publish success disarms);
+  no poll, no A↔B probe. **DESIGN: "ready" is a SESSION signal, not a true A-vs-B
+  compare** — the sync server tracks no A↔B divergence (`sync_propagate_to_peer()`
+  writes no `peerStamps['B']` on A; no A-vs-B route; the only A↔B signal is the
+  publish guard's heavy live B probe). So it arms off the observed save and resets
+  on reload. The robust reload-surviving version (real A-vs-B; needs a server
+  publish-stamp + a cheap A-vs-B read, i.e. touching the sync contract) is
+  **2061 ▶**, deferred. ◐ **2070 snapshot retention** — S7 first slice (v0.10.213)
   shipped per-snapshot/batch DELETE + the snapshots panel. **Slice 1 (v0.10.258):
   auto-retention** — `sync_prune_auto_snapshots($keep=30)` runs at the tail of
   `sync_pre_propagate_snapshot()`, keeping the newest 30 `auto-pre-propagate`
