@@ -165,8 +165,8 @@ Deep rationale for any item → `HANDOFF.md`, under the same ID.
 - **2080** ✅ B-freeze + unlock + B→A back-prop (all slices) — *awaiting live validation*
 - **2090** ✅ "Published: \<date>" snippet — *awaiting live validation*
 - **2095** ✅ holistic ahead/behind protocol audit — *awaiting live validation*
-- **2100** ✅ snapshot names relaxed (v0.11.9) — dropped the allow-list; now only the real round-trip breakers are barred (`/ \ : * ? " < > |`, `\p{C}`, leading dot, `..`, empty, >80). `=` `+` `@` `&` `#` etc. now allowed. Identical across /save /load /delete — *awaiting live validation*
-- **2110** ✅ "mark in sync" override (v0.11.10) — loading a snapshot bumps L's activity stamp → false "ahead". Small trust-the-user toggle on the L pill (clean-ahead only) forces it calm + kills the Push glow; client-only (no sync-state write), self-cancels on real edit / 'behind' / convergence, resets on reload. Toggles to an undo once forced — *awaiting live validation*
+- **2100** ✅ snapshot names relaxed (v0.11.9) — dropped the allow-list; now only the real round-trip breakers are barred (`/ \ : * ? " < > |`, `\p{C}`, leading dot, `..`, empty, >80). `=` `+` `@` `&` `#` etc. now allowed. Identical across /save /load /delete — ✅ live-validated
+- **2110** ✅ "mark in sync" override (v0.11.10) — loading a snapshot bumps L's activity stamp → false "ahead". Small trust-the-user toggle on the L pill (clean-ahead only) forces it calm + kills the Push glow; client-only (no sync-state write), self-cancels on real edit / 'behind' / convergence, resets on reload. Toggles to an undo once forced — ✅ live-validated (dirty-off path)
 
 ### `3000 [conv]`
 - **3010–3012** ✅ editor route · mode toggle · redirects
