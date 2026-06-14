@@ -142,6 +142,7 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 | 4000 | `[workshop]` | image workshop |
 | 5000 | `[dirty]` | unified dirty/save signal (derived, approach B) |
 | 6000 | `[editor]` | the editor itself — a core pillar (interaction, dialogs, modes) |
+| 7000 | `[i18n]` | bilingual / multilingual sites — content model + editor + runtime |
 | 8000 | `[backgrounds]` | site backgrounds — processing + editor + runtime |
 | 9000 | `[ui]` | cross-cutting UI / design system — flows down to tablet + phone |
 | 10000 | `[tablet]` | iPad first-class editing layer (standing constraint) |
@@ -446,6 +447,12 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   `page/delete-image`, `use-image`). The governing rule "advance iff
   propagate-scope write" is the invariant any new write route must honour.
   Topology + operations + role-sidecar detail live in the sync memory files.
+  · **2100 — snapshot names overly restricted (registered 2026-06-14, not
+  started).** The snapshots panel accepts only a few characters / a very short
+  name; find WHY the constraint is that tight (a filesystem-safe sanitizer? a
+  length cap? a too-narrow validation regex?) and relax it to something usable.
+  Small. (Band tens 2010–2090 are full, so this small item takes the next free
+  slot, 2100.)
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
   3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ✅ **3065 fold STYLES
@@ -584,6 +591,80 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   building** (e.g. share the engine: Layout's typography/marks emitter and
   image-fit/focus model are candidates to reuse, but Lines renders into an SVG —
   `<text>`/`<image>` — vs Layout's HTML, so the rendering target differs).
+  **NOTE:** this 6030 entry IS the user's "medium-big" note (layout text styles
+  usable by Line objects + workshop-resized images usable by Line image blocks) —
+  already registered, no duplicate. Being medium-big it may grow children; if it
+  sprouts a real sub-tree it should be PROMOTED to a hundreds slot (e.g. 6500) per
+  the hundreds-tier convention, rather than crammed into 6031/6032.
+- **6000-band items registered 2026-06-14 (from the user's notes; not started).**
+  Smalls take tens slots, major subtasks take hundreds slots (room for children):
+  · **6040 — layout image-rect "Change → upload" bypasses workshop resize.**
+    In Layout, select an image rect → Change → upload loads the FULL original
+    (unacceptably large for web); it must route through the same resize step the
+    normal add path uses. (cf 4000 `[workshop]` — the resize logic lives there.)
+  · **6050 — image library "get from workshop" omits file size.** The
+    editor › images › get-from-workshop view shows imported dimensions but not
+    byte size (B/K/M); add it so the author can judge web-weight. (cf 4000.)
+  · **6060 — Kirby-created pages lack the 3 screen classes** (narrow/medium/wide).
+    A major lack; new pages should be provisioned with them. Believed easy.
+  · **6070 — Lines reload jumps scroll to page MIDDLE, losing work position.**
+    On reload the draw surface auto-scrolls to mid-page. Preferred: preserve the
+    current scroll position; fallback: scroll to TOP (more natural than middle).
+  · **6080 — typography weight & size ranges too narrow.** Weight cap is too low
+    → microscopic (see the existing "Caveat"); conversely some fonts are enormous
+    and need a much LOWER minimum size than allowed. Widen both bounds.
+  · **6090 — draw fill option lost / unclear.** An object of `type:'freehandClosed'`
+    renders FILLED, but the author can't find the fill/no-fill toggle. Investigate:
+    where the option is, which kinds it applies to (freehand / loop / bezier /
+    closed variants) and which it doesn't, then surface it consistently.
+  · **6100 `[editor]` — global "Site" settings MODE (major).** The canvas settings
+    (dimensions) live inside Lines for historical (draw-centric origin) reasons; for
+    logical coherency they should not be sidelined there. Introduce a compact global
+    **"Site"** mode and move canvas dimensions into it. THEN audit which OTHER
+    affordances have the same misplacement and logically belong in "Site". Children
+    TBD: 6110 create the mode, 6120 move canvas dims, 6130 audit + migrate others.
+    (cf 9020 — same draw-centric-origin root as the library-UI rework.)
+  · **6200 `[editor]` — drill-down becomes a property of ALL rect-blocks (major).**
+    The standalone `drilldown` rect kind was declared obsolete by convergence yet
+    is still present. Retire it as a distinct kind and make drill-down an OPTIONAL
+    property any rect-block (text/image/snippet) can carry. Children TBD: model
+    field (progressive-disclosure per the UI rule), per-kind editor UI, runtime
+    overlay, migrate existing drilldown rects.
+  · **6300 `[editor]` — zoom & Lines↔Layout mode parity (major).** (a) Layout —
+    after convergence a SUB-mode of canvas editing — has NO zoom and must gain it;
+    (b) the zoom clamp at ≥25% is too tight: monopage sites are very long
+    vertically and drawing a line top→bottom needs the whole page area visible at
+    once — try clamping at **≥1%** (400% max is fine) before resorting to
+    auto-scroll-while-drawing (delicate: speed is hard to calibrate); (c) audit
+    every affordance present in Lines but missing in Layout and reach parity.
+    Children TBD: 6310 layout zoom, 6320 zoom range ≥1%, 6330 parity audit.
+    (cf 9050 `[ui]` layout-mode undo — a known instance of the same "Layout lacks
+    what Lines has" gap; the 6330 audit should fold it in.)
+  · **6400 `[editor]` — rotate the BASE object after freehand drawing (medium).**
+    Freehand drawing is hard to orient by hand; objects often land in an unwanted
+    orientation (e.g. a loop's main axis vertical when the author wanted it
+    oblique). Distinct from the existing rotate BEHAVIOR — this rotates the base
+    geometry. Spec: object detail panel › PARAMETERS, below Position Y, a "Rotate
+    object" button → overlaid subpanel with two hints highlighted in turn —
+    "1. Place the rotate origin on the canvas" (auto-starts; click/tap places it,
+    advances directly to phase 2) and "2. Now rotate the object" (drag mouse /
+    finger anywhere to rotate) — plus Confirm / Cancel (Enter / Esc). Touch parity
+    is required (this is a tablet-first interaction). The rotate MATH already
+    exists in behaviors; the new work is the post-draw authoring affordance.
+- **`[i18n]` 7000 — bilingual / multilingual sites (BIG, registered 2026-06-14,
+  not started).** Many sites need to be bilingual; the first real site will be.
+  Two very different sizes of work: the **UI affordance** (a language switch) is
+  easy and can ship as a placeable snippet (cf 6020). The **infrastructure** is
+  big and needs DECISIONS before any build: how multilingual text is REPRESENTED
+  in the content model (per-language fields? Kirby's native multi-lang content
+  files? a translations sidecar?), how it threads through the editor (authoring
+  each language) and the runtime (selecting + rendering the active language), and
+  how it interacts with the L↔A↔B propagate layer. Kirby has first-class
+  multi-language support — evaluate using it vs a custom representation before
+  committing. ⚠️ Schema-shape decision → almost certainly a `CONTENT_SCHEMA_VERSION`
+  bump + migration when it lands (per-axis authorization required). Band 7000 was
+  freed when `[cleanup]` moved to 20000 (reserved for intermediary epics).
+  Children TBD once the representation is chosen — 7010 = decision/spike first.
 - **Forward epics, registered not started** — 8010 `[backgrounds]` · **9000 `[ui]`**
   (starts by refining editor UI, then studies tablet/phone deltas): 9010 general
   editor-UI refinement · **9020 draw/library structure rework** (absorbs former
