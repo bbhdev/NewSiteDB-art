@@ -92,90 +92,21 @@ Read this top-to-bottom once; reference back as needed.
 
 ---
 
-## 🧭 Work tracking convention (single coherent scheme, v0.10.242; hundreds-tier amendment 2026-06-14)
+## 🧭 Work registry → `REGISTRY.md` (moved out 2026-06-14)
 
-**Why this exists:** the project had drifted into THREE incompatible work-item
-naming systems at once — sync "S4/S5", convergence "Slice 7/8", and tasks
-"#36/#37" — so one piece of work often had two or three addresses and references
-used different ones. That is how the way got lost (and how a diagnosis got
-misframed). This scheme replaces all of them with ONE addressing axis.
+**The work registry now lives in its own file: `REGISTRY.md` at the repo root.**
+That file is the single source of truth for the band table, the numbering
+convention + Rosetta, and the live status list (✅/◐/▶ per item). It is short and
+tablet-friendly — read/update it there, NOT here.
 
-**The rules:**
+**Split contract (Model B):** `REGISTRY.md` holds the *compact registry*; this
+file (`HANDOFF.md`) holds the *deep per-item rationale* — the decisions, gotchas,
+and "why" behind each item — keyed by the same canonical ID. The ID is the join
+between the two. **Do not re-paste the status list into HANDOFF** (a second copy
+would drift — exactly the failure that prompted the split). HANDOFF prose may
+mention a status in passing but `REGISTRY.md` is the authority for it.
 
-1. **One canonical ID per work item — a spaced integer.** The thousands "band"
-   = the epic. Below the band the remaining digits form a **tier hierarchy**:
-   **hundreds = major subtask, tens = sub-subtask, units = a tightly-linked +1
-   follow-up.** So `6120` reads "epic 6000 › major subtask 6100 › sub-subtask
-   6120". This ID is what you cite **everywhere** — chat, commits, memory, this
-   doc.
-2. **Epic = a `[tag]`, never a number.** The tag (and the band digit) carry
-   grouping; they are not addresses. Bands past 9000 are 5-digit — the tag still
-   identifies the epic.
-3. **Spacing & insertion — claim the WIDEST free tier (use the hundreds).** A
-   NEW major subtask takes a **hundreds** slot (`6100`, `6200`, `6300`) — this
-   reserves the 99 IDs beneath it for its own children, so it can grow a deep
-   sub-tree without colliding. Its children take **tens** (`6110`, `6120`);
-   tightly-linked grandchildren take **+1** (`6111`, `6112`). Do NOT spend a bare
-   tens slot (`6040`) on something that will sprout sub-subtasks — its children
-   would have nowhere to live. (This amends the original "×10 off the band"
-   habit, which wasted the entire hundreds digit — a loss of addressing domain.)
-   A genuinely small, childless item may still take a tens slot directly off the
-   band. **Grandfathered:** the existing tens-off-band items (`6010/6020`,
-   `2040/2041/2042`, etc.) keep their IDs unchanged — the hundreds tier is
-   forward-looking only, not a retroactive renumber. (Exception by choice: an
-   UNSTARTED tens item later judged major MAY be promoted to a hundreds slot —
-   `6030`→`6500` was done 2026-06-14 — but this is a deliberate per-item call,
-   not a sweep.)
-4. **Genuine deep subdivision → dotted decimals:** when the integer tiers are
-   exhausted, go dotted — `6121.1`, `6121.2`, then `6121.2.a`, `6121.2.b`. A
-   child never renumbers its parent; the parent closes only when its children do.
-5. **The TaskList tool's own `#N` is ignorable noise.** The tool stamps its own
-   sequential id and can't emit `2041`, so the canonical ID **leads the task
-   subject**. Read the `2041 [sync] …`, ignore the `#N` prefix the tool shows.
-6. **Legacy names (S1–S9, Slice 1–8, 4g-1–6, 3a/3b) are FROZEN** — never
-   extended. The Rosetta below keeps old commits/docs/memory legible.
-
-**Bands:**
-
-| Band | `[tag]` | Subject |
-|---|---|---|
-| 1000 | `[deploy]` | deploy pipeline / targets / host config |
-| 2000 | `[sync]` | L↔A↔B propagate layer (push/pull/publish, freeze, snapshots) |
-| 3000 | `[conv]` | editor convergence (draw+page → one /dev/editor) |
-| 4000 | `[workshop]` | image workshop |
-| 5000 | `[dirty]` | unified dirty/save signal (derived, approach B) |
-| 6000 | `[editor]` | the editor itself — a core pillar (interaction, dialogs, modes) |
-| 7000 | `[i18n]` | bilingual / multilingual sites — content model + editor + runtime |
-| 8000 | `[backgrounds]` | site backgrounds — processing + editor + runtime |
-| 9000 | `[ui]` | cross-cutting UI / design system — flows down to tablet + phone |
-| 10000 | `[tablet]` | iPad first-class editing layer (standing constraint) |
-| 11000 | `[phone]` | smartphone demo mode (reduced from tablet) |
-| 12000 | `[bedit]` | safe fallback editing on B (cross-links 2080) |
-| 13000 | `[behaviors]` | new behavior-type ideas (backlog) |
-| 20000 | `[cleanup]` | maintenance / cache pruning / tech-debt — runs last, at project end |
-
-**Rosetta — legacy → canonical (frozen, do not extend):**
-
-| Legacy | Canonical |
-|---|---|
-| deploy Slice 1–4 | 1010 · 1020 · 1030 · 1040 |
-| sync S1 · S2 · S3 | 2010 · 2020 · 2030 |
-| sync S4a · S4b · S4c | 2040 · 2041 · 2042 |
-| sync S5 · S6 · S7 · S8 · S9 | 2050 · 2060 · 2070 · 2080 · 2090 |
-| sync protocol review | 2095 |
-| conv Slice 1a/1b/1c | 3010 · 3011 · 3012 |
-| conv Slice 2 · 3 · 4 · 5 · 6 | 3020 · 3030 · 3040 · 3050 · 3060 |
-| conv Slice 7 · 8 · "All" | 3070 · 3080 · 3090 |
-| workshop 4g-1 · 4g-1b | 4010 · 4011 |
-| workshop 4g-2 · 4g-3 · 4g-5 · 4g-6 | 4020 · 4030 · 4050 · 4060 |
-| dirty lines (B) · layout (B) | 5010 · 5020 |
-| dirty styles (#36) · images (#37) | 5030 · 5040 |
-| editor dialogs (#33) | 6010 |
-| media cleanup (#39) | 20010 |
-
-> NOTE: sync's canonical order (S5→S6→S7→S8→S9 = 2050→2090) fixes a tracker
-> wart — S8/S9 were *filed* before S6/S7, so creation-order lied about sequence.
-> The spaced IDs encode true sequence regardless of when each was filed.
+The deep rationale per epic continues below, under canonical IDs.
 
 ---
 
@@ -184,10 +115,11 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 > The long prose block immediately below this section is a **historical
 > snapshot (~v0.10.96–136 era)** — accurate for the typography / text-marks
 > work of that period, but it predates the entire sync + dirty + convergence
-> arc. Do NOT read it as the frontier. The live frontier is the **relabeled
-> task list** (canonical IDs, see the Work-tracking-convention section above)
-> + the **memory files** (MEMORY.md index) + the **commit journal**. This
-> block summarizes where each epic actually stands.
+> arc. Do NOT read it as the frontier. The live frontier is the **registry**
+> (canonical IDs + status — now in `REGISTRY.md`) + the **memory files**
+> (MEMORY.md index) + the **commit journal**. The block below this is the
+> per-item *rationale* layer (keyed by ID); the terse status list is in
+> `REGISTRY.md`.
 
 Status by epic (canonical IDs; ✅ done · ▶ pending):
 

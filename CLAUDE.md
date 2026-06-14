@@ -29,12 +29,20 @@ Full rationale is in HANDOFF.md's "PROJECT NORTH STAR" callout at the top.
 
 ## Read this on session start
 
-Read `HANDOFF.md` at the repo root before doing substantive work. It's a
-project-specific briefing covering the architecture, recent decisions,
-known limitations, diagnostic tools, and per-block runtime semantics that
-aren't all obvious from the code.
+Read BOTH `HANDOFF.md` and `REGISTRY.md` at the repo root before doing
+substantive work.
 
-`project-hierarchy.csv` at the repo root maps every file/dir to its role.
+- `REGISTRY.md` — the single source of truth for the **work registry**: the
+  band table, the numbering convention + Rosetta, and the live status list
+  (✅/◐/▶ per canonical ID). Short and tablet-friendly; this is where you read
+  "what's next" and where you flip a status when an item lands.
+- `HANDOFF.md` — the project briefing + the **deep per-item rationale** keyed by
+  the same IDs: architecture, decisions, gotchas, known limitations, diagnostic
+  tools, per-block runtime semantics not obvious from the code.
+
+The two are joined by the canonical ID. Never keep a second copy of the status
+list in HANDOFF (it would drift). `project-hierarchy.csv` at the repo root maps
+every file/dir to its role.
 
 ## Behavioral rule
 
