@@ -92,7 +92,7 @@ Read this top-to-bottom once; reference back as needed.
 
 ---
 
-## 🧭 Work tracking convention (single coherent scheme, v0.10.242)
+## 🧭 Work tracking convention (single coherent scheme, v0.10.242; hundreds-tier amendment 2026-06-14)
 
 **Why this exists:** the project had drifted into THREE incompatible work-item
 naming systems at once — sync "S4/S5", convergence "Slice 7/8", and tasks
@@ -103,18 +103,29 @@ misframed). This scheme replaces all of them with ONE addressing axis.
 **The rules:**
 
 1. **One canonical ID per work item — a spaced integer.** The thousands "band"
-   = the epic; within a band, items are spaced (×10) so there is always room to
-   insert. Example: `2041`. This ID is what you cite **everywhere** — chat,
-   commits, memory, this doc.
+   = the epic. Below the band the remaining digits form a **tier hierarchy**:
+   **hundreds = major subtask, tens = sub-subtask, units = a tightly-linked +1
+   follow-up.** So `6120` reads "epic 6000 › major subtask 6100 › sub-subtask
+   6120". This ID is what you cite **everywhere** — chat, commits, memory, this
+   doc.
 2. **Epic = a `[tag]`, never a number.** The tag (and the band digit) carry
    grouping; they are not addresses. Bands past 9000 are 5-digit — the tag still
    identifies the epic.
-3. **Spacing & insertion.** New item near an existing one → take a nearby free
-   slot, and the proximity *is* the grouping (e.g. a follow-up to `2040` is
-   `2041`). Tightly-linked sub-slices use +1 (`2040/2041/2042`).
-4. **Genuine subdivision of one item → dotted decimals:** `2041.1`, `2041.2`,
-   then `2041.2.a`, `2041.2.b`. A child never renumbers its parent; the parent
-   closes only when its children do.
+3. **Spacing & insertion — claim the WIDEST free tier (use the hundreds).** A
+   NEW major subtask takes a **hundreds** slot (`6100`, `6200`, `6300`) — this
+   reserves the 99 IDs beneath it for its own children, so it can grow a deep
+   sub-tree without colliding. Its children take **tens** (`6110`, `6120`);
+   tightly-linked grandchildren take **+1** (`6111`, `6112`). Do NOT spend a bare
+   tens slot (`6040`) on something that will sprout sub-subtasks — its children
+   would have nowhere to live. (This amends the original "×10 off the band"
+   habit, which wasted the entire hundreds digit — a loss of addressing domain.)
+   A genuinely small, childless item may still take a tens slot directly off the
+   band. **Grandfathered:** the existing tens-off-band items (`6010/6020/6030`,
+   `2040/2041/2042`, etc.) keep their IDs unchanged — the hundreds tier is
+   forward-looking only, not a retroactive renumber.
+4. **Genuine deep subdivision → dotted decimals:** when the integer tiers are
+   exhausted, go dotted — `6121.1`, `6121.2`, then `6121.2.a`, `6121.2.b`. A
+   child never renumbers its parent; the parent closes only when its children do.
 5. **The TaskList tool's own `#N` is ignorable noise.** The tool stamps its own
    sequential id and can't emit `2041`, so the canonical ID **leads the task
    subject**. Read the `2041 [sync] …`, ignore the `#N` prefix the tool shows.
