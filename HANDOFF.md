@@ -396,12 +396,23 @@ Status by epic (canonical IDs; ✅ done · ▶ pending):
   `page/delete-image`, `use-image`). The governing rule "advance iff
   propagate-scope write" is the invariant any new write route must honour.
   Topology + operations + role-sidecar detail live in the sync memory files.
-  · **2100 — snapshot names overly restricted (registered 2026-06-14, not
-  started).** The snapshots panel accepts only a few characters / a very short
-  name; find WHY the constraint is that tight (a filesystem-safe sanitizer? a
-  length cap? a too-narrow validation regex?) and relax it to something usable.
-  Small. (Band tens 2010–2090 are full, so this small item takes the next free
-  slot, 2100.)
+  · **2100 — snapshot names relaxed (✅ v0.11.9, awaiting live validation).**
+  ROOT CAUSE: the name was filtered by TWO stacked checks in each of the three
+  `dev/draw/library/{save,load,delete}` routes (`site/config/config.php`) — a
+  correct **blacklist** of dangerous chars AND a redundant **allow-list**
+  `^[\p{L}\p{N} _.,'()\[\]\-]+$` that barred everything else (so `=`, `+`, `@`,
+  `&`, `#`… were rejected for no real reason). FIX: dropped the allow-list; the
+  surviving rule is a pure blacklist `#[\\/:*?"<>|\p{C}]#u` + structural guards
+  (empty, >80, leading dot, `..`). WHY that's the complete set: the name's only
+  load-bearing use is as a **directory name** — the rest of the round-trip is
+  safe for any char (JSON request body, `meta.json`, and the JS list which uses
+  `textContent`/`setAttribute`/`dataset`, never `innerHTML` or a URL — verified
+  dev-editor.js:7494–7520). `:` stays barred (macOS Finder `:`↔`/` swap, a real
+  hazard on the dev Mac); `\p{C}` covers NUL/control + invisible/spoof format
+  chars. The authoritative traversal defense is the **realpath-containment**
+  check in /delete (`dirname($targetReal) !== $libRootReal`, config.php:1080–84),
+  not the string filter — the filter is the first line, realpath is the wall.
+  All three routes kept byte-identical so a name that saves always loads/deletes.
 - **`[conv]` 3000** — ✅ 3010–3012 (editor route, mode toggle, redirects) ·
   3020 drop deco-mount · 3030 Styles mode · 3040 Images mode (workshop folded in) ·
   3050 data-aligned saves · 3060 consolidated `dev-editor.js`. ✅ **3065 fold STYLES
