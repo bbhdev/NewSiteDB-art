@@ -11,7 +11,7 @@
 >
 > Read BOTH this file and `HANDOFF.md` at session start.
 >
-> **Frontier beacon:** `v0.11.7` · 2026-06-14 · branch `main` (the home/rendezvous branch).
+> **Frontier beacon:** `v0.11.10` · 2026-06-14 · branch `main` (the home/rendezvous branch).
 > Update this line whenever the registry's authoritative branch or version advances —
 > it is the cross-device staleness tripwire (see Multi-device protocol below).
 
